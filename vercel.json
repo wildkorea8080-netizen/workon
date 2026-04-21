@@ -4,17 +4,7 @@
   "framework": "nextjs",
   "cleanUrls": true,
   "trailingSlash": false,
-  "env": [
-    "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "NEXTAUTH_URL",
-    "NEXTAUTH_SECRET",
-    "ANTHROPIC_API_KEY",
-    "VOYAGE_API_KEY",
-    "NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET",
-    "NEXT_PUBLIC_APP_NAME"
-  ],
+  
   "headers": [
     {
       "source": "/api/(.*)",
