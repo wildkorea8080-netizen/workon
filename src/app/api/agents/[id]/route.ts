@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getServerAuthSession } from '@/lib/auth';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const session = await getServerAuthSession();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { ok: false, error: { message: '인증이 필요합니다.' } },
+        { status: 401 }
+      );
+    }
+
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
+      );
+    }
+
+    const departmentId = session.user.departmentId;
+    if (!departmentId) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+    const { name, description, system_prompt, config, is_active } = body;
+
+    if (!name && !description && system_prompt === undefined && config === undefined && is_active === undefined) {
+      return NextResponse.json(
+        { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
+        { status: 400 }
+      );
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (name !== undefined) updatePayload.name = typeof name === 'string' ? name.trim() : name;
+    if (description !== undefined) updatePayload.description = typeof description === 'string' ? description.trim() : description;
+    if (system_prompt !== undefined) updatePayload.system_prompt = typeof system_prompt === 'string' ? system_prompt.trim() : system_prompt;
+    if (config !== undefined) updatePayload.config = config;
+    if (is_active !== undefined) updatePayload.is_active = is_active;
+
+    updatePayload.updated_by = session.user.id;
+
+    const { data: agent, error } = await supabaseAdmin
+      .from('agents')
+      .update(updatePayload)
+      .eq('id', params.id)
+      .eq('department_id', departmentId)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: { message: '에이전트 업데이트 중 오류가 발생했습니다.' } },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, data: agent });
+  } catch (error) {
+    console.error('Agent update error:', error);
+    return NextResponse.json(
+      { ok: false, error: { message: '서버 오류가 발생했습니다.', details: error instanceof Error ? error.message : String(error) } },
+      { status: 500 }
+    );
+  }
+}
