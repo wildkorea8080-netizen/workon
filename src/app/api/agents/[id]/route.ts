@@ -70,3 +70,51 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     );
   }
 }
+
+export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const session = await getServerAuthSession();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { ok: false, error: { message: '인증이 필요합니다.' } },
+        { status: 401 }
+      );
+    }
+
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
+      );
+    }
+
+    const departmentId = session.user.departmentId;
+    if (!departmentId) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
+        { status: 403 }
+      );
+    }
+
+    const { error } = await supabaseAdmin
+      .from('agents')
+      .delete()
+      .eq('id', params.id)
+      .eq('department_id', departmentId);
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: { message: '에이전트 삭제 중 오류가 발생했습니다.' } },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Agent delete error:', error);
+    return NextResponse.json(
+      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
+      { status: 500 }
+    );
+  }
+}
