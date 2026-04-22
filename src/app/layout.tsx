@@ -10,9 +10,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
+      <head>
+        <link
+          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css"
+          rel="stylesheet"
+        />
+      </head>
       <body>
         <Providers>
-          {/* 기본 레이아웃: 헤더/푸터는 추후 확장 가능합니다. */}
           {children}
         </Providers>
       </body>
