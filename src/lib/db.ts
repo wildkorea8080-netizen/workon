@@ -67,6 +67,8 @@ export type Conversation = {
   user_id?: string;
   title?: string;
   status: string;
+  share_token?: string | null;
+  is_shared?: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;

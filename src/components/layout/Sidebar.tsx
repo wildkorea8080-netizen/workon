@@ -53,6 +53,12 @@ export default function Sidebar({
   const [searchTerm, setSearchTerm] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -102,6 +108,19 @@ export default function Sidebar({
     }
   };
 
+  const handleShare = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/conversations/${id}/share`, { method: 'POST' });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      await navigator.clipboard.writeText(result.data.shareUrl);
+      showToast('🔗 공유 링크가 복사됐습니다!');
+    } catch {
+      showToast('공유 링크 생성에 실패했습니다.');
+    }
+  };
+
   const filtered = conversations.filter(c =>
     c.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -116,7 +135,7 @@ export default function Sidebar({
   const userInitial = userName.slice(0, 1).toUpperCase();
 
   return (
-    <aside className="w-60 flex-shrink-0 bg-[#1C2B4A] flex flex-col h-full overflow-hidden">
+    <aside className="w-60 flex-shrink-0 bg-[#1C2B4A] flex flex-col h-full overflow-hidden relative">
       {/* 새 대화 버튼 */}
       <div className="p-3 pt-4">
         <button
@@ -166,6 +185,7 @@ export default function Sidebar({
                     selected={selectedConversationId === c.id}
                     onSelect={() => onConversationSelect(c.id)}
                     onDelete={handleDelete}
+                    onShare={handleShare}
                     onStartRename={startRename}
                     renamingId={renamingId}
                     renameValue={renameValue}
@@ -190,6 +210,13 @@ export default function Sidebar({
           <p className="text-white/40 text-[10px] truncate">{session?.user?.email}</p>
         </div>
       </div>
+
+      {/* 토스트 */}
+      {toast && (
+        <div className="absolute bottom-16 left-3 right-3 bg-white text-slate-800 text-xs font-medium px-3 py-2.5 rounded-xl shadow-lg text-center animate-fade-in z-10">
+          {toast}
+        </div>
+      )}
     </aside>
   );
 }
@@ -199,6 +226,7 @@ interface ConvItemProps {
   selected: boolean;
   onSelect: () => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
+  onShare: (id: string, e: React.MouseEvent) => void;
   onStartRename: (c: Conversation, e: React.MouseEvent) => void;
   renamingId: string | null;
   renameValue: string;
@@ -208,7 +236,7 @@ interface ConvItemProps {
 }
 
 function ConvItem({
-  c, selected, onSelect, onDelete, onStartRename,
+  c, selected, onSelect, onDelete, onShare, onStartRename,
   renamingId, renameValue, onRenameChange, onRenameSubmit, onRenameCancel,
 }: ConvItemProps) {
   const isRenaming = renamingId === c.id;
@@ -247,6 +275,7 @@ function ConvItem({
       {/* 호버 액션 아이콘 */}
       {!isRenaming && (
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {/* 이름 변경 */}
           <button
             onClick={e => onStartRename(c, e)}
             className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 text-white/50 hover:text-white transition-colors"
@@ -256,6 +285,17 @@ function ConvItem({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
+          {/* 공유 */}
+          <button
+            onClick={e => onShare(c.id, e)}
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 text-white/50 hover:text-white transition-colors"
+            title="공유 링크 복사"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+          </button>
+          {/* 삭제 */}
           <button
             onClick={e => onDelete(c.id, e)}
             className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-500/30 text-white/50 hover:text-red-300 transition-colors"

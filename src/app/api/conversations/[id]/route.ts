@@ -122,7 +122,24 @@ export async function DELETE(
 
     const conversationId = params.id;
 
-    // 대화 삭제 (사용자 권한 확인 포함)
+    // 소유자 확인
+    const { data: existing } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    if (!existing) {
+      return NextResponse.json(
+        { ok: false, error: { message: '대화를 찾을 수 없습니다.' } },
+        { status: 404 }
+      );
+    }
+
+    // 메시지 먼저 삭제 (cascade 미설정 대비)
+    await supabaseAdmin.from('messages').delete().eq('conversation_id', conversationId);
+
     const { error } = await supabaseAdmin
       .from('conversations')
       .delete()

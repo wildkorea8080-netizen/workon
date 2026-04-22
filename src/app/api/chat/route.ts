@@ -176,6 +176,28 @@ export async function POST(request: NextRequest) {
       // 메시지 저장 실패해도 응답은 반환
     }
 
+    // 새 대화일 때 제목 자동 생성 (비동기, 실패해도 무방)
+    if (!conversation_id) {
+      (async () => {
+        try {
+          const titleResponse = await callClaudeAPI(
+            [{ role: 'user', content: `다음 질문을 20자 이내 한국어 제목으로 요약해줘. 제목만 출력하고 다른 설명은 하지 마: "${message}"` }],
+            undefined,
+            40
+          );
+          const autoTitle = titleResponse.content.trim().replace(/^["']|["']$/g, '').slice(0, 30);
+          if (autoTitle) {
+            await supabaseAdmin
+              .from('conversations')
+              .update({ title: autoTitle })
+              .eq('id', conversation.id);
+          }
+        } catch {
+          // 제목 생성 실패는 무시
+        }
+      })();
+    }
+
     // 사용 로그 기록
     await supabaseAdmin.from('usage_logs').insert({
       department_id: user.department_id,
