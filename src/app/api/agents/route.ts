@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
@@ -13,10 +13,12 @@ export async function GET(_request: NextRequest) {
 
     // departmentId가 세션에 없으면 DB에서 조회
     let departmentId = session.user.departmentId;
+    let favoriteIds: string[] = [];
+
     if (!departmentId) {
       const { data: user, error: userError } = await supabaseAdmin
         .from('users')
-        .select('department_id')
+        .select('department_id, favorite_agent_ids')
         .eq('id', session.user.id)
         .maybeSingle();
 
@@ -27,15 +29,75 @@ export async function GET(_request: NextRequest) {
         );
       }
       departmentId = user.department_id;
+      favoriteIds = user.favorite_agent_ids ?? [];
+    } else {
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('favorite_agent_ids')
+        .eq('id', session.user.id)
+        .maybeSingle();
+      favoriteIds = user?.favorite_agent_ids ?? [];
     }
 
-    // 부서의 에이전트 목록 조회
-    const { data: agents, error } = await supabaseAdmin
+    const { searchParams } = new URL(request.url);
+    const category = searchParams.get('category');
+    const personalOnly = searchParams.get('personal') === 'true';
+    const favoritesOnly = searchParams.get('favorites') === 'true';
+
+    // 즐겨찾기 탭: favoriteIds 기반으로 in() 쿼리
+    if (favoritesOnly) {
+      if (favoriteIds.length === 0) {
+        return NextResponse.json({ ok: true, data: [] });
+      }
+      const { data: agents, error } = await supabaseAdmin
+        .from('agents')
+        .select('*')
+        .eq('department_id', departmentId)
+        .in('id', favoriteIds)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: { message: '즐겨찾기 비서 조회 중 오류가 발생했습니다.' } },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+    }
+
+    // 내 비서 탭
+    if (personalOnly) {
+      const { data: agents, error } = await supabaseAdmin
+        .from('agents')
+        .select('*')
+        .eq('department_id', departmentId)
+        .eq('is_personal', true)
+        .eq('owner_id', session.user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return NextResponse.json(
+          { ok: false, error: { message: '나만의 비서 조회 중 오류가 발생했습니다.' } },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+    }
+
+    // 카테고리 / 전체 비서
+    let query = supabaseAdmin
       .from('agents')
       .select('*')
       .eq('department_id', departmentId)
       .eq('is_active', true)
-      .order('created_at', { ascending: false });
+      .eq('is_personal', false);
+
+    if (category && category !== '전체') {
+      query = query.eq('category', category);
+    }
+
+    const { data: agents, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       return NextResponse.json(
@@ -44,7 +106,7 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: agents });
+    return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
   } catch (error) {
     console.error('에이전트 목록 조회 오류:', error);
     return NextResponse.json(

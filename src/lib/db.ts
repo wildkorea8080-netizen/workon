@@ -32,6 +32,13 @@ export type Agent = {
   system_prompt?: string;
   config: Record<string, unknown>;
   is_active: boolean;
+  category?: string;
+  icon?: string;
+  color?: string;
+  is_personal: boolean;
+  owner_id?: string | null;
+  approval_status?: string | null;
+  approval_note?: string | null;
   created_by?: string;
   updated_by?: string;
   created_at: string;
