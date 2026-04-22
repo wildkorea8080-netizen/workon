@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Agent } from '@/lib/db';
 import AgentCard from './AgentCard';
+import CreateAgentModal from './CreateAgentModal';
 
 const TABS = [
   { key: 'all',      label: '전체' },
@@ -19,15 +20,15 @@ type TabKey = (typeof TABS)[number]['key'];
 interface AgentSelectorProps {
   selectedAgent: Agent | null;
   onAgentSelect: (agent: Agent | null) => void;
-  onCreatePersonal?: () => void;
 }
 
-export default function AgentSelector({ selectedAgent, onAgentSelect, onCreatePersonal }: AgentSelectorProps) {
+export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSelectorProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const fetchAgents = useCallback(async (tab: TabKey) => {
     setLoading(true);
@@ -76,6 +77,13 @@ export default function AgentSelector({ selectedAgent, onAgentSelect, onCreatePe
   };
 
   return (
+    <>
+    {showCreateModal && (
+      <CreateAgentModal
+        onClose={() => setShowCreateModal(false)}
+        onCreated={() => { setShowCreateModal(false); fetchAgents('personal'); setActiveTab('personal'); }}
+      />
+    )}
     <div className="flex flex-col border-b border-slate-100 bg-white">
       {/* 탭 바 */}
       <div className="flex items-center gap-0.5 px-4 pt-3 overflow-x-auto scrollbar-none">
@@ -119,7 +127,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect, onCreatePe
             {/* 내 비서 탭: 새 비서 만들기 카드 */}
             {activeTab === 'personal' && (
               <button
-                onClick={onCreatePersonal}
+                onClick={() => setShowCreateModal(true)}
                 className="flex flex-col items-center justify-center gap-2 p-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:border-brand-300 hover:text-brand-500 hover:bg-brand-50 transition-all duration-150 min-h-[120px]"
               >
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -140,5 +148,6 @@ export default function AgentSelector({ selectedAgent, onAgentSelect, onCreatePe
         )}
       </div>
     </div>
+    </>
   );
 }

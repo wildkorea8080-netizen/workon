@@ -35,13 +35,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-      { status: 403 }
-    );
-  }
-
   const formData = await request.formData();
   const file = formData.get('file');
   const agentId = formData.get('agentId')?.toString();
@@ -52,6 +45,22 @@ export async function POST(request: Request) {
       { ok: false, error: { message: '에이전트 ID가 필요합니다.' } },
       { status: 400 }
     );
+  }
+
+  // 관리자이거나, 본인 소유의 개인 비서인 경우에만 허용
+  if (session.user.role !== 'ADMIN') {
+    const { data: agent } = await supabaseAdmin
+      .from('agents')
+      .select('is_personal, owner_id')
+      .eq('id', agentId)
+      .maybeSingle();
+
+    if (!agent?.is_personal || agent.owner_id !== session.user.id) {
+      return NextResponse.json<ApiResponse<null>>(
+        { ok: false, error: { message: '권한이 없습니다.' } },
+        { status: 403 }
+      );
+    }
   }
 
   if (!(file instanceof File)) {
