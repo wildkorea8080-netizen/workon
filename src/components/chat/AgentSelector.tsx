@@ -121,6 +121,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
                 isFavorite={favoriteIds.includes(agent.id)}
                 onFavoriteToggle={handleFavoriteToggle}
                 onSelect={a => onAgentSelect(selectedAgent?.id === a.id ? null : a)}
+                onApprovalRequested={() => fetchAgents(activeTab)}
               />
             ))}
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id || !isAdminSession(session)) {
@@ -20,6 +20,9 @@ export async function GET(_request: NextRequest) {
       );
     }
 
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status') ?? 'pending';
+
     const { data: agents, error } = await supabaseAdmin
       .from('agents')
       .select(`
@@ -31,7 +34,7 @@ export async function GET(_request: NextRequest) {
         )
       `)
       .eq('department_id', departmentId)
-      .eq('approval_status', 'pending')
+      .eq('approval_status', status)
       .order('created_at', { ascending: false });
 
     if (error) {

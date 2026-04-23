@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
@@ -47,9 +47,12 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       );
     }
 
+    const body = await request.json().catch(() => ({}));
+    const note: string | null = body.note?.trim() || null;
+
     const { error } = await supabaseAdmin
       .from('agents')
-      .update({ approval_status: 'pending', approval_note: null })
+      .update({ approval_status: 'pending', approval_note: note })
       .eq('id', params.id);
 
     if (error) {

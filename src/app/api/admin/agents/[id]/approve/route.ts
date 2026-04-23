@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id || !isAdminSession(session)) {
@@ -41,13 +41,17 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       );
     }
 
+    // scope: 'department'(기본) | 'all' — 향후 확장용, 현재는 department_id 유지
+    const body = await request.json().catch(() => ({}));
+    const scope: string = body.scope ?? 'department';
+
     const { data: agent, error } = await supabaseAdmin
       .from('agents')
       .update({
         is_personal: false,
         owner_id: null,
         approval_status: 'approved',
-        approval_note: null,
+        approval_note: scope,   // scope 정보를 note에 보존
         updated_by: session.user.id,
       })
       .eq('id', params.id)

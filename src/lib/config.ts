@@ -1,3 +1,5 @@
+const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build';
+
 function getEnv(key: string, required = true, fallbackKeys: string[] = []): string {
   const keys = [key, ...fallbackKeys];
 
@@ -8,7 +10,7 @@ function getEnv(key: string, required = true, fallbackKeys: string[] = []): stri
     }
   }
 
-  if (required) {
+  if (required && !isBuildPhase) {
     throw new Error(`Missing required environment variable: ${key}`);
   }
 
