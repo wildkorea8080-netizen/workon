@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ChatInterface from '@/components/chat/ChatInterface';
 import AgentSelector from '@/components/chat/AgentSelector';
@@ -10,21 +10,22 @@ import Header from '@/components/layout/Header';
 import Sidebar from '@/components/layout/Sidebar';
 import type { Agent } from '@/lib/db';
 
-const AVATAR_COLORS = [
-  'bg-indigo-500', 'bg-violet-500', 'bg-blue-500',
-  'bg-teal-500', 'bg-emerald-500', 'bg-pink-500',
-];
-function pickBg(name: string) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffff;
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
-}
-
 type ViewMode = 'welcome' | 'chat';
+
+// ?conv=ID 딥링크 처리 — useSearchParams는 Suspense 경계 안에서만 사용 가능
+function ConvLoader({ onLoad }: { onLoad: (id: string) => void }) {
+  const params = useSearchParams();
+  useEffect(() => {
+    const id = params.get('conv');
+    if (id) onLoad(id);
+  // onLoad ref는 안정적이므로 deps 생략
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
 
 export default function HomePage() {
   const { data: session, status } = useSession();
-  const router = useRouter();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -141,6 +142,10 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col h-screen bg-[#F5F7FA] overflow-hidden" style={{ fontFamily: 'Pretendard, -apple-system, sans-serif' }}>
+      <Suspense fallback={null}>
+        <ConvLoader onLoad={handleConversationSelect} />
+      </Suspense>
+
       {/* 고정 헤더 */}
       <Header />
 
