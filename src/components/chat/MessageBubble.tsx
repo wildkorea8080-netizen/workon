@@ -30,7 +30,7 @@ export default function MessageBubble({ role, content, sources, error }: Message
     <div className={`flex gap-3 mb-5 group ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 아바타 */}
       {!isUser && (
-        <div className="w-7 h-7 rounded-lg bg-[#1a1f36] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <div className="w-7 h-7 rounded-lg bg-[#1C2B4A] flex items-center justify-center flex-shrink-0 mt-0.5">
           <svg className="w-3.5 h-3.5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
@@ -41,10 +41,10 @@ export default function MessageBubble({ role, content, sources, error }: Message
         <div
           className={`px-4 py-3 text-sm leading-relaxed ${
             isUser
-              ? 'bg-brand-600 text-white rounded-2xl rounded-tr-sm'
+              ? 'bg-[#003087] text-white rounded-2xl rounded-tr-sm shadow-sm'
               : error
               ? 'bg-red-50 text-red-800 border border-red-200 rounded-2xl rounded-tl-sm'
-              : 'bg-slate-100 text-slate-900 rounded-2xl rounded-tl-sm'
+              : 'bg-white text-slate-900 border border-slate-200 rounded-2xl rounded-tl-sm shadow-sm'
           }`}
         >
           {error ? (
@@ -125,7 +125,7 @@ export default function MessageBubble({ role, content, sources, error }: Message
 
       {/* 사용자 아바타 */}
       {isUser && (
-        <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <div className="w-7 h-7 rounded-lg bg-[#003087] flex items-center justify-center flex-shrink-0 mt-0.5">
           <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>

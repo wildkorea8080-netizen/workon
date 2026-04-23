@@ -3,8 +3,8 @@ import './globals.css';
 import { Providers } from '@/components/providers';
 
 export const metadata: Metadata = {
-  title: 'WORKON',
-  description: 'Internal document management and AI-powered reporting platform.'
+  title: 'AI 업무도우미 | WORKON',
+  description: '공공기관 전용 AI 비서 플랫폼',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

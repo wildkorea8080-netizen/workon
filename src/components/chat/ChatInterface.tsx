@@ -212,7 +212,7 @@ export default function ChatInterface({
 
       {/* 입력 영역 */}
       <div className="px-5 py-4 bg-white border-t border-slate-100 flex-shrink-0">
-        <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100 transition-all">
+        <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#003087] focus-within:ring-2 focus-within:ring-[#003087]/10 transition-all">
           <textarea
             ref={textareaRef}
             value={inputMessage}

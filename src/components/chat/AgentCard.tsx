@@ -4,13 +4,22 @@ import { useState } from 'react';
 import type { Agent } from '@/lib/db';
 
 const AVATAR_COLORS = [
-  { bg: 'bg-indigo-500', light: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-700' },
-  { bg: 'bg-violet-500', light: 'bg-violet-50', border: 'border-violet-300', text: 'text-violet-700' },
-  { bg: 'bg-blue-500',   light: 'bg-blue-50',   border: 'border-blue-300',   text: 'text-blue-700'   },
-  { bg: 'bg-teal-500',   light: 'bg-teal-50',   border: 'border-teal-300',   text: 'text-teal-700'   },
-  { bg: 'bg-emerald-500',light: 'bg-emerald-50', border: 'border-emerald-300',text: 'text-emerald-700'},
-  { bg: 'bg-pink-500',   light: 'bg-pink-50',   border: 'border-pink-300',   text: 'text-pink-700'   },
+  { bg: 'bg-[#003087]',   light: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-[#003087]'  },
+  { bg: 'bg-[#0066CC]',   light: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-700'    },
+  { bg: 'bg-teal-600',    light: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-700'   },
+  { bg: 'bg-violet-600',  light: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-700' },
+  { bg: 'bg-[#A23B72]',   light: 'bg-pink-50',    border: 'border-pink-200',    text: 'text-pink-700'   },
+  { bg: 'bg-[#F18F01]',   light: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700'  },
 ];
+
+// 카테고리별 뱃지 색상
+const CATEGORY_BADGE: Record<string, string> = {
+  '공공기관': 'bg-blue-50 text-[#003087] border border-blue-200',
+  '업무':     'bg-amber-50 text-amber-700 border border-amber-200',
+  '문서':     'bg-violet-50 text-violet-700 border border-violet-200',
+  '번역':     'bg-teal-50 text-teal-700 border border-teal-200',
+  '기타':     'bg-slate-50 text-slate-600 border border-slate-200',
+};
 
 export function pickColor(name: string) {
   let h = 0;
@@ -74,7 +83,7 @@ export default function AgentCard({
 
         {/* 카테고리 뱃지 */}
         {agent.category && agent.category !== '전체' && (
-          <span className={`self-start px-2 py-0.5 rounded-full text-xs font-medium ${c.light} ${c.text}`}>
+          <span className={`self-start px-2 py-0.5 rounded-full text-xs font-medium ${CATEGORY_BADGE[agent.category] ?? `${c.light} ${c.text}`}`}>
             {agent.category}
           </span>
         )}
