@@ -1,0 +1,5 @@
+부서명,상위부서명,직원이름,이메일,직책,권한
+기획부,,홍길동,hong@oads.or.kr,팀장,ADMIN
+기획부,,김철수,kim@oads.or.kr,주임,USER
+사업부,,이영희,lee@oads.or.kr,과장,USER
+사업부,,박민준,park@oads.or.kr,사원,USER
