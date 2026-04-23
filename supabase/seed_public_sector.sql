@@ -9,6 +9,30 @@
 --     LIMIT 1 서브쿼리를 그대로 사용하세요.
 -- =============================================================
 
+-- =============================================================
+-- 누락 컬럼 선행 추가 (이미 있으면 무시)
+-- =============================================================
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS icon     text;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS color    text;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS category text DEFAULT '전체';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_personal boolean DEFAULT false;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS owner_id  uuid REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS approval_status text DEFAULT null;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS approval_note   text;
+
+-- users 테이블 누락 컬럼
+ALTER TABLE users ADD COLUMN IF NOT EXISTS favorite_agent_ids uuid[] DEFAULT '{}';
+
+-- conversations 테이블 누락 컬럼
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS share_token text UNIQUE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_shared   boolean DEFAULT false;
+
+-- 인덱스
+CREATE INDEX IF NOT EXISTS idx_agents_category ON agents(category);
+CREATE INDEX IF NOT EXISTS idx_agents_owner    ON agents(owner_id);
+CREATE INDEX IF NOT EXISTS idx_agents_approval ON agents(approval_status);
+
+
 DO $$
 DECLARE
   v_dept_id uuid;
