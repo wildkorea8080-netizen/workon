@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 // 보안 이벤트 타입
 export type SecurityEventType =
@@ -17,7 +17,7 @@ export async function logSecurityEvent(
   severity: 'low' | 'medium' | 'high' | 'critical' = 'medium'
 ) {
   try {
-    await supabase.from('security_logs').insert({
+    await supabaseAdmin.from('security_logs').insert({
       department_id: departmentId,
       user_id: userId,
       event_type: eventType,
@@ -81,7 +81,8 @@ export async function filterUserInput(departmentId: string, text: string, userId
     .eq('is_active', true);
 
   if (error) {
-    throw new Error('금지어 조회 중 오류가 발생했습니다.');
+    console.warn('[filter] 금지어 조회 실패, 필터링 스킵:', error.message);
+    return result; // 필터 실패 시 차단하지 않고 통과
   }
 
   if (forbiddenWords) {

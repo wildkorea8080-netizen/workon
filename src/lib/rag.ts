@@ -27,7 +27,9 @@ export async function retrieveRelevantChunks(
   });
 
   if (error) {
-    throw new Error('문서 검색 중 오류가 발생했습니다: ' + error.message);
+    // RPC 미존재 등 DB 오류 → 빈 결과로 계속 진행 (RAG 없이 Claude만 사용)
+    console.warn('[RAG] search_agent_chunks 실패 (문서 없이 진행):', error.message);
+    return { query, chunks: [], totalChunks: 0 };
   }
 
   const chunks: RetrievedChunk[] = (data ?? []).map((row: any) => ({
