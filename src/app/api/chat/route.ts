@@ -33,24 +33,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 사용자의 부서 확인
-    const { data: user, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('department_id')
-      .eq('id', session.user.id)
-      .single();
+    // 부서 확인: 세션 캐시 우선, 없으면 DB 조회, 그래도 없으면 첫 번째 부서 자동 배정
+    let departmentId: string | null = session.user.departmentId ?? null;
 
-    if (userError || !user?.department_id) {
+    if (!departmentId) {
+      const { data: dbUser } = await supabaseAdmin
+        .from('users')
+        .select('department_id')
+        .eq('id', session.user.id)
+        .single();
+      departmentId = dbUser?.department_id ?? null;
+    }
+
+    if (!departmentId) {
+      // 마지막 수단: 첫 번째 부서 자동 배정
+      const { data: firstDept } = await supabaseAdmin
+        .from('departments')
+        .select('id')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+      if (firstDept?.id) {
+        departmentId = firstDept.id;
+        await supabaseAdmin
+          .from('users')
+          .update({ department_id: firstDept.id })
+          .eq('id', session.user.id);
+      }
+    }
+
+    if (!departmentId) {
       return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
+        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다. 관리자에게 문의하세요.' } },
         { status: 403 }
       );
     }
 
-    // 에이전트 확인 및 권한 체크
+    // 에이전트 확인
     const { data: agent, error: agentError } = await supabaseAdmin
       .from('agents')
-      .select('id, department_id, system_prompt, name')
+      .select('id, department_id, system_prompt, name, is_personal, owner_id')
       .eq('id', agent_id)
       .eq('is_active', true)
       .single();
@@ -62,7 +84,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (agent.department_id !== user.department_id) {
+    // 접근 권한: 같은 부서 에이전트 OR 내 나만의 비서
+    const canAccess =
+      agent.department_id === departmentId ||
+      (agent.is_personal && agent.owner_id === session.user.id);
+
+    if (!canAccess) {
       return NextResponse.json(
         { ok: false, error: { message: '해당 에이전트에 접근할 권한이 없습니다.' } },
         { status: 403 }
@@ -70,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 입력 필터링
-    const filterResult = await filterUserInput(user.department_id, message);
+    const filterResult = await filterUserInput(departmentId, message);
     if (!filterResult.isValid) {
       return NextResponse.json(
         {
@@ -110,7 +137,7 @@ export async function POST(request: NextRequest) {
       const { data: newConv, error: convError } = await supabaseAdmin
         .from('conversations')
         .insert({
-          department_id: user.department_id,
+          department_id: departmentId,
           agent_id: agent_id,
           user_id: session.user.id,
           title: `대화 with ${agent.name}`,
@@ -200,7 +227,7 @@ export async function POST(request: NextRequest) {
 
     // 사용 로그 기록
     await supabaseAdmin.from('usage_logs').insert({
-      department_id: user.department_id,
+      department_id: departmentId,
       user_id: session.user.id,
       action: 'chat_message',
       resource_type: 'conversation',
