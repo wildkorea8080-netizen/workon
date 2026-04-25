@@ -7,6 +7,35 @@ const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? '';
 const PUBLIC_FILE = /\.(.*)$/;
 const SUPER_COOKIE = 'super_token';
 
+// 점검 모드 캐시 (Edge Runtime 모듈 레벨, 30초 TTL)
+let maintenanceCache: { value: boolean; message: string; ts: number } | null = null;
+const CACHE_TTL = 30_000;
+
+async function checkMaintenance(): Promise<{ on: boolean; message: string }> {
+  if (maintenanceCache && Date.now() - maintenanceCache.ts < CACHE_TTL) {
+    return { on: maintenanceCache.value, message: maintenanceCache.message };
+  }
+  try {
+    const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return { on: false, message: '' };
+
+    const res  = await fetch(
+      `${url}/rest/v1/system_settings?key=in.(maintenance_mode,maintenance_message)&select=key,value`,
+      { headers: { apikey: key, Authorization: `Bearer ${key}` } }
+    );
+    if (!res.ok) return { on: false, message: '' };
+    const data = await res.json() as { key: string; value: string }[];
+    const map  = Object.fromEntries(data.map(r => [r.key, r.value]));
+    const on   = map.maintenance_mode === 'true';
+    const msg  = map.maintenance_message ?? '';
+    maintenanceCache = { value: on, message: msg, ts: Date.now() };
+    return { on, message: msg };
+  } catch {
+    return { on: false, message: '' };
+  }
+}
+
 /**
  * Edge Runtime 호환 JWT 서명 검증 (Web Crypto API)
  */
@@ -49,11 +78,33 @@ async function verifySuperTokenEdge(token: string): Promise<boolean> {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // ── 점검 모드 체크 (/super, /maintenance, /api/super, /api/system은 제외) ──
+  const isExempt =
+    pathname.startsWith('/super') ||
+    pathname.startsWith('/maintenance') ||
+    pathname.startsWith('/api/super') ||
+    pathname.startsWith('/api/system') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/api/auth') ||
+    PUBLIC_FILE.test(pathname);
+
+  if (!isExempt) {
+    const { on: isMaintenance } = await checkMaintenance();
+    if (isMaintenance) {
+      // 슈퍼관리자 토큰 있으면 통과
+      const superToken = req.cookies.get(SUPER_COOKIE)?.value;
+      const isSuperAdmin = superToken ? await verifySuperTokenEdge(superToken) : false;
+      if (!isSuperAdmin) {
+        return NextResponse.redirect(new URL('/maintenance', req.url));
+      }
+    }
+  }
+
   // 정적 파일, Next.js 내부 경로 통과
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/auth') ||
-    pathname.startsWith('/api/super/auth') || // 슈퍼관리자 인증 API는 공개
+    pathname.startsWith('/api/super/auth') ||
     pathname.startsWith('/static') ||
     PUBLIC_FILE.test(pathname)
   ) {
@@ -122,5 +173,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/user/:path*', '/super/:path*'],
+  matcher: ['/admin/:path*', '/user/:path*', '/super/:path*', '/((?!_next|api|static|.*\\..*).*)'],
 };

@@ -9,6 +9,7 @@ import AgentSelector from '@/components/chat/AgentSelector';
 import Header from '@/components/layout/Header';
 import Sidebar from '@/components/layout/Sidebar';
 import type { Agent } from '@/lib/db';
+import NoticesBanner from '@/components/NoticesBanner';
 
 type ViewMode = 'welcome' | 'chat';
 
@@ -148,6 +149,8 @@ export default function HomePage() {
 
       {/* 고정 헤더 */}
       <Header />
+      {/* 공지 배너 */}
+      <NoticesBanner />
 
       {/* 헤더 아래 영역 */}
       <div className="flex flex-1 overflow-hidden pt-14">
