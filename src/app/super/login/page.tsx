@@ -29,12 +29,13 @@ function LoginForm() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!data.ok) { setError(data.error); return; }
-      router.push(redirect);
-      router.refresh();
+      if (!data.ok) { setError(data.error); setLoading(false); return; }
+      // 쿠키가 브라우저에 반영될 시간을 준 뒤 이동
+      setTimeout(() => {
+        window.location.href = redirect;
+      }, 300);
     } catch {
       setError('네트워크 오류가 발생했습니다.');
-    } finally {
       setLoading(false);
     }
   };

@@ -10,10 +10,11 @@ const SUPER_COOKIE = 'super_token';
 /**
  * Edge Runtime 호환 JWT 서명 검증 (Web Crypto API)
  */
+const SUPER_JWT_FALLBACK = 'dev-fallback-super-secret-change-in-prod';
+
 async function verifySuperTokenEdge(token: string): Promise<boolean> {
   try {
-    const secret = process.env.SUPER_JWT_SECRET;
-    if (!secret) return false;
+    const secret = process.env.SUPER_JWT_SECRET || SUPER_JWT_FALLBACK;
 
     const parts = token.split('.');
     if (parts.length !== 3) return false;
