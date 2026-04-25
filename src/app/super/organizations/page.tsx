@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const ORG_TYPES = ['중앙행정기관', '지방자치단체', '공공기관', '교육기관', '협회단체', '일반기업'];
 
@@ -58,6 +58,7 @@ export default function OrganizationsPage() {
   const [panelOpen, setPanelOpen]       = useState(false);
   const [activeMenu, setActiveMenu]     = useState<string | null>(null);
   const [toast, setToast]     = useState<string | null>(null);
+  const [impersonating, setImpersonating] = useState<string | null>(null);
   const LIMIT = 20;
 
   const fetchOrgs = useCallback(async (p = 1) => {
@@ -80,6 +81,20 @@ export default function OrganizationsPage() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleImpersonate = async (id: string) => {
+    setImpersonating(id);
+    try {
+      const res = await fetch(`/api/super/organizations/${id}/impersonate`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) { showToast(data.error ?? '접속 실패'); return; }
+      window.open('/admin', '_blank');
+    } catch {
+      showToast('접속 중 오류가 발생했습니다.');
+    } finally {
+      setImpersonating(null);
+    }
   };
 
   const handleStatusChange = async (id: string, status: string) => {
@@ -198,10 +213,13 @@ export default function OrganizationsPage() {
                           className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg transition-colors">
                           상세
                         </a>
-                        <a href="/admin" target="_blank"
-                          className="px-3 py-1.5 bg-[#7C3AED]/20 hover:bg-[#7C3AED]/40 text-violet-300 text-xs font-medium rounded-lg transition-colors">
-                          접속
-                        </a>
+                        <button
+                          onClick={() => handleImpersonate(org.id)}
+                          disabled={impersonating === org.id}
+                          className="px-3 py-1.5 bg-[#7C3AED]/20 hover:bg-[#7C3AED]/40 text-violet-300 text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {impersonating === org.id ? '접속 중...' : '접속'}
+                        </button>
                         <div className="relative">
                           <button
                             onClick={() => setActiveMenu(activeMenu === org.id ? null : org.id)}

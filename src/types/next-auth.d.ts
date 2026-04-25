@@ -8,6 +8,11 @@ declare module 'next-auth' {
       id?: string;
       role?: 'ADMIN' | 'USER';
       departmentId?: string | null;
+      isImpersonating?: boolean;
+      impersonatedBy?: string;
+      impersonateOrgId?: string;
+      impersonateOrgName?: string;
+      impersonateLogId?: string;
     };
   }
 
@@ -24,5 +29,10 @@ declare module 'next-auth/jwt' {
     id?: string;
     role?: 'ADMIN' | 'USER';
     departmentId?: string | null;
+    isImpersonating?: boolean;
+    impersonatedBy?: string;
+    impersonateOrgId?: string;
+    impersonateOrgName?: string;
+    impersonateLogId?: string;
   }
 }

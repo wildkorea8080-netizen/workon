@@ -1,7 +1,7 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import Link from 'next/link';
 import AdminNav from '@/components/admin/AdminNav';
-
+import ImpersonateBanner from '@/components/admin/ImpersonateBanner';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerAuthSession();
@@ -21,33 +21,40 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
+  const isImpersonating = session?.user?.isImpersonating === true;
+  const orgName = session?.user?.impersonateOrgName ?? '';
+
   return (
     <div className="flex h-screen bg-slate-50">
+      {/* 대리 접근 배너 */}
+      {isImpersonating && <ImpersonateBanner orgName={orgName} />}
+
       {/* 좌측 사이드바 */}
-      <aside className="w-60 bg-[#1C2B4A] text-white flex flex-col flex-shrink-0">
+      <aside className={`w-60 bg-[#1C2B4A] text-white flex flex-col flex-shrink-0 ${isImpersonating ? 'mt-[52px]' : ''}`}>
         {/* 로고 */}
         <div className="px-6 py-5 border-b border-white/10">
           <Link href="/admin" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <span className="text-lg">🏛️</span>
             <div>
               <p className="text-sm font-bold text-white leading-tight">AI 업무도우미</p>
-              <p className="text-[10px] text-white/40 mt-0">관리자 포털</p>
+              <p className="text-[10px] text-white/40 mt-0">관리자 포털{isImpersonating ? ' (대리)' : ''}</p>
             </div>
           </Link>
         </div>
 
-        {/* 네비게이션 — 클라이언트 컴포넌트 (활성 상태 표시) */}
         <AdminNav />
 
         {/* 하단 사용자 정보 */}
         <div className="px-4 py-4 border-t border-white/10">
           <div className="flex items-center gap-2.5 mb-3">
-            <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${isImpersonating ? 'bg-amber-500' : 'bg-brand-600'}`}>
               {session?.user?.email?.[0]?.toUpperCase() ?? 'A'}
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold text-white truncate">{session?.user?.email}</p>
-              <p className="text-[11px] text-white/40">관리자</p>
+              <p className={`text-[11px] ${isImpersonating ? 'text-amber-400' : 'text-white/40'}`}>
+                {isImpersonating ? '대리 접근 중' : '관리자'}
+              </p>
             </div>
           </div>
           <Link
@@ -63,7 +70,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </aside>
 
       {/* 우측 콘텐츠 */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className={`flex-1 flex flex-col overflow-hidden ${isImpersonating ? 'mt-[52px]' : ''}`}>
         <main className="flex-1 overflow-y-auto px-8 py-6">
           {children}
         </main>
@@ -71,4 +78,3 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     </div>
   );
 }
-

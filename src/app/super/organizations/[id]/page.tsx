@@ -40,10 +40,25 @@ export default function OrgDetailPage() {
   const router  = useRouter();
   const [tab, setTab]   = useState<Tab>('overview');
   const [org, setOrg]   = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast]     = useState<string | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [toast, setToast]           = useState<string | null>(null);
+  const [impersonating, setImpersonating] = useState(false);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  const handleImpersonate = async () => {
+    setImpersonating(true);
+    try {
+      const res  = await fetch(`/api/super/organizations/${id}/impersonate`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) { showToast(data.error ?? '접속 실패'); return; }
+      window.open('/admin', '_blank');
+    } catch {
+      showToast('접속 중 오류가 발생했습니다.');
+    } finally {
+      setImpersonating(false);
+    }
+  };
 
   const fetchOrg = useCallback(async () => {
     setLoading(true);
@@ -92,10 +107,13 @@ export default function OrgDetailPage() {
           <p className="text-slate-500 text-sm mt-1">{org.slug} · {org.type}</p>
         </div>
         <div className="flex gap-2">
-          <a href="/admin" target="_blank"
-            className="px-4 py-2 bg-[#7C3AED]/20 hover:bg-[#7C3AED]/40 text-violet-300 text-sm font-medium rounded-xl transition-colors">
-            기관 접속
-          </a>
+          <button
+            onClick={handleImpersonate}
+            disabled={impersonating}
+            className="px-4 py-2 bg-[#7C3AED]/20 hover:bg-[#7C3AED]/40 disabled:opacity-50 text-violet-300 text-sm font-medium rounded-xl transition-colors"
+          >
+            {impersonating ? '접속 중...' : '기관 접속'}
+          </button>
           {org.status === 'active' ? (
             <button onClick={() => handleStatusChange('suspended')}
               className="px-4 py-2 bg-amber-900/30 hover:bg-amber-900/50 text-amber-400 text-sm font-medium rounded-xl transition-colors">
@@ -401,7 +419,7 @@ function UsageTab({ orgId }: { orgId: string }) {
               <XAxis dataKey="date" tickFormatter={d => d.slice(5)} tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <Tooltip
-                formatter={(v: number) => [`${v}건`, '대화']}
+                formatter={(v) => [`${v ?? 0}건`, '대화']}
                 contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#94a3b8' }}
               />
@@ -421,7 +439,7 @@ function UsageTab({ orgId }: { orgId: string }) {
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <YAxis tickFormatter={fmt} tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <Tooltip
-                formatter={(v: number) => [fmt(v), '토큰']}
+                formatter={(v) => [fmt(Number(v ?? 0)), '토큰']}
                 contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
               />
               <Bar dataKey="tokens" fill="#7C3AED" radius={[4, 4, 0, 0]} />

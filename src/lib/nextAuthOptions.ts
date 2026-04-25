@@ -189,6 +189,13 @@ export const authOptions: AuthOptions = {
         session.user.id = token.id as string;
         session.user.role = token.role as 'ADMIN' | 'USER';
         session.user.departmentId = token.departmentId ?? null;
+        if (token.isImpersonating) {
+          session.user.isImpersonating   = true;
+          session.user.impersonatedBy    = token.impersonatedBy as string;
+          session.user.impersonateOrgId  = token.impersonateOrgId as string;
+          session.user.impersonateOrgName = token.impersonateOrgName as string;
+          session.user.impersonateLogId  = token.impersonateLogId as string;
+        }
       }
       return session;
     }
