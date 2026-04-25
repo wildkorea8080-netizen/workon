@@ -21,38 +21,52 @@ export async function POST(
 
   const orgId = params.id;
 
-  // 1) 기관 조회
-  const { data: org } = await supabaseAdmin
+  // 1) 기관 조회 — organizations 테이블에 slug 컬럼 없음, name만 선택
+  const { data: org, error: orgErr } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, slug')
+    .select('id, name')
     .eq('id', orgId)
-    .single();
+    .maybeSingle();
 
-  if (!org) return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
+  if (orgErr) {
+    console.error('[impersonate] org query error:', orgErr.message, 'orgId:', orgId);
+    return NextResponse.json({ ok: false, error: `기관 조회 실패: ${orgErr.message}` }, { status: 500 });
+  }
+  if (!org) {
+    return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
+  }
 
-  // 2) 기관 소속 ADMIN 사용자 조회
-  const { data: depts } = await supabaseAdmin
+  // 2) 기관 소속 부서 조회
+  const { data: depts, error: deptErr } = await supabaseAdmin
     .from('departments')
     .select('id')
     .eq('organization_id', orgId);
 
-  const deptIds = (depts ?? []).map(d => d.id);
+  if (deptErr) {
+    console.error('[impersonate] dept query error:', deptErr.message);
+  }
+
+  const deptIds = (depts ?? []).map((d: { id: string }) => d.id);
   if (!deptIds.length) {
     return NextResponse.json({ ok: false, error: '해당 기관에 부서가 없습니다.' }, { status: 404 });
   }
 
-  const { data: adminUser } = await supabaseAdmin
+  // 3) 기관 소속 ADMIN 사용자 조회
+  const { data: adminUser, error: adminErr } = await supabaseAdmin
     .from('users')
     .select('id, email, full_name, department_id')
     .in('department_id', deptIds)
     .eq('role', 'ADMIN')
     .maybeSingle();
 
+  if (adminErr) {
+    console.error('[impersonate] admin user query error:', adminErr.message);
+  }
   if (!adminUser) {
     return NextResponse.json({ ok: false, error: '해당 기관에 관리자가 없습니다.' }, { status: 404 });
   }
 
-  // 3) impersonation_logs 기록
+  // 4) impersonation_logs 기록
   const { data: logRow } = await supabaseAdmin
     .from('impersonation_logs')
     .insert({
@@ -62,9 +76,9 @@ export async function POST(
       ip_address: request.headers.get('x-forwarded-for') ?? null,
     })
     .select('id')
-    .single();
+    .maybeSingle();
 
-  // 4) NextAuth 호환 임시 세션 토큰 생성 (2시간)
+  // 5) NextAuth 호환 임시 세션 토큰 생성 (2시간)
   const secret = process.env.NEXTAUTH_SECRET ?? 'fallback-secret';
   const sessionToken = await encode({
     token: {
@@ -86,13 +100,12 @@ export async function POST(
     maxAge: 7200,
   });
 
-  // 5) 응답 - 쿠키 설정
+  // 6) 응답 — 쿠키 설정
+  const isProd = (process.env.NEXTAUTH_URL ?? '').startsWith('https://');
   const response = NextResponse.json({
     ok: true,
     data: { redirectUrl: '/admin', orgName: org.name },
   });
-
-  const isProd = (process.env.NEXTAUTH_URL ?? '').startsWith('https://');
   response.cookies.set({
     name: nextAuthCookieName(),
     value: sessionToken,
