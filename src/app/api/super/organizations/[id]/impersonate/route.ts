@@ -52,16 +52,19 @@ export async function POST(
   }
 
   // 3) 기관 소속 ADMIN 사용자 조회
-  const { data: adminUser, error: adminErr } = await supabaseAdmin
+  const { data: adminUsers, error: adminErr } = await supabaseAdmin
     .from('users')
     .select('id, email, full_name, department_id')
     .in('department_id', deptIds)
     .eq('role', 'ADMIN')
-    .maybeSingle();
+    .limit(5);
 
   if (adminErr) {
     console.error('[impersonate] admin user query error:', adminErr.message);
   }
+
+  // 슈퍼관리자 본인 계정 제외 후 첫 번째 ADMIN 선택
+  const adminUser = (adminUsers ?? []).find((u: { id: string }) => u.id !== admin.sub) ?? (adminUsers ?? [])[0];
   if (!adminUser) {
     return NextResponse.json({ ok: false, error: '해당 기관에 관리자가 없습니다.' }, { status: 404 });
   }
