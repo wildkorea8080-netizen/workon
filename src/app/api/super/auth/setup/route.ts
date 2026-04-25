@@ -56,7 +56,10 @@ export async function POST(request: NextRequest) {
     if (existingAuthUser) {
       // 기존 Auth 계정 재사용 — 비밀번호 변경도 적용
       authUserId = existingAuthUser.id;
-      await supabaseAdmin.auth.admin.updateUserById(authUserId, { password });
+      await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+        password,
+        email_confirm: true,
+      });
     } else {
       // 신규 Auth 계정 생성
       const { data: newAuth, error: authError } = await supabaseAdmin.auth.admin.createUser({

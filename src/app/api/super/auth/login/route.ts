@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
 
@@ -15,9 +16,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1) Supabase Auth로 비밀번호 검증
-    const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1) anon key 클라이언트로 비밀번호 검증
+    //    service role 키는 signInWithPassword 용도에 적합하지 않음
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false },
+    });
+
+    const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+      email: normalizedEmail,
       password,
     });
 
@@ -28,7 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2) users 테이블에서 is_super_admin 확인
+    // 2) users 테이블에서 is_super_admin 확인 (service role로 조회)
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('id, email, full_name, is_super_admin')
@@ -43,7 +53,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3) last_login_at 업데이트
+    // 3) updated_at 갱신
     await supabaseAdmin
       .from('users')
       .update({ updated_at: new Date().toISOString() })
@@ -56,7 +66,7 @@ export async function POST(request: NextRequest) {
       user.full_name ?? user.email
     );
 
-    // 5) 쿠키 설정
+    // 5) httpOnly 쿠키 설정
     const response = NextResponse.json({ ok: true });
     response.cookies.set({
       name: SUPER_COOKIE_NAME,
@@ -65,7 +75,7 @@ export async function POST(request: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 86400, // 24h
+      maxAge: 86400,
     });
 
     return response;
