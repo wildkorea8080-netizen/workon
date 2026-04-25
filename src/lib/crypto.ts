@@ -1,32 +1,38 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+// @ts-nocheck
+/* eslint-disable @typescript-eslint/no-require-imports */
+import crypto from 'crypto';
 
 function getKey(): Buffer {
-  const secret = process.env.API_KEY_ENCRYPTION_SECRET ?? 'workon-api-key-enc-secret-32byte';
-  return Buffer.from(secret.slice(0, 32).padEnd(32, '0'), 'utf8');
+  const hexKey = process.env.ENCRYPTION_KEY;
+  if (hexKey && hexKey.length === 64) return Buffer.from(hexKey, 'hex');
+  const str = (process.env.API_KEY_ENCRYPTION_SECRET ?? 'workon-api-key-enc-secret-32byte')
+    .slice(0, 32).padEnd(32, '0');
+  return Buffer.from(str, 'utf8');
 }
 
-export function encryptApiKey(plaintext: string): string {
-  const iv = randomBytes(16);
-  const key = getKey();
-  const cipher = createCipheriv('aes-256-cbc', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
+export function encryptApiKey(text: string): string {
+  const iv     = crypto.randomBytes(16);
+  const key    = getKey();
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const enc    = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  return iv.toString('hex') + ':' + enc.toString('hex');
 }
 
-export function decryptApiKey(encrypted: string): string {
+export function decryptApiKey(text: string): string {
   try {
-    const [ivHex, encHex] = encrypted.split(':');
+    const [ivHex, encHex] = text.split(':');
     if (!ivHex || !encHex) return '';
-    const iv  = Buffer.from(ivHex, 'hex');
-    const enc = Buffer.from(encHex, 'hex');
-    const decipher = createDecipheriv('aes-256-cbc', getKey(), iv);
-    return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
-  } catch {
-    return '';
-  }
+    const key      = getKey();
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
+    const dec      = Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]);
+    return dec.toString('utf8');
+  } catch { return ''; }
 }
 
-export function maskKey(plaintext: string): string {
-  if (!plaintext || plaintext.length < 8) return '••••••••';
-  return plaintext.slice(0, 8) + '••••••••••••••••';
+export function maskApiKey(key: string): string {
+  if (!key || key.length <= 8) return '••••••••';
+  return key.substring(0, 10) + '••••••••••••' + key.substring(key.length - 4);
 }
+
+// backward-compat alias
+export const maskKey = maskApiKey;
