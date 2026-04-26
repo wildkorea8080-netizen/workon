@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
+import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
 
   const result: Record<string, any> = {};
   for (const p of PROVIDERS) {
-    const k = (keys ?? []).find(r => r.provider === p);
+    const k = (keys ?? []).find((r: { provider: string }) => r.provider === p);
     result[p] = k
       ? { id: k.id, masked: k.key_value ? maskApiKey(decryptApiKey(k.key_value)) : '(미설정)', updatedAt: k.updated_at, hasKey: !!k.key_value }
       : { id: null, masked: '(미설정)', updatedAt: null, hasKey: false };
@@ -29,9 +30,6 @@ export async function GET(request: NextRequest) {
   // 시스템 키를 사용 중인 기관 수 (자체 키 없는 기관)
   const { count: orgTotal } = await supabaseAdmin
     .from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active');
-
-  const { data: orgsWithOwnKey } = await supabaseAdmin
-    .from('api_keys').select('organization_id').is('organization_id', null).eq('is_active', true);
 
   // 이번달 시스템 키 사용 토큰 (org_id가 없는 usage_logs)
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
@@ -87,5 +85,8 @@ export async function PATCH(request: NextRequest) {
   });
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  logSystem({ level: 'warning', category: 'security',
+    message: `시스템 API 키 변경: ${provider}`,
+    details: { provider, prefix } });
   return NextResponse.json({ ok: true });
 }

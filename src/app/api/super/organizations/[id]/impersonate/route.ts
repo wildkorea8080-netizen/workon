@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encode } from 'next-auth/jwt';
+import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,6 +119,11 @@ export async function POST(
     path: '/',
     maxAge: 7200,
   });
+
+  logSystem({ level: 'warning', category: 'security',
+    message: `대리 접근: ${org.name}`,
+    details: { superAdminId: admin.sub, targetUserId: adminUser.id },
+    orgId });
 
   return response;
 }

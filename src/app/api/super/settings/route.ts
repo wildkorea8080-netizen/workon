@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,11 @@ export async function PATCH(request: NextRequest) {
       .select().single();
 
     if (error) throw error;
+    if (key === 'maintenance_mode') {
+      logSystem({ level: 'critical', category: 'admin',
+        message: `점검 모드 ${value === 'true' ? '활성화' : '해제'}`,
+        details: { changedBy: admin.sub } });
+    }
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     console.error('[super/settings PATCH]', err);

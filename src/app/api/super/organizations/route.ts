@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
+import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -190,6 +191,8 @@ export async function POST(request: NextRequest) {
       target_id: org.id,
       after_data: { name: org.name, plan, adminEmail },
     });
+    logSystem({ level: 'info', category: 'admin',
+      message: `기관 등록: ${org.name}`, details: { plan, adminEmail }, orgId: org.id });
 
     return NextResponse.json({
       ok: true,

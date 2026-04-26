@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
+import { logAccess } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (authError || !authData.user) {
+      logAccess({ action: 'login_failed', path: '/super/login',
+        ipAddress: request.headers.get('x-forwarded-for'),
+        userAgent: request.headers.get('user-agent'),
+        statusCode: 401, details: { email: normalizedEmail } });
       return NextResponse.json(
         { ok: false, error: '이메일 또는 비밀번호가 올바르지 않습니다.' },
         { status: 401 }
@@ -66,7 +71,13 @@ export async function POST(request: NextRequest) {
       user.full_name ?? user.email
     );
 
-    // 5) httpOnly 쿠키 설정
+    // 5) 로그인 성공 기록
+    logAccess({ userId: user.id, action: 'login', path: '/super/login',
+      ipAddress: request.headers.get('x-forwarded-for'),
+      userAgent: request.headers.get('user-agent'),
+      statusCode: 200 });
+
+    // 6) httpOnly 쿠키 설정
     const response = NextResponse.json({ ok: true });
     response.cookies.set({
       name: SUPER_COOKIE_NAME,
