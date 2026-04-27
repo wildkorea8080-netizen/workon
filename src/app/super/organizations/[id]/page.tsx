@@ -160,6 +160,33 @@ export default function OrgDetailPage() {
 function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => void; onToast: (m: string) => void }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteInput, setDeleteInput]         = useState('');
+  const [invitations, setInvitations]         = useState<any[]>([]);
+  const [showNewInvite, setShowNewInvite]     = useState(false);
+  const [inviteEmail, setInviteEmail]         = useState('');
+  const [inviting, setInviting]               = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/super/organizations/${org.id}/invitations`)
+      .then(r => r.json()).then(d => { if (d.ok) setInvitations(d.data); }).catch(() => {});
+  }, [org.id]);
+
+  const handleNewInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    const res  = await fetch(`/api/super/organizations/${org.id}/invitations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: inviteEmail, role: 'ADMIN' }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setInvitations(prev => [data.data, ...prev]);
+      setInviteEmail(''); setShowNewInvite(false);
+      onToast('초대 링크가 생성됐습니다.');
+    } else {
+      onToast(data.error ?? '오류가 발생했습니다.');
+    }
+    setInviting(false);
+  };
 
   const progressColor = (pct: number) =>
     pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-[#7C3AED]';
@@ -215,6 +242,46 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
         <LimitBar label="사용자"       current={org.user_count ?? 0}              max={org.max_users ?? 0}            unit="명" pct={userPct}  color={progressColor(userPct)} />
         <LimitBar label="비서"         current={org.current_agents ?? 0}           max={org.max_agents ?? 0}           unit="개" pct={agentPct} color={progressColor(agentPct)} />
         <LimitBar label="이번달 토큰"  current={org.tokens_this_month ?? 0}        max={org.monthly_token_limit ?? 0}  unit=""   pct={tokenPct} color={progressColor(tokenPct)} fmtFn={fmt} />
+      </div>
+
+      {/* 관리자 초대 링크 */}
+      <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-white">관리자 초대 링크</h3>
+          <button onClick={() => setShowNewInvite(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#7C3AED]/20 hover:bg-[#7C3AED]/40 text-violet-300 text-xs font-semibold rounded-lg transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/></svg>
+            새 초대 링크 생성
+          </button>
+        </div>
+
+        {/* 새 초대 생성 폼 */}
+        {showNewInvite && (
+          <div className="flex gap-2 p-3 bg-[#0F172A] rounded-xl border border-slate-700">
+            <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+              type="email" placeholder="admin@org.go.kr"
+              className="flex-1 px-3 py-2 bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none" />
+            <button onClick={handleNewInvite} disabled={inviting || !inviteEmail.trim()}
+              className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors">
+              {inviting ? '생성 중...' : '생성'}
+            </button>
+            <button onClick={() => setShowNewInvite(false)}
+              className="px-3 py-2 border border-slate-700 text-slate-400 text-xs rounded-lg hover:text-white">
+              취소
+            </button>
+          </div>
+        )}
+
+        {/* 초대 링크 목록 */}
+        {invitations.length === 0 ? (
+          <p className="text-xs text-slate-500">아직 초대 링크가 없습니다. [새 초대 링크 생성]을 눌러 관리자를 초대하세요.</p>
+        ) : (
+          <div className="space-y-2">
+            {invitations.map(inv => (
+              <InviteRow key={inv.id} inv={inv} onCopy={() => onToast('링크가 복사됐습니다.')} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 위험 구역 */}
@@ -737,6 +804,48 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── 초대 링크 행 컴포넌트 ───────────────────────────────────
+function InviteRow({ inv, onCopy }: { inv: any; onCopy: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(inv.inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    onCopy();
+  };
+
+  const statusBadge = inv.isAccepted
+    ? <span className="px-2 py-0.5 bg-emerald-900/40 text-emerald-400 text-xs rounded-full">수락됨</span>
+    : inv.isExpired
+    ? <span className="px-2 py-0.5 bg-red-900/40 text-red-400 text-xs rounded-full">만료됨</span>
+    : <span className="px-2 py-0.5 bg-amber-900/40 text-amber-400 text-xs rounded-full">대기 중</span>;
+
+  return (
+    <div className="p-3 bg-[#0F172A] rounded-xl border border-slate-700 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-semibold text-white truncate">{inv.email}</span>
+          <span className="text-xs text-slate-500">{inv.role}</span>
+          {statusBadge}
+        </div>
+        <span className="text-[10px] text-slate-600 flex-shrink-0">
+          {new Date(inv.expires_at).toLocaleDateString('ko-KR')} 만료
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 text-[11px] text-slate-400 font-mono truncate">{inv.inviteUrl}</code>
+        <button onClick={handleCopy}
+          className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            copied ? 'bg-emerald-700 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'
+          }`}>
+          {copied ? '✓ 복사됨' : '복사'}
+        </button>
+      </div>
     </div>
   );
 }
