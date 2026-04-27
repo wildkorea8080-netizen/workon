@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       name, slug, type, plan,
       contractStart, contractEnd,
       maxUsers, maxAgents, maxTokensPerMonth,
-      adminEmail, adminName,
+      adminEmail,
       monthlyFee, notes,
     } = body;
 
@@ -105,26 +105,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // slug 중복 확인
-    const { data: existing } = await supabaseAdmin
-      .from('organizations')
+    // slug 중복 확인 (departments 테이블에서 확인)
+    const { data: existingDept } = await supabaseAdmin
+      .from('departments')
       .select('id')
-      .eq('slug', slug)
+      .eq('slug', `${slug}-main`)
       .maybeSingle();
 
-    if (existing) {
+    if (existingDept) {
       return NextResponse.json(
         { ok: false, error: '이미 사용 중인 Slug입니다.' },
         { status: 409 }
       );
     }
 
-    // 1) organizations INSERT
+    // 1) organizations INSERT (slug 컬럼은 organizations 테이블에 없음 → departments에서 사용)
     const { data: org, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
         name: name.trim(),
-        slug: slug.trim(),
         type: type ?? '공공기관',
         status: 'active',
         plan: plan ?? 'basic',
