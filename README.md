@@ -1,326 +1,110 @@
-# WORKON
+# WORKON AI — 공공기관 전용 AI 비서 플랫폼
 
-**Multi-tenant SaaS platform for document management, AI-powered Q&A, and report generation**
-
-- 📄 **Document Management**: Upload and manage internal documents (PDF, DOCX, TXT)
-- 🤖 **AI Q&A**: Ask questions about documents, get answers with source references
-- 📋 **Report Generation**: Create reports from templates using document insights
-- 👥 **Multi-Tenant**: Secure department-based data isolation
-- 🔐 **Role-Based Access**: Admin and user roles with proper authorization
-- 🌐 **Korean Localization**: Full Korean UI and documentation
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- npm/yarn
-- Git
-- Supabase account
-- Anthropic API key
-- Voyage AI API key
-
-### Local Development
-
-```bash
-# 1. Clone and install
-git clone <repository-url>
-cd WORKON
-npm install
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your development values
-
-# 3. Run development server
-npm run dev
-# Open http://localhost:3000
-```
-
-**See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete setup instructions.**
-
-## Technology Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | Next.js 14 (App Router) + React 18 + TypeScript + Tailwind CSS |
-| **Authentication** | NextAuth.js 4 with Credentials provider |
-| **Database** | Supabase (PostgreSQL) with pgvector for embeddings |
-| **AI Services** | Claude API (Anthropic) + Voyage AI (embeddings) |
-| **Storage** | Supabase Storage (S3-compatible) |
-| **Deployment** | Vercel |
-
-## Project Structure
-
-```
-WORKON/
-├── src/
-│   ├── app/                    # Next.js App Router pages
-│   │   ├── api/               # REST API routes
-│   │   ├── admin/             # Admin dashboard
-│   │   ├── auth/              # Authentication pages
-│   │   ├── chat/              # Chat interface
-│   │   ├── report/            # Report generation
-│   │   └── user/              # User dashboard
-│   ├── components/             # React components
-│   │   ├── admin/             # Admin UI components
-│   │   ├── chat/              # Chat UI components
-│   │   └── report/            # Report components
-│   ├── lib/                    # Utility functions
-│   │   ├── auth.ts            # Authentication helpers
-│   │   ├── claude.ts          # Claude API wrapper
-│   │   ├── db.ts              # Type definitions
-│   │   ├── embeddings.ts      # Voyage AI wrapper
-│   │   ├── filter.ts          # Content filtering
-│   │   ├── rag.ts             # RAG retrieval logic
-│   │   ├── supabase.ts        # Client Supabase
-│   │   └── supabaseAdmin.ts   # Admin Supabase client
-│   ├── middleware.ts           # NextAuth middleware
-│   └── types/                  # TypeScript types
-├── docs/                       # Documentation
-│   ├── DATABASE_SCHEMA.md      # Database design
-│   ├── PRODUCT_REQUIREMENTS.md # Product spec
-│   ├── SYSTEM_ARCHITECTURE.md  # Architecture details
-│   ├── USER_FLOWS.md          # User workflows
-│   └── PROJECT_OVERVIEW.md     # Project goals
-├── CLAUDE.md                   # Development guidelines (source of truth)
-├── DEPLOYMENT.md               # Deployment guide
-├── PRODUCTION_NOTES.md         # Production safety notes
-├── .env.example                # Environment variables template
-└── package.json                # Dependencies
-
-```
-
-## Core Features
-
-### 📄 Document Management
-- Upload PDF, DOCX, TXT files
-- Automatic text extraction
-- Intelligent chunking and embedding
-- Storage in secure vector database
-
-### 🤖 AI-Powered Chat
-- Ask questions about uploaded documents
-- RAG (Retrieval Augmented Generation) search
-- Source references for every answer
-- Korean language support
-
-### 📋 Report Templates
-- Predefined report templates
-- Template-based form generation
-- AI-powered content generation using Claude
-- Export and download reports
-
-### 🛡️ Security & Multi-Tenancy
-- Row-level Security (RLS) for data isolation
-- Department-based access control
-- Admin user management
-- Forbidden word filtering
-
-### 📊 Usage Analytics
-- Dashboard statistics
-- Usage tracking
-- Performance monitoring
-- Admin reporting
-
-## API Overview
-
-All API responses follow a consistent format:
-
-```typescript
-// Success
-{ ok: true, data: T }
-
-// Error
-{ ok: false, error: { message: string; code?: string } }
-```
-
-### Key Endpoints
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/api/chat` | Send message and get AI response |
-| POST | `/api/upload` | Upload document |
-| GET | `/api/stats` | Get usage statistics |
-| POST | `/api/report` | Generate report |
-| POST | `/api/agents` | Create/manage AI agents |
-| GET\|PUT | `/api/forbidden-words` | Manage forbidden words |
-
-## Environment Variables
-
-Copy `.env.example` to `.env` and configure:
-
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-# Authentication
-NEXTAUTH_URL=http://localhost:3000  # Production: https://yourdomain.com
-NEXTAUTH_SECRET=your-secret-32-characters-minimum
-
-# AI APIs
-ANTHROPIC_API_KEY=sk-ant-v1-xxxxx
-VOYAGE_API_KEY=voyage-xxxxx
-
-# Storage
-NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET=documents
-```
-
-**Full documentation: See [.env.example](./.env.example)**
-
-## Development Guidelines
-
-All development follows guidelines in [CLAUDE.md](./CLAUDE.md):
-
-- **API Response Format**: Consistent `{ok, data/error}` format
-- **Authentication**: `getServerAuthSession()` for server routes
-- **Database Types**: Centralized in `src/lib/db.ts`
-- **Multi-Tenancy**: Department-based RLS policies
-- **Korean Documentation**: All comments in Korean
-- **Error Handling**: Consistent error responses
-
-## Building & Deployment
-
-### Development Build
-
-```bash
-npm run build
-npm start
-# Application runs on http://localhost:3000
-```
-
-### Production Deployment
-
-1. **Configure Services**:
-   - Create Supabase project
-   - Set up Anthropic API key
-   - Set up Voyage AI key
-
-2. **Deploy to Vercel**:
-   ```bash
-   # Connect GitHub repository to Vercel
-   # Add environment variables in Vercel dashboard
-   # Deploy automatically on push to main
-   ```
-
-3. **Post-Deployment**:
-   - Verify authentication flow
-   - Test document upload
-   - Monitor API costs
-
-**See [DEPLOYMENT.md](./DEPLOYMENT.md) for step-by-step instructions.**
-
-## Production Considerations
-
-- **Monitoring**: Set up error tracking (Sentry recommended)
-- **Backups**: Supabase handles automated backups
-- **Security**: All secrets must use Vercel environment variables
-- **Rate Limiting**: Implement API rate limiting for production
-- **Costs**: Monitor Claude API and Voyage AI usage
-
-**Full production safety guide: [PRODUCTION_NOTES.md](./PRODUCTION_NOTES.md)**
-
-## Project Commands
-
-```bash
-# Development
-npm run dev              # Start development server
-npm run lint            # Run ESLint
-npm run build           # Build for production
-npm start               # Start production server
-
-# Database
-supabase db push        # Apply migrations
-supabase db pull        # Sync local schema
-```
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [CLAUDE.md](./CLAUDE.md) | Development guidelines - **source of truth** |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Complete deployment guide |
-| [PRODUCTION_NOTES.md](./PRODUCTION_NOTES.md) | Production safety checklist |
-| [docs/](./docs/) | Product and architecture documentation |
-
-## Support & Troubleshooting
-
-### Common Issues
-
-**Build fails with type errors**:
-```bash
-npm install --legacy-peer-deps
-npm run build
-```
-
-**Authentication issues**:
-- Verify NEXTAUTH_SECRET is 32+ characters
-- Check NEXTAUTH_URL matches your domain
-- Confirm Supabase connection
-
-**API errors**:
-- Check API keys in environment variables
-- Verify Supabase RLS policies
-- Review Vercel logs
-
-See [DEPLOYMENT.md Troubleshooting](./DEPLOYMENT.md#troubleshooting) for more.
-
-## Architecture Related Files
-
-- [docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md) - Database design
-- [docs/SYSTEM_ARCHITECTURE.md](./docs/SYSTEM_ARCHITECTURE.md) - Architecture overview
-- [docs/USER_FLOWS.md](./docs/USER_FLOWS.md) - User workflows
-- [docs/PROJECT_OVERVIEW.md](./docs/PROJECT_OVERVIEW.md) - Product goals
-
-## Monitoring & Performance
-
-### Key Metrics
-
-- API response time < 2s
-- Claude API latency 5-10s (expected)
-- Error rate < 0.1%
-- Database connection pool usage
-- Storage and embedding costs
-
-### Alerts to Set Up
-
-- High error rate
-- API latency spike
-- Database connection limit reached
-- Embedding API failures
-- Weekly cost threshold
-
-## Security
-
-✅ **Implemented**:
-- Row-level Security policies for multi-tenancy
-- NextAuth.js authentication
-- API request validation
-- Content filtering (forbidden words)
-- Secure password storage via Supabase Auth
-- Environment-based secret management
-
-⚠️ **Production Requirements**:
-- Enable HTTPS only (Vercel default)
-- Configure CORS if needed
-- Set appropriate database backups
-- Monitor access logs
-- Regular security audits
-- Keep dependencies updated
-
-## License
-
-Project is proprietary. All rights reserved.
-
-## Support
-
-For development questions, refer to [CLAUDE.md](./CLAUDE.md).  
-For deployment issues, see [DEPLOYMENT.md](./DEPLOYMENT.md).  
-For production concerns, review [PRODUCTION_NOTES.md](./PRODUCTION_NOTES.md).
+> Next.js 14 · Supabase · Claude API · Voyage AI · Vercel
 
 ---
 
-**Project Status**: Production Ready (v0.1.0)  
-**Last Updated**: April 15, 2026
+## 슈퍼관리자 포털
+
+### 접속 URL
+```
+https://workon-ai.vercel.app/super/login
+```
+
+### 최초 계정 생성 (1회만)
+
+```bash
+curl -X POST https://workon-ai.vercel.app/api/super/auth/setup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":    "admin@workon.ai",
+    "password": "안전한비밀번호8자이상",
+    "name":     "슈퍼관리자",
+    "setupKey": "YOUR_SUPER_ADMIN_SETUP_KEY"
+  }'
+```
+
+이미 계정이 있으면 `/super/login` 에서 바로 로그인하세요.
+
+### 주요 기능
+
+| 경로 | 기능 |
+|---|---|
+| `/super` | 대시보드 (전체 현황, 차트, 알림) |
+| `/super/organizations` | 기관 CRUD, 대리 접근 |
+| `/super/accounts` | 전체 사용자 + 슈퍼관리자 관리 |
+| `/super/api-keys` | 시스템 API 키 + 기관별 키 현황 |
+| `/super/usage` | 실시간 사용량 모니터링 |
+| `/super/contracts` | 계약 등록/갱신, 매출 통계 |
+| `/super/notices` | 공지사항 작성/발행 |
+| `/super/settings` | 시스템 설정, 점검 모드 |
+| `/super/logs` | 접속·시스템·대리접근 로그 |
+
+---
+
+## 환경변수
+
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# NextAuth
+NEXTAUTH_URL=
+NEXTAUTH_SECRET=
+
+# AI APIs
+ANTHROPIC_API_KEY=       # Claude
+VOYAGE_API_KEY=          # Voyage AI 임베딩
+
+# 슈퍼관리자 전용
+SUPER_ADMIN_SETUP_KEY=   # 최초 계정 생성 키
+SUPER_JWT_SECRET=        # JWT 서명 키 (32바이트)
+ENCRYPTION_KEY=          # API 키 암호화 키 (64자 hex)
+```
+
+### 키 생성 명령
+
+```bash
+# SUPER_JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# ENCRYPTION_KEY
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+---
+
+## DB 마이그레이션 실행 순서
+
+Supabase SQL Editor에서 순서대로 실행:
+
+```
+0001_init.sql
+0002_security_logs.sql
+0003_search_document_chunks.sql
+0004_search_agent_chunks.sql
+0005_benchmark_features.sql
+0006_super_admin.sql
+0007_impersonation.sql
+0008_user_active.sql
+0009_api_keys_system.sql
+0010_notices.sql
+0011_logs.sql
+```
+
+---
+
+## 기술 스택
+
+| 레이어 | 기술 |
+|---|---|
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS |
+| 일반 인증 | NextAuth.js 4 (Credentials) |
+| 슈퍼관리자 인증 | 자체 JWT (HMAC-SHA256, httpOnly 쿠키) |
+| DB | Supabase PostgreSQL + pgvector |
+| AI/LLM | Claude API (`claude-sonnet-4-6`) |
+| 임베딩 | Voyage AI (`voyage-3`) |
+| 배포 | Vercel |
+| 차트 | Recharts |

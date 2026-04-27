@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-04-21  
+**최종 업데이트**: 2026-04-27  
 **분석 기준**: 실제 코드베이스 + docs/ 문서 전체 반영
 
 ---
@@ -256,5 +256,70 @@ NEXT_PUBLIC_APP_NAME=WORKON                        # 기본값
 
 ## Claude 모델 업그레이드
 
-현재 `claude.ts`에서 `claude-3-sonnet-20240229` 사용 중 (구버전).  
-최신 모델: `claude-sonnet-4-6` 또는 `claude-haiku-4-5-20251001`으로 교체 권장.
+현재 `claude.ts`에서 `claude-sonnet-4-6` 사용 중.
+
+---
+
+## 슈퍼관리자 포털 (STEP 1~12, 2026-04-27 완료)
+
+### 경로 구조
+
+```
+/super/login          슈퍼관리자 전용 로그인 (NextAuth와 완전 분리)
+/super                대시보드 (전체 현황 + 차트)
+/super/organizations  기관 관리 (CRUD + 대리 접근)
+/super/accounts       계정 관리 (전체 사용자 + 슈퍼관리자)
+/super/api-keys       API 키 관리 (시스템 + 기관별)
+/super/usage          사용량 모니터링 (실시간 + 차트 + 알림)
+/super/contracts      계약/과금 관리 (계약 + 매출 + 요금제)
+/super/notices        공지사항 관리
+/super/settings       시스템 설정 (기본 + 점검모드 + 보안)
+/super/logs           로그 관리 (접속 + 시스템 + 대리접근)
+/maintenance          점검 모드 안내 페이지
+```
+
+### 인증 방식
+
+- **쿠키**: `super_token` (httpOnly, 24시간)
+- **JWT**: HMAC-SHA256, `SUPER_JWT_SECRET` 서명
+- **미들웨어**: Edge Runtime에서 Web Crypto API로 검증 (30초 캐시)
+
+### 신규 환경변수
+
+```bash
+SUPER_ADMIN_SETUP_KEY=   # 최초 슈퍼관리자 계정 생성 키
+SUPER_JWT_SECRET=        # 슈퍼관리자 JWT 서명 비밀키 (32바이트)
+ENCRYPTION_KEY=          # API 키 AES-256 암호화 키 (64자 hex)
+```
+
+### 신규 DB 테이블
+
+| 테이블 | 용도 |
+|---|---|
+| `contracts` | 기관별 계약 (플랜/기간/요금) |
+| `api_keys` | 기관/시스템 API 키 암호화 저장 |
+| `billing_logs` | 월별 과금 집계 |
+| `super_admin_logs` | 슈퍼관리자 조작 감사 로그 |
+| `impersonation_logs` | 대리 접근 이력 |
+| `notices` | 공지사항 |
+| `notice_reads` | 공지 읽음 처리 |
+| `system_settings` | 서비스 설정값 (key-value) |
+| `access_logs` | 접속 로그 |
+| `system_logs` | 시스템 이벤트 로그 |
+
+### organizations 테이블 추가 컬럼
+
+`status`, `plan`, `domain`, `contact_*`, `max_users`, `max_agents`, `monthly_token_limit`
+
+### departments 테이블 추가 컬럼
+
+`organization_id` FK (기관↔부서 계층 연결)
+
+### users 테이블 추가 컬럼
+
+`is_super_admin`, `is_active`
+
+### 대리 접근 (Impersonation)
+
+`next-auth/jwt encode()`로 임시 admin 세션 생성 → 기존 admin 코드 무수정 재사용.
+세션에 `isImpersonating: true` 포함 → admin layout에서 노란 배너 표시.
