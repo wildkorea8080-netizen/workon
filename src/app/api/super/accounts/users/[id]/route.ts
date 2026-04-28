@@ -29,7 +29,16 @@ export async function PATCH(
       .select('id, email, full_name, role')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      // is_active 컬럼 없을 때 안내
+      if (error.message?.includes('is_active')) {
+        return NextResponse.json({
+          ok: false,
+          error: 'DB에 is_active 컬럼이 없습니다. Supabase SQL Editor에서 실행:\nALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;',
+        }, { status: 500 });
+      }
+      throw error;
+    }
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     console.error('[super/accounts/users PATCH]', err);
@@ -68,14 +77,16 @@ export async function DELETE(
       console.warn('[delete user] Auth 삭제 실패 (DB는 삭제됨):', authErr.message);
     }
 
-    // 4) 감사 로그
-    await supabaseAdmin.from('super_admin_logs').insert({
-      admin_user_id: admin.sub,
-      action: 'user_deleted',
-      target_type: 'user',
-      target_id: params.id,
-      before_data: { email: user?.email, name: user?.full_name },
-    }).catch(() => {});
+    // 4) 감사 로그 (오류 무시)
+    try {
+      await supabaseAdmin.from('super_admin_logs').insert({
+        admin_user_id: admin.sub,
+        action: 'user_deleted',
+        target_type: 'user',
+        target_id: params.id,
+        before_data: { email: user?.email, name: user?.full_name },
+      });
+    } catch { /* 감사 로그 실패는 무시 */ }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
