@@ -135,13 +135,8 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      // 이메일이 지정된 초대인 경우 이메일 일치 확인
-      if (inv.email && inv.email !== email) {
-        return NextResponse.json<ApiResponse<null>>(
-          { ok: false, error: { message: `이 초대 링크는 ${inv.email} 이메일 전용입니다.` } },
-          { status: 400 }
-        );
-      }
+      // 이메일 힌트는 있지만 다른 이메일로도 가입 가능 (초대 토큰이 보안 수단)
+      // 이메일 불일치 시 차단하지 않고 초대의 부서/역할만 사용
       inviteDeptId = inv.department_id;
       inviteRole   = inv.role ?? 'USER';
       inviteId     = inv.id;

@@ -16,13 +16,19 @@ function SignupForm() {
   const [message,         setMessage]          = useState('');
   const [error,           setError]            = useState('');
   const [loading,         setLoading]          = useState(false);
-  const [inviteInfo,      setInviteInfo]       = useState<{ orgName?: string; role?: string } | null>(null);
+  const [inviteInfo,      setInviteInfo]       = useState<{ orgName?: string; role?: string; email?: string } | null>(null);
 
   useEffect(() => {
     if (!inviteToken) return;
     fetch(`/api/signup/invite-info?token=${inviteToken}`)
       .then(r => r.json())
-      .then(d => { if (d.ok) setInviteInfo(d.data); })
+      .then(d => {
+        if (d.ok) {
+          setInviteInfo(d.data);
+          // 초대 이메일이 있으면 기본값으로 채워주되 수정 가능
+          if (d.data?.email) setEmail(d.data.email);
+        }
+      })
       .catch(() => {});
   }, [inviteToken]);
 
@@ -60,12 +66,17 @@ function SignupForm() {
         </div>
 
         {inviteToken && inviteInfo && (
-          <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-[#003087] flex items-center gap-2">
-            <span className="text-base">🏢</span>
-            <span>
-              <strong>{inviteInfo.orgName}</strong> 기관의&nbsp;
-              <strong>{inviteInfo.role === 'ADMIN' ? '관리자' : '직원'}</strong>으로 초대됐습니다.
-            </span>
+          <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-[#003087] space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🏢</span>
+              <span>
+                <strong>{inviteInfo.orgName}</strong> 기관의&nbsp;
+                <strong>{inviteInfo.role === 'ADMIN' ? '관리자' : '직원'}</strong>으로 초대됐습니다.
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 pl-6">
+              아래 이메일로 가입하면 해당 기관에 자동으로 소속됩니다.
+            </p>
           </div>
         )}
 
