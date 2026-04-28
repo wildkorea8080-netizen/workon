@@ -58,10 +58,11 @@ async function createUserRecord(userId: string, email: string, fullName: string,
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
-    const password = typeof body.password === 'string' ? body.password : '';
+    const email           = typeof body.email           === 'string' ? body.email.toLowerCase().trim() : '';
+    const password        = typeof body.password        === 'string' ? body.password : '';
     const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : '';
-    const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+    const fullName        = typeof body.fullName        === 'string' ? body.fullName.trim() : '';
+    const inviteToken     = typeof body.inviteToken     === 'string' ? body.inviteToken.trim() : '';
 
     if (!email || !password || !confirmPassword || !fullName) {
       return NextResponse.json<ApiResponse<null>>(
@@ -104,15 +105,70 @@ export async function POST(request: Request) {
       }
     }
 
-    // 사용자 레코드 생성 (이미 존재하는 경우 무시)
+    // ── 초대 토큰 검증 ────────────────────────────────────
+    let inviteDeptId: string | null = null;
+    let inviteRole = 'USER';
+    let inviteId: string | null = null;
+
+    if (inviteToken) {
+      const { data: inv } = await supabaseAdmin
+        .from('invitations')
+        .select('id, email, role, department_id, expires_at, accepted_at')
+        .eq('token', inviteToken)
+        .maybeSingle();
+
+      if (!inv) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '유효하지 않은 초대 링크입니다.' } },
+          { status: 400 }
+        );
+      }
+      if (inv.accepted_at) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '이미 사용된 초대 링크입니다.' } },
+          { status: 400 }
+        );
+      }
+      if (new Date(inv.expires_at) < new Date()) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '만료된 초대 링크입니다.' } },
+          { status: 400 }
+        );
+      }
+      // 이메일이 지정된 초대인 경우 이메일 일치 확인
+      if (inv.email && inv.email !== email) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: `이 초대 링크는 ${inv.email} 이메일 전용입니다.` } },
+          { status: 400 }
+        );
+      }
+      inviteDeptId = inv.department_id;
+      inviteRole   = inv.role ?? 'USER';
+      inviteId     = inv.id;
+    }
+
+    // 사용자 레코드 생성
     if (signUpData?.user) {
       const isAdminEmail = ADMIN_EMAILS.includes(email);
-      const role = isAdminEmail ? 'ADMIN' : 'USER';
-      const departmentId = isAdminEmail
-        ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
-        : await getDefaultDepartmentId();
+      // 초대 토큰이 있으면 초대의 부서/역할 사용, 없으면 기본값
+      let departmentId: string | null = inviteDeptId;
+      const role = inviteToken ? inviteRole : (isAdminEmail ? 'ADMIN' : 'USER');
+
+      if (!departmentId) {
+        departmentId = isAdminEmail
+          ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
+          : await getDefaultDepartmentId();
+      }
 
       await createUserRecord(signUpData.user.id, email, fullName, role, departmentId);
+
+      // 초대 수락 처리
+      if (inviteId) {
+        await supabaseAdmin
+          .from('invitations')
+          .update({ accepted_at: new Date().toISOString() })
+          .eq('id', inviteId);
+      }
     }
 
     return NextResponse.json<ApiResponse<{ message: string }>>(
