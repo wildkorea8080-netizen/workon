@@ -81,6 +81,9 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   useEffect(() => { fetchOrgs(); }, [fetchOrgs]);
   useEffect(() => { fetchUsers(1); setPage(1); }, [fetchUsers]);
 
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const handlePatch = async (id: string, body: object) => {
     const res  = await fetch(`/api/super/accounts/users/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -88,6 +91,17 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
     const data = await res.json();
     if (data.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
     else onToast(data.error);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res  = await fetch(`/api/super/accounts/users/${deleteTarget.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    setDeleting(false);
+    setDeleteTarget(null);
+    if (data.ok) { fetchUsers(page); onToast('계정이 삭제됐습니다.'); }
+    else onToast(data.error ?? '삭제 실패');
   };
 
   const activeCount   = users.filter(u => u.is_active !== false).length;
@@ -187,6 +201,11 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
                         className="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-700 hover:bg-purple-900/40 text-slate-300 hover:text-purple-400 transition-colors">
                         {u.role === 'ADMIN' ? '권한 해제' : '관리자 권한'}
                       </button>
+                      <button
+                        onClick={() => setDeleteTarget({ id: u.id, name: u.full_name || u.email, email: u.email })}
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-900/20 hover:bg-red-900/50 text-red-400 transition-colors">
+                        삭제
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -206,6 +225,33 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
             <span className="text-sm text-slate-400">{page} / {totalPages}</span>
             <button onClick={() => { const p = page+1; setPage(p); fetchUsers(p); }} disabled={page>=totalPages}
               className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40 hover:border-[#7C3AED] transition-colors">다음</button>
+          </div>
+        </div>
+      )}
+
+      {/* 계정 삭제 확인 모달 */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+          <div className="bg-[#1E293B] border border-red-700/40 rounded-2xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-base font-bold text-red-400">계정 삭제 확인</h3>
+            <div className="p-3 bg-[#0F172A] rounded-xl">
+              <p className="text-sm font-semibold text-white">{deleteTarget.name}</p>
+              <p className="text-xs text-slate-400">{deleteTarget.email}</p>
+            </div>
+            <p className="text-sm text-slate-300">
+              계정을 삭제하면 <span className="text-red-400 font-semibold">복구할 수 없습니다.</span><br/>
+              해당 사용자의 모든 데이터가 영구 삭제됩니다.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 border border-slate-700 rounded-xl text-sm text-slate-400 hover:text-white transition-colors">
+                취소
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 text-white font-semibold rounded-xl text-sm transition-colors">
+                {deleting ? '삭제 중...' : '영구 삭제'}
+              </button>
+            </div>
           </div>
         </div>
       )}
