@@ -85,27 +85,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 이메일 확인 없이 즉시 회원가입 처리
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName },
-        emailRedirectTo: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/login?role=user`
-      }
-    });
-
-    if (signUpError) {
-      // 이메일 확인 오류가 아닌 다른 오류만 처리
-      if (!signUpError.message?.includes('User already registered')) {
-        return NextResponse.json<ApiResponse<null>>(
-          { ok: false, error: { message: signUpError.message || '회원가입 중 오류가 발생했습니다.' } },
-          { status: 400 }
-        );
-      }
-    }
-
-    // ── 초대 토큰 검증 ────────────────────────────────────
+    // ── 1단계: 초대 토큰 검증 (있을 경우) ───────────────────
     let inviteDeptId: string | null = null;
     let inviteRole = 'USER';
     let inviteId: string | null = null;
@@ -131,21 +111,69 @@ export async function POST(request: Request) {
       }
       if (new Date(inv.expires_at) < new Date()) {
         return NextResponse.json<ApiResponse<null>>(
-          { ok: false, error: { message: '만료된 초대 링크입니다.' } },
+          { ok: false, error: { message: '만료된 초대 링크입니다. 슈퍼관리자에게 새 링크를 요청하세요.' } },
           { status: 400 }
         );
       }
-      // 이메일 힌트는 있지만 다른 이메일로도 가입 가능 (초대 토큰이 보안 수단)
-      // 이메일 불일치 시 차단하지 않고 초대의 부서/역할만 사용
       inviteDeptId = inv.department_id;
       inviteRole   = inv.role ?? 'USER';
       inviteId     = inv.id;
     }
 
-    // 사용자 레코드 생성
-    if (signUpData?.user) {
+    // ── 2단계: Supabase Auth 사용자 생성 ─────────────────────
+    let authUserId: string;
+
+    if (inviteToken) {
+      // 초대 기반: admin.createUser() 사용 → 이메일 발송 없음, rate limit 없음
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,      // 이메일 확인 자동 완료
+        user_metadata: { full_name: fullName },
+      });
+
+      if (authErr) {
+        if (authErr.message?.includes('already registered') || authErr.message?.includes('already been registered')) {
+          return NextResponse.json<ApiResponse<null>>(
+            { ok: false, error: { message: '이미 가입된 이메일입니다. 로그인 페이지를 이용하세요.' } },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: authErr.message || '회원가입 중 오류가 발생했습니다.' } },
+          { status: 400 }
+        );
+      }
+      authUserId = authData.user.id;
+    } else {
+      // 일반 가입: 기존 signUp() 방식
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: fullName },
+          emailRedirectTo: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/login`,
+        },
+      });
+
+      if (signUpError && !signUpError.message?.includes('User already registered')) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: signUpError.message || '회원가입 중 오류가 발생했습니다.' } },
+          { status: 400 }
+        );
+      }
+      if (!signUpData?.user) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '회원가입에 실패했습니다. 잠시 후 다시 시도해주세요.' } },
+          { status: 400 }
+        );
+      }
+      authUserId = signUpData.user.id;
+    }
+
+    // ── 3단계: users 테이블 레코드 생성 ──────────────────────
+    {
       const isAdminEmail = ADMIN_EMAILS.includes(email);
-      // 초대 토큰이 있으면 초대의 부서/역할 사용, 없으면 기본값
       let departmentId: string | null = inviteDeptId;
       const role = inviteToken ? inviteRole : (isAdminEmail ? 'ADMIN' : 'USER');
 
@@ -155,7 +183,7 @@ export async function POST(request: Request) {
           : await getDefaultDepartmentId();
       }
 
-      await createUserRecord(signUpData.user.id, email, fullName, role, departmentId);
+      await createUserRecord(authUserId, email, fullName, role, departmentId);
 
       // 초대 수락 처리
       if (inviteId) {
