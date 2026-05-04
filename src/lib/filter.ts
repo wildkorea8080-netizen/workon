@@ -74,7 +74,7 @@ export async function filterUserInput(departmentId: string, text: string, userId
   };
 
   // 금지어 확인
-  const { data: forbiddenWords, error } = await supabase
+  const { data: forbiddenWords, error } = await supabaseAdmin
     .from('forbidden_words')
     .select('word')
     .eq('department_id', departmentId)
