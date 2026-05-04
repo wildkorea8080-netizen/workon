@@ -257,10 +257,12 @@ export async function POST(request: NextRequest) {
         usage: claudeResponse.usage,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('채팅 오류:', error);
+    // Claude API 키 오류는 명확한 메시지 반환
+    const msg = error?.message ?? '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
+      { ok: false, error: { message: msg } },
       { status: 500 }
     );
   }
