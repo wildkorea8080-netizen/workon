@@ -13,11 +13,18 @@ export async function retrieveRelevantChunks(
   agentId: string,
   query: string
 ): Promise<RetrievalResult> {
-  if (!agentId) throw new Error('에이전트 ID가 필요합니다.');
-  if (!query.trim()) throw new Error('쿼리가 비어있습니다.');
+  if (!agentId) return { query, chunks: [], totalChunks: 0 };
+  if (!query.trim()) return { query, chunks: [], totalChunks: 0 };
 
-  const queryEmbeddings = await getEmbeddings([query]);
-  const queryEmbedding = queryEmbeddings[0];
+  // Voyage AI 임베딩 실패 시 RAG 없이 Claude만 사용
+  let queryEmbedding: number[];
+  try {
+    const queryEmbeddings = await getEmbeddings([query]);
+    queryEmbedding = queryEmbeddings[0];
+  } catch (embErr: any) {
+    console.warn('[RAG] 임베딩 실패 (문서 없이 진행):', embErr.message);
+    return { query, chunks: [], totalChunks: 0 };
+  }
 
   const { data, error } = await supabaseAdmin.rpc('search_agent_chunks', {
     query_embedding: queryEmbedding,
@@ -27,7 +34,6 @@ export async function retrieveRelevantChunks(
   });
 
   if (error) {
-    // RPC 미존재 등 DB 오류 → 빈 결과로 계속 진행 (RAG 없이 Claude만 사용)
     console.warn('[RAG] search_agent_chunks 실패 (문서 없이 진행):', error.message);
     return { query, chunks: [], totalChunks: 0 };
   }

@@ -154,16 +154,22 @@ export async function POST(request: NextRequest) {
       conversation = newConv;
     }
 
-    // 관련 청크 검색
-    const retrievalResult = await retrieveRelevantChunks(agent_id, message);
+    // 관련 청크 검색 (실패해도 빈 결과로 계속)
+    let retrievalResult;
+    try {
+      retrievalResult = await retrieveRelevantChunks(agent_id, message);
+    } catch {
+      retrievalResult = { query: message, chunks: [], totalChunks: 0 };
+    }
 
-    // Claude 메시지 구성
+    // Claude 메시지 구성 (RAG 문서가 있을 때만 참고 자료 추가)
+    const systemMessage = agent.system_prompt || '당신은 도움이 되는 AI 어시스턴트입니다.';
     const contextText = retrievalResult.chunks
       .map((chunk) => `[참고 자료: ${chunk.documentTitle || '문서'}]\n${chunk.text}`)
       .join('\n\n');
-
-    const systemMessage = agent.system_prompt || '당신은 도움이 되는 AI 어시스턴트입니다.';
-    const fullSystemPrompt = `${systemMessage}\n\n참고 자료:\n${contextText}`;
+    const fullSystemPrompt = contextText
+      ? `${systemMessage}\n\n참고 자료:\n${contextText}`
+      : systemMessage;
 
     const claudeMessages: ClaudeMessage[] = [
       { role: 'user', content: message },
@@ -172,8 +178,10 @@ export async function POST(request: NextRequest) {
     // Claude API 호출
     const claudeResponse = await callClaudeAPI(claudeMessages, fullSystemPrompt);
 
-    // 응답 조립
-    const finalResponse = assembleResponse(message, retrievalResult.chunks, claudeResponse.content);
+    // 응답 조립 (RAG 없으면 Claude 응답 그대로)
+    const finalResponse = retrievalResult.chunks.length > 0
+      ? assembleResponse(message, retrievalResult.chunks, claudeResponse.content)
+      : claudeResponse.content;
 
     // 메시지 저장
     const { error: msgError } = await supabaseAdmin.from('messages').insert([
