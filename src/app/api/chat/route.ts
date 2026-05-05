@@ -146,8 +146,9 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (convError) {
+        console.error('[chat] conversation insert error:', convError);
         return NextResponse.json(
-          { ok: false, error: { message: '대화 생성 중 오류가 발생했습니다.' } },
+          { ok: false, error: { message: `대화 생성 실패: ${convError.message}` } },
           { status: 500 }
         );
       }
