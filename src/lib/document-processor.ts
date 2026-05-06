@@ -1,5 +1,7 @@
 import mammoth from 'mammoth';
-import pdf from 'pdf-parse';
+// pdf-parse를 직접 lib 파일로 import — 기본 import 시 테스트 파일 실행 오류 방지
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 import { getEmbeddings } from '@/lib/embeddings';
 
 export const CHUNK_SIZE = 800;
@@ -23,7 +25,7 @@ async function extractTextFromFile(fileBuffer: Buffer, mimeType: string, fileNam
   }
 
   if (mimeType === 'application/pdf' || lowerName.endsWith('.pdf')) {
-    const pdfData = await pdf(fileBuffer);
+    const pdfData = await pdfParse(fileBuffer);
     return pdfData.text;
   }
 
