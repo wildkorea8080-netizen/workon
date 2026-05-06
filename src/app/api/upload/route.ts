@@ -25,6 +25,9 @@ const BLOCKED_EXTENSIONS = [
   'php', 'asp', 'jsp', 'cgi', 'pl', 'py', 'sh', 'dll', 'so'
 ];
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Vercel Pro: 최대 60초
+
 export async function POST(request: Request) {
   const session = await getServerAuthSession();
 
@@ -141,7 +144,18 @@ export async function POST(request: Request) {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const processingResult = await (await import('@/lib/document-processor')).processDocumentFile(buffer, file.type, file.name);
+
+  // 문서 처리 + 임베딩 (Voyage AI 실패 시 임베딩 없이 저장)
+  let processingResult: Awaited<ReturnType<typeof import('@/lib/document-processor').processDocumentFile>>;
+  try {
+    processingResult = await (await import('@/lib/document-processor')).processDocumentFile(buffer, file.type, file.name);
+  } catch (procErr: any) {
+    console.error('[upload] 문서 처리 실패:', procErr.message);
+    return NextResponse.json<ApiResponse<null>>(
+      { ok: false, error: { message: `문서 처리 중 오류가 발생했습니다: ${procErr.message}` } },
+      { status: 500 }
+    );
+  }
 
   const storagePath = `documents/${departmentId}/${Date.now()}-${file.name}`;
   const { error: uploadError } = await supabaseAdmin.storage
@@ -150,7 +164,7 @@ export async function POST(request: Request) {
 
   if (uploadError) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '파일 저장 중 오류가 발생했습니다.', details: uploadError } },
+      { ok: false, error: { message: `파일 저장 중 오류가 발생했습니다: ${uploadError.message}` } },
       { status: 500 }
     );
   }
