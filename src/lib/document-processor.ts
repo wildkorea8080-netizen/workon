@@ -92,17 +92,28 @@ export async function processDocumentFile(fileBuffer: Buffer, mimeType: string, 
     throw new Error('문서에서 텍스트를 추출할 수 없습니다.');
   }
 
-  const embeddings = await getEmbeddings(chunkTexts);
+  // Voyage AI 임베딩 (크레딧 부족 등 실패 시 빈 임베딩으로 저장)
+  let embeddings: number[][] = [];
+  let embeddingError = false;
+  try {
+    embeddings = await getEmbeddings(chunkTexts);
+  } catch (err: any) {
+    console.warn('[document-processor] 임베딩 실패, 텍스트만 저장:', err.message);
+    embeddingError = true;
+    embeddings = chunkTexts.map(() => []);
+  }
+
   const chunks: DocumentChunk[] = chunkTexts.map((text, index) => ({
     index,
     text,
-    embedding: embeddings[index]
+    embedding: embeddings[index] ?? []
   }));
 
   return {
     text: normalizedText,
     chunks,
     summary: normalizedText.slice(0, 250),
-    averageEmbedding: averageEmbedding(embeddings)
+    averageEmbedding: embeddingError ? [] : averageEmbedding(embeddings),
+    embeddingError,
   };
 }

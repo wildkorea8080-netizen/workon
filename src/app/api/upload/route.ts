@@ -202,8 +202,12 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json<ApiResponse<{ documentId: string }>>(
-    { ok: true, data: { documentId: insertedDocument.id } },
+  const warning = (processingResult as any).embeddingError
+    ? '문서는 저장됐지만 임베딩(Voyage AI)이 실패했습니다. Voyage AI 크레딧을 확인하세요.'
+    : null;
+
+  return NextResponse.json(
+    { ok: true, data: { documentId: insertedDocument.id, warning } },
     { status: 201 }
   );
 }
