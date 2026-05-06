@@ -188,13 +188,17 @@ export async function POST(request: Request) {
     summary: processingResult.summary,
     metadata: {
       chunk_count: processingResult.chunks.length,
+      // 임베딩 없을 때 빈 배열 대신 텍스트만 저장 (vector(1024) 타입 오류 방지)
       chunks: processingResult.chunks.map((chunk) => ({
         index: chunk.index,
         text: chunk.text,
-        embedding: chunk.embedding
+        embedding: chunk.embedding?.length > 0 ? chunk.embedding : null
       }))
     },
-    embedding: processingResult.averageEmbedding
+    // 빈 배열은 vector(1024) 타입에 넣을 수 없으므로 null로 저장
+    embedding: processingResult.averageEmbedding?.length > 0
+      ? processingResult.averageEmbedding
+      : null
   };
 
   const { data: insertedDocument, error: insertError } = await supabaseAdmin
@@ -204,8 +208,9 @@ export async function POST(request: Request) {
     .single();
 
   if (insertError || !insertedDocument) {
+    console.error('[upload] documents insert error:', insertError);
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '문서 레코드 저장에 실패했습니다.', details: insertError } },
+      { ok: false, error: { message: `문서 레코드 저장 실패: ${insertError?.message ?? '알 수 없는 오류'}` } },
       { status: 500 }
     );
   }
