@@ -16,6 +16,7 @@ export default function DocumentsManager() {
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -198,23 +199,35 @@ export default function DocumentsManager() {
               </div>
             ) : (
               <div>
-                <label className="w-full p-8 border-2 border-dashed border-slate-300 rounded-md cursor-pointer hover:border-slate-400 transition-colors flex items-center justify-center">
-                  <div className="text-center">
+                <label
+                  className={`w-full p-8 border-2 border-dashed rounded-md cursor-pointer transition-colors flex items-center justify-center ${
+                    dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-300 hover:border-slate-400'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragging(false);
+                    const dropped = e.dataTransfer.files[0];
+                    if (dropped) setUploadForm(prev => ({ ...prev, file: dropped }));
+                  }}
+                >
+                  <div className="text-center pointer-events-none">
                     <svg className="w-10 h-10 mx-auto mb-2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3v-6" />
                     </svg>
-                    <p className="font-medium text-slate-700">클릭해서 파일을 선택하세요</p>
-                    <p className="text-xs text-slate-500 mt-1">또는 드래그 앤 드롭</p>
+                    <p className="font-medium text-slate-700">
+                      {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, TXT (최대 20MB)</p>
                   </div>
                   <input
                     type="file"
                     accept=".pdf,.docx,.txt"
                     onChange={(e) => setUploadForm(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
                     className="hidden"
-                    required
                   />
                 </label>
-                <p className="text-xs text-slate-500 mt-2">지원 형식: PDF, DOCX, TXT (최대 20MB)</p>
               </div>
             )}
           </div>
