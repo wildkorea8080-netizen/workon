@@ -289,12 +289,14 @@ export default function DocumentsManager() {
                       <span className="text-xs text-slate-500">•</span>
                       <span className="text-xs text-slate-500">{new Date(doc.created_at).toLocaleDateString('ko-KR')}</span>
                       <span className="text-xs text-slate-500">•</span>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
+                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${
                         doc.agent_id
                           ? 'bg-green-100 text-green-800'
                           : 'bg-amber-100 text-amber-800'
                       }`}>
-                        {doc.agent_id ? '에이전트 연결' : '미연결'}
+                        {doc.agent_id
+                          ? `🤖 ${agents.find(a => a.id === doc.agent_id)?.name ?? '에이전트 연결'}`
+                          : '미연결'}
                       </span>
                     </div>
                   </div>
