@@ -40,15 +40,21 @@ export async function POST(request: Request) {
 
   const formData = await request.formData();
   const file = formData.get('file');
-  const agentId = formData.get('agentId')?.toString();
+  // 단일 agentId 또는 복수 agentIds 모두 지원
+  const agentIdSingle = formData.get('agentId')?.toString();
+  const agentIdsRaw   = formData.getAll('agentIds').map(v => v.toString());
+  const agentIds: string[] = agentIdsRaw.length > 0 ? agentIdsRaw
+    : agentIdSingle ? [agentIdSingle] : [];
   const title = formData.get('title')?.toString() ?? '';
 
-  if (!agentId) {
+  if (agentIds.length === 0) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '에이전트 ID가 필요합니다.' } },
+      { ok: false, error: { message: '에이전트를 하나 이상 선택해주세요.' } },
       { status: 400 }
     );
   }
+  // 권한 체크는 첫 번째 agentId 기준
+  const agentId = agentIds[0];
 
   // 관리자이거나, 본인 소유의 개인 비서인 경우에만 허용
   if (session.user.role !== 'ADMIN') {
@@ -177,10 +183,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const documentRecord = {
+  // 공통 문서 메타데이터 (모든 에이전트에 동일)
+  const baseRecord = {
     department_id: departmentId,
     uploaded_by: session.user.id,
-    agent_id: agentId,
     storage_path: storagePath,
     file_name: file.name,
     file_type: file.type,
@@ -188,26 +194,24 @@ export async function POST(request: Request) {
     summary: processingResult.summary,
     metadata: {
       chunk_count: processingResult.chunks.length,
-      // 임베딩 없을 때 빈 배열 대신 텍스트만 저장 (vector(1024) 타입 오류 방지)
       chunks: processingResult.chunks.map((chunk) => ({
         index: chunk.index,
         text: chunk.text,
-        embedding: chunk.embedding?.length > 0 ? chunk.embedding : null
-      }))
+        embedding: chunk.embedding?.length > 0 ? chunk.embedding : null,
+      })),
     },
-    // 빈 배열은 vector(1024) 타입에 넣을 수 없으므로 null로 저장
     embedding: processingResult.averageEmbedding?.length > 0
-      ? processingResult.averageEmbedding
-      : null
+      ? processingResult.averageEmbedding : null,
   };
 
-  const { data: insertedDocument, error: insertError } = await supabaseAdmin
+  // 선택한 모든 에이전트에 문서 레코드 생성 (storage 파일은 공유)
+  const insertRows = agentIds.map(aid => ({ ...baseRecord, agent_id: aid }));
+  const { data: insertedDocs, error: insertError } = await supabaseAdmin
     .from('documents')
-    .insert(documentRecord)
-    .select('id')
-    .single();
+    .insert(insertRows)
+    .select('id');
 
-  if (insertError || !insertedDocument) {
+  if (insertError || !insertedDocs?.length) {
     console.error('[upload] documents insert error:', insertError);
     return NextResponse.json<ApiResponse<null>>(
       { ok: false, error: { message: `문서 레코드 저장 실패: ${insertError?.message ?? '알 수 없는 오류'}` } },
@@ -220,7 +224,7 @@ export async function POST(request: Request) {
     : null;
 
   return NextResponse.json(
-    { ok: true, data: { documentId: insertedDocument.id, warning } },
+    { ok: true, data: { documentIds: insertedDocs.map((d: { id: string }) => d.id), count: insertedDocs.length, warning } },
     { status: 201 }
   );
 }

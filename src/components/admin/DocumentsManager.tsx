@@ -9,9 +9,9 @@ export default function DocumentsManager() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadForm, setUploadForm] = useState({
-    file: null as File | null,
-    agentId: '',
-    title: '',
+    file:     null as File | null,
+    agentIds: [] as string[],
+    title:    '',
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -67,8 +67,8 @@ export default function DocumentsManager() {
       return;
     }
 
-    if (!uploadForm.agentId) {
-      setErrorMessage('에이전트를 선택해주세요.');
+    if (uploadForm.agentIds.length === 0) {
+      setErrorMessage('비서를 하나 이상 선택해주세요.');
       return;
     }
 
@@ -76,25 +76,21 @@ export default function DocumentsManager() {
     setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', uploadForm.file);
-    formData.append('agentId', uploadForm.agentId);
-    if (uploadForm.title) {
-      formData.append('title', uploadForm.title);
-    }
+    uploadForm.agentIds.forEach(id => formData.append('agentIds', id));
+    if (uploadForm.title) formData.append('title', uploadForm.title);
 
     try {
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
+      const response = await fetch('/api/upload', { method: 'POST', body: formData });
       const result = await response.json();
+      if (!result.ok) throw new Error(result.error?.message || '업로드 실패');
 
-      if (!result.ok) {
-        throw new Error(result.error?.message || '업로드 실패');
-      }
-
-      setStatusMessage('문서 업로드 및 처리가 완료되었습니다.');
-      setUploadForm({ file: null, agentId: '', title: '' });
+      const count = result.data?.count ?? 1;
+      setStatusMessage(
+        count > 1
+          ? `문서가 ${count}개 비서에 등록됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
+          : `문서 업로드 및 처리가 완료됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
+      );
+      setUploadForm({ file: null, agentIds: [], title: '' });
       setUploadProgress(0);
       loadData();
     } catch (err) {
@@ -146,21 +142,45 @@ export default function DocumentsManager() {
 
         <form onSubmit={handleUpload} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">에이전트 선택 *</label>
-            <select
-              value={uploadForm.agentId}
-              onChange={(e) => setUploadForm(prev => ({ ...prev, agentId: e.target.value }))}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
-              required
-            >
-              <option value="">에이전트를 선택하세요</option>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                  {agent.description && ` - ${agent.description}`}
-                </option>
-              ))}
-            </select>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              비서 선택 * <span className="text-xs text-slate-400 font-normal">(복수 선택 가능)</span>
+            </label>
+            <div className="border border-slate-300 rounded-md max-h-48 overflow-y-auto divide-y divide-slate-100">
+              {agents.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-slate-400">등록된 비서가 없습니다.</p>
+              ) : agents.map((agent) => {
+                const checked = uploadForm.agentIds.includes(agent.id);
+                return (
+                  <label key={agent.id}
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-blue-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        setUploadForm(prev => ({
+                          ...prev,
+                          agentIds: checked
+                            ? prev.agentIds.filter(id => id !== agent.id)
+                            : [...prev.agentIds, agent.id],
+                        }));
+                      }}
+                      className="rounded accent-slate-900 w-4 h-4 flex-shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{agent.name}</p>
+                      {agent.description && (
+                        <p className="text-xs text-slate-400 truncate">{agent.description}</p>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            {uploadForm.agentIds.length > 0 && (
+              <p className="text-xs text-blue-600 mt-1">
+                {uploadForm.agentIds.length}개 비서 선택됨
+              </p>
+            )}
           </div>
 
           <div>
