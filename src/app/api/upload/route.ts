@@ -157,7 +157,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const storagePath = `documents/${departmentId}/${Date.now()}-${file.name}`;
+  // 파일명에서 한글·특수문자 제거 → Supabase Storage 허용 문자만 사용
+  const ext        = file.name.split('.').pop() ?? 'bin';
+  const safeName   = file.name
+    .replace(/\.[^.]+$/, '')          // 확장자 제거
+    .replace(/[^\w\s-]/g, '')         // 영문/숫자/공백/하이픈 외 제거
+    .replace(/\s+/g, '_')             // 공백 → 언더스코어
+    .slice(0, 80)                     // 최대 80자
+    || 'document';
+  const storagePath = `documents/${departmentId}/${Date.now()}-${safeName}.${ext}`;
   const { error: uploadError } = await supabaseAdmin.storage
     .from(SUPABASE_DOCUMENTS_BUCKET)
     .upload(storagePath, buffer, { contentType: file.type });
