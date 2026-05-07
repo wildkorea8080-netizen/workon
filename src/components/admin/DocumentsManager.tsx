@@ -17,6 +17,10 @@ export default function DocumentsManager() {
   const [errorMessage, setErrorMessage] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // 비서 추가 모달
+  const [assignModal, setAssignModal] = useState<Document | null>(null);
+  const [assignIds, setAssignIds] = useState<string[]>([]);
+  const [assigning, setAssigning] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -38,6 +42,33 @@ export default function DocumentsManager() {
       setErrorMessage('데이터 로드 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openAssignModal = (doc: Document) => {
+    setAssignModal(doc);
+    setAssignIds([]);
+  };
+
+  const handleAssign = async () => {
+    if (!assignModal || assignIds.length === 0) return;
+    setAssigning(true);
+    try {
+      const res = await fetch('/api/documents/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: assignModal.id, agentIds: assignIds }),
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setStatusMessage(`${result.data.added}개 비서에 문서가 추가됐습니다.`);
+      setAssignModal(null);
+      loadData();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : '추가 중 오류가 발생했습니다.');
+      setAssignModal(null);
+    } finally {
+      setAssigning(false);
     }
   };
 
@@ -321,15 +352,24 @@ export default function DocumentsManager() {
                     </div>
                   </div>
                 </div>
-                <button
+                <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+                  <button
+                    onClick={() => openAssignModal(doc)}
+                    className="px-2.5 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
+                    title="다른 비서에 추가 연결"
+                  >
+                    + 비서 추가
+                  </button>
+                  <button
                   onClick={() => handleDelete(doc.id)}
-                  className="ml-4 p-2 text-slate-400 hover:text-red-600 transition-colors"
+                  className="p-2 text-slate-400 hover:text-red-600 transition-colors"
                   title="문서 삭제"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                 </button>
+                </div>
               </div>
             </div>
           ))}
@@ -345,6 +385,55 @@ export default function DocumentsManager() {
           )}
         </div>
       </div>
+
+      {/* 비서 추가 모달 */}
+      {assignModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
+          onClick={() => setAssignModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-slate-900">비서 추가 연결</h3>
+            <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2 truncate">
+              📄 {assignModal.title || assignModal.file_name}
+            </p>
+            <div className="border border-slate-200 rounded-xl max-h-52 overflow-y-auto divide-y divide-slate-100">
+              {agents
+                .filter(a => a.id !== assignModal.agent_id)
+                .map(agent => {
+                  const checked = assignIds.includes(agent.id);
+                  return (
+                    <label key={agent.id}
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-blue-50' : ''}`}>
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setAssignIds(prev =>
+                          checked ? prev.filter(id => id !== agent.id) : [...prev, agent.id]
+                        )}
+                        className="rounded accent-slate-900 w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm text-slate-800">{agent.name}</span>
+                    </label>
+                  );
+                })}
+            </div>
+            {assignIds.length > 0 && (
+              <p className="text-xs text-blue-600">{assignIds.length}개 비서 선택됨</p>
+            )}
+            {errorMessage && (
+              <p className="text-xs text-red-600">{errorMessage}</p>
+            )}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setAssignModal(null)}
+                className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">
+                취소
+              </button>
+              <button onClick={handleAssign}
+                disabled={assigning || assignIds.length === 0}
+                className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-semibold rounded-xl text-sm transition-colors">
+                {assigning ? '추가 중...' : '추가'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
