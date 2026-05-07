@@ -12,7 +12,7 @@ export async function getEmbeddings(inputs: string[]): Promise<number[][]> {
   }
 
   // Voyage AI API로 임베딩 요청
-  const response = await fetch('https://api.voyage.ai/v1/embeddings', {
+  const response = await fetch('https://api.voyageai.com/v1/embeddings', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${VOYAGE_API_KEY}`,
