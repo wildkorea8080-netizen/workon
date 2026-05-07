@@ -50,10 +50,16 @@ export default function HomePage() {
       const result = await res.json();
       if (!result.ok) return;
       const conv = result.data;
-      if (conv.agent) {
-        setSelectedAgent(conv.agent);
-        lastAgentRef.current = conv.agent;
+
+      // Supabase join이 객체 또는 배열로 올 수 있으므로 정규화
+      const agentData = Array.isArray(conv.agent) ? conv.agent[0] : conv.agent;
+      if (agentData?.id) {
+        setSelectedAgent(agentData);
+        lastAgentRef.current = agentData;
+      } else if (lastAgentRef.current) {
+        setSelectedAgent(lastAgentRef.current);
       }
+
       setConversationId(id);
       setViewMode('chat');
     } catch {

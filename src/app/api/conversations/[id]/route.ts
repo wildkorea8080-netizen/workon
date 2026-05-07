@@ -23,9 +23,10 @@ export async function GET(
       .select(`
         id,
         title,
+        agent_id,
         created_at,
         updated_at,
-        agent:agents(id, name, description),
+        agent:agents(id, name, description, icon, color, system_prompt, is_personal, category),
         messages(
           id,
           role,
@@ -34,6 +35,7 @@ export async function GET(
           created_at
         )
       `)
+      .order('created_at', { referencedTable: 'messages', ascending: true })
       .eq('id', conversationId)
       .eq('user_id', session.user.id)
       .single();
