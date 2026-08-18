@@ -11,7 +11,8 @@
     "connector:probe": "tsx scripts/connector-probe.mjs",
     "tool:probe": "tsx scripts/tool-loop-probe.mjs",
     "db:check": "tsx scripts/db-check.mjs",
-    "db:migrate": "tsx scripts/db-migrate.mjs"
+    "db:migrate": "tsx scripts/db-migrate.mjs",
+    "seed:agents": "tsx scripts/seed-agents.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",
