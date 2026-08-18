@@ -88,4 +88,41 @@ for (const table of ['departments', 'agents', 'documents', 'usage_logs']) {
   console.log(`${bad ? '주의' : 'OK  '}  ${table.padEnd(12)} ${count ?? 0}건`);
 }
 
+// ── 과금 기록 규약 ───────────────────────────────────────────
+// organization_spend_krw는 details.cost_krw가 있는 행만 센다.
+// 토큰을 쓰는 라우트가 이 필드를 빠뜨리면 그 사용량은 예산 판정에서
+// 조용히 0원이 되어 한도가 걸릴 수 없게 된다. 드리프트를 여기서 잡는다.
+// (2026-08 이전 로그는 규약 도입 전이라 없는 것이 정상이다.)
+
+console.log('\n=== 과금 기록 규약 (details.cost_krw) ===');
+{
+  const CONVENTION_FROM = '2026-08-01';
+  const { data, error } = await db
+    .from('usage_logs')
+    .select('created_at, details')
+    .gte('created_at', CONVENTION_FROM);
+
+  if (error) {
+    console.log(`      조회 실패: ${error.message.slice(0, 60)}`);
+    ok = false;
+  } else if (data.length === 0) {
+    console.log(`OK    ${CONVENTION_FROM} 이후 사용 로그 없음`);
+  } else {
+    const missing = data.filter((r) => r?.details?.cost_krw == null);
+    const noModel = data.filter((r) => !r?.details?.model);
+    if (missing.length) ok = false;
+    console.log(
+      `${missing.length ? '주의' : 'OK  '}  cost_krw 누락 ${missing.length}건 / 전체 ${data.length}건 (${CONVENTION_FROM} 이후)`
+    );
+    // model이 없으면 나중에 모델을 늘렸을 때 과거 사용량을 귀속시킬 수 없다
+    console.log(
+      `${noModel.length ? '주의' : 'OK  '}  model 누락 ${noModel.length}건`
+    );
+    if (missing.length) {
+      const days = [...new Set(missing.map((r) => r.created_at?.slice(0, 10)))].sort();
+      console.log(`      누락 발생일: ${days.join(', ')}`);
+    }
+  }
+}
+
 process.exit(ok?0:1);

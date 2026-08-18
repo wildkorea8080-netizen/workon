@@ -405,6 +405,18 @@ details: {
 
 환율은 `config.ts`의 `USD_KRW_RATE` (기본 1350, `USD_KRW_RATE` 환경변수로 조정).
 
+**집계 경로가 둘이고 옛 로그를 다르게 셉니다.** 의도된 차이입니다.
+
+| 경로 | 근거 | `cost_*` 없는 옛 로그 |
+|---|---|---|
+| 화면 표시 (JS `sumCostUsd`) | `details.cost_usd` | 기본 모델 단가로 **추정해 포함** |
+| 예산 판정 (SQL `organization_spend_krw`) | `details.cost_krw` | **제외** (`AND details ? 'cost_krw'`) |
+
+판정은 추정치로 서비스를 차단하지 않겠다는 뜻이라 이대로 둡니다.
+대신 **새 라우트가 `cost_krw` 기록을 빠뜨리면 그 사용량은 예산 판정에서
+조용히 0원이 되어 한도가 걸릴 수 없게 됩니다.** `npm run db:check`가
+2026-08-01 이후 로그의 `cost_krw`·`model` 누락을 세므로 배포 후 한 번 돌리세요.
+
 ### 한도는 계약 형태에 따라 갈립니다
 
 | `contracts.billing_type` | 판정 기준 | 대상 |
