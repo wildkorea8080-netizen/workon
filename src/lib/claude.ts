@@ -1,9 +1,22 @@
 import { ANTHROPIC_API_KEY } from '@/lib/config';
 import { DEFAULT_MODEL_ID } from '@/lib/models';
 
+/** 툴 사용 시 메시지 content는 문자열이 아니라 블록 배열이 된다 */
+export type ClaudeContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
+
 export interface ClaudeMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ClaudeContentBlock[];
+}
+
+/** MCP 형식 그대로 — 커넥터가 주는 정의를 변환 없이 넘긴다 */
+export interface ClaudeTool {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
 }
 
 export interface ClaudeUsage {
@@ -21,7 +34,9 @@ export interface ClaudeResponse {
 /** 스트리밍 중 순차적으로 방출되는 이벤트 */
 export type ClaudeStreamEvent =
   | { type: 'text'; text: string }
-  | { type: 'usage'; usage: ClaudeUsage };
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  /** 스트림 종료. stopReason이 'tool_use'면 툴을 실행하고 다시 호출해야 한다. */
+  | { type: 'done'; usage: ClaudeUsage; stopReason: string | null };
 
 /** 현재 사용 중인 모델. 사용량 로그에 함께 기록해 나중에 모델별 정산이 가능하게 한다. */
 export const CLAUDE_MODEL = DEFAULT_MODEL_ID;
@@ -90,7 +105,8 @@ export async function callClaudeAPI(
 export async function* streamClaudeAPI(
   messages: ClaudeMessage[],
   systemPrompt?: string,
-  maxTokens = 4096
+  maxTokens = 4096,
+  tools?: ClaudeTool[]
 ): AsyncGenerator<ClaudeStreamEvent> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다.');
@@ -105,6 +121,10 @@ export async function* streamClaudeAPI(
 
   if (systemPrompt) {
     requestBody.system = systemPrompt;
+  }
+
+  if (tools?.length) {
+    requestBody.tools = tools;
   }
 
   const response = await fetch(CLAUDE_API_URL, {
@@ -124,7 +144,12 @@ export async function* streamClaudeAPI(
   const decoder = new TextDecoder();
   // input_tokens는 message_start에, output_tokens는 message_delta에 실려 옴
   const usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0, model: CLAUDE_MODEL };
+  let stopReason: string | null = null;
   let buffer = '';
+
+  // tool_use 블록의 input은 JSON 문자열이 여러 조각(input_json_delta)으로
+  // 나뉘어 오므로 블록 인덱스별로 모았다가 content_block_stop에서 파싱한다.
+  const pendingTools = new Map<number, { id: string; name: string; json: string }>();
 
   try {
     while (true) {
@@ -151,14 +176,53 @@ export async function* streamClaudeAPI(
           continue; // 파싱 불가한 조각은 건너뛴다
         }
 
-        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-          yield { type: 'text', text: parsed.delta.text as string };
-        } else if (parsed.type === 'message_start') {
-          usage.input_tokens = parsed.message?.usage?.input_tokens ?? 0;
-        } else if (parsed.type === 'message_delta') {
-          usage.output_tokens = parsed.usage?.output_tokens ?? usage.output_tokens;
-        } else if (parsed.type === 'error') {
-          throw new Error(`Claude API 오류: ${parsed.error?.message ?? '알 수 없는 오류'}`);
+        switch (parsed.type) {
+          case 'message_start':
+            usage.input_tokens = parsed.message?.usage?.input_tokens ?? 0;
+            break;
+
+          case 'content_block_start':
+            if (parsed.content_block?.type === 'tool_use') {
+              pendingTools.set(parsed.index, {
+                id: parsed.content_block.id,
+                name: parsed.content_block.name,
+                json: '',
+              });
+            }
+            break;
+
+          case 'content_block_delta':
+            if (parsed.delta?.type === 'text_delta') {
+              yield { type: 'text', text: parsed.delta.text as string };
+            } else if (parsed.delta?.type === 'input_json_delta') {
+              const pending = pendingTools.get(parsed.index);
+              if (pending) pending.json += parsed.delta.partial_json ?? '';
+            }
+            break;
+
+          case 'content_block_stop': {
+            const pending = pendingTools.get(parsed.index);
+            if (pending) {
+              pendingTools.delete(parsed.index);
+              let input: Record<string, unknown> = {};
+              try {
+                // 인자가 없는 툴은 빈 문자열로 온다
+                input = pending.json ? JSON.parse(pending.json) : {};
+              } catch {
+                // 조각이 유실되면 빈 인자로 넘겨 툴이 오류를 돌려주게 한다
+              }
+              yield { type: 'tool_use', id: pending.id, name: pending.name, input };
+            }
+            break;
+          }
+
+          case 'message_delta':
+            usage.output_tokens = parsed.usage?.output_tokens ?? usage.output_tokens;
+            stopReason = parsed.delta?.stop_reason ?? stopReason;
+            break;
+
+          case 'error':
+            throw new Error(`Claude API 오류: ${parsed.error?.message ?? '알 수 없는 오류'}`);
         }
       }
     }
@@ -166,5 +230,5 @@ export async function* streamClaudeAPI(
     reader.releaseLock();
   }
 
-  yield { type: 'usage', usage };
+  yield { type: 'done', usage, stopReason };
 }

@@ -170,6 +170,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 | `meta` | `{ conversation_id, chunks }` | 스트림 시작 직후 |
 | `delta` | `{ text }` | 텍스트 조각마다 |
 | `error` | `{ message }` | 생성 중 오류 |
+| `tool_start` | `{ name, input }` | 도구 실행 직전 |
+| `tool_end` | `{ name, ok, sources }` | 도구 실행 완료 |
 | `done` | `{ usage, title }` | 저장 완료 후 |
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
@@ -187,8 +189,14 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 셀을 순서대로 이어붙이면 열 머리글과 값의 대응이 끊겨 "A사의 B항목?" 같은
 질문에 엉뚱한 열을 답하게 됩니다. 상세 구조는 `hwp.ts`의 `renderTable` 참조.
 
+**툴 실행 루프**: 스트리밍 중 `stop_reason='tool_use'`가 오면 툴을 실행하고
+`tool_result`를 붙여 다시 호출합니다. `tool_use`의 인자는 `input_json_delta`로
+잘게 쪼개져 오므로 블록 인덱스별로 모았다가 `content_block_stop`에서 파싱합니다
+(`claude.ts`). 토큰 사용량은 라운드별로 누적합니다.
+
 **출처 표기**: 응답 텍스트에 덧붙이지 않고 `messages.source_references`에 저장해
-`SourceCitation` 컴포넌트가 렌더링합니다. 텍스트에 덧붙이면 DB 저장 내용과
+`SourceCitation`(문서 청크)과 `MessageBubble`의 링크 목록(도구 출처)이 렌더링합니다.
+`source_references`는 `{ chunks: [...], links: [...] }` 구조입니다. 텍스트에 덧붙이면 DB 저장 내용과
 화면 표시가 어긋나므로 이 방식을 유지하세요.
 
 ---
@@ -347,9 +355,9 @@ details: {
 새 커넥터는 `Connector` 인터페이스를 구현하고 `connectors/index.ts`의
 `CONNECTORS` 배열에 추가하면 끝입니다.
 
-**주의: 도구를 정의해도 아직 모델이 호출하지는 않습니다.** `/api/chat`에
-툴 실행 루프(tool_use → 실행 → tool_result)가 없기 때문입니다. 커넥터 계층은
-독립적으로 완성돼 있고 `npm run connector:probe`로 검증할 수 있습니다.
+`/api/chat`에 툴 실행 루프가 있어 모델이 필요하다고 판단하면 호출합니다
+(최대 `MAX_TOOL_ROUNDS`=4 왕복). 툴 정의는 **모든 에이전트에 노출**됩니다 —
+에이전트별 on/off는 아직 없습니다.
 
 만들 때 지킬 것:
 

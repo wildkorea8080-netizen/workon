@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { streamClaudeAPI, callClaudeAPI, CLAUDE_MODEL, type ClaudeMessage, type ClaudeUsage } from '@/lib/claude';
+import {
+  streamClaudeAPI,
+  callClaudeAPI,
+  CLAUDE_MODEL,
+  type ClaudeMessage,
+  type ClaudeUsage,
+  type ClaudeContentBlock,
+  type ClaudeTool,
+} from '@/lib/claude';
+import { availableTools, executeTool, type ToolSource } from '@/lib/connectors';
 import { retrieveRelevantChunks } from '@/lib/rag';
 import { filterUserInput } from '@/lib/filter';
 import { checkTokenLimit } from '@/lib/usage-limit';
@@ -10,6 +19,9 @@ import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
 /** Claude에 함께 보낼 직전 대화 메시지 최대 개수 (사용자+어시스턴트 합산) */
 const HISTORY_MESSAGE_LIMIT = 20;
+
+/** 툴 호출 왕복 상한. 모델이 툴만 반복해서 부르는 상황을 끊는다. */
+const MAX_TOOL_ROUNDS = 4;
 
 function jsonError(message: string, status: number, details?: unknown) {
   return NextResponse.json(
@@ -200,6 +212,14 @@ export async function POST(request: NextRequest) {
 
     const claudeMessages: ClaudeMessage[] = [...history, { role: 'user', content: message }];
 
+    // MCP 형식 툴 정의를 Anthropic 형식으로 변환한다.
+    // 이 변환이 어댑터 계층의 책임이며, 커넥터는 프로바이더를 모른다.
+    const tools: ClaudeTool[] = availableTools().map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.inputSchema,
+    }));
+
     const isNewConversation = !conversation_id;
     const encoder = new TextEncoder();
 
@@ -209,18 +229,79 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode(sse(event, data)));
 
         let fullText = '';
-        let usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0, model: CLAUDE_MODEL };
+        const usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0, model: CLAUDE_MODEL };
+        const toolSources: ToolSource[] = [];
 
         try {
           // 대화 ID와 출처는 먼저 보내 클라이언트가 즉시 반영할 수 있게 한다
           send('meta', { conversation_id: conversation.id, chunks });
 
-          for await (const event of streamClaudeAPI(claudeMessages, fullSystemPrompt)) {
-            if (event.type === 'text') {
-              fullText += event.text;
-              send('delta', { text: event.text });
-            } else {
-              usage = event.usage;
+          // 툴 실행 루프: 모델이 툴을 부르면 실행 결과를 붙여 다시 호출한다.
+          // 무한 왕복을 막기 위해 라운드 수를 제한한다.
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            const assistantBlocks: ClaudeContentBlock[] = [];
+            const pendingCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
+            let roundText = '';
+            let stopReason: string | null = null;
+
+            for await (const event of streamClaudeAPI(
+              claudeMessages,
+              fullSystemPrompt,
+              4096,
+              tools
+            )) {
+              if (event.type === 'text') {
+                roundText += event.text;
+                fullText += event.text;
+                send('delta', { text: event.text });
+              } else if (event.type === 'tool_use') {
+                pendingCalls.push({ id: event.id, name: event.name, input: event.input });
+              } else {
+                usage.input_tokens += event.usage.input_tokens;
+                usage.output_tokens += event.usage.output_tokens;
+                stopReason = event.stopReason;
+              }
+            }
+
+            if (stopReason !== 'tool_use' || pendingCalls.length === 0) break;
+
+            // 모델이 만든 턴을 그대로 대화에 추가한다 (텍스트 + tool_use 블록)
+            if (roundText) assistantBlocks.push({ type: 'text', text: roundText });
+            for (const call of pendingCalls) {
+              assistantBlocks.push({
+                type: 'tool_use',
+                id: call.id,
+                name: call.name,
+                input: call.input,
+              });
+            }
+            claudeMessages.push({ role: 'assistant', content: assistantBlocks });
+
+            // 툴 실행 결과를 사용자 턴으로 되돌려준다
+            const resultBlocks: ClaudeContentBlock[] = [];
+            for (const call of pendingCalls) {
+              send('tool_start', { name: call.name, input: call.input });
+
+              const result = await executeTool(call.name, call.input);
+              toolSources.push(...result.sources);
+
+              send('tool_end', {
+                name: call.name,
+                ok: !result.isError,
+                sources: result.sources,
+              });
+
+              resultBlocks.push({
+                type: 'tool_result',
+                tool_use_id: call.id,
+                content: result.content,
+                is_error: result.isError,
+              });
+            }
+            claudeMessages.push({ role: 'user', content: resultBlocks });
+
+            if (round === MAX_TOOL_ROUNDS - 1) {
+              console.warn('[chat] 툴 라운드 상한 도달');
             }
           }
         } catch (error: any) {
@@ -249,6 +330,11 @@ export async function POST(request: NextRequest) {
                 chunkIndex: c.chunkIndex,
                 similarity: c.similarity,
               })),
+              // 외부 도구가 돌려준 출처 (중복 URL 제거)
+              links: toolSources.filter(
+                (source, index, all) =>
+                  all.findIndex((other) => other.url === source.url) === index
+              ),
             },
           },
         ]);

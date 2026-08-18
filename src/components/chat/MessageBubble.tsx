@@ -7,14 +7,21 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
 import type { RetrievedChunk } from '@/lib/db';
 
+interface ToolLink {
+  title: string;
+  url: string;
+}
+
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
   sources?: RetrievedChunk[];
+  /** 외부 도구(국가법령정보 등)가 돌려준 출처 링크 */
+  links?: ToolLink[];
   error?: string;
 }
 
-export default function MessageBubble({ role, content, sources, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, sources, links, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -95,6 +102,33 @@ export default function MessageBubble({ role, content, sources, error }: Message
         {sources && sources.length > 0 && (
           <div className="mt-2 w-full">
             <SourceCitation sources={sources} />
+          </div>
+        )}
+
+        {/* 외부 도구 출처 — 공공 데이터는 원문 링크를 함께 제시한다 */}
+        {links && links.length > 0 && (
+          <div className="mt-2 w-full space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-1 h-4 bg-[#003087] rounded-full" />
+              <div className="text-xs font-medium text-slate-600">출처</div>
+              <div className="text-xs text-slate-500">({links.length}개)</div>
+            </div>
+            <div className="space-y-1.5">
+              {links.map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-md p-2.5 hover:bg-slate-100 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5 text-[#003087] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  <span className="text-xs text-slate-700 break-all">{link.title}</span>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

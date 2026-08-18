@@ -4,12 +4,29 @@ import { useState, useRef, useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 
+interface ToolLink {
+  title: string;
+  url: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sources?: RetrievedChunk[];
+  /** 외부 도구가 돌려준 출처 링크 */
+  links?: ToolLink[];
   error?: string;
+}
+
+/** 도구 이름 → 사용자에게 보일 문구 */
+const TOOL_LABELS: Record<string, string> = {
+  law_search: '국가법령정보에서 법령을 찾는 중',
+  law_get_articles: '법령 조문을 읽는 중',
+};
+
+function toolLabel(name: string) {
+  return TOOL_LABELS[name] ?? `${name} 실행 중`;
 }
 
 const AVATAR_COLORS = [
@@ -39,6 +56,8 @@ export default function ChatInterface({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
+  // 현재 실행 중인 도구 이름 (없으면 null)
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
@@ -69,10 +88,24 @@ export default function ChatInterface({
       .then(r => r.json())
       .then(result => {
         if (!result.ok) return;
+        // 출처는 source_references(JSONB)에 들어 있다.
+        // 예전에는 m.sources를 읽어 항상 undefined였고, 대화를 다시 열면
+        // 출처가 사라졌다.
         setMessages(
-          (result.data.messages ?? []).map((m: { id: string; role: 'user' | 'assistant'; content: string; sources?: RetrievedChunk[] }) => ({
-            id: m.id, role: m.role, content: m.content, sources: m.sources,
-          }))
+          (result.data.messages ?? []).map(
+            (m: {
+              id: string;
+              role: 'user' | 'assistant';
+              content: string;
+              source_references?: { chunks?: RetrievedChunk[]; links?: ToolLink[] };
+            }) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              sources: m.source_references?.chunks,
+              links: m.source_references?.links,
+            })
+          )
         );
       })
       .catch(() => {})
@@ -93,6 +126,7 @@ export default function ChatInterface({
     setMessages(prev => [...prev, userMsg]);
     setInputMessage('');
     setIsLoading(true);
+    setActiveTool(null);
 
     const patchAssistant = (patch: Partial<Message>) =>
       setMessages(prev =>
@@ -125,6 +159,7 @@ export default function ChatInterface({
       let buffer = '';
       let streamed = '';
       let pendingSources: RetrievedChunk[] | undefined;
+      const collectedLinks: ToolLink[] = [];
       let bubbleShown = false;
 
       // 첫 텍스트가 도착하는 순간 말풍선을 만든다.
@@ -134,7 +169,13 @@ export default function ChatInterface({
         setIsLoading(false);
         setMessages(prev => [
           ...prev,
-          { id: assistantId, role: 'assistant', content: streamed, sources: pendingSources },
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: streamed,
+            sources: pendingSources,
+            links: collectedLinks.length ? [...collectedLinks] : undefined,
+          },
         ]);
       };
 
@@ -174,6 +215,16 @@ export default function ChatInterface({
             streamed += payload.text;
             if (!bubbleShown) showBubble();
             else patchAssistant({ content: streamed });
+          } else if (name === 'tool_start') {
+            setActiveTool(payload.name);
+          } else if (name === 'tool_end') {
+            setActiveTool(null);
+            for (const source of payload.sources ?? []) {
+              if (!collectedLinks.some((l) => l.url === source.url)) collectedLinks.push(source);
+            }
+            if (bubbleShown && collectedLinks.length) {
+              patchAssistant({ links: [...collectedLinks] });
+            }
           } else if (name === 'error') {
             if (!bubbleShown) {
               setIsLoading(false);
@@ -201,6 +252,7 @@ export default function ChatInterface({
       });
     } finally {
       setIsLoading(false);
+      setActiveTool(null);
     }
   };
 
@@ -257,6 +309,7 @@ export default function ChatInterface({
               role={msg.role}
               content={msg.content}
               sources={msg.sources}
+              links={msg.links}
               error={msg.error}
             />
           ))
@@ -269,10 +322,15 @@ export default function ChatInterface({
                 {selectedAgent.icon ?? selectedAgent.name.slice(0, 1)}
               </div>
               <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm">
-                <div className="flex gap-1.5 items-center">
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="flex gap-2 items-center">
+                  <div className="flex gap-1.5 items-center">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  {activeTool && (
+                    <span className="text-xs text-slate-500">{toolLabel(activeTool)}...</span>
+                  )}
                 </div>
               </div>
             </div>
