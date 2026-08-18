@@ -9,7 +9,14 @@ interface AgentWithOwner extends Agent {
   owner?: { id: string; email: string; full_name?: string | null } | null;
 }
 
-type AgentFormData = { name: string; description: string; system_prompt: string };
+type AgentFormData = {
+  name: string;
+  description: string;
+  system_prompt: string;
+  enabled_connectors: string[];
+};
+
+type ConnectorInfo = { id: string; label: string; toolNames: string[] };
 
 export default function AgentsManager() {
   const [activeTab, setActiveTab] = useState<Tab>('official');
@@ -23,8 +30,9 @@ export default function AgentsManager() {
   // 공식 비서 탭 상태
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [formData, setFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '' });
-  const [editFormData, setEditFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '' });
+  const [formData, setFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
+  const [editFormData, setEditFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -37,6 +45,12 @@ export default function AgentsManager() {
 
   // 프롬프트 미리보기 접이식
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const loadConnectors = useCallback(async () => {
+    const res = await fetch('/api/connectors');
+    const result = await res.json();
+    if (result.ok) setConnectors(result.data ?? []);
+  }, []);
 
   const loadOfficialAgents = useCallback(async () => {
     const res = await fetch('/api/agents');
@@ -61,10 +75,10 @@ export default function AgentsManager() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([loadOfficialAgents(), loadPendingAgents()])
+    Promise.all([loadOfficialAgents(), loadPendingAgents(), loadConnectors()])
       .catch(() => setError('데이터를 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
-  }, [loadOfficialAgents, loadPendingAgents]);
+  }, [loadOfficialAgents, loadPendingAgents, loadConnectors]);
 
   useEffect(() => {
     if (activeTab === 'rejected' && rejectedAgents.length === 0) {
@@ -86,7 +100,7 @@ export default function AgentsManager() {
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => [result.data, ...prev]);
-      setFormData({ name: '', description: '', system_prompt: '' });
+      setFormData({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
       setShowCreateForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류');
@@ -289,6 +303,44 @@ export default function AgentsManager() {
                       <textarea rows={5} value={editFormData.system_prompt}
                         onChange={e => setEditFormData(p => ({ ...p, system_prompt: e.target.value }))}
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
+
+                      {connectors.length > 0 && (
+                        <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+                          <div>
+                            <p className="text-xs font-semibold text-slate-700">외부 도구</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              켜면 이 비서가 필요할 때 해당 데이터를 직접 조회해 출처와 함께 답합니다.
+                            </p>
+                          </div>
+                          {connectors.map(connector => {
+                            const checked = editFormData.enabled_connectors.includes(connector.id);
+                            return (
+                              <label key={connector.id} className="flex items-start gap-2.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={e =>
+                                    setEditFormData(p => ({
+                                      ...p,
+                                      enabled_connectors: e.target.checked
+                                        ? [...p.enabled_connectors, connector.id]
+                                        : p.enabled_connectors.filter(id => id !== connector.id),
+                                    }))
+                                  }
+                                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-xs font-medium text-slate-800">{connector.label}</span>
+                                  <span className="block text-[11px] text-slate-400 font-mono">
+                                    {connector.toolNames.join(', ')}
+                                  </span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       <div className="flex gap-2">
                         <button type="submit" disabled={submitting}
                           className="px-4 py-2 bg-brand-600 text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
@@ -312,7 +364,7 @@ export default function AgentsManager() {
                         }`}>
                         {agent.is_active ? '활성' : '비활성'}
                       </button>
-                      <button onClick={() => { setEditingAgent(agent); setEditFormData({ name: agent.name, description: agent.description ?? '', system_prompt: agent.system_prompt ?? '' }); }}
+                      <button onClick={() => { setEditingAgent(agent); setEditFormData({ name: agent.name, description: agent.description ?? '', system_prompt: agent.system_prompt ?? '', enabled_connectors: agent.enabled_connectors ?? [] }); }}
                         className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">수정</button>
                       <button onClick={() => handleDeleteAgent(agent)} disabled={deletingId === agent.id}
                         className="px-3 py-1 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50 disabled:opacity-50">

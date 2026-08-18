@@ -118,6 +118,11 @@ src/
 | 0006 | 슈퍼관리자 시스템 (contracts, api_keys, billing_logs, super_admin_logs 등) |
 | 0007~0011 | impersonation, is_active, 시스템 API 키, 공지, 로그 |
 | 0012 | `usage_logs.organization_id` 자동 채움 트리거 |
+| 0013 | `agents.enabled_connectors` (에이전트별 외부 도구 설정) |
+
+**0013에 대한 주의**: `/api/chat`이 `agents.enabled_connectors`를 select 하므로
+**코드 배포 전에 반드시 이 마이그레이션을 적용**해야 합니다. 컬럼이 없으면
+에이전트 조회가 실패해 채팅 전체가 동작하지 않습니다.
 
 **0012에 대한 주의**: `usage_logs.organization_id`는 애플리케이션 코드가 아니라
 BEFORE INSERT 트리거가 `department_id`로부터 유도합니다.
@@ -356,8 +361,12 @@ details: {
 `CONNECTORS` 배열에 추가하면 끝입니다.
 
 `/api/chat`에 툴 실행 루프가 있어 모델이 필요하다고 판단하면 호출합니다
-(최대 `MAX_TOOL_ROUNDS`=4 왕복). 툴 정의는 **모든 에이전트에 노출**됩니다 —
-에이전트별 on/off는 아직 없습니다.
+(최대 `MAX_TOOL_ROUNDS`=4 왕복).
+
+**도구는 에이전트별로 켜야 합니다.** `agents.enabled_connectors`(text[])에 든
+커넥터의 툴만 노출됩니다. 기본값은 빈 배열 = 도구 미사용이며, 기관 관리자가
+비서 수정 화면에서 켭니다. 툴 단위가 아니라 커넥터 단위인 이유는 관리자가
+"국가법령정보를 쓸지"를 결정하지 "law_search를 쓸지"를 결정하지 않기 때문입니다.
 
 만들 때 지킬 것:
 

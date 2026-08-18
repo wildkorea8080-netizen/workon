@@ -22,6 +22,29 @@ export function availableTools(): ToolDefinition[] {
   return availableConnectors().flatMap((connector) => connector.tools);
 }
 
+/**
+ * 지정한 커넥터의 툴만 추린다.
+ *
+ * 에이전트마다 쓸 커넥터가 다르다. 빈 배열이면 도구를 쓰지 않는다는 뜻이므로
+ * 빈 배열을 돌려준다 (전체 노출로 폴백하지 않는다).
+ */
+export function toolsForConnectors(connectorIds: string[] | null | undefined): ToolDefinition[] {
+  if (!connectorIds?.length) return [];
+  const allowed = new Set(connectorIds);
+  return availableConnectors()
+    .filter((connector) => allowed.has(connector.id))
+    .flatMap((connector) => connector.tools);
+}
+
+/** 관리 화면에 보여줄 커넥터 목록 */
+export function connectorCatalog(): { id: string; label: string; toolNames: string[] }[] {
+  return availableConnectors().map((connector) => ({
+    id: connector.id,
+    label: connector.label,
+    toolNames: connector.tools.map((tool) => tool.name),
+  }));
+}
+
 /** 툴 이름으로 담당 커넥터를 찾는다 */
 function findConnector(toolName: string): Connector | undefined {
   return availableConnectors().find((connector) =>

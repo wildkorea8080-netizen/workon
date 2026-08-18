@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, description, system_prompt, config } = body;
+    const { name, description, system_prompt, config, enabled_connectors } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
         config: config || {},
         created_by: session!.user.id,
         updated_by: session!.user.id,
+        enabled_connectors: Array.isArray(enabled_connectors) ? enabled_connectors : [],
       })
       .select()
       .single();

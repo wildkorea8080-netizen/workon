@@ -10,7 +10,7 @@ import {
   type ClaudeContentBlock,
   type ClaudeTool,
 } from '@/lib/claude';
-import { availableTools, executeTool, type ToolSource } from '@/lib/connectors';
+import { toolsForConnectors, executeTool, type ToolSource } from '@/lib/connectors';
 import { retrieveRelevantChunks } from '@/lib/rag';
 import { filterUserInput } from '@/lib/filter';
 import { checkTokenLimit } from '@/lib/usage-limit';
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
     // 에이전트 확인
     const { data: agent, error: agentError } = await supabaseAdmin
       .from('agents')
-      .select('id, department_id, system_prompt, name, is_personal, owner_id')
+      .select('id, department_id, system_prompt, name, is_personal, owner_id, enabled_connectors')
       .eq('id', agent_id)
       .eq('is_active', true)
       .single();
@@ -212,9 +212,12 @@ export async function POST(request: NextRequest) {
 
     const claudeMessages: ClaudeMessage[] = [...history, { role: 'user', content: message }];
 
-    // MCP 형식 툴 정의를 Anthropic 형식으로 변환한다.
-    // 이 변환이 어댑터 계층의 책임이며, 커넥터는 프로바이더를 모른다.
-    const tools: ClaudeTool[] = availableTools().map((tool) => ({
+    // 이 에이전트에 허용된 커넥터의 툴만 노출한다.
+    // MCP 형식 → Anthropic 형식 변환은 이 어댑터 계층의 책임이며,
+    // 커넥터는 프로바이더를 모른다.
+    const agentTools = toolsForConnectors(agent.enabled_connectors);
+    const allowedToolNames = new Set(agentTools.map((tool) => tool.name));
+    const tools: ClaudeTool[] = agentTools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       input_schema: tool.inputSchema,
@@ -282,7 +285,10 @@ export async function POST(request: NextRequest) {
             for (const call of pendingCalls) {
               send('tool_start', { name: call.name, input: call.input });
 
-              const result = await executeTool(call.name, call.input);
+              // 모델은 노출된 툴만 부를 수 있지만, 실행 직전에 한 번 더 확인한다
+              const result = allowedToolNames.has(call.name)
+                ? await executeTool(call.name, call.input)
+                : { content: `허용되지 않은 도구입니다: ${call.name}`, sources: [], isError: true };
               toolSources.push(...result.sources);
 
               send('tool_end', {

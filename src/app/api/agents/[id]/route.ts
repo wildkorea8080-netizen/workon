@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { connectorCatalog } from '@/lib/connectors';
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -28,9 +29,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const body = await request.json();
-    const { name, description, system_prompt, config, is_active } = body;
+    const { name, description, system_prompt, config, is_active, enabled_connectors } = body;
 
-    if (!name && !description && system_prompt === undefined && config === undefined && is_active === undefined) {
+    if (
+      !name &&
+      !description &&
+      system_prompt === undefined &&
+      config === undefined &&
+      is_active === undefined &&
+      enabled_connectors === undefined
+    ) {
       return NextResponse.json(
         { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
         { status: 400 }
@@ -43,6 +51,15 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (system_prompt !== undefined) updatePayload.system_prompt = typeof system_prompt === 'string' ? system_prompt.trim() : system_prompt;
     if (config !== undefined) updatePayload.config = config;
     if (is_active !== undefined) updatePayload.is_active = is_active;
+
+    if (enabled_connectors !== undefined) {
+      // 존재하지 않는 커넥터 id가 저장되면 조용히 무시될 뿐이지만,
+      // 설정 화면이 실제와 어긋나 보이므로 여기서 걸러낸다.
+      const known = new Set(connectorCatalog().map((c) => c.id));
+      updatePayload.enabled_connectors = Array.isArray(enabled_connectors)
+        ? enabled_connectors.filter((id: unknown) => typeof id === 'string' && known.has(id))
+        : [];
+    }
 
     updatePayload.updated_by = session.user.id;
 

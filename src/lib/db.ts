@@ -39,6 +39,8 @@ export type Agent = {
   owner_id?: string | null;
   approval_status?: string | null;
   approval_note?: string | null;
+  /** 이 에이전트가 쓸 외부 도구 커넥터 id 목록. 빈 배열이면 도구 미사용. */
+  enabled_connectors?: string[];
   created_by?: string;
   updated_by?: string;
   created_at: string;
