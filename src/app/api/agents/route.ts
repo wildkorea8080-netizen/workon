@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getVisibleDepartmentIds } from '@/lib/department-scope';
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
@@ -39,10 +40,21 @@ export async function GET(request: NextRequest) {
       favoriteIds = user?.favorite_agent_ids ?? [];
     }
 
+    if (!departmentId) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');
     const personalOnly = searchParams.get('personal') === 'true';
     const favoritesOnly = searchParams.get('favorites') === 'true';
+
+    // 자기 부서 + 상위 부서의 비서를 함께 본다.
+    // 상위 부서에 등록한 공통 비서를 하위 부서가 쓸 수 있어야 전 부서 활용이 된다.
+    const visibleDeptIds = await getVisibleDepartmentIds(departmentId);
 
     // 즐겨찾기 탭: favoriteIds 기반으로 in() 쿼리
     if (favoritesOnly) {
@@ -52,7 +64,7 @@ export async function GET(request: NextRequest) {
       const { data: agents, error } = await supabaseAdmin
         .from('agents')
         .select('*')
-        .eq('department_id', departmentId)
+        .in('department_id', visibleDeptIds)
         .in('id', favoriteIds)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
@@ -89,7 +101,7 @@ export async function GET(request: NextRequest) {
     let query = supabaseAdmin
       .from('agents')
       .select('*')
-      .eq('department_id', departmentId)
+      .in('department_id', visibleDeptIds)
       .eq('is_active', true)
       .eq('is_personal', false);
 

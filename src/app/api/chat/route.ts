@@ -16,6 +16,7 @@ import { filterUserInput } from '@/lib/filter';
 import { checkTokenLimit } from '@/lib/usage-limit';
 import type { Conversation, RetrievedChunk } from '@/lib/db';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
+import { getVisibleDepartmentIds } from '@/lib/department-scope';
 
 /** Claude에 함께 보낼 직전 대화 메시지 최대 개수 (사용자+어시스턴트 합산) */
 const HISTORY_MESSAGE_LIMIT = 20;
@@ -98,9 +99,11 @@ export async function POST(request: NextRequest) {
       return jsonError('에이전트를 찾을 수 없습니다.', 404);
     }
 
-    // 접근 권한: 같은 부서 에이전트 OR 내 나만의 비서
+    // 접근 권한: 내 부서 또는 상위 부서의 에이전트 OR 내 나만의 비서.
+    // 상위 부서 비서를 하위 부서가 쓸 수 있어야 계층 공유가 성립한다.
+    const visibleDeptIds = await getVisibleDepartmentIds(departmentId);
     const canAccess =
-      agent.department_id === departmentId ||
+      visibleDeptIds.includes(agent.department_id) ||
       (agent.is_personal && agent.owner_id === session.user.id);
 
     if (!canAccess) {

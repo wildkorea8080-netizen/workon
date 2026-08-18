@@ -120,6 +120,7 @@ src/
 | 0012 | `usage_logs.organization_id` 자동 채움 트리거 |
 | 0013 | `agents.enabled_connectors` (에이전트별 외부 도구 설정) |
 | 0014 | `departments.parent_id` (부서 계층) + 기관 단위 유일성 + `organization_id` NOT NULL |
+| 0015 | `department_ancestors` RPC + `search_document_chunks` 상위 부서 확장 |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -310,7 +311,25 @@ MAIL_FROM=
 
 ## 멀티테넌트 격리 원칙
 
-모든 DB 쿼리에서 반드시:
+### 부서 계층 공유
+
+공공기관은 `기관 > 국/본부 > 과 > 팀`으로 위계가 깊습니다. 상위 부서에 등록한
+공통 비서·문서를 하위 부서가 함께 씁니다.
+
+방향을 혼동하면 격리가 깨지므로 이름을 분명히 씁니다 (`src/lib/department-scope.ts`):
+
+| 함수 | 의미 | 쓰는 곳 |
+|---|---|---|
+| `getVisibleDepartmentIds(D)` | D + **상위** 부서들 | D 소속 직원이 볼 수 있는 자료 범위 |
+| `getSharedDepartmentIds(D)` | D + **하위** 부서들 | D에 공유하면 누가 보는지 |
+
+사용자에게 보일 자료를 조회할 때는 `.eq('department_id', D)`가 아니라
+`.in('department_id', await getVisibleDepartmentIds(D))`를 씁니다.
+RPC 조회가 실패하면 **자기 부서만** 돌려줍니다 — 실패가 범위를 넓히면 안 됩니다.
+
+### 그 밖의 쿼리
+
+부서 계층과 무관한 쿼리(대화·사용로그 등)는 그대로:
 ```typescript
 .eq('department_id', departmentId)
 ```
