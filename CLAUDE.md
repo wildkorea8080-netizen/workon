@@ -83,7 +83,7 @@ src/
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/employee/stats`, `/api/qna`, `/api/reports/*`, `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
-| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
+| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
 
@@ -326,6 +326,11 @@ MAIL_FROM=
 사용자에게 보일 자료를 조회할 때는 `.eq('department_id', D)`가 아니라
 `.in('department_id', await getVisibleDepartmentIds(D))`를 씁니다.
 RPC 조회가 실패하면 **자기 부서만** 돌려줍니다 — 실패가 범위를 넓히면 안 됩니다.
+
+부서 트리 관리는 `/admin/departments` (기관 관리자). 상위 부서를 바꿀 때
+**자기 자신이나 하위 부서를 상위로 지정하면 거부**합니다. 허용하면 그 하위
+부서들이 어떤 최상위에도 닿지 못하는 끊어진 고리가 되어 화면에서 사라지고
+재귀 조회가 무한루프에 빠집니다.
 
 ### 그 밖의 쿼리
 
