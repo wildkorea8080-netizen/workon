@@ -6,11 +6,14 @@
  */
 
 import { lawConnector } from './law';
+import { kosisConnector } from './kosis';
+import { g2bConnector } from './g2b';
+import { dartConnector } from './dart';
 import { toolError, type Connector, type ToolDefinition, type ToolResult } from './types';
 
 export * from './types';
 
-const CONNECTORS: Connector[] = [lawConnector];
+const CONNECTORS: Connector[] = [lawConnector, kosisConnector, g2bConnector, dartConnector];
 
 /** 환경변수가 갖춰진 커넥터만 */
 export function availableConnectors(): Connector[] {

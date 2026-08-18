@@ -352,10 +352,14 @@ details: {
 
 구현 위치: `src/lib/connectors/`
 
-| 커넥터 | 상태 | 도구 |
-|---|---|---|
-| 국가법령정보 (법제처) | ✅ | `law_search`, `law_get_articles` |
-| KOSIS / 나라장터 / DART | 미구현 | |
+| 커넥터 | id | 도구 | 필요 키 |
+|---|---|---|---|
+| 국가법령정보 (법제처) | `law` | `law_search`, `law_get_articles` | `LAW_API_OC` (기본 'test') |
+| 국가통계포털 KOSIS | `kosis` | `kosis_search_tables`, `kosis_get_data` | `KOSIS_API_KEY` |
+| 나라장터 (조달청) | `g2b` | `g2b_search_bids` | `G2B_API_KEY` |
+| 전자공시 DART | `dart` | `dart_search_disclosures`, `dart_get_company` | `DART_API_KEY` |
+
+키가 없는 커넥터는 `isConfigured()`가 false를 돌려 도구 목록에서 아예 빠집니다.
 
 새 커넥터는 `Connector` 인터페이스를 구현하고 `connectors/index.ts`의
 `CONNECTORS` 배열에 추가하면 끝입니다.
@@ -381,9 +385,22 @@ details: {
 
 **국내 공공 API는 간헐적으로 실패합니다.** 동일 URL이 성공 → HTTP 404 →
 타임아웃을 오가는 것을 실측했습니다. `fetchJson`이 3회까지 재시도하므로
-커넥터에서 직접 `fetch`를 부르지 말고 이 헬퍼를 쓰세요.
+(인증 실패는 제외) 커넥터에서 직접 `fetch`를 부르지 말고 이 헬퍼를 쓰세요.
 
-남은 대상: KOSIS, 조달청 나라장터, 금감원 DART.
+**오류를 HTTP 상태가 아니라 본문에 싣는 API가 많고, 둘을 섞어 쓰기도 합니다.**
+- KOSIS: HTTP 200 + `{ err, errMsg }`
+- DART: HTTP 200 + `{ status: '010', message }`
+- 나라장터: **HTTP 403 + 본문에 `OpenAPI_ServiceResponse.cmmMsgHeader`**
+
+그래서 `fetchJson`은 2xx가 아니어도 본문이 JSON이면 그대로 돌려주고, 오류
+판별은 각 커넥터가 자기 API 규약대로 합니다. 상태 코드만 보고 본문을 버리면
+원인을 알 수 없는 "HTTP 403"만 남습니다.
+
+**나라장터 경로의 `ad/` 접두사 주의**: 공공데이터포털 문서에는 End Point가
+`1230000/BidPublicInfoService`로 적혀 있지만 실제로는 `1230000/ad/...`라야
+동작합니다. 접두사가 없으면 `NO_OPENAPI_SERVICE_ERROR`가 납니다.
+(data.go.kr에서 경로 오류는 `NO_OPENAPI_SERVICE_ERROR`, 키 오류는
+`SERVICE_KEY_IS_NOT_REGISTERED_ERROR`로 구분됩니다.)
 
 ---
 

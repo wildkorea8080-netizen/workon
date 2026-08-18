@@ -57,20 +57,32 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 600;
 
-async function fetchOnce(url: string, timeoutMs: number): Promise<string> {
+async function fetchOnce(url: string, timeoutMs: number): Promise<{ status: number; text: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
+    return { status: response.status, text: await response.text() };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 외부 API 호출 공통 헬퍼 — 타임아웃·재시도·JSON 파싱 실패를 일관되게 처리한다 */
+/** 인증 실패는 재시도해도 달라지지 않는다 */
+function isAuthFailure(status: number) {
+  return status === 401 || status === 403;
+}
+
+/**
+ * 외부 API 호출 공통 헬퍼 — 타임아웃·재시도·JSON 파싱을 일관되게 처리한다.
+ *
+ * 상태 코드가 2xx가 아니어도 본문이 JSON이면 그대로 돌려준다. 국내 공공 API는
+ * 오류를 HTTP 상태가 아니라 본문에 싣는 경우가 많고, 심지어 둘을 섞어 쓴다
+ * (나라장터는 HTTP 403 + 본문에 SERVICE_KEY_IS_NOT_REGISTERED_ERROR).
+ * 상태 코드만 보고 본문을 버리면 원인을 알 수 없는 "HTTP 403"만 남는다.
+ * 본문 안의 오류 판별은 각 커넥터가 자기 API의 규약대로 한다.
+ */
 export async function fetchJson<T>(
   url: string,
   timeoutMs = DEFAULT_TIMEOUT_MS
@@ -78,18 +90,25 @@ export async function fetchJson<T>(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let status = 0;
     try {
-      const text = await fetchOnce(url, timeoutMs);
+      const result = await fetchOnce(url, timeoutMs);
+      status = result.status;
+
       try {
-        return JSON.parse(text) as T;
+        return JSON.parse(result.text) as T;
       } catch {
-        // 공공 API는 오류 시 JSON 대신 HTML 안내 페이지를 주는 경우가 있다.
-        // 이건 재시도해도 같으므로 즉시 포기한다.
-        throw new Error('응답이 JSON 형식이 아닙니다. API 키나 파라미터를 확인하세요.');
+        // JSON이 아니면 오류 안내 HTML일 가능성이 높다
+        throw new Error(
+          status >= 200 && status < 300
+            ? '응답이 JSON 형식이 아닙니다. API 키나 파라미터를 확인하세요.'
+            : `HTTP ${status}`
+        );
       }
     } catch (err: any) {
       lastError = err;
       if (String(err?.message).startsWith('응답이 JSON')) break;
+      if (isAuthFailure(status)) break;
       if (attempt < MAX_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
       }

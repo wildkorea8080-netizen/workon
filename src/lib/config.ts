@@ -40,3 +40,8 @@ export const USD_KRW_RATE = Number(process.env.USD_KRW_RATE ?? '1350');
 // 기본값 'test'는 법제처가 열어둔 시험용 계정이라 제한이 있을 수 있으니
 // 운영에서는 자체 ID를 발급받아 설정하세요.
 export const LAW_API_OC = process.env.LAW_API_OC ?? 'test';
+
+// 공공 데이터 커넥터 (선택) — 미설정 시 해당 커넥터가 도구 목록에서 제외된다
+export const KOSIS_API_KEY = getEnv('KOSIS_API_KEY', false);
+export const G2B_API_KEY = getEnv('G2B_API_KEY', false);
+export const DART_API_KEY = getEnv('DART_API_KEY', false);
