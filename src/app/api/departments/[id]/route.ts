@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getSharedDepartmentIds } from '@/lib/department-scope';
+import { getSharedDepartmentIds, getManagedDepartmentIds } from '@/lib/department-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,8 +30,10 @@ async function requireAdminOrg() {
   return { session, departmentId, organizationId };
 }
 
-/** 대상 부서가 관리자의 기관 소속인지 확인 */
-async function loadDepartment(id: string, organizationId: string) {
+/** 대상 부서가 관리자의 관리 범위(자기 부서 + 하위) 안인지 확인 */
+async function loadDepartment(id: string, organizationId: string, managedIds: string[]) {
+  if (!managedIds.includes(id)) return null;
+
   const { data } = await supabaseAdmin
     .from('departments')
     .select('id, name, parent_id')
@@ -46,7 +48,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
-  const target = await loadDepartment(params.id, ctx.organizationId);
+  const managedIds = await getManagedDepartmentIds(ctx.departmentId);
+  const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
   if (!target) {
     return NextResponse.json({ ok: false, error: { message: '부서를 찾을 수 없습니다.' } }, { status: 404 });
   }
@@ -70,7 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     if (parentId) {
-      const parent = await loadDepartment(parentId, ctx.organizationId);
+      const parent = await loadDepartment(parentId, ctx.organizationId, managedIds);
       if (!parent) {
         return NextResponse.json({ ok: false, error: { message: '상위 부서를 찾을 수 없습니다.' } }, { status: 400 });
       }
@@ -117,7 +120,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
-  const target = await loadDepartment(params.id, ctx.organizationId);
+  const managedIds = await getManagedDepartmentIds(ctx.departmentId);
+  const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
   if (!target) {
     return NextResponse.json({ ok: false, error: { message: '부서를 찾을 수 없습니다.' } }, { status: 404 });
   }

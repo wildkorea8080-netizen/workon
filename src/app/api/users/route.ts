@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -21,11 +22,14 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    // 관리자는 같은 부서의 모든 사용자 조회 가능
+    // 관리자는 자기 부서와 그 하위 부서의 사용자를 관리한다.
+    // 예전에는 자기 부서만 조회해, 하위 부서 직원을 볼 수도 옮길 수도 없었다.
+    const managedDeptIds = await getManagedDepartmentIds(departmentId);
+
     const { data: users, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, created_at')
-      .eq('department_id', departmentId)
+      .select('id, email, full_name, role, created_at, department_id, departments(id, name)')
+      .in('department_id', managedDeptIds)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -36,7 +40,13 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: users });
+    // Supabase 조인은 객체 또는 배열로 오므로 정규화한다
+    const normalized = (users ?? []).map((user: any) => {
+      const dept = Array.isArray(user.departments) ? user.departments[0] : user.departments;
+      return { ...user, departments: undefined, department_name: dept?.name ?? null };
+    });
+
+    return NextResponse.json({ ok: true, data: normalized });
   } catch (error) {
     console.error('사용자 목록 조회 중 오류:', error);
     return NextResponse.json(

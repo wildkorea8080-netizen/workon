@@ -322,6 +322,12 @@ MAIL_FROM=
 |---|---|---|
 | `getVisibleDepartmentIds(D)` | D + **상위** 부서들 | D 소속 직원이 볼 수 있는 자료 범위 |
 | `getSharedDepartmentIds(D)` | D + **하위** 부서들 | D에 공유하면 누가 보는지 |
+| `getManagedDepartmentIds(D)` | D + **하위** 부서들 | 관리자가 관리할 수 있는 범위 |
+
+**관리자 권한 범위는 자기 부서 + 하위 부서**입니다. 최상위 부서 소속 관리자는
+기관 전체를, 과 단위 관리자는 자기 과 아래만 관리합니다.
+직원·부서를 수정하는 라우트는 **대상과 목적지 양쪽**을 이 범위로 검사해야
+합니다. 한쪽만 보면 범위 밖 직원을 끌어오거나 관리 밖 부서로 밀어낼 수 있습니다.
 
 사용자에게 보일 자료를 조회할 때는 `.eq('department_id', D)`가 아니라
 `.in('department_id', await getVisibleDepartmentIds(D))`를 씁니다.

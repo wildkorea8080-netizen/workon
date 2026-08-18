@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,10 +81,15 @@ export async function GET() {
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
+  // 관리자는 자기 부서와 그 하위만 관리한다.
+  // 기관 전체를 열어두면 하위 부서 관리자가 다른 본부 조직도까지 손댈 수 있다.
+  const managedDeptIds = await getManagedDepartmentIds(ctx.departmentId);
+
   const { data: departments, error } = await supabaseAdmin
     .from('departments')
     .select('id, name, parent_id, description')
-    .eq('organization_id', ctx.organizationId);
+    .eq('organization_id', ctx.organizationId)
+    .in('id', managedDeptIds);
 
   if (error) {
     console.error('[departments GET]', error);
@@ -126,17 +132,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: { message: '부서명을 입력해주세요.' } }, { status: 400 });
   }
 
-  // 상위 부서는 반드시 같은 기관 소속이어야 한다
-  if (parentId) {
-    const { data: parent } = await supabaseAdmin
-      .from('departments')
-      .select('id')
-      .eq('id', parentId)
-      .eq('organization_id', ctx.organizationId)
-      .maybeSingle();
-    if (!parent) {
-      return NextResponse.json({ ok: false, error: { message: '상위 부서를 찾을 수 없습니다.' } }, { status: 400 });
-    }
+  // 상위 부서는 관리 범위 안이어야 한다. 없으면 자기 부서 아래로 만든다
+  // (관리 범위 밖에 최상위 부서를 새로 만들 수 있으면 안 된다).
+  const managedDeptIds = await getManagedDepartmentIds(ctx.departmentId);
+  const resolvedParentId = parentId ?? ctx.departmentId;
+
+  if (!managedDeptIds.includes(resolvedParentId)) {
+    return NextResponse.json(
+      { ok: false, error: { message: '관리 범위 밖의 부서를 상위로 지정할 수 없습니다.' } },
+      { status: 403 }
+    );
   }
 
   const slug =
@@ -145,7 +150,7 @@ export async function POST(request: NextRequest) {
 
   const { data: created, error } = await supabaseAdmin
     .from('departments')
-    .insert({ name, slug, parent_id: parentId, organization_id: ctx.organizationId })
+    .insert({ name, slug, parent_id: resolvedParentId, organization_id: ctx.organizationId })
     .select('id, name, parent_id, description')
     .single();
 

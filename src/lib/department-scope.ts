@@ -44,6 +44,19 @@ export async function getVisibleDepartmentIds(departmentId: string): Promise<str
 }
 
 /**
+ * 관리자가 관리할 수 있는 부서 범위 (자기 부서 + 모든 하위 부서).
+ *
+ * 계층 의미를 그대로 따릅니다 — 자기 아래를 관리합니다. 최상위 부서 소속
+ * 관리자는 기관 전체를, 과 단위 관리자는 자기 과 아래만 관리합니다.
+ *
+ * `getSharedDepartmentIds`와 계산은 같지만 의도가 달라 이름을 나눠 둡니다.
+ * (공유 영향 범위 vs 관리 권한 범위)
+ */
+export async function getManagedDepartmentIds(departmentId: string): Promise<string[]> {
+  return getSharedDepartmentIds(departmentId);
+}
+
+/**
  * 이 부서에 자료를 공유하면 실제로 보게 될 부서 id 목록
  * (자기 자신 + 모든 하위 부서). 관리 화면에서 영향 범위를 보여줄 때 씁니다.
  */
