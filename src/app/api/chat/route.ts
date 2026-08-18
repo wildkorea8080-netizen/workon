@@ -307,7 +307,25 @@ export async function POST(request: NextRequest) {
             claudeMessages.push({ role: 'user', content: resultBlocks });
 
             if (round === MAX_TOOL_ROUNDS - 1) {
-              console.warn('[chat] 툴 라운드 상한 도달');
+              // 상한에 걸렸다. 여기서 그냥 끝내면 방금 받은 툴 결과를 모델에
+              // 돌려주지 못해, 사용자는 "찾아볼게요" 같은 도입부만 받고 정작
+              // 답을 못 받는다. 도구 없이 한 번 더 호출해 답을 마무리시킨다.
+              console.warn('[chat] 툴 라운드 상한 도달 — 도구 없이 마무리');
+              send('tool_limit', { rounds: MAX_TOOL_ROUNDS });
+
+              for await (const event of streamClaudeAPI(
+                claudeMessages,
+                `${fullSystemPrompt}\n\n[중요] 도구 호출 한도에 도달해 더 이상 도구를 사용할 수 없습니다. 앞으로 무엇을 하겠다는 예고는 하지 마세요. 지금까지 확보한 자료만으로 답변을 완성하되, 자료가 부족하면 무엇이 부족한지와 사용자가 무엇을 다시 물으면 되는지를 알려주세요.`,
+                4096
+              )) {
+                if (event.type === 'text') {
+                  fullText += event.text;
+                  send('delta', { text: event.text });
+                } else if (event.type === 'done') {
+                  usage.input_tokens += event.usage.input_tokens;
+                  usage.output_tokens += event.usage.output_tokens;
+                }
+              }
             }
           }
         } catch (error: any) {

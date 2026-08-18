@@ -177,6 +177,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 | `error` | `{ message }` | 생성 중 오류 |
 | `tool_start` | `{ name, input }` | 도구 실행 직전 |
 | `tool_end` | `{ name, ok, sources }` | 도구 실행 완료 |
+| `tool_limit` | `{ rounds }` | 툴 라운드 상한 도달 |
 | `done` | `{ usage, title }` | 저장 완료 후 |
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
@@ -195,7 +196,11 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 질문에 엉뚱한 열을 답하게 됩니다. 상세 구조는 `hwp.ts`의 `renderTable` 참조.
 
 **툴 실행 루프**: 스트리밍 중 `stop_reason='tool_use'`가 오면 툴을 실행하고
-`tool_result`를 붙여 다시 호출합니다. `tool_use`의 인자는 `input_json_delta`로
+`tool_result`를 붙여 다시 호출합니다. 라운드 상한(`MAX_TOOL_ROUNDS`)에 걸리면
+**도구 정의는 유지한 채 `tool_choice='none'`으로 한 번 더 호출해 답변을
+마무리**합니다. 그냥 루프를 끝내면 마지막 툴 결과를 모델에 돌려주지 못해
+사용자가 도입부만 받고 답을 못 받습니다. 이때 `tools`를 통째로 빼면 이력의
+`tool_use` 블록 때문에 빈 응답이 오므로 반드시 `tool_choice`를 쓰세요. `tool_use`의 인자는 `input_json_delta`로
 잘게 쪼개져 오므로 블록 인덱스별로 모았다가 `content_block_stop`에서 파싱합니다
 (`claude.ts`). 토큰 사용량은 라운드별로 누적합니다.
 

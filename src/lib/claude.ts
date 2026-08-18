@@ -106,7 +106,12 @@ export async function* streamClaudeAPI(
   messages: ClaudeMessage[],
   systemPrompt?: string,
   maxTokens = 4096,
-  tools?: ClaudeTool[]
+  tools?: ClaudeTool[],
+  /**
+   * 'none'이면 도구 정의는 유지한 채 호출만 막는다.
+   * 이력에 tool_use 블록이 있는데 tools를 통째로 빼면 모델이 빈 응답을 낸다.
+   */
+  toolChoice?: 'auto' | 'none'
 ): AsyncGenerator<ClaudeStreamEvent> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다.');
@@ -125,6 +130,7 @@ export async function* streamClaudeAPI(
 
   if (tools?.length) {
     requestBody.tools = tools;
+    if (toolChoice) requestBody.tool_choice = { type: toolChoice };
   }
 
   const response = await fetch(CLAUDE_API_URL, {
