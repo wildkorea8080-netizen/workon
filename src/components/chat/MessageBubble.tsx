@@ -2,6 +2,10 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+// GFM 표 지원. 없으면 표가 문단으로 취급돼 파이프 문자가 그대로 보이고,
+// HTML이 줄바꿈을 공백으로 접어 한 줄로 뭉개진다. HWP 표를 마크다운으로
+// 복원해 인덱싱하므로(hwp.ts) RAG로 가져온 표도 같은 증상을 겪는다.
+import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
@@ -61,6 +65,7 @@ export default function MessageBubble({ role, content, sources, links, error }: 
           ) : (
             <div className={`prose prose-sm max-w-none ${isUser ? 'prose-invert' : ''}`}>
               <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
                 components={{
                   code({ className, children }) {
                     const match = /language-(\w+)/.exec(className || '');
@@ -90,6 +95,29 @@ export default function MessageBubble({ role, content, sources, links, error }: 
                     <blockquote className="border-l-4 border-slate-300 pl-3 italic text-slate-600 my-2">{children}</blockquote>
                   ),
                   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+
+                  // 표 — 공공기관 문서의 핵심이라 좁은 화면에서도 읽혀야 한다.
+                  // 넘칠 때 페이지 전체가 가로로 밀리지 않도록 표만 스크롤시킨다.
+                  table: ({ children }) => (
+                    <div className="my-3 overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="w-full text-xs border-collapse">{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
+                  th: ({ children }) => (
+                    <th className="px-3 py-2 text-left font-semibold text-slate-700 border-b border-slate-200 whitespace-nowrap">
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="px-3 py-2 align-top border-b border-slate-100 text-slate-700">{children}</td>
+                  ),
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer"
+                      className="text-[#003087] underline underline-offset-2 hover:text-[#002070]">
+                      {children}
+                    </a>
+                  ),
                 }}
               >
                 {content}

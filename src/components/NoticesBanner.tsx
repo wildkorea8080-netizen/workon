@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Notice {
   id: string;
@@ -82,7 +83,7 @@ export default function NoticesBanner() {
               <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 p-1">✕</button>
             </div>
             <div className="prose prose-sm max-w-none text-slate-700 max-h-80 overflow-y-auto">
-              <ReactMarkdown>{modal.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{modal.content}</ReactMarkdown>
             </div>
             <p className="text-xs text-slate-400 mt-4">{new Date(modal.published_at).toLocaleString('ko-KR')}</p>
             <button onClick={() => setModal(null)}
