@@ -26,17 +26,43 @@ if (existsSync('.env.local')) {
   }
 }
 
-const url = process.env.DATABASE_URL;
+// 이름을 헷갈려 넣는 경우가 많아 몇 가지를 함께 받는다.
+const URL_KEYS = ['DATABASE_URL', 'POSTGRES_URL', 'SUPABASE_DB_URL'];
+const foundKey = URL_KEYS.find((k) => process.env[k]);
+const url = foundKey ? process.env[foundKey] : null;
+
+const HOWTO = `
+  1. Supabase 대시보드 → 프로젝트 → Settings → Database
+  2. 'Connection string' 에서 Session pooler 탭 → URI 복사
+     (Transaction pooler(6543)는 DDL에 적합하지 않습니다. 5432를 쓰세요)
+  3. [YOUR-PASSWORD] 자리에 DB 비밀번호를 넣습니다
+     기억나지 않으면 같은 화면에서 'Reset database password'로 재설정
+  4. .env.local에 아래 한 줄 추가
+
+     DATABASE_URL=postgresql://postgres.프로젝트ref:비밀번호@aws-0-리전.pooler.supabase.com:5432/postgres
+
+  .env.local은 gitignore 대상이라 커밋되지 않습니다.`;
+
 if (!url) {
+  // https:// 주소를 넣어 둔 경우를 짚어 준다. 흔한 혼동이다.
+  const apiUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   console.error(`
-DATABASE_URL이 없습니다.
+DB 접속 문자열이 없습니다. (${URL_KEYS.join(' / ')} 중 하나)
+${apiUrl ? `
+  SUPABASE_URL은 https:// 로 시작하는 API 주소라 여기에 쓸 수 없습니다.
+  DDL 실행에는 postgresql:// 로 시작하는 Postgres 접속 문자열이 필요합니다.
+` : ''}${HOWTO}
+`);
+  process.exit(1);
+}
 
-  1. Supabase 대시보드 → Settings → Database → Connection string → URI 복사
-  2. .env.local에 아래 한 줄 추가 (값은 그대로 붙여넣기)
+if (!/^postgres(ql)?:\/\//.test(url)) {
+  console.error(`
+${foundKey} 값이 Postgres 접속 문자열이 아닙니다.
 
-     DATABASE_URL=postgresql://postgres.xxxx:비밀번호@aws-0-....pooler.supabase.com:5432/postgres
-
-  .env.local은 gitignore 대상이라 커밋되지 않습니다.
+  받은 형태 : ${url.split('://')[0]}://...
+  필요한 형태: postgresql://...
+${HOWTO}
 `);
   process.exit(1);
 }
