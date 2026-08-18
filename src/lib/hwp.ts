@@ -269,6 +269,38 @@ export function isHwpFile(fileName: string, mimeType?: string): boolean {
 }
 
 /**
+ * 사용자 정의 영역(PUA) 문자인지.
+ *
+ * 한글은 공문서의 구분선·결재란 같은 장식을 전용 글꼴의 PUA 문자로 그린다.
+ * (실측: 어느 공문 1건에서 U+F080F 85개, U+F0317 91개 — 문서의 9.8%)
+ * 의미 없는 문자인데 임베딩 토큰만 잡아먹고 청크 내용을 오염시키므로 버린다.
+ */
+function isPrivateUse(codePoint: number): boolean {
+  return (
+    (codePoint >= 0xe000 && codePoint <= 0xf8ff) ||
+    (codePoint >= 0xf0000 && codePoint <= 0xffffd) ||
+    (codePoint >= 0x100000 && codePoint <= 0x10fffd)
+  );
+}
+
+/** RAG 인덱싱에 쓸 수 있도록 장식 문자와 빈 줄을 정리한다 */
+function normalize(text: string): string {
+  const withoutPua = Array.from(text)
+    .filter((ch) => !isPrivateUse(ch.codePointAt(0) ?? 0))
+    .join('');
+
+  return withoutPua
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    // 빈 줄이 연속되면 하나로 — 원문 레이아웃상 빈 문단이 많다
+    .filter((line, index, lines) => line.trim() !== '' || lines[index - 1]?.trim() !== '')
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * HWP/HWPX 파일에서 순수 텍스트를 추출합니다.
  * 확장자가 아니라 파일 시그니처로 포맷을 판별합니다 (확장자만 바꾼 파일 대응).
  */
@@ -277,7 +309,7 @@ export async function extractTextFromHwp(buffer: Buffer, fileName: string): Prom
   const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
 
   const text = isZip ? await extractHwpx(buffer) : extractHwp(buffer);
-  const normalized = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const normalized = normalize(text);
 
   if (!normalized) {
     throw new HwpParseError(
