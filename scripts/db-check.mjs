@@ -50,4 +50,42 @@ for (const [mig, name, args] of rpcs) {
   if (!pass) ok = false;
   console.log(`${pass?'OK  ':'없음'}  ${mig}  ${name}${error?`  → ${error.message.slice(0,70)}`:''}`);
 }
+
+// ── 데이터 상태 ─────────────────────────────────────────────
+// 스키마가 있어도 백필이 안 됐으면 격리가 깨진다. 실제 행을 세어 본다.
+
+console.log('\n=== 공개 범위 분포 ===');
+console.log('0016 직후에는 기존 자료가 전부 department여야 정상입니다.');
+for (const table of ['agents', 'documents']) {
+  const { data, error } = await db.from(table).select('visibility');
+  if (error) {
+    console.log(`      ${table}  → 조회 실패: ${error.message.slice(0, 60)}`);
+    ok = false;
+    continue;
+  }
+  const tally = {};
+  for (const row of data) tally[row.visibility ?? '(null)'] = (tally[row.visibility ?? '(null)'] ?? 0) + 1;
+  const summary = Object.entries(tally).map(([k, v]) => `${k} ${v}건`).join(' / ') || '행 없음';
+  // visibility가 NULL이면 visibilityFilter의 .or()에 걸리지 않아 아무에게도 안 보인다
+  const bad = tally['(null)'] > 0;
+  if (bad) ok = false;
+  console.log(`${bad ? '주의' : 'OK  '}  ${table.padEnd(10)} ${summary}`);
+}
+
+console.log('\n=== 기관 미연결 행 (전부 0이어야 정상) ===');
+for (const table of ['departments', 'agents', 'documents', 'usage_logs']) {
+  const { count, error } = await db
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .is('organization_id', null);
+  if (error) {
+    console.log(`      ${table}  → 조회 실패: ${error.message.slice(0, 60)}`);
+    ok = false;
+    continue;
+  }
+  const bad = (count ?? 0) > 0;
+  if (bad) ok = false;
+  console.log(`${bad ? '주의' : 'OK  '}  ${table.padEnd(12)} ${count ?? 0}건`);
+}
+
 process.exit(ok?0:1);
