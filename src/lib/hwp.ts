@@ -22,8 +22,11 @@ import { XMLParser } from 'fast-xml-parser';
 // ── HWP 5.0 레코드 태그 ──────────────────────────────────────
 // 참고: 한글과컴퓨터 「한/글 문서 파일 형식」 공개 문서
 const HWPTAG_BEGIN = 0x10;
-/** 문단 텍스트 레코드 */
-const HWPTAG_PARA_TEXT = HWPTAG_BEGIN + 51; // 67
+const HWPTAG_PARA_HEADER = HWPTAG_BEGIN + 50; // 66 문단 헤더
+const HWPTAG_PARA_TEXT = HWPTAG_BEGIN + 51; // 67 문단 텍스트
+const HWPTAG_CTRL_HEADER = HWPTAG_BEGIN + 55; // 71 컨트롤 헤더
+const HWPTAG_LIST_HEADER = HWPTAG_BEGIN + 56; // 72 문단 리스트 헤더 (표에서는 셀 하나)
+const HWPTAG_TABLE = HWPTAG_BEGIN + 61; // 77 표 정보
 
 /** FileHeader 속성 플래그의 압축 여부 비트 */
 const FLAG_COMPRESSED = 0x01;
@@ -37,17 +40,29 @@ export class HwpParseError extends Error {
 
 // ── HWP 5.0 (바이너리) ───────────────────────────────────────
 
+interface HwpRecord {
+  tagId: number;
+  payload: Uint8Array;
+  children: HwpRecord[];
+}
+
 /**
- * HWP 레코드 스트림을 순회하며 문단 텍스트를 뽑는다.
+ * HWP 레코드 스트림을 트리로 파싱한다.
  *
  * 레코드 헤더는 4바이트 리틀엔디언 비트필드:
  *   [0..9]   tagID (10bit)
- *   [10..19] level (10bit)
+ *   [10..19] level (10bit) — 이 값으로 부모-자식 관계가 정해진다
  *   [20..31] size  (12bit) — 0xFFF이면 뒤따르는 4바이트가 실제 크기
+ *
+ * 표는 CTRL_HEADER(level N) 아래에 TABLE, LIST_HEADER(셀 선언), 셀 내용
+ * PARA_HEADER가 모두 level N+1 형제로 나열된다. LIST_HEADER가 부모가 아니라
+ * "뒤따르는 N개 문단이 이 셀"이라고 선언하는 방식이다 (renderTable 참조).
  */
-function extractTextFromRecords(data: Uint8Array): string[] {
+function parseRecordTree(data: Uint8Array): HwpRecord[] {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const paragraphs: string[] = [];
+  const roots: HwpRecord[] = [];
+  // stack[n] = 현재 level n인 레코드
+  const stack: HwpRecord[] = [];
   let pos = 0;
 
   while (pos + 4 <= data.length) {
@@ -55,6 +70,7 @@ function extractTextFromRecords(data: Uint8Array): string[] {
     pos += 4;
 
     const tagId = header & 0x3ff;
+    const level = (header >> 10) & 0x3ff;
     let size = (header >> 20) & 0xfff;
 
     if (size === 0xfff) {
@@ -65,14 +81,26 @@ function extractTextFromRecords(data: Uint8Array): string[] {
 
     if (pos + size > data.length) break;
 
-    if (tagId === HWPTAG_PARA_TEXT) {
-      paragraphs.push(decodeParaText(data.subarray(pos, pos + size)));
+    const record: HwpRecord = {
+      tagId,
+      payload: data.subarray(pos, pos + size),
+      children: [],
+    };
+
+    const parent = stack[level - 1];
+    if (level === 0 || !parent) {
+      roots.push(record);
+    } else {
+      parent.children.push(record);
     }
+
+    stack[level] = record;
+    stack.length = level + 1;
 
     pos += size;
   }
 
-  return paragraphs;
+  return roots;
 }
 
 /**
@@ -122,6 +150,163 @@ function decodeParaText(bytes: Uint8Array): string {
   return out.join('');
 }
 
+// ── 표 복원 ──────────────────────────────────────────────────
+
+/**
+ * CTRL_HEADER의 컨트롤 ID. 4바이트에 역순으로 저장돼 있다.
+ * 표는 "tbl " 이다.
+ */
+function readCtrlId(payload: Uint8Array): string {
+  if (payload.length < 4) return '';
+  return String.fromCharCode(payload[3], payload[2], payload[1], payload[0]);
+}
+
+/**
+ * 표 셀의 위치·병합 정보.
+ *
+ * LIST_HEADER 본문 바이트 배치 (실제 공문서로 실측 확인):
+ *   0  INT32   문단 수
+ *   4  UINT32  속성
+ *   8  UINT16  열 주소 (0부터)
+ *   10 UINT16  행 주소 (0부터)
+ *   12 UINT16  열 병합 수
+ *   14 UINT16  행 병합 수
+ */
+interface TableCell {
+  col: number;
+  row: number;
+  colSpan: number;
+  rowSpan: number;
+  text: string;
+}
+
+/** LIST_HEADER가 선언하는, 이 셀에 속한 문단 개수 */
+function readParagraphCount(payload: Uint8Array): number {
+  if (payload.length < 4) return 1;
+  const count = new DataView(
+    payload.buffer,
+    payload.byteOffset,
+    payload.byteLength
+  ).getInt32(0, true);
+  return count > 0 ? count : 1;
+}
+
+function readCellPosition(payload: Uint8Array): Omit<TableCell, 'text'> | null {
+  if (payload.length < 16) return null;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  return {
+    col: view.getUint16(8, true),
+    row: view.getUint16(10, true),
+    colSpan: Math.max(1, view.getUint16(12, true)),
+    rowSpan: Math.max(1, view.getUint16(14, true)),
+  };
+}
+
+/** 표를 마크다운 표로 렌더링한다. 열 머리글이 각 값과 함께 읽히도록. */
+function renderTable(ctrlHeader: HwpRecord): string {
+  const tableInfo = ctrlHeader.children.find((c) => c.tagId === HWPTAG_TABLE);
+  if (!tableInfo || tableInfo.payload.length < 8) return renderChildren(ctrlHeader.children);
+
+  const infoView = new DataView(
+    tableInfo.payload.buffer,
+    tableInfo.payload.byteOffset,
+    tableInfo.payload.byteLength
+  );
+  const rowCount = infoView.getUint16(4, true);
+  const colCount = infoView.getUint16(6, true);
+
+  if (rowCount === 0 || colCount === 0 || rowCount > 500 || colCount > 100) {
+    // 값이 비상식적이면 표로 취급하지 않고 본문처럼 이어붙인다
+    return renderChildren(ctrlHeader.children);
+  }
+
+  // LIST_HEADER와 셀 내용은 부모-자식이 아니라 형제로 나열된다.
+  // LIST_HEADER가 "뒤따르는 N개 문단이 이 셀"이라고 선언하는 구조라
+  // 순서대로 훑으면서 다음 LIST_HEADER 전까지를 해당 셀의 내용으로 묶는다.
+  const cells: TableCell[] = [];
+  const children = ctrlHeader.children;
+
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].tagId !== HWPTAG_LIST_HEADER) continue;
+
+    const position = readCellPosition(children[i].payload);
+    if (!position) continue;
+
+    const paragraphCount = readParagraphCount(children[i].payload);
+    const content: HwpRecord[] = [];
+    let consumed = 0;
+    let j = i + 1;
+
+    while (j < children.length && children[j].tagId !== HWPTAG_LIST_HEADER) {
+      content.push(children[j]);
+      if (children[j].tagId === HWPTAG_PARA_HEADER) {
+        consumed++;
+        if (consumed >= paragraphCount) {
+          j++;
+          break;
+        }
+      }
+      j++;
+    }
+
+    cells.push({
+      ...position,
+      // 셀 안의 줄바꿈은 표 한 칸에 들어가야 하므로 공백으로 바꾼다
+      text: renderChildren(content).replace(/\s+/g, ' ').trim(),
+    });
+
+    i = j - 1;
+  }
+
+  if (cells.length === 0) return '';
+
+  // 병합된 셀은 차지하는 자리를 모두 채워 열이 밀리지 않게 한다
+  const grid: string[][] = Array.from({ length: rowCount }, () =>
+    Array.from({ length: colCount }, () => '')
+  );
+  for (const cell of cells) {
+    for (let r = cell.row; r < Math.min(cell.row + cell.rowSpan, rowCount); r++) {
+      for (let c = cell.col; c < Math.min(cell.col + cell.colSpan, colCount); c++) {
+        // 병합된 나머지 칸은 비워 두고 시작 칸에만 내용을 넣는다
+        grid[r][c] = r === cell.row && c === cell.col ? cell.text : '';
+      }
+    }
+  }
+
+  const escape = (value: string) => value.replace(/\|/g, '\\|');
+  const toRow = (values: string[]) => `| ${values.map(escape).join(' | ')} |`;
+
+  const lines = [toRow(grid[0]), `|${' --- |'.repeat(colCount)}`];
+  for (let r = 1; r < rowCount; r++) lines.push(toRow(grid[r]));
+
+  return lines.join('\n');
+}
+
+/** 레코드 트리를 훑어 본문 텍스트를 만든다 */
+function renderChildren(records: HwpRecord[]): string {
+  const parts: string[] = [];
+
+  for (const record of records) {
+    if (record.tagId === HWPTAG_PARA_TEXT) {
+      parts.push(decodeParaText(record.payload));
+      continue;
+    }
+
+    if (record.tagId === HWPTAG_CTRL_HEADER && readCtrlId(record.payload) === 'tbl ') {
+      const table = renderTable(record);
+      if (table) parts.push(table);
+      continue;
+    }
+
+    if (record.children.length > 0) {
+      const nested = renderChildren(record.children);
+      if (nested) parts.push(nested);
+    }
+  }
+
+  return parts.join('\n');
+}
+
 /** 압축된 스트림이면 풀고, 아니면 그대로 반환 */
 function maybeInflate(raw: Uint8Array, compressed: boolean): Uint8Array {
   if (!compressed) return raw;
@@ -167,7 +352,7 @@ function extractHwp(buffer: Buffer): string {
     throw new HwpParseError('본문(BodyText)을 찾을 수 없습니다.');
   }
 
-  const paragraphs: string[] = [];
+  const parts: string[] = [];
   for (const section of sections) {
     const raw = Uint8Array.from(section.content as ArrayLike<number>);
     let data: Uint8Array;
@@ -178,10 +363,10 @@ function extractHwp(buffer: Buffer): string {
       console.warn(`[hwp] ${section.name} 압축 해제 실패, 건너뜀:`, err?.message);
       continue;
     }
-    paragraphs.push(...extractTextFromRecords(data));
+    parts.push(renderChildren(parseRecordTree(data)));
   }
 
-  return paragraphs.join('\n');
+  return parts.join('\n');
 }
 
 // ── HWPX (ZIP + XML) ─────────────────────────────────────────

@@ -53,8 +53,70 @@ function makeParaTextRecord(text) {
   return Buffer.concat([head, body]);
 }
 
-function buildSyntheticHwp(paragraphs) {
-  const records = Buffer.concat(paragraphs.map(makeParaTextRecord));
+/** 임의 레코드 하나 (헤더 4바이트 + 본문) */
+function makeRecord(tagId, level, body) {
+  const size = body.length;
+  if (size >= 0xfff) throw new Error('probe는 짧은 레코드만 지원');
+  const header = (tagId & 0x3ff) | ((level & 0x3ff) << 10) | ((size & 0xfff) << 20);
+  const head = Buffer.alloc(4);
+  head.writeUInt32LE(header >>> 0, 0);
+  return Buffer.concat([head, body]);
+}
+
+const TAG_PARA_HEADER = 66;
+const TAG_PARA_TEXT = 67;
+const TAG_CTRL_HEADER = 71;
+const TAG_LIST_HEADER = 72;
+const TAG_TABLE = 77;
+
+/**
+ * 표 컨트롤 레코드를 만든다. 실제 파일과 같은 형제 배치를 재현한다:
+ *   L1 CTRL_HEADER("tbl ")
+ *     L2 TABLE / LIST_HEADER / PARA_HEADER  (모두 형제)
+ *       L3 PARA_TEXT
+ */
+function makeTableRecords(rows) {
+  const rowCount = rows.length;
+  const colCount = rows[0].length;
+
+  const ctrlBody = Buffer.alloc(46);
+  // 컨트롤 ID "tbl " 는 역순 저장
+  ctrlBody[0] = ' '.charCodeAt(0);
+  ctrlBody[1] = 'l'.charCodeAt(0);
+  ctrlBody[2] = 'b'.charCodeAt(0);
+  ctrlBody[3] = 't'.charCodeAt(0);
+
+  const tableBody = Buffer.alloc(40);
+  tableBody.writeUInt16LE(rowCount, 4);
+  tableBody.writeUInt16LE(colCount, 6);
+
+  const parts = [
+    makeRecord(TAG_CTRL_HEADER, 1, ctrlBody),
+    makeRecord(TAG_TABLE, 2, tableBody),
+  ];
+
+  rows.forEach((cols, r) => {
+    cols.forEach((text, c) => {
+      const cell = Buffer.alloc(47);
+      cell.writeInt32LE(1, 0); // 문단 수
+      cell.writeUInt16LE(c, 8); // 열 주소
+      cell.writeUInt16LE(r, 10); // 행 주소
+      cell.writeUInt16LE(1, 12); // 열 병합
+      cell.writeUInt16LE(1, 14); // 행 병합
+      parts.push(makeRecord(TAG_LIST_HEADER, 2, cell));
+      parts.push(makeRecord(TAG_PARA_HEADER, 2, Buffer.alloc(24)));
+      parts.push(makeRecord(TAG_PARA_TEXT, 3, encodeParaBody(text)));
+    });
+  });
+
+  return Buffer.concat(parts);
+}
+
+function buildSyntheticHwp(paragraphs, tableRows) {
+  const records = Buffer.concat([
+    ...paragraphs.map(makeParaTextRecord),
+    ...(tableRows ? [makeRecord(TAG_PARA_HEADER, 0, Buffer.alloc(24)), makeTableRecords(tableRows)] : []),
+  ]);
   const compressed = Buffer.from(deflateRaw(records));
 
   // FileHeader: 32바이트 시그니처 + 4바이트 버전 + 4바이트 속성(압축 비트)
@@ -88,6 +150,18 @@ const SAMPLE = [
 // 파서가 통과시켜야 하는 기대 문자열 (컨트롤 더미가 섞이면 안 됨)
 const EXPECT = ['공공기관 문서 관리 지침', '제1조(목적)', '이 지침은 문서의 관리에', '붙임 1. 서식', '2026. 8. 18.'];
 
+// 표 복원 검증용 (헤더 행 + 데이터 2행)
+const TABLE_ROWS = [
+  ['업체명', '참여자격', '비고'],
+  ['롯데상사', '적격', ''],
+  ['비오씨', '부적격', '일반대두 미신청'],
+];
+const EXPECT_TABLE = [
+  '| 업체명 | 참여자격 | 비고 |',
+  '| 롯데상사 | 적격 |  |',
+  '| 비오씨 | 부적격 | 일반대두 미신청 |',
+];
+
 async function main() {
   const { extractTextFromHwp } = await import('../src/lib/hwp.ts');
   const target = process.argv[2];
@@ -113,13 +187,19 @@ async function main() {
   console.log(JSON.stringify(hwpxText));
 
   const hwpPath = join(dir, 'sample.hwp');
-  writeFileSync(hwpPath, buildSyntheticHwp(SAMPLE));
+  writeFileSync(hwpPath, buildSyntheticHwp(SAMPLE, TABLE_ROWS));
   const hwpText = await extractTextFromHwp(readFileSync(hwpPath), 'sample.hwp');
-  const hwpOk = EXPECT.every((s) => hwpText.includes(s)) && !hwpText.includes('ZZZ');
-  console.log(`\n[HWP 5.0] ${hwpOk ? 'PASS' : 'FAIL'}`);
-  console.log(JSON.stringify(hwpText));
 
-  if (!hwpxOk || !hwpOk) process.exit(1);
+  const hwpOk = EXPECT.every((s) => hwpText.includes(s)) && !hwpText.includes('ZZZ');
+  console.log(`\n[HWP 5.0 본문] ${hwpOk ? 'PASS' : 'FAIL'}`);
+
+  const missingRows = EXPECT_TABLE.filter((row) => !hwpText.includes(row));
+  const tableOk = missingRows.length === 0;
+  console.log(`[HWP 5.0 표복원] ${tableOk ? 'PASS' : 'FAIL'}`);
+  if (!tableOk) console.log('  누락된 행:', missingRows);
+  console.log(hwpText);
+
+  if (!hwpxOk || !hwpOk || !tableOk) process.exit(1);
 }
 
 main().catch((e) => {

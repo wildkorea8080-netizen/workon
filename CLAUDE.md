@@ -60,7 +60,7 @@ src/
 │   ├── embeddings.ts     # Voyage AI 래퍼
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
 │   ├── forbidden-words.ts # 금지어 DB 조회
-│   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 (자체 구현)
+│   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 + 표 복원 (자체 구현)
 │   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
 │   ├── plans.ts          # 요금제 정의
 │   ├── rag.ts            # pgvector RPC 검색 (search_agent_chunks)
@@ -181,6 +181,10 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 **RAG가 두 갈래인 이유**: `/api/chat`은 에이전트에 연결된 문서만(`search_agent_chunks`),
 `/api/qna`는 부서 전체 문서(`search_document_chunks`)를 검색합니다. 의도된 분리입니다.
+
+**표 처리**: HWP 문서의 표는 마크다운 표로 복원해 인덱싱합니다.
+셀을 순서대로 이어붙이면 열 머리글과 값의 대응이 끊겨 "A사의 B항목?" 같은
+질문에 엉뚱한 열을 답하게 됩니다. 상세 구조는 `hwp.ts`의 `renderTable` 참조.
 
 **출처 표기**: 응답 텍스트에 덧붙이지 않고 `messages.source_references`에 저장해
 `SourceCitation` 컴포넌트가 렌더링합니다. 텍스트에 덧붙이면 DB 저장 내용과
