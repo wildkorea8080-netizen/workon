@@ -79,7 +79,35 @@ const { default: pg } = await import('pg');
 
 // Supabase 풀러는 TLS를 쓰지만 인증서 체인이 로컬에 없을 수 있다.
 const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-await client.connect();
+
+try {
+  await client.connect();
+} catch (err) {
+  const code = err.code ?? '';
+  console.error(`\n접속 실패: ${err.message}`);
+
+  // Direct connection은 IPv6다. 국내 IPv4 전용 환경에서 흔히 여기서 막힌다.
+  if (code === 'ENETUNREACH' || code === 'EHOSTUNREACH' || code === 'ENOTFOUND') {
+    console.error(`
+  Direct connection은 IPv6로 접속합니다. IPv4만 되는 환경이면 닿지 않습니다.
+  대시보드에서 Connection Method를 'Session pooler'로 바꿔 URI를 다시 복사하세요.
+  (주소가 db.xxx.supabase.co 가 아니라 aws-0-리전.pooler.supabase.com 형태가 됩니다)`);
+  } else if (code === '28P01' || /password authentication/i.test(err.message)) {
+    console.error(`
+  비밀번호가 맞지 않습니다.
+  - [YOUR-PASSWORD] 자리를 실제 비밀번호로 바꿨는지 확인하세요(대괄호도 지웁니다)
+  - 비밀번호에 @ # ? / % : 가 있으면 percent-encode 해야 합니다
+    (@ → %40, # → %23, ? → %3F, / → %2F, % → %25, : → %3A)
+  - 기억나지 않으면 Settings → Database → Reset database password`);
+  } else if (code === 'ETIMEDOUT') {
+    console.error(`
+  응답이 없습니다. 방화벽이 5432 포트를 막고 있을 수 있습니다.
+  사내망이라면 Session pooler(5432) 또는 Transaction pooler(6543)를 시도해 보세요.`);
+  }
+
+  console.error('');
+  process.exit(1);
+}
 
 /** 적용 이력 표. 없으면 만든다. */
 await client.query(`
