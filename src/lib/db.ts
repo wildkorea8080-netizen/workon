@@ -41,6 +41,16 @@ export type Agent = {
   approval_note?: string | null;
   /** 이 에이전트가 쓸 외부 도구 커넥터 id 목록. 빈 배열이면 도구 미사용. */
   enabled_connectors?: string[];
+  /** 누가 볼 수 있는가(권한). category와 달리 표시가 아니라 접근을 정한다. */
+  visibility?: 'organization' | 'department';
+  organization_id?: string | null;
+  /** 직원 화면 노출 여부. false면 관리자에게만 보이는 '노출 대기중'. */
+  is_published?: boolean;
+  /** 카테고리 안에서의 순서. 작을수록 앞. 동률이면 이름순. */
+  display_order?: number;
+  /** chat=대화형, link=외부 링크 연결형(새 탭) */
+  agent_type?: 'chat' | 'link';
+  link_url?: string | null;
   created_by?: string;
   updated_by?: string;
   created_at: string;

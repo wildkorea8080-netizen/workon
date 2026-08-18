@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { connectorCatalog } from '@/lib/connectors';
+import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -31,6 +32,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const body = await request.json();
     const { name, description, system_prompt, config, is_active, enabled_connectors, visibility } = body;
 
+    const CATALOG_KEYS = ['icon', 'category', 'is_published', 'display_order', 'agent_type', 'link_url'];
+    const touchesCatalog = CATALOG_KEYS.some((key) => body[key] !== undefined);
+
     if (
       !name &&
       !description &&
@@ -38,12 +42,38 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       config === undefined &&
       is_active === undefined &&
       enabled_connectors === undefined &&
-      visibility === undefined
+      visibility === undefined &&
+      !touchesCatalog
     ) {
       return NextResponse.json(
         { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
         { status: 400 }
       );
+    }
+
+    // 링크형 검증은 현재 유형을 알아야 한다. 링크형 비서의 이름만 바꾸는
+    // 요청에는 agent_type이 실려 오지 않으므로, 주소를 지우려는 시도인지
+    // 손대지 않은 것인지 구분하려면 지금 값이 필요하다.
+    const { data: current } = await supabaseAdmin
+      .from('agents')
+      .select('agent_type')
+      .eq('id', params.id)
+      .eq('department_id', departmentId)
+      .maybeSingle();
+
+    if (!current) {
+      return NextResponse.json(
+        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
+        { status: 404 }
+      );
+    }
+
+    const { payload: catalog, error: catalogError } = parseCatalogFields(
+      body,
+      (current.agent_type as AgentType) ?? 'chat'
+    );
+    if (catalogError) {
+      return NextResponse.json({ ok: false, error: { message: catalogError } }, { status: 400 });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -72,6 +102,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       updatePayload.visibility = visibility;
     }
 
+    Object.assign(updatePayload, catalog);
     updatePayload.updated_by = session.user.id;
 
     const { data: agent, error } = await supabaseAdmin
