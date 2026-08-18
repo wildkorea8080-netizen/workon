@@ -56,6 +56,25 @@ ${apiUrl ? `
   process.exit(1);
 }
 
+// 예시 문자열을 그대로 붙여넣는 일이 잦다. 접속을 시도하기 전에 잡는다.
+const PLACEHOLDERS = ['리전', '비밀번호', '프로젝트ref', 'YOUR-PASSWORD', 'xxxx', '[', ']'];
+const leftover = PLACEHOLDERS.filter((t) => url.includes(t));
+if (leftover.length > 0) {
+  console.error(`
+${foundKey} 에 예시 문자열이 남아 있습니다: ${leftover.join(', ')}
+
+  안내문의 예시가 아니라 대시보드에서 복사한 실제 URI를 넣어야 합니다.
+  실제 값은 이런 형태입니다(리전·프로젝트 ref가 채워져 있습니다):
+
+    postgresql://postgres.abcdefghijklmnop:실제비밀번호@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres
+
+  Settings → Database → Connection string → Connection Method를
+  'Session pooler'로 바꾼 뒤 Type: URI 를 복사하세요.
+  복사한 문자열에서 [YOUR-PASSWORD] 부분만 비밀번호로 바꾸면 됩니다(대괄호도 지웁니다).
+`);
+  process.exit(1);
+}
+
 if (!/^postgres(ql)?:\/\//.test(url)) {
   console.error(`
 ${foundKey} 값이 Postgres 접속 문자열이 아닙니다.
