@@ -3,38 +3,41 @@ import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
 
-const ADMIN_EMAILS = ['admin@welfare.org', 'admin@researchcenter.kr'];
-const ADMIN_DEPARTMENT_SLUG = 'admin-team';
 const MIN_PASSWORD_LENGTH = 8;
 
-async function getDepartmentIdBySlug(slug: string) {
-  const { data: department, error } = await supabaseAdmin
-    .from('departments')
+/**
+ * 초대 없이 가입할 때 소속 부서를 정한다.
+ *
+ * 예전에는 전체 시스템에서 가장 오래된 부서를 배정했다. 그 결과 아무나
+ * 가입하면 첫 번째 기관의 부서에 들어가 그 기관의 문서·비서·대화에 접근할
+ * 수 있었다. 멀티테넌트에서 있어선 안 되는 동작이다.
+ *
+ * 이제 이메일 도메인으로 기관을 찾고, 그 기관 안에서만 부서를 고른다.
+ * 도메인이 등록된 기관이 없으면 소속을 알 수 없으므로 가입을 막는다.
+ */
+async function resolveDepartmentByEmailDomain(email: string) {
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (!domain) return null;
+
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
     .select('id')
-    .eq('slug', slug)
+    .eq('domain', domain)
     .maybeSingle();
 
-  if (error) {
-    console.warn('[signup] department lookup failed:', error.message);
-    return null;
-  }
+  if (!org) return null;
 
-  return department?.id ?? null;
-}
-
-async function getDefaultDepartmentId() {
-  const { data: departments, error } = await supabaseAdmin
+  // 기관 내 최상위 부서를 우선, 없으면 가장 먼저 만들어진 부서
+  const { data: departments } = await supabaseAdmin
     .from('departments')
-    .select('id')
-    .order('created_at', { ascending: true })
-    .limit(1);
+    .select('id, parent_id')
+    .eq('organization_id', org.id)
+    .order('created_at', { ascending: true });
 
-  if (error || !departments?.length) {
-    console.warn('[signup] default department lookup failed:', error?.message);
-    return null;
-  }
+  if (!departments?.length) return null;
 
-  return departments[0].id;
+  const root = departments.find((d: { parent_id: string | null }) => !d.parent_id);
+  return (root ?? departments[0]).id as string;
 }
 
 async function createUserRecord(userId: string, email: string, fullName: string, role: string, departmentId: string | null) {
@@ -173,14 +176,30 @@ export async function POST(request: Request) {
 
     // ── 3단계: users 테이블 레코드 생성 ──────────────────────
     {
-      const isAdminEmail = ADMIN_EMAILS.includes(email);
+      // 특정 이메일에 ADMIN을 자동 부여하던 하드코딩을 제거했다.
+      // 그 주소로 가입하는 누구나 기관 관리자가 되는 권한 상승 경로였다.
+      // 관리자 지정은 초대(invitations.role) 또는 슈퍼관리자를 통해서만 한다.
       let departmentId: string | null = inviteDeptId;
-      const role = inviteToken ? inviteRole : (isAdminEmail ? 'ADMIN' : 'USER');
+      const role = inviteToken ? inviteRole : 'USER';
 
       if (!departmentId) {
-        departmentId = isAdminEmail
-          ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
-          : await getDefaultDepartmentId();
+        departmentId = await resolveDepartmentByEmailDomain(email);
+      }
+
+      if (!departmentId) {
+        // 소속을 특정할 수 없으면 계정을 만들지 않는다.
+        // 임의의 부서에 넣으면 타 기관 자료에 접근하게 된다.
+        await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+        return NextResponse.json<ApiResponse<null>>(
+          {
+            ok: false,
+            error: {
+              message:
+                '소속 기관을 확인할 수 없습니다. 관리자에게 받은 초대 링크로 가입해주세요.',
+            },
+          },
+          { status: 403 }
+        );
       }
 
       await createUserRecord(authUserId, email, fullName, role, departmentId);

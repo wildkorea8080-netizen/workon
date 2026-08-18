@@ -119,6 +119,13 @@ src/
 | 0007~0011 | impersonation, is_active, 시스템 API 키, 공지, 로그 |
 | 0012 | `usage_logs.organization_id` 자동 채움 트리거 |
 | 0013 | `agents.enabled_connectors` (에이전트별 외부 도구 설정) |
+| 0014 | `departments.parent_id` (부서 계층) + 기관 단위 유일성 + `organization_id` NOT NULL |
+
+**0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
+기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
+부서를 만들거나 찾을 때 **반드시 `organization_id`로 한정**하세요. 이름만으로
+조회하면 타 기관의 동명 부서('총무과')가 잡혀 크로스 테넌트 접근이 생깁니다.
+하위 부서 전체가 필요하면 `department_descendants(uuid)` RPC를 쓰세요.
 
 **0013에 대한 주의**: `/api/chat`이 `agents.enabled_connectors`를 select 하므로
 **코드 배포 전에 반드시 이 마이그레이션을 적용**해야 합니다. 컬럼이 없으면
@@ -250,6 +257,11 @@ MAIL_FROM=
 > 모두 해결된 상태였습니다 (문서만 갱신되지 않았음). 아래가 현재 실제 상태입니다.
 
 ### 🔴 구조적 위험
+
+0. **부서를 '추측해서' 배정하지 말 것**
+   소속을 알 수 없을 때 임의의 부서(예: 가장 오래된 부서)를 배정하면 타 기관
+   자료에 접근하게 됩니다. 실제로 `signup`·`chat`·`bulk-register` 세 곳에
+   있었고 2026-08-18에 제거했습니다. 소속을 특정할 수 없으면 **거부**하세요.
 
 1. **RLS 미사용 — 테넌트 격리가 애플리케이션 코드에만 의존**
    마이그레이션 어디에도 `ROW LEVEL SECURITY` 설정이 없습니다.

@@ -66,24 +66,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!departmentId) {
-      // 마지막 수단: 첫 번째 부서 자동 배정
-      const { data: firstDept } = await supabaseAdmin
-        .from('departments')
-        .select('id')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single();
-      if (firstDept?.id) {
-        departmentId = firstDept.id;
-        await supabaseAdmin
-          .from('users')
-          .update({ department_id: firstDept.id })
-          .eq('id', session.user.id);
-      }
-    }
-
-    if (!departmentId) {
-      return jsonError('부서 정보를 찾을 수 없습니다. 관리자에게 문의하세요.', 403);
+      // 예전에는 여기서 "전체에서 가장 오래된 부서"를 자동 배정하고 users에
+      // 영구 저장했다. 그 부서는 다른 기관 소속일 수 있어, 부서 없는 사용자가
+      // 타 기관 자료에 접근하게 되는 경로였다. 추측하지 말고 거부한다.
+      return jsonError('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
     }
 
     // 기관 상태 + 월 토큰 한도 확인

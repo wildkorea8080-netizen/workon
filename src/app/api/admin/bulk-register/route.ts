@@ -72,45 +72,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 관리자 부서 정보 조회 (신규 부서 생성 시 상위 부서명 참조용)
+    // 관리자가 속한 기관. 모든 부서 조회·생성을 이 기관으로 한정한다.
     const { data: adminDept } = await supabaseAdmin
       .from('departments')
-      .select('name')
+      .select('name, organization_id')
       .eq('id', adminDeptId)
       .single();
+
+    const organizationId = adminDept?.organization_id;
+    if (!organizationId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: { message: '관리자 부서가 기관에 연결되어 있지 않습니다. 슈퍼관리자에게 문의하세요.' },
+        },
+        { status: 409 }
+      );
+    }
 
     // 부서 캐시 (같은 이름 중복 조회 방지)
     const deptCache = new Map<string, string>();
 
-    async function findOrCreateDept(deptName: string): Promise<string> {
-      if (deptCache.has(deptName)) return deptCache.get(deptName)!;
+    function makeSlug(name: string) {
+      return (
+        name
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^a-z0-9가-힣-]/g, '') +
+        '-' +
+        Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 6)
+      );
+    }
+
+    /**
+     * 부서를 찾거나 만든다.
+     *
+     * 조회를 반드시 organization_id로 한정한다. 예전에는 이름만으로 조회해
+     * 다른 기관의 동명 부서('총무과')가 잡혔고, 그 결과 이 기관 직원이 타 기관
+     * 부서에 배정돼 타 기관 자료에 접근할 수 있었다.
+     */
+    async function findOrCreateDept(deptName: string, parentName?: string): Promise<string> {
+      const name = deptName.trim();
+      if (deptCache.has(name)) return deptCache.get(name)!;
 
       const { data: existing } = await supabaseAdmin
         .from('departments')
         .select('id')
-        .eq('name', deptName.trim())
+        .eq('organization_id', organizationId)
+        .eq('name', name)
         .maybeSingle();
 
       if (existing) {
-        deptCache.set(deptName, existing.id);
+        deptCache.set(name, existing.id);
         return existing.id;
       }
 
-      // 없으면 새 부서 생성
-      const slug = deptName.trim()
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^a-z0-9가-힣-]/g, '')
-        + '-' + Date.now();
+      // 상위 부서가 지정돼 있으면 먼저 만들어 계층을 잇는다.
+      // 자기 자신을 상위로 지정한 행은 무시한다.
+      let parentId: string | null = null;
+      const parent = parentName?.trim();
+      if (parent && parent !== name) {
+        parentId = await findOrCreateDept(parent);
+      }
 
       const { data: newDept, error } = await supabaseAdmin
         .from('departments')
-        .insert({ name: deptName.trim(), slug, description: `${adminDept?.name ?? ''} 산하 부서` })
+        .insert({
+          name,
+          slug: makeSlug(name),
+          organization_id: organizationId,
+          parent_id: parentId,
+          description: parent ? `${parent} 산하 부서` : `${adminDept?.name ?? ''} 산하 부서`,
+        })
         .select('id')
         .single();
 
-      if (error || !newDept) throw new Error(`부서 생성 실패: ${deptName}`);
-      deptCache.set(deptName, newDept.id);
+      if (error || !newDept) throw new Error(`부서 생성 실패: ${name}`);
+      deptCache.set(name, newDept.id);
       return newDept.id;
     }
 
@@ -133,7 +172,7 @@ export async function POST(request: NextRequest) {
       const tempPassword = generateTempPassword();
 
       try {
-        const deptId = await findOrCreateDept(row.부서명.trim());
+        const deptId = await findOrCreateDept(row.부서명, row.상위부서명);
 
         // 이미 존재하는 이메일 확인
         const { data: existingUser } = await supabaseAdmin
