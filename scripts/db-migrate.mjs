@@ -87,7 +87,7 @@ try {
   console.error(`\n접속 실패: ${err.message}`);
 
   // Direct connection은 IPv6다. 국내 IPv4 전용 환경에서 흔히 여기서 막힌다.
-  if (code === 'ENETUNREACH' || code === 'EHOSTUNREACH' || code === 'ENOTFOUND') {
+  if (['ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND', 'ENOENT', 'EAI_AGAIN'].includes(code)) {
     console.error(`
   Direct connection은 IPv6로 접속합니다. IPv4만 되는 환경이면 닿지 않습니다.
   대시보드에서 Connection Method를 'Session pooler'로 바꿔 URI를 다시 복사하세요.
