@@ -15,8 +15,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .eq('organization_id', params.id)
     .eq('is_active', true);
 
-  const anthropic = (keys ?? []).find(k => k.provider === 'anthropic');
-  const voyage    = (keys ?? []).find(k => k.provider === 'voyage');
+  const anthropic = (keys ?? []).find((k: { provider: string; [x: string]: any }) => k.provider === 'anthropic');
+  const voyage    = (keys ?? []).find((k: { provider: string; [x: string]: any }) => k.provider === 'voyage');
 
   return NextResponse.json({
     ok: true,

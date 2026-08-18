@@ -225,7 +225,16 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
 
 // ─── 새 계약 패널 ─────────────────────────────────────────
 function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: () => void; onCreated: () => void }) {
-  const [form, setForm] = useState({
+  // PLANS가 as const라 명시적 타입 없이는 monthlyFee가 리터럴 100000으로 좁혀져
+  // 다른 플랜의 요금을 대입할 수 없다
+  const [form, setForm] = useState<{
+    orgId: string;
+    plan: string;
+    startDate: string;
+    endDate: string;
+    notes: string;
+    monthlyFee: number;
+  }>({
     orgId: '', plan: 'basic',
     startDate: new Date().toISOString().slice(0, 10), endDate: '', notes: '',
     monthlyFee: PLANS.basic.monthlyFee,

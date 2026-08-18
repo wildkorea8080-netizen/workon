@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,14 +84,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       const { data: userRows } = await supabaseAdmin
         .from('users').select('id, full_name, email').in('id', topUserIds);
       topUsers = topUserIds.map(id => {
-        const u = (userRows ?? []).find(r => r.id === id);
+        const u = (userRows ?? []).find((r: { id: string; full_name?: string; email?: string }) => r.id === id);
         return { userId: id, name: u?.full_name || u?.email || id.slice(0, 8), tokens: userTokenMap.get(id) ?? 0 };
       });
     }
 
     // 예상 비용: input $3/M, output $15/M
     const costUsd = parseFloat(
-      ((totalInputTokens / 1_000_000) * 3 + (totalOutputTokens / 1_000_000) * 15).toFixed(4)
+      estimateCostUsd({ input_tokens: totalInputTokens, output_tokens: totalOutputTokens }).toFixed(4)
     );
 
     return NextResponse.json({

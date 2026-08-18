@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
           const oid = l.organization_id; if (!oid) continue;
           usageMap.set(oid, (usageMap.get(oid) ?? 0) + ((l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0)));
         }
-        return (orgs ?? []).filter(o => o.monthly_token_limit && (usageMap.get(o.id) ?? 0) >= o.monthly_token_limit).length;
+        return (orgs ?? []).filter((o: { id: string; monthly_token_limit?: number }) => o.monthly_token_limit && (usageMap.get(o.id) ?? 0) >= o.monthly_token_limit).length;
       })(),
       supabaseAdmin.from('organizations').select('id, name, plan, status, created_at').order('created_at', { ascending: false }).limit(5),
       supabaseAdmin.from('system_logs').select('level, message, created_at').in('level', ['error', 'critical']).order('created_at', { ascending: false }).limit(5),
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
       monthOutput += (l.details?.output_tokens ?? 0);
     }
     const monthTokens     = monthInput + monthOutput;
-    const estimatedCostUsd = parseFloat(((monthInput / 1_000_000) * 3 + (monthOutput / 1_000_000) * 15).toFixed(4));
+    const estimatedCostUsd = estimateCostUsd({ input_tokens: monthInput, output_tokens: monthOutput });
 
     // ── 매출 집계 ──────────────────────────────────────
     const thisMonthRevenue = (revenueThis.data ?? []).reduce((s: number, c: any) => s + Number(c.price_per_month ?? 0), 0);

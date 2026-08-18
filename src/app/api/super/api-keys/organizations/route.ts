@@ -30,9 +30,9 @@ export async function GET(request: NextRequest) {
     usageCountMap.set(l.organization_id, (usageCountMap.get(l.organization_id) ?? 0) + 1);
   }
 
-  const result = (orgs ?? []).map(org => {
-    const anthropicKey = (allKeys ?? []).find(k => k.organization_id === org.id && k.provider === 'anthropic');
-    const voyageKey    = (allKeys ?? []).find(k => k.organization_id === org.id && k.provider === 'voyage');
+  const result = (orgs ?? []).map((org: { id: string; [k: string]: any }) => {
+    const anthropicKey = (allKeys ?? []).find((k: { organization_id: string; provider: string; updated_at?: string }) => k.organization_id === org.id && k.provider === 'anthropic');
+    const voyageKey    = (allKeys ?? []).find((k: { organization_id: string; provider: string; updated_at?: string }) => k.organization_id === org.id && k.provider === 'voyage');
     const hasOwnKey    = !!(anthropicKey || voyageKey);
     const lastUpdated  = [anthropicKey?.updated_at, voyageKey?.updated_at]
       .filter(Boolean).sort().reverse()[0] ?? null;

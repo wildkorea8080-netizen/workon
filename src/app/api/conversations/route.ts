@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 각 대화의 첫 번째 사용자 메시지를 미리보기로 추가
-    const conversationIds = (conversations || []).map((c) => c.id);
+    const conversationIds = (conversations || []).map((c: { id: string }) => c.id);
     let firstMessages: Record<string, string> = {};
 
     if (conversationIds.length > 0) {
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const enriched = (conversations || []).map((c) => ({
+    const enriched = (conversations || []).map((c: any) => ({
       ...c,
       first_message: firstMessages[c.id] ?? null,
     }));

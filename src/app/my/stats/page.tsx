@@ -207,8 +207,8 @@ export default function MyStatsPage() {
                   axisLine={false}
                 />
                 <Tooltip
-                  formatter={(v: number) => [`${v}건`, '대화 수']}
-                  labelFormatter={(l: string) => formatDateFull(l)}
+                  formatter={(v) => [`${v ?? 0}건`, '대화 수']}
+                  labelFormatter={(l) => formatDateFull(String(l ?? ''))}
                   contentStyle={{
                     fontSize: 12,
                     borderRadius: 8,

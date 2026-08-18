@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
+import { sendTempPasswordEmail, isMailConfigured } from '@/lib/mailer';
+import { APP_URL } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +24,8 @@ export interface RegisterResult {
   success: boolean;
   error?: string;
   tempPassword?: string;
+  /** 임시 비밀번호 안내 메일 발송 여부 (메일 미설정 시 false) */
+  emailSent?: boolean;
 }
 
 function generateTempPassword(): string {
@@ -175,9 +179,18 @@ export async function POST(request: NextRequest) {
           throw new Error(insertError.message);
         }
 
+        // 임시 비밀번호 안내 메일 (미설정이면 조용히 건너뛴다 — 등록 자체는 성공)
+        const mail = await sendTempPasswordEmail({
+          to: email,
+          fullName: row.직원이름.trim(),
+          tempPassword,
+          loginUrl: `${APP_URL}/login`,
+        });
+
         results.push({
           row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
           부서명: row.부서명.trim(), success: true, tempPassword,
+          emailSent: mail.sent,
         });
       } catch (err) {
         results.push({
@@ -195,7 +208,13 @@ export async function POST(request: NextRequest) {
       ok: true,
       data: {
         results,
-        summary: { total: rows.length, success: successCount, fail: failCount },
+        summary: {
+          total: rows.length,
+          success: successCount,
+          fail: failCount,
+          // 메일 미설정이면 관리자가 임시 비밀번호를 직접 전달해야 한다
+          mailConfigured: isMailConfigured(),
+        },
       },
     });
   } catch (error) {

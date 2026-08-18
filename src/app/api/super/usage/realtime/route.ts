@@ -20,10 +20,10 @@ export async function GET(request: NextRequest) {
 
   const rows = hourLogs ?? [];
   const activeNow = new Set(
-    rows.filter(r => new Date(r.created_at) >= fiveMinAgo && r.user_id).map(r => r.user_id)
+    rows.filter((r: { created_at: string; user_id?: string }) => new Date(r.created_at) >= fiveMinAgo && r.user_id).map((r: { user_id?: string }) => r.user_id)
   ).size;
 
-  const lastHourTokens = rows.reduce((s, r) =>
+  const lastHourTokens = rows.reduce((s: number, r: { details?: any }) =>
     s + ((r.details?.input_tokens ?? 0) + (r.details?.output_tokens ?? 0)), 0);
 
   return NextResponse.json({

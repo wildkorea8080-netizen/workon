@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const reports = (data || []).map((row) => ({
+    const reports = (data || []).map((row: any) => ({
       id: row.id,
       template_name: (row.details as any)?.template_name ?? '알 수 없는 템플릿',
       report_content: (row.details as any)?.report_content ?? '',

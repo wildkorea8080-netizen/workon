@@ -56,10 +56,10 @@ export async function GET(request: NextRequest) {
       .from('contracts').select('price_per_month, expires_at').eq('status', 'active');
 
     const totalActive = (allActive ?? []).length;
-    const expiringIn30 = (allActive ?? []).filter(c =>
+    const expiringIn30 = (allActive ?? []).filter((c: { expires_at?: string }) =>
       c.expires_at && Math.ceil((new Date(c.expires_at).getTime() - now) / 86400000) <= 30 && new Date(c.expires_at).getTime() > now
     ).length;
-    const totalMonthlyRevenue = (allActive ?? []).reduce((s, c) => s + Number(c.price_per_month ?? 0), 0);
+    const totalMonthlyRevenue = (allActive ?? []).reduce((s: number, c: { price_per_month?: number }) => s + Number(c.price_per_month ?? 0), 0);
 
     return NextResponse.json({
       ok: true,

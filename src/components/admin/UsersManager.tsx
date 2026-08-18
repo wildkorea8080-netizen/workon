@@ -34,7 +34,7 @@ export default function UsersManager() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'USER' | 'ADMIN'>('USER');
   const [inviting, setInviting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ url: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ url: string; emailSent: boolean } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -68,7 +68,7 @@ export default function UsersManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setInviteResult({ url: result.data.inviteUrl });
+      setInviteResult({ url: result.data.inviteUrl, emailSent: Boolean(result.data.emailSent) });
       await loadData();
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : '초대 발송에 실패했습니다.');
@@ -267,8 +267,26 @@ export default function UsersManager() {
                 <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
-                <p className="text-sm text-green-700 font-medium">초대 링크가 생성됐습니다!</p>
+                <p className="text-sm text-green-700 font-medium">
+                  {inviteResult.emailSent
+                    ? `${inviteEmail}로 초대 메일을 보냈습니다!`
+                    : '초대 링크가 생성됐습니다!'}
+                </p>
               </div>
+
+              {!inviteResult.emailSent && (
+                <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    메일 발송이 설정되지 않아 자동 발송되지 않았습니다. 아래 링크를 직접 전달해주세요.
+                    <br />
+                    <span className="text-amber-700">자동 발송하려면 <code className="font-mono">RESEND_API_KEY</code>와 <code className="font-mono">MAIL_FROM</code> 환경변수를 설정하세요.</span>
+                  </p>
+                </div>
+              )}
+
               <div>
                 <p className="text-xs text-slate-500 mb-2 font-medium">초대 링크 (7일 유효)</p>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">

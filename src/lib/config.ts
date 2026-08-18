@@ -26,3 +26,12 @@ export const NEXTAUTH_SECRET = getEnv('NEXTAUTH_SECRET');
 export const VOYAGE_API_KEY = getEnv('VOYAGE_API_KEY');
 export const ANTHROPIC_API_KEY = getEnv('ANTHROPIC_API_KEY');
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? 'WORKON';
+
+// 메일 발송 (선택) — 미설정이면 초대 링크를 관리자가 직접 전달하는 방식으로 폴백한다
+export const RESEND_API_KEY = getEnv('RESEND_API_KEY', false);
+export const MAIL_FROM = process.env.MAIL_FROM ?? '';
+export const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+
+// API 원가를 원화로 환산할 때 쓰는 고정 환율. 변동 반영이 필요하면 환경변수로 조정한다.
+export const USD_KRW_RATE = Number(process.env.USD_KRW_RATE ?? '1350');

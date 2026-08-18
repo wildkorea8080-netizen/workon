@@ -88,9 +88,16 @@ export default function ChatInterface({
     if (!inputMessage.trim() || isLoading) return;
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: inputMessage.trim() };
+    const assistantId = String(Date.now() + 1);
+
     setMessages(prev => [...prev, userMsg]);
     setInputMessage('');
     setIsLoading(true);
+
+    const patchAssistant = (patch: Partial<Message>) =>
+      setMessages(prev =>
+        prev.map(m => (m.id === assistantId ? { ...m, ...patch } : m))
+      );
 
     try {
       const res = await fetch('/api/chat', {
@@ -102,32 +109,96 @@ export default function ChatInterface({
           conversation_id: conversationId,
         }),
       });
-      const result = await res.json();
 
-      if (!result.ok) {
+      // 스트림 시작 전 실패는 JSON으로 돌아온다
+      if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
+        const result = await res.json().catch(() => null);
         setMessages(prev => [...prev, {
-          id: String(Date.now() + 1), role: 'assistant', content: '',
-          error: result.error?.message || '오류가 발생했습니다.',
+          id: assistantId, role: 'assistant', content: '',
+          error: result?.error?.message || '오류가 발생했습니다.',
         }]);
         return;
       }
 
-      if (!conversationId && result.data.conversation_id) {
-        onConversationCreated(result.data.conversation_id);
-        prevConvIdRef.current = result.data.conversation_id;
-      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamed = '';
+      let pendingSources: RetrievedChunk[] | undefined;
+      let bubbleShown = false;
 
-      setMessages(prev => [...prev, {
-        id: String(Date.now() + 1),
-        role: 'assistant',
-        content: result.data.response,
-        sources: result.data.chunks,
-      }]);
+      // 첫 텍스트가 도착하는 순간 말풍선을 만든다.
+      // 그 전까지는 로딩 인디케이터가 계속 보인다.
+      const showBubble = () => {
+        bubbleShown = true;
+        setIsLoading(false);
+        setMessages(prev => [
+          ...prev,
+          { id: assistantId, role: 'assistant', content: streamed, sources: pendingSources },
+        ]);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE 이벤트는 빈 줄로 구분된다. 마지막 조각은 불완전할 수 있어 남겨둔다.
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+
+        for (const raw of events) {
+          const eventLine = raw.split('\n').find(l => l.startsWith('event:'));
+          const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
+          if (!eventLine || !dataLine) continue;
+
+          const name = eventLine.slice(6).trim();
+          let payload: any;
+          try {
+            payload = JSON.parse(dataLine.slice(5).trim());
+          } catch {
+            continue;
+          }
+
+          if (name === 'meta') {
+            if (!conversationId && payload.conversation_id) {
+              onConversationCreated(payload.conversation_id);
+              prevConvIdRef.current = payload.conversation_id;
+            }
+            if (payload.chunks?.length) {
+              pendingSources = payload.chunks;
+              if (bubbleShown) patchAssistant({ sources: payload.chunks });
+            }
+          } else if (name === 'delta') {
+            streamed += payload.text;
+            if (!bubbleShown) showBubble();
+            else patchAssistant({ content: streamed });
+          } else if (name === 'error') {
+            if (!bubbleShown) {
+              setIsLoading(false);
+              setMessages(prev => [...prev, {
+                id: assistantId, role: 'assistant', content: streamed,
+                error: payload.message || '오류가 발생했습니다.',
+              }]);
+              bubbleShown = true;
+            } else {
+              patchAssistant({ error: payload.message || '오류가 발생했습니다.' });
+            }
+          }
+        }
+      }
     } catch {
-      setMessages(prev => [...prev, {
-        id: String(Date.now() + 1), role: 'assistant', content: '',
-        error: '네트워크 오류가 발생했습니다.',
-      }]);
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === assistantId);
+        const errored: Message = {
+          id: assistantId, role: 'assistant', content: '',
+          error: '네트워크 오류가 발생했습니다.',
+        };
+        return exists
+          ? prev.map(m => (m.id === assistantId ? { ...m, error: errored.error } : m))
+          : [...prev, errored];
+      });
     } finally {
       setIsLoading(false);
     }

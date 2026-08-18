@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,15 @@ export async function GET(request: NextRequest) {
     const { data: orgs } = await supabaseAdmin
       .from('organizations')
       .select('id, name, plan, monthly_token_limit, status');
-    const orgMap = new Map((orgs ?? []).map(o => [o.id, o]));
+    type OrgRow = {
+      id: string;
+      name: string;
+      plan: string;
+      monthly_token_limit: number | null;
+      status: string;
+    };
+    // 명시적 제네릭이 없으면 [키, 값] 배열이 유니온으로 추론돼 Map 값 타입이 {}가 된다
+    const orgMap = new Map<string, OrgRow>((orgs ?? []).map((o: OrgRow) => [o.id, o]));
 
     // usage_logs 조회
     let query = supabaseAdmin
@@ -122,7 +131,7 @@ export async function GET(request: NextRequest) {
           conversations: u.conversations, totalTokens: total,
           inputTokens: u.inputTokens, outputTokens: u.outputTokens,
           activeUsers: u.users.size,
-          estimatedCost: parseFloat(((u.inputTokens / 1_000_000) * 3 + (u.outputTokens / 1_000_000) * 15).toFixed(4)),
+          estimatedCost: estimateCostUsd({ input_tokens: u.inputTokens, output_tokens: u.outputTokens }),
           tokenLimit: limit,
           usagePercent: limit > 0 ? Math.round((total / limit) * 100) : 0,
         };
@@ -130,7 +139,7 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.totalTokens - a.totalTokens);
 
     const estimatedCostUsd = parseFloat(
-      ((totalInput / 1_000_000) * 3 + (totalOutput / 1_000_000) * 15).toFixed(4)
+      estimateCostUsd({ input_tokens: totalInput, output_tokens: totalOutput }).toFixed(4)
     );
 
     return NextResponse.json({

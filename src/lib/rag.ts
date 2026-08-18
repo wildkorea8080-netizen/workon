@@ -53,22 +53,6 @@ export async function retrieveRelevantChunks(
   };
 }
 
-export function formatSourceReferences(chunks: RetrievedChunk[]): string {
-  if (chunks.length === 0) return '참고 자료가 없습니다.';
-
-  const sources = chunks.map((chunk, index) => {
-    const title = chunk.documentTitle || `문서 ${chunk.documentId.slice(0, 8)}`;
-    return `${index + 1}. ${title} (청크 ${chunk.chunkIndex + 1}, 유사도: ${(chunk.similarity * 100).toFixed(1)}%)`;
-  });
-
-  return '참고 자료:\n' + sources.join('\n');
-}
-
-export function assembleResponse(
-  _query: string,
-  chunks: RetrievedChunk[],
-  aiResponse: string
-): string {
-  const sources = formatSourceReferences(chunks);
-  return `${aiResponse}\n\n${sources}`;
-}
+// NOTE: 출처 표기는 응답 텍스트에 덧붙이지 않고 source_references 메타데이터로
+// 전달해 SourceCitation 컴포넌트가 렌더링한다. 텍스트에 덧붙이던 예전 방식은
+// DB에 저장되는 내용과 화면에 보이는 내용이 달라지는 문제가 있었다.

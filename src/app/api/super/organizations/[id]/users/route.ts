@@ -20,8 +20,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     if (!depts?.length) return NextResponse.json({ ok: true, data: [] });
 
-    const deptIds = depts.map(d => d.id);
-    const deptNameMap = Object.fromEntries(depts.map(d => [d.id, d.name]));
+    const deptIds = depts.map((d: { id: string }) => d.id);
+    const deptNameMap = Object.fromEntries(depts.map((d: { id: string; name: string }) => [d.id, d.name]));
 
     let query = supabaseAdmin
       .from('users')
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { data: users, error } = await query;
     if (error) throw error;
 
-    const enriched = (users ?? []).map(u => ({
+    const enriched = (users ?? []).map((u: any) => ({
       ...u,
       department_name: u.department_id ? (deptNameMap[u.department_id] ?? '—') : '—',
     }));
