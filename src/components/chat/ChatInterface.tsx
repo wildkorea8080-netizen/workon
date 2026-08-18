@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 
@@ -52,6 +53,7 @@ export default function ChatInterface({
   onConversationCreated,
   onChangeAgent,
 }: ChatInterfaceProps) {
+  const branding = useBranding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -371,6 +373,9 @@ export default function ChatInterface({
           </button>
         </div>
         <p className="text-xs text-slate-400 mt-2 text-center">Enter로 전송 · Shift+Enter로 줄바꿈</p>
+        {/* AI 고지. senGPT도 명시하고 있고 공공기관 배포에서는 사실상 필수다.
+            생성 결과를 그대로 결재에 올리면 안 된다는 것을 화면이 계속 알려야 한다. */}
+        <p className="text-[11px] text-slate-400 mt-1 text-center px-4">{branding.aiNotice}</p>
       </div>
     </div>
   );

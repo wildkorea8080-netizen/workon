@@ -3,9 +3,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
+import { useBranding } from '@/lib/use-branding';
 
 export default function Header() {
   const { data: session } = useSession();
+  const branding = useBranding();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -26,8 +28,13 @@ export default function Header() {
     <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-[#1C2B4A] flex items-center px-5 gap-4 shadow-md">
       {/* 로고 */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        <span className="text-xl">🏛️</span>
-        <span className="text-white font-bold text-base tracking-tight">AI 업무도우미</span>
+        {branding.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={branding.logoUrl} alt="" className="h-7 max-w-[120px] object-contain" />
+        ) : (
+          <span className="text-xl">🏛️</span>
+        )}
+        <span className="text-white font-bold text-base tracking-tight">{branding.name}</span>
       </div>
 
       <div className="flex-1" />
