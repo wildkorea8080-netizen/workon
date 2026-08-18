@@ -24,3 +24,6 @@ check-ports.js
 create-users.js
 setup-initial-data.mjs
 temp-login-test.mjs
+
+# Claude Code 로컬 설정 (launch.json 등)
+.claude/
