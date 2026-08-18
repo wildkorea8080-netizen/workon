@@ -35,3 +35,8 @@ export const APP_URL =
 
 // API 원가를 원화로 환산할 때 쓰는 고정 환율. 변동 반영이 필요하면 환경변수로 조정한다.
 export const USD_KRW_RATE = Number(process.env.USD_KRW_RATE ?? '1350');
+
+// 국가법령정보 공동활용 OPEN API 사용자 ID (open.law.go.kr에서 발급).
+// 기본값 'test'는 법제처가 열어둔 시험용 계정이라 제한이 있을 수 있으니
+// 운영에서는 자체 ID를 발급받아 설정하세요.
+export const LAW_API_OC = process.env.LAW_API_OC ?? 'test';

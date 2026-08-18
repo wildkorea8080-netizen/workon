@@ -59,6 +59,7 @@ src/
 │   ├── document-processor.ts # PDF/DOCX/TXT 파싱 + 청킹 + 임베딩
 │   ├── embeddings.ts     # Voyage AI 래퍼
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
+│   ├── connectors/       # 공공 데이터 커넥터 (MCP 형식 툴 정의)
 │   ├── forbidden-words.ts # 금지어 DB 조회
 │   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 + 표 복원 (자체 구현)
 │   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
@@ -336,7 +337,21 @@ details: {
 
 ## 외부 도구 연동 규약 (커넥터)
 
-아직 구현된 커넥터는 없습니다. 만들 때 지킬 것:
+구현 위치: `src/lib/connectors/`
+
+| 커넥터 | 상태 | 도구 |
+|---|---|---|
+| 국가법령정보 (법제처) | ✅ | `law_search`, `law_get_articles` |
+| KOSIS / 나라장터 / DART | 미구현 | |
+
+새 커넥터는 `Connector` 인터페이스를 구현하고 `connectors/index.ts`의
+`CONNECTORS` 배열에 추가하면 끝입니다.
+
+**주의: 도구를 정의해도 아직 모델이 호출하지는 않습니다.** `/api/chat`에
+툴 실행 루프(tool_use → 실행 → tool_result)가 없기 때문입니다. 커넥터 계층은
+독립적으로 완성돼 있고 `npm run connector:probe`로 검증할 수 있습니다.
+
+만들 때 지킬 것:
 
 **툴 정의는 MCP 표준 형식으로 작성합니다.** Anthropic tool-use 포맷에 직접
 맞춰 짜면 나중에 다른 프로바이더의 function-calling으로 옮길 때 커넥터를
@@ -347,7 +362,11 @@ details: {
 - 커넥터는 순수 함수여야 함: 입력 → 외부 API 호출 → 구조화된 결과 + 출처 URL
 - 출처(원문 링크)를 반드시 반환할 것. 공공 데이터는 근거 제시가 요구사항입니다.
 
-우선순위가 높은 대상: 국가법령정보, KOSIS, 조달청 나라장터, 금감원 DART.
+**국내 공공 API는 간헐적으로 실패합니다.** 동일 URL이 성공 → HTTP 404 →
+타임아웃을 오가는 것을 실측했습니다. `fetchJson`이 3회까지 재시도하므로
+커넥터에서 직접 `fetch`를 부르지 말고 이 헬퍼를 쓰세요.
+
+남은 대상: KOSIS, 조달청 나라장터, 금감원 DART.
 
 ---
 

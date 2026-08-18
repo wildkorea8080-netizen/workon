@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "hwp:probe": "tsx scripts/hwp-probe.mjs"
+    "hwp:probe": "tsx scripts/hwp-probe.mjs",
+    "connector:probe": "tsx scripts/connector-probe.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",
