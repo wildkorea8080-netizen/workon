@@ -83,7 +83,7 @@ src/
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/employee/stats`, `/api/qna`, `/api/reports/*`, `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
-| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
+| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
 
@@ -474,6 +474,23 @@ details: {
 동작합니다. 접두사가 없으면 `NO_OPENAPI_SERVICE_ERROR`가 납니다.
 (data.go.kr에서 경로 오류는 `NO_OPENAPI_SERVICE_ERROR`, 키 오류는
 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`로 구분됩니다.)
+
+---
+
+## 감사 대응 (공공기관)
+
+공공기관은 감사·정보공개 청구가 들어오면 "특정 기간, 특정 직원의 AI 사용
+내역"을 제출해야 합니다. `/admin/audit` 화면과 `GET /api/admin/audit-logs`가
+이를 담당합니다.
+
+- 조회 범위는 **관리 범위(자기 부서 + 하위)**로 한정. 범위 밖 직원 지정은 403
+- `kind=usage`(사용 내역) / `kind=security`(보안 이벤트)
+- `format=csv`면 기간 전체를 내보냅니다 (화면 페이지가 아니라 전체). 최대 5만 건
+- 시간은 **KST 기준**으로 표기합니다 — 감사 자료는 한국 시간으로 제출합니다
+- 활동 코드는 한국어로 변환합니다 (`chat_message` → `AI 대화`)
+
+**CSV에는 반드시 UTF-8 BOM(`﻿`)을 붙이세요.** 없으면 Excel에서 한글이 깨집니다.
+기존 클라이언트 측 내보내기(`super/logs`, `super/usage`)도 같은 방식입니다.
 
 ---
 
