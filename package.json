@@ -9,7 +9,8 @@
     "lint": "next lint",
     "hwp:probe": "tsx scripts/hwp-probe.mjs",
     "connector:probe": "tsx scripts/connector-probe.mjs",
-    "tool:probe": "tsx scripts/tool-loop-probe.mjs"
+    "tool:probe": "tsx scripts/tool-loop-probe.mjs",
+    "db:check": "tsx scripts/db-check.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",
