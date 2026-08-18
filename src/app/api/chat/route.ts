@@ -73,17 +73,27 @@ export async function POST(request: NextRequest) {
       return jsonError('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
     }
 
-    // 기관 상태 + 월 토큰 한도 확인
+    // 기관 상태 + 사용 한도 확인 (계약 형태에 따라 금액 또는 토큰 기준)
     const limitStatus = await checkTokenLimit(departmentId);
     if (!limitStatus.allowed) {
-      const message =
-        limitStatus.reason === 'org_suspended'
-          ? '기관 이용이 정지되었습니다. 관리자에게 문의하세요.'
-          : `이번 달 사용 한도를 모두 사용했습니다. (${limitStatus.usedTokens.toLocaleString()} / ${limitStatus.limitTokens.toLocaleString()} 토큰) 관리자에게 문의하세요.`;
+      // 담당자가 바로 이해할 수 있는 말로 알린다.
+      // 공공기관 담당자에게 "토큰 소진"은 의미가 통하지 않는다.
+      let message: string;
+      if (limitStatus.reason === 'org_suspended') {
+        message = '기관 이용이 정지되었습니다. 관리자에게 문의하세요.';
+      } else if (limitStatus.reason === 'budget_exhausted') {
+        const used = Math.round(limitStatus.budget?.usedKrw ?? 0).toLocaleString();
+        const total = Math.round(limitStatus.budget?.totalKrw ?? 0).toLocaleString();
+        message = `연간 계약 금액을 모두 사용했습니다. (${used}원 / ${total}원) 계약 담당자에게 문의하세요.`;
+      } else {
+        message = `이번 달 사용 한도를 모두 사용했습니다. (${limitStatus.usedTokens.toLocaleString()} / ${limitStatus.limitTokens.toLocaleString()} 토큰) 관리자에게 문의하세요.`;
+      }
+
       return jsonError(message, 429, {
         reason: limitStatus.reason,
         usedTokens: limitStatus.usedTokens,
         limitTokens: limitStatus.limitTokens,
+        budget: limitStatus.budget,
       });
     }
 

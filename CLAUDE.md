@@ -122,6 +122,7 @@ src/
 | 0014 | `departments.parent_id` (부서 계층) + 기관 단위 유일성 + `organization_id` NOT NULL |
 | 0015 | `department_ancestors` RPC + `search_document_chunks` 상위 부서 확장 |
 | 0016 | `agents`·`documents`에 `visibility` + `organization_id` (기관 전체 공개가 기본) |
+| 0017 | `contracts.billing_type` 연간 정액 계약 + `organization_spend_krw` RPC |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -404,13 +405,19 @@ details: {
 
 환율은 `config.ts`의 `USD_KRW_RATE` (기본 1350, `USD_KRW_RATE` 환경변수로 조정).
 
-### 한도는 아직 토큰 기준입니다
+### 한도는 계약 형태에 따라 갈립니다
 
-`organizations.monthly_token_limit`과 계약이 토큰 수 기준입니다.
-모델이 하나뿐이라 현재는 문제가 없지만, **단가가 다른 모델을 추가하면
-"토큰 100만"의 의미가 모델마다 달라집니다.** 그 시점에 `usage-limit.ts`를
-비용 기준(`cost_krw` 합산)으로 바꿔야 하며, 이미 체결된 계약은 재협상 대상입니다.
-비용 데이터는 지금부터 쌓이므로 전환 자체는 계산식 교체로 끝납니다.
+| `contracts.billing_type` | 판정 기준 | 대상 |
+|---|---|---|
+| `pay_as_you_go` **(기본)** | 이번 달 **토큰** 합산 vs `organizations.monthly_token_limit` | 기존 민간 계약 |
+| `annual_fixed` | 계약 기간 누적 **금액** vs `contracts.annual_budget_krw` | 공공기관 |
+
+공공기관 예산은 전년도에 확정 금액으로 편성되므로 종량제와 맞지 않습니다.
+연간 정액 계약은 `organization_spend_krw` RPC로 `usage_logs.details.cost_krw`를
+합산해 판정합니다. `budget_alert_percent`(기본 80)를 넘으면 경고, 100%면 차단입니다.
+
+토큰 기준은 모델이 늘면 "토큰 100만"의 의미가 모델마다 달라지는 약점이 있습니다.
+금액 기준이 그 문제를 함께 해결하므로, 신규 계약은 `annual_fixed`를 권합니다.
 
 ---
 

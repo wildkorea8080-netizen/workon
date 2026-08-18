@@ -234,10 +234,17 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
     endDate: string;
     notes: string;
     monthlyFee: number;
+    billingType: 'pay_as_you_go' | 'annual_fixed';
+    annualBudgetKrw: number;
+    budgetAlertPercent: number;
   }>({
     orgId: '', plan: 'basic',
     startDate: new Date().toISOString().slice(0, 10), endDate: '', notes: '',
     monthlyFee: PLANS.basic.monthlyFee,
+    // 공공기관은 확정 금액으로 예산을 편성한다. 기본은 기존 종량제 유지.
+    billingType: 'pay_as_you_go',
+    annualBudgetKrw: 0,
+    budgetAlertPercent: 80,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
@@ -254,7 +261,13 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
     setSaving(true); setError(null);
     const res = await fetch('/api/super/contracts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgId: form.orgId, planType: form.plan, monthlyFee: form.monthlyFee, startDate: form.startDate, endDate: form.endDate || null, notes: form.notes }),
+      body: JSON.stringify({
+        orgId: form.orgId, planType: form.plan, monthlyFee: form.monthlyFee,
+        startDate: form.startDate, endDate: form.endDate || null, notes: form.notes,
+        billingType: form.billingType,
+        annualBudgetKrw: form.annualBudgetKrw,
+        budgetAlertPercent: form.budgetAlertPercent,
+      }),
     });
     const d = await res.json();
     if (d.ok) onCreated(); else setError(d.error);
@@ -294,10 +307,57 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
               </div>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">월 이용료 (원)</label>
-              <input type="number" value={form.monthlyFee} onChange={e => set('monthlyFee', Number(e.target.value))} min={0}
-                className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
+              <label className="block text-xs font-semibold text-slate-400 mb-2">과금 형태</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ['pay_as_you_go', '종량제', '쓴 만큼 후불'],
+                  ['annual_fixed', '연간 정액', '확정 금액 (공공)'],
+                ] as ['pay_as_you_go' | 'annual_fixed', string, string][]).map(([value, label, hint]) => (
+                  <button key={value} type="button" onClick={() => set('billingType', value)}
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-colors text-center ${
+                      form.billingType === value ? 'bg-[#7C3AED] text-white' : 'bg-[#0F172A] text-slate-400 border border-slate-700'
+                    }`}>
+                    {label}<br/><span className="font-normal text-[10px] opacity-70">{hint}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                공공기관은 예산을 확정 금액으로 편성합니다. 연간 정액은 계약 기간 누적 사용액이
+                계약 금액에 도달하면 차단합니다.
+              </p>
             </div>
+
+            {form.billingType === 'annual_fixed' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                    연간 계약 금액 (원) <span className="text-red-400">*</span>
+                  </label>
+                  <input type="number" value={form.annualBudgetKrw}
+                    onChange={e => set('annualBudgetKrw', Number(e.target.value))} min={0} step={1000000}
+                    className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
+                  {form.annualBudgetKrw > 0 && (
+                    <p className="text-[11px] text-slate-500 mt-1.5">
+                      {(form.annualBudgetKrw / 10000).toLocaleString()}만원 · 월 환산 약{' '}
+                      {Math.round(form.annualBudgetKrw / 12 / 10000).toLocaleString()}만원
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">예산 경고 기준 (%)</label>
+                  <input type="number" value={form.budgetAlertPercent}
+                    onChange={e => set('budgetAlertPercent', Number(e.target.value))} min={1} max={100}
+                    className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
+                  <p className="text-[11px] text-slate-500 mt-1.5">소진율이 이 값을 넘으면 경고합니다. 차단은 100%입니다.</p>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5">월 이용료 (원)</label>
+                <input type="number" value={form.monthlyFee} onChange={e => set('monthlyFee', Number(e.target.value))} min={0}
+                  className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1.5">계약 시작일</label>
