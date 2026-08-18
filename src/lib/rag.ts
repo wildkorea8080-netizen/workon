@@ -2,7 +2,23 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getEmbeddings } from '@/lib/embeddings';
 import type { RetrievedChunk, RetrievalResult } from '@/lib/db';
 
-export const MATCH_THRESHOLD = 0.72;
+/**
+ * 코사인 유사도 하한.
+ *
+ * 0.72였는데 그 값으로는 **어떤 문서도 통과한 적이 없다.** voyage-3의 한국어
+ * 유사도 분포를 실측한 결과다(2026-08-19, 공문 HWP 1건 기준):
+ *
+ *   관련 질문   0.41 ~ 0.49   (참여자격 / 반입가능물량 / 자격 요건)
+ *   무관 질문   0.02 ~ 0.11   (요리 / 코딩 / 날씨 / 연차)
+ *
+ * 무관 질문조차 0.11을 넘지 못하므로 0.25면 약 2배 여유를 두고 갈린다.
+ * 상한을 높게 잡는 것보다 top-k(MATCH_COUNT)가 순위로 걸러내게 하는 편이
+ * 안전하다 — 임계값은 "아무것도 관련 없을 때 빈 결과를 주기 위한 바닥"이다.
+ *
+ * 문서가 늘면 분포가 달라질 수 있다. 바꿀 때는 감이 아니라
+ * 관련/무관 질문을 각각 몇 개 측정해 분리 구간을 확인하고 정할 것.
+ */
+export const MATCH_THRESHOLD = 0.25;
 export const MATCH_COUNT = 5;
 
 /**

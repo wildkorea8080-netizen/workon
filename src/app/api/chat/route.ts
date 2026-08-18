@@ -204,14 +204,44 @@ export async function POST(request: NextRequest) {
       chunks = [];
     }
 
-    // Claude 프롬프트 조립 (RAG 문서가 있을 때만 참고 자료 추가)
+    // 이 비서에 연결된 문서가 있는지. 검색 결과가 비었을 때만 확인하면 된다.
+    // "문서가 아예 없다"와 "문서는 있는데 관련된 대목을 못 찾았다"는 다른 상황이고,
+    // 모델에게 해야 할 말도 다르다.
+    let hasDocuments = false;
+    if (chunks.length === 0) {
+      const { count } = await supabaseAdmin
+        .from('documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('agent_id', agent_id);
+      hasDocuments = (count ?? 0) > 0;
+    }
+
+    // Claude 프롬프트 조립
     const systemMessage = agent.system_prompt || '당신은 도움이 되는 AI 어시스턴트입니다.';
     const contextText = chunks
       .map((chunk) => `[참고 자료: ${chunk.documentTitle || '문서'}]\n${chunk.text}`)
       .join('\n\n');
-    const fullSystemPrompt = contextText
-      ? `${systemMessage}\n\n참고 자료:\n${contextText}`
-      : systemMessage;
+
+    let fullSystemPrompt: string;
+    if (contextText) {
+      fullSystemPrompt = `${systemMessage}\n\n참고 자료:\n${contextText}`;
+    } else if (hasDocuments) {
+      // 연결된 문서는 있는데 이번 질문과 맞는 대목을 못 찾은 경우.
+      // 이걸 알려주지 않으면 모델이 일반 지식으로 그럴듯하게 답한다. 공공기관에서는
+      // 근거 없는 답이 근거 있는 답처럼 보이는 것이 가장 위험하다.
+      fullSystemPrompt = [
+        systemMessage,
+        '',
+        '[문서 검색 결과 없음]',
+        '이 비서에 연결된 문서에서 이번 질문과 관련된 내용을 찾지 못했습니다.',
+        '내부 자료에 근거가 없다는 사실을 먼저 밝히고 답하세요.',
+        '일반적인 설명을 덧붙일 수는 있으나, 그것이 이 기관의 자료에서 나온 것처럼',
+        '말해서는 안 됩니다. 구체적인 수치·자격요건·기한은 지어내지 말고',
+        '어디서 확인해야 하는지 안내하세요.',
+      ].join('\n');
+    } else {
+      fullSystemPrompt = systemMessage;
+    }
 
     const claudeMessages: ClaudeMessage[] = [...history, { role: 'user', content: message }];
 

@@ -173,7 +173,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 ```
 질문 → 기관 상태·월 토큰 한도 확인 (usage-limit.ts, 초과 시 429)
 → 직전 대화 이력 최대 20개 조회 (멀티턴 문맥)
-→ getEmbeddings → search_agent_chunks RPC (threshold 0.72, top-5)
+→ getEmbeddings → search_agent_chunks RPC (threshold 0.25, top-5)
 → Claude 스트리밍 호출 → SSE로 즉시 전달
 → 스트림 종료 후 messages + usage_logs 저장
 ```
@@ -197,6 +197,30 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 ```
 질문 → getEmbeddings → supabase.rpc('search_document_chunks') → Claude 응답 생성
 ```
+
+**유사도 임계값은 실측으로 정합니다.** 한때 0.72였는데 그 값으로는 **어떤 문서도
+통과한 적이 없었습니다.** voyage-3의 한국어 유사도 분포를 실측한 결과
+(2026-08-19, 공문 HWP 1건):
+
+| 구분 | 유사도 |
+|---|---|
+| 관련 질문 | 0.41 ~ 0.49 |
+| 무관 질문 (요리·코딩·날씨) | 0.02 ~ 0.11 |
+
+임계값은 "관련도 하한"이 아니라 **"아무것도 관련 없을 때 빈 결과를 주기 위한
+바닥"**입니다. 순위 선별은 top-k(`MATCH_COUNT`)가 합니다. 바꿀 때는 감이 아니라
+관련/무관 질문을 각각 몇 개 측정해 분리 구간을 확인하세요 (`src/lib/rag.ts`).
+
+**검색 결과가 없으면 모델에게 그 사실을 알려야 합니다.** 예전에는 빈 결과일 때
+프롬프트에 아무것도 넣지 않아서, 모델이 문서가 있다는 것조차 모른 채 일반
+지식으로 그럴듯하게 답했습니다. 공공기관에서는 근거 없는 답이 근거 있는 답처럼
+보이는 것이 가장 위험합니다. `/api/chat`은 세 경우를 구분합니다:
+
+| 상황 | 프롬프트 |
+|---|---|
+| 청크 찾음 | 참고 자료로 붙임 |
+| 문서는 있는데 못 찾음 | `[문서 검색 결과 없음]` + 근거 없음을 밝히도록 지시 |
+| 연결된 문서 자체가 없음 | 비서 프롬프트만 |
 
 **RAG가 두 갈래인 이유**: `/api/chat`은 에이전트에 연결된 문서만(`search_agent_chunks`),
 `/api/qna`는 부서 전체 문서(`search_document_chunks`)를 검색합니다. 의도된 분리입니다.
