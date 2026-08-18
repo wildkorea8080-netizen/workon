@@ -1,10 +1,12 @@
 -- =============================================================
--- 마이그레이션 0012~0016 적용 상태 점검
+-- 마이그레이션 0012~0017 적용 상태 점검
 --
 -- Supabase SQL Editor에 그대로 붙여넣고 Run 하세요.
 -- 스키마를 바꾸지 않는 읽기 전용 쿼리라 몇 번 실행해도 안전합니다.
 --
 -- '상태' 열이 전부 OK여야 정상입니다.
+-- '없음'이 있으면 해당 마이그레이션 파일을 **전체** 복사해 실행하세요.
+-- (파일 끝의 확인 쿼리만 실행하면 컬럼이 없다고 나옵니다)
 -- =============================================================
 
 WITH checks AS (
@@ -89,6 +91,30 @@ WITH checks AS (
   SELECT 14, '0016', 'documents 기관 자동 채움 트리거',
          CASE WHEN EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_documents_fill_org')
            THEN 'OK' ELSE '없음' END
+
+  -- ── 0017: 연간 정액 계약 ────────────────────────────────────
+  UNION ALL
+  SELECT 15, '0017', 'contracts.billing_type 컬럼',
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'contracts' AND column_name = 'billing_type'
+         ) THEN 'OK' ELSE '없음' END
+  UNION ALL
+  SELECT 16, '0017', 'contracts.annual_budget_krw 컬럼',
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'contracts' AND column_name = 'annual_budget_krw'
+         ) THEN 'OK' ELSE '없음' END
+  UNION ALL
+  SELECT 17, '0017', 'contracts.budget_alert_percent 컬럼',
+         CASE WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'contracts' AND column_name = 'budget_alert_percent'
+         ) THEN 'OK' ELSE '없음' END
+  UNION ALL
+  SELECT 18, '0017', 'organization_spend_krw 함수',
+         CASE WHEN EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'organization_spend_krw')
+           THEN 'OK' ELSE '없음' END
 )
 SELECT 마이그레이션, 항목, 상태 FROM checks ORDER BY ord;
 
@@ -124,3 +150,40 @@ SELECT
 FROM departments d
 ORDER BY 볼수있는단계 DESC, d.name
 LIMIT 20;
+
+
+-- 4) 계약 형태 분포
+--    0017 직후에는 기존 계약이 전부 'pay_as_you_go'여야 정상입니다.
+--    (연간 정액은 새로 맺는 계약부터 적용)
+SELECT
+  billing_type AS 과금형태,
+  status       AS 상태,
+  count(*)     AS 계약수,
+  count(*) FILTER (WHERE annual_budget_krw IS NOT NULL) AS 예산설정됨
+FROM contracts
+GROUP BY billing_type, status
+ORDER BY 과금형태, 상태;
+
+
+-- 5) 연간 정액 계약의 예산 소진 현황
+--    연간 정액 계약이 없으면 결과가 비어 있는 것이 정상입니다.
+SELECT
+  o.name                                    AS 기관,
+  c.annual_budget_krw                       AS 계약금액,
+  organization_spend_krw(
+    c.organization_id,
+    c.started_at,
+    COALESCE(c.expires_at, now())
+  )                                         AS 누적사용액,
+  ROUND(
+    organization_spend_krw(
+      c.organization_id, c.started_at, COALESCE(c.expires_at, now())
+    ) / NULLIF(c.annual_budget_krw, 0) * 100
+  )                                         AS 소진율,
+  c.budget_alert_percent                    AS 경고기준,
+  c.expires_at                              AS 계약종료
+FROM contracts c
+JOIN organizations o ON o.id = c.organization_id
+WHERE c.billing_type = 'annual_fixed'
+  AND c.status = 'active'
+ORDER BY 소진율 DESC NULLS LAST;
