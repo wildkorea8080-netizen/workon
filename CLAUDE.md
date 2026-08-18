@@ -1,7 +1,7 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-04-27  
-**분석 기준**: 실제 코드베이스 + docs/ 문서 전체 반영
+**최종 업데이트**: 2026-08-18  
+**분석 기준**: 코드베이스 전수 확인 (`next build` + `tsc --noEmit` 통과 상태에서 검증)
 
 ---
 
@@ -20,14 +20,15 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | Auth | NextAuth.js 4 (Credentials) — Supabase Auth도 signup에서 일부 사용 |
 | DB | Supabase PostgreSQL + pgvector (임베딩 저장) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
-| AI/LLM | Claude API (`claude-3-sonnet-20240229`) |
+| AI/LLM | Claude API (`claude-sonnet-4-6`) — 논스트리밍 + SSE 스트리밍 양쪽 지원 |
 | 임베딩 | Voyage AI (`voyage-3`) |
+| 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
 | 문서 파싱 | `pdf-parse`, `mammoth` (DOCX) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
-> **주의**: `src/lib/openai.ts`는 스텁(stub)이며 실제로 사용되지 않습니다. 임베딩은 Voyage AI, 생성은 Claude를 사용합니다.
+> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`claude.ts`, `embeddings.ts`, `mailer.ts`).
 
 ---
 
@@ -36,74 +37,57 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트
-│   │   ├── agents/       # 에이전트 CRUD
-│   │   ├── chat/         # RAG 채팅 (POST)
-│   │   ├── conversations/ # 대화 관리
-│   │   ├── forbidden-words/ # 금지어 관리
-│   │   ├── qna/          # 부서 전체 문서 Q&A (pgvector RPC 사용)
-│   │   ├── rag-test/     # RAG 테스트용
-│   │   ├── report/       # 보고서 생성/템플릿 목록
-│   │   ├── security-logs/ # 보안 로그 조회
-│   │   ├── signup/       # 회원가입
-│   │   ├── stats/        # 통계
-│   │   ├── templates/    # 보고서 템플릿 CRUD
-│   │   ├── upload/       # 문서 업로드+처리
-│   │   └── users/        # 사용자 관리
-│   ├── admin/            # 관리자 페이지 (대부분 구현됨)
-│   ├── employee/         # 직원 페이지 ⚠️ 대부분 플레이스홀더
-│   ├── login/ signin/ signup/ # 인증 페이지
-│   └── report/           # 독립 보고서 페이지
+│   ├── api/              # API 라우트 78개 (아래 "API 구조" 참조)
+│   ├── admin/            # 기관 관리자 포털
+│   ├── super/            # 슈퍼관리자 포털 (독립 인증)
+│   ├── employee/         # 직원 서브페이지 (reports/history/qna)
+│   ├── my/stats/         # 내 사용현황
+│   ├── shared/[token]/   # 대화 공개 공유 페이지 (비인증)
+│   ├── login/ signin/ signup/ register/  # 인증 페이지
+│   ├── maintenance/      # 점검 모드 안내
+│   └── page.tsx          # 직원 메인 (비서 선택 + 채팅)
 ├── components/
-│   ├── admin/            # 관리자 UI (실제 구현됨)
-│   ├── chat/             # 채팅 UI (실제 구현됨)
-│   └── report/           # 보고서 UI (구현됨, but 직원 페이지에 미연결)
+│   ├── admin/   chat/   super/   employee/   report/   layout/
 ├── lib/
 │   ├── auth.ts           # getServerAuthSession, isAdminSession
-│   ├── claude.ts         # Claude API 래퍼 (raw fetch)
-│   ├── config.ts         # 환경 변수 관리
+│   ├── nextAuthOptions.ts # NextAuth 설정
+│   ├── super-auth.ts     # 슈퍼관리자 JWT (NextAuth와 별개)
+│   ├── claude.ts         # Claude API — callClaudeAPI + streamClaudeAPI
+│   ├── config.ts         # 환경 변수 (직접 process.env 접근 금지)
+│   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
 │   ├── document-processor.ts # PDF/DOCX/TXT 파싱 + 청킹 + 임베딩
 │   ├── embeddings.ts     # Voyage AI 래퍼
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
 │   ├── forbidden-words.ts # 금지어 DB 조회
-│   ├── openai.ts         # ⚠️ 스텁 — 실제로 사용 안 함
-│   ├── rag.ts            # RAG 검색 로직 (in-memory 코사인 유사도)
+│   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
+│   ├── plans.ts          # 요금제 정의
+│   ├── rag.ts            # pgvector RPC 검색 (search_agent_chunks)
+│   ├── usage-limit.ts    # 기관 상태 + 월 토큰 한도 검사
+│   ├── logger.ts
 │   ├── supabase.ts       # 클라이언트 Supabase (anon key)
-│   ├── supabaseAdmin.ts  # 서버 Supabase (service role key)
-│   └── supabaseClient.ts # 추가 클라이언트 (중복 주의)
-└── middleware.ts         # NextAuth 미들웨어
+│   └── supabaseAdmin.ts  # 서버 Supabase (service role key)
+└── middleware.ts         # NextAuth + 슈퍼관리자 + 점검 모드
 ```
 
 ---
 
-## API 엔드포인트 목록
+## API 구조 (78개 라우트)
 
-| 메서드 | 경로 | 설명 | 권한 |
+라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
+정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
+
+| 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
-| POST | `/api/signup` | 회원가입 (Supabase Auth) | 공개 |
-| GET | `/api/agents` | 부서 에이전트 목록 | 인증 |
-| POST | `/api/agents` | 에이전트 생성 | ADMIN |
-| GET/PUT/DELETE | `/api/agents/[id]` | 에이전트 CRUD | ADMIN (수정/삭제) |
-| POST | `/api/chat` | RAG 채팅 응답 | 인증 |
-| GET | `/api/conversations` | 대화 목록 | 인증 |
-| POST | `/api/conversations` | 새 대화 생성 | 인증 |
-| GET/PUT/DELETE | `/api/conversations/[id]` | 대화 상세/수정/삭제 | 인증 |
-| GET | `/api/forbidden-words` | 금지어 목록 | ADMIN |
-| POST | `/api/forbidden-words` | 금지어 추가 | ADMIN |
-| DELETE | `/api/forbidden-words/[id]` | 금지어 삭제 | ADMIN |
-| POST | `/api/qna` | 부서 전체 문서 Q&A | 인증 |
-| GET | `/api/rag-test` | RAG 디버그 테스트 | ADMIN |
-| GET | `/api/report` | 템플릿 목록 조회 | 인증 |
-| POST | `/api/report` | 보고서 생성 | 인증 |
-| GET | `/api/security-logs` | 보안 로그 조회 | ADMIN |
-| GET | `/api/stats` | 대시보드 통계 | 인증 |
-| GET | `/api/templates` | 보고서 템플릿 목록 | 인증 |
-| POST | `/api/templates` | 템플릿 생성 | ADMIN |
-| GET/PUT/DELETE | `/api/templates/[id]` | 템플릿 CRUD | ADMIN (수정/삭제) |
-| POST | `/api/upload` | 문서 업로드+처리+임베딩 | ADMIN |
-| GET | `/api/users` | 부서 사용자 목록 | ADMIN |
-| POST | `/api/users` | 사용자 초대 | ADMIN |
+| 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
+| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/employee/stats`, `/api/qna`, `/api/reports/*`, `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
+| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
+| 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
+| 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
+
+**관리자 전용 라우트를 추가할 때는 GET/POST/PUT/DELETE 각 핸들러마다
+`isAdminSession(session)` 검사를 넣어야 합니다.** 한 핸들러에만 넣고 다른
+핸들러를 빠뜨리는 실수가 실제로 있었습니다 (`forbidden-words` POST, 2026-08 수정).
 
 ---
 
@@ -121,10 +105,21 @@ src/
 - `forbidden_words` — 부서별 금지어
 - `usage_logs` — 사용 로그
 
-**⚠️ 마이그레이션에 누락된 DB 객체:**
-- `security_logs` 테이블 — `filter.ts`와 `/api/security-logs`에서 참조하지만 없음
-- `search_document_chunks` RPC 함수 — `/api/qna`에서 `supabase.rpc()`로 호출하지만 없음
-- `messages` 테이블에 `department_id` 컬럼 없음 — `stats/route.ts`가 이 컬럼으로 쿼리
+마이그레이션 0002~0012에서 추가된 것:
+
+| 마이그레이션 | 내용 |
+|---|---|
+| 0002 | `security_logs` 테이블 |
+| 0003 | `search_document_chunks` RPC (부서 전체 검색) |
+| 0004 | `search_agent_chunks` RPC (에이전트 단위 검색) |
+| 0005 | 벤치마킹 기능 컬럼 (category, is_personal, favorites, share_token, approval_status) + `invitations`, `organizations` |
+| 0006 | 슈퍼관리자 시스템 (contracts, api_keys, billing_logs, super_admin_logs 등) |
+| 0007~0011 | impersonation, is_active, 시스템 API 키, 공지, 로그 |
+| 0012 | `usage_logs.organization_id` 자동 채움 트리거 |
+
+**0012에 대한 주의**: `usage_logs.organization_id`는 애플리케이션 코드가 아니라
+BEFORE INSERT 트리거가 `department_id`로부터 유도합니다.
+insert 시 이 컬럼을 직접 넣을 필요가 없고, `department_id`만 정확히 넣으면 됩니다.
 
 ---
 
@@ -157,25 +152,47 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 → getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
 ```
 
-### 채팅 시 (`/api/chat`)
+### 채팅 시 (`/api/chat`) — SSE 스트리밍
 ```
-질문 → getEmbeddings → in-memory 코사인 유사도 계산 (rag.ts)
-→ 상위 5개 청크 → Claude 프롬프트 조립 → 응답 반환
+질문 → 기관 상태·월 토큰 한도 확인 (usage-limit.ts, 초과 시 429)
+→ 직전 대화 이력 최대 20개 조회 (멀티턴 문맥)
+→ getEmbeddings → search_agent_chunks RPC (threshold 0.72, top-5)
+→ Claude 스트리밍 호출 → SSE로 즉시 전달
+→ 스트림 종료 후 messages + usage_logs 저장
 ```
+
+**응답 형식**: `/api/chat`은 JSON이 아니라 `text/event-stream`을 반환합니다.
+
+| 이벤트 | 페이로드 | 시점 |
+|---|---|---|
+| `meta` | `{ conversation_id, chunks }` | 스트림 시작 직후 |
+| `delta` | `{ text }` | 텍스트 조각마다 |
+| `error` | `{ message }` | 생성 중 오류 |
+| `done` | `{ usage, title }` | 저장 완료 후 |
+
+스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
+클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).
 
 ### Q&A 시 (`/api/qna`)
 ```
-질문 → getEmbeddings → supabase.rpc('search_document_chunks') [⚠️ 함수 없음]
-→ Claude 응답 생성
+질문 → getEmbeddings → supabase.rpc('search_document_chunks') → Claude 응답 생성
 ```
 
-**두 RAG 구현이 서로 다릅니다**: `/api/chat`은 in-memory 방식, `/api/qna`는 pgvector RPC 방식. 통일 필요.
+**RAG가 두 갈래인 이유**: `/api/chat`은 에이전트에 연결된 문서만(`search_agent_chunks`),
+`/api/qna`는 부서 전체 문서(`search_document_chunks`)를 검색합니다. 의도된 분리입니다.
+
+**출처 표기**: 응답 텍스트에 덧붙이지 않고 `messages.source_references`에 저장해
+`SourceCitation` 컴포넌트가 렌더링합니다. 텍스트에 덧붙이면 DB 저장 내용과
+화면 표시가 어긋나므로 이 방식을 유지하세요.
 
 ---
 
 ## 환경 변수
 
+전체 목록은 `.env.example` 참조. 필수/선택 구분:
+
 ```bash
+# 필수
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -183,50 +200,59 @@ NEXTAUTH_URL=
 NEXTAUTH_SECRET=
 VOYAGE_API_KEY=
 ANTHROPIC_API_KEY=
-OPENAI_API_KEY=         # 설정해도 실제로 사용 안 됨 (스텁)
-NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET=documents  # 기본값
-NEXT_PUBLIC_APP_NAME=WORKON                        # 기본값
+
+# 슈퍼관리자 포털
+SUPER_ADMIN_SETUP_KEY=
+SUPER_JWT_SECRET=
+ENCRYPTION_KEY=
+
+# 선택 (기본값 있음)
+NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET=documents
+NEXT_PUBLIC_APP_NAME=WORKON
+NEXT_PUBLIC_APP_URL=              # 미설정 시 NEXTAUTH_URL로 폴백
+
+# 선택 (메일 발송) — 둘 다 있어야 자동 발송, 없으면 링크 수동 전달로 폴백
+RESEND_API_KEY=
+MAIL_FROM=
 ```
+
+**환경변수는 반드시 `src/lib/config.ts`를 경유**해서 읽습니다. `process.env` 직접 접근 금지.
 
 ---
 
-## 현재 알려진 버그 (작업 전 반드시 확인)
+## 현재 알려진 제약 (작업 전 반드시 확인)
 
-### 🔴 크리티컬 (런타임 크래시)
+> 2026-08-18 전수 확인. 이전 버전 CLAUDE.md에 적혀 있던 "크리티컬 버그" 9건은
+> 모두 해결된 상태였습니다 (문서만 갱신되지 않았음). 아래가 현재 실제 상태입니다.
 
-1. **`upload/route.ts` 변수 선언 순서 오류** (`src/app/api/upload/route.ts:81,97`)
-   `logSecurityEvent(departmentId, ...)` 호출이 `departmentId` 변수 할당보다 먼저 나옴
-   → 위험 파일명/확장자 감지 시 `ReferenceError` 발생
+### 🔴 구조적 위험
 
-2. **`security_logs` 테이블 미존재**
-   `filter.ts`의 `logSecurityEvent()`가 마이그레이션에 없는 테이블에 INSERT 시도
-   → 금지어 감지 시 DB 오류 발생
+1. **RLS 미사용 — 테넌트 격리가 애플리케이션 코드에만 의존**
+   마이그레이션 어디에도 `ROW LEVEL SECURITY` 설정이 없습니다.
+   격리는 전적으로 각 라우트의 `.eq('department_id', ...)` 필터에 달려 있으며,
+   라우트 하나만 빠뜨려도 타 기관 데이터가 노출됩니다.
+   → 신규 라우트 작성 시 department_id 필터를 반드시 확인할 것.
 
-3. **`search_document_chunks` RPC 미존재**
-   `/api/qna`가 `supabase.rpc('search_document_chunks', ...)` 호출
-   → QnA API 항상 500 에러
+2. **테스트 0개**
+   회귀를 잡아줄 장치가 전혀 없습니다. 인증·테넌트 격리·RAG 검색은
+   최소한의 테스트가 필요합니다.
 
-### 🟠 주요 버그
+### 🟠 기능 공백 (웍스AI 대비)
 
-4. **`/api/users` POST 컴파일 에러** (`src/app/api/users/route.ts:77`)
-   `supabase` 임포트 없이 사용 (`supabaseAdmin` 사용해야 함), `session.user.department_id` 참조 오류
+- 단일 모델 고정 (`claude-sonnet-4-6`) — 모델 선택·멀티 프로바이더 없음
+- MCP / 툴 실행 루프 없음
+- HWP·XLSX·PPTX 미지원 (PDF/DOCX/TXT만), OCR·이미지 입력 없음
+- 회의록(STT)·번역·이미지/비디오 생성·PPT 생성 없음
+- SSO, IP 제어 없음
 
-5. **`stats/route.ts` 잘못된 쿼리** (`src/app/api/stats/route.ts:47`)
-   `messages` 테이블에 `department_id` 컬럼이 없음
+상세 분석과 우선순위는 [docs/GAP_ANALYSIS_2026-08.md](docs/GAP_ANALYSIS_2026-08.md) 참조.
 
-6. **Admin 대시보드 통계 카드가 하드코딩 "--"** (`src/app/admin/page.tsx`)
-   `StatsDashboard` 컴포넌트가 실제 `/api/stats`를 호출하지 않음
+### 🟡 알려진 불일치
 
-### 🟡 미완성
-
-7. **직원 페이지 전체가 플레이스홀더**
-   `/employee/qna`, `/employee/reports`, `/employee/history` — 내용 없음
-
-8. **문서 목록 API 없음**
-   `DocumentsManager`가 문서 목록을 로드 못함 (`GET /api/documents` 라우트 없음)
-
-9. **사용자 초대 이메일 미구현**
-   `// TODO: 초대 이메일 발송` 주석만 있음
+- **RAG 구현 2종 공존**: `/api/chat`은 `search_agent_chunks`(에이전트 단위),
+  `/api/qna`는 `search_document_chunks`(부서 전체). 의도된 분리지만 통합 검토 필요.
+- **과금 파이프라인 미완성**: `usage_logs`에 토큰은 정확히 쌓이지만
+  원화 환산·`billing_logs` 월 집계·청구서 생성은 미구현.
 
 ---
 
@@ -237,7 +263,12 @@ NEXT_PUBLIC_APP_NAME=WORKON                        # 기본값
 - 모든 DB 쿼리에 `department_id` 필터 필수 (테넌트 격리)
 - 서버 API 응답: `{ ok: true, data: T }` 또는 `{ ok: false, error: {...} }`
 - 환경변수 직접 접근 금지 → `src/lib/config.ts` 경유
-- 관리자 전용 API: `isAdminSession(session)` 확인 필수
+- 관리자 전용 API: **모든 핸들러마다** `isAdminSession(session)` 확인 필수
+- 외부 API는 SDK 대신 `fetch`로 직접 호출 (기존 관례)
+- `next.config.mjs`의 `ignoreBuildErrors`는 제거된 상태입니다.
+  **타입 에러가 있으면 빌드가 실패합니다.** 다시 켜지 마세요.
+  Supabase 행이 `any`로 추론되는 콜백은 인라인 타입을 명시하세요:
+  `.map((c: { id: string }) => c.id)`
 
 ---
 
@@ -254,9 +285,81 @@ NEXT_PUBLIC_APP_NAME=WORKON                        # 기본값
 
 ---
 
-## Claude 모델 업그레이드
+## 모델·단가 (확장 대비)
 
-현재 `claude.ts`에서 `claude-sonnet-4-6` 사용 중.
+**단가는 `src/lib/models.ts`의 `MODELS` 레지스트리 한 곳에만 존재합니다.**
+2026-08 이전에는 `(tokens/1M)*3 + (tokens/1M)*15`가 6개 라우트에 하드코딩돼
+있었습니다. 다시 그렇게 하지 마세요. 모델 추가 = 레지스트리에 항목 하나 추가.
+
+```typescript
+import { estimateCostUsd, estimateCostKrw, sumCostUsd } from '@/lib/models';
+```
+
+### 토큰을 소비하는 라우트의 필수 규약
+
+`usage_logs.details`에 **반드시** 아래를 함께 기록합니다:
+
+```typescript
+details: {
+  model: usage.model,                              // 어떤 모델이 썼는지
+  input_tokens: usage.input_tokens,
+  output_tokens: usage.output_tokens,
+  cost_usd: estimateCostUsd(usage, usage.model),   // 기록 시점 단가로 확정
+  cost_krw: estimateCostKrw(usage, usage.model),
+}
+```
+
+`model` 없이 토큰만 남기면 **모델을 추가하는 순간 과거 사용량을 어느 모델에
+귀속시킬지 영원히 알 수 없게 됩니다.** 소급이 불가능하므로 지금부터 지킵니다.
+
+`cost_usd`를 기록 시점에 확정해 두는 이유는 나중에 단가가 바뀌어도 과거 정산이
+흔들리지 않게 하기 위해서입니다. 집계 시에는 `sumCostUsd(logs)`를 쓰세요 —
+`cost_usd`가 있으면 그 값을, 없는 과거 로그(2026-08 이전)는 기본 모델 단가로
+추정하는 폴백이 들어 있습니다.
+
+환율은 `config.ts`의 `USD_KRW_RATE` (기본 1350, `USD_KRW_RATE` 환경변수로 조정).
+
+### 한도는 아직 토큰 기준입니다
+
+`organizations.monthly_token_limit`과 계약이 토큰 수 기준입니다.
+모델이 하나뿐이라 현재는 문제가 없지만, **단가가 다른 모델을 추가하면
+"토큰 100만"의 의미가 모델마다 달라집니다.** 그 시점에 `usage-limit.ts`를
+비용 기준(`cost_krw` 합산)으로 바꿔야 하며, 이미 체결된 계약은 재협상 대상입니다.
+비용 데이터는 지금부터 쌓이므로 전환 자체는 계산식 교체로 끝납니다.
+
+---
+
+## 외부 도구 연동 규약 (커넥터)
+
+아직 구현된 커넥터는 없습니다. 만들 때 지킬 것:
+
+**툴 정의는 MCP 표준 형식으로 작성합니다.** Anthropic tool-use 포맷에 직접
+맞춰 짜면 나중에 다른 프로바이더의 function-calling으로 옮길 때 커넥터를
+전부 다시 써야 합니다. MCP를 거치면 그 비용이 0입니다.
+
+- 툴 스키마: MCP `tools/list` 형식 (name, description, inputSchema)
+- 프로바이더별 변환은 `src/lib/llm/` 어댑터 계층의 책임 — 커넥터는 관여하지 않음
+- 커넥터는 순수 함수여야 함: 입력 → 외부 API 호출 → 구조화된 결과 + 출처 URL
+- 출처(원문 링크)를 반드시 반환할 것. 공공 데이터는 근거 제시가 요구사항입니다.
+
+우선순위가 높은 대상: 국가법령정보, KOSIS, 조달청 나라장터, 금감원 DART.
+
+---
+
+## 사용량 한도
+
+`src/lib/usage-limit.ts`의 `checkTokenLimit(departmentId)`가
+부서 → 기관 → 이번 달 `usage_logs` 합산 순으로 확인합니다.
+
+- 기관 `status='suspended'` → 차단 (429)
+- 이번 달 토큰 합산 ≥ `monthly_token_limit` → 차단 (429)
+- 기관 미연결 부서, `monthly_token_limit=0`(무제한), 집계 실패 → **허용**
+  (과금 집계 오류로 서비스가 멈추면 안 되므로 fail-open)
+
+토큰을 소비하는 신규 라우트를 추가하면 이 검사를 함께 넣으세요.
+
+> 확장 시 주의: 현재 매 요청마다 이번 달 로그를 합산합니다.
+> 기관당 월 수만 건을 넘으면 일별 집계 테이블이나 RPC로 옮겨야 합니다.
 
 ---
 
@@ -358,3 +461,24 @@ ENCRYPTION_KEY=          # API 키 AES-256 암호화 키 (64자 hex)
 - ✅ 정부 파란색 디자인 시스템 (#003087 기반)
 - ✅ 공공기관 특화 비서 8개 seed 데이터 (음슴체변환, 공문, 보고서, 회의록 등)
 - ✅ Pretendard 폰트
+
+---
+
+## 2026-08-18 변경 (P0/P1)
+
+품질·기반 작업. 상세 배경은 [docs/GAP_ANALYSIS_2026-08.md](docs/GAP_ANALYSIS_2026-08.md).
+
+| 변경 | 내용 |
+|---|---|
+| **멀티턴 대화 복구** | `/api/chat`이 이전 대화 이력을 Claude에 전달하지 않아 문맥이 매번 초기화되던 문제 수정 (최대 20개) |
+| **SSE 스트리밍** | `streamClaudeAPI()` 추가, `/api/chat`이 `text/event-stream` 반환, `ChatInterface`가 점진 렌더링 |
+| **토큰 한도 차단** | `usage-limit.ts` 신설. 기관 정지·월 한도 초과 시 429 반환 (기존에는 경보만 있었음) |
+| **usage_logs 집계 복구** | `organization_id`를 아무도 쓰지 않아 슈퍼관리자 사용량·과금 통계가 전부 0이던 문제를 마이그레이션 0012 트리거로 해결 |
+| **메일 발송** | `mailer.ts` 신설 (Resend REST). 초대 링크·임시 비밀번호 자동 발송. 미설정 시 기존 수동 전달 방식으로 폴백 |
+| **타입 안전성** | tsc 에러 61건 해소 후 `ignoreBuildErrors` 제거 |
+| **권한 구멍 수정** | `POST /api/forbidden-words`에 누락됐던 `isAdminSession` 검사 추가 |
+| **응답 규약 통일** | `forbidden-words`의 `success:` → `ok:` |
+| **리포지토리 정리** | `disable-rls.js`·`test.exe` 등 제거/untrack, UTF-16으로 깨져 있던 `.gitignore`·`.env.example` 재작성, 루트 .md 15개를 `docs/`로 이동 |
+
+> `.gitignore`와 `.env.example`이 UTF-16LE로 저장돼 패턴이 전부 무효였습니다
+> (PowerShell `>>` 기본 인코딩). 파일 추가 시 UTF-8로 저장하세요.
