@@ -270,11 +270,11 @@ export default function DocumentsManager() {
                     <p className="font-medium text-slate-700">
                       {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, TXT (최대 20MB)</p>
+                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, TXT, HWP, HWPX (최대 20MB)</p>
                   </div>
                   <input
                     type="file"
-                    accept=".pdf,.docx,.txt"
+                    accept=".pdf,.docx,.txt,.hwp,.hwpx"
                     onChange={(e) => setUploadForm(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
                     className="hidden"
                   />

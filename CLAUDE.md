@@ -24,7 +24,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | 임베딩 | Voyage AI (`voyage-3`) |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
-| 문서 파싱 | `pdf-parse`, `mammoth` (DOCX) |
+| 문서 파싱 | `pdf-parse`, `mammoth` (DOCX), 자체 HWP/HWPX 추출기 (`hwp.ts`) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
@@ -60,6 +60,7 @@ src/
 │   ├── embeddings.ts     # Voyage AI 래퍼
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
 │   ├── forbidden-words.ts # 금지어 DB 조회
+│   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 (자체 구현)
 │   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
 │   ├── plans.ts          # 요금제 정의
 │   ├── rag.ts            # pgvector RPC 검색 (search_agent_chunks)
@@ -148,7 +149,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ### 문서 업로드 시
 ```
-파일 업로드 → extractText (pdf-parse/mammoth) → chunkText (800단어, 100 겹침)
+파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts) → chunkText (800단어, 100 겹침)
 → getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
 ```
 
@@ -241,7 +242,7 @@ MAIL_FROM=
 
 - 단일 모델 고정 (`claude-sonnet-4-6`) — 모델 선택·멀티 프로바이더 없음
 - MCP / 툴 실행 루프 없음
-- HWP·XLSX·PPTX 미지원 (PDF/DOCX/TXT만), OCR·이미지 입력 없음
+- XLSX·PPTX 미지원, OCR·이미지 입력 없음 (HWP/HWPX는 2026-08 지원 시작)
 - 회의록(STT)·번역·이미지/비디오 생성·PPT 생성 없음
 - SSO, IP 제어 없음
 

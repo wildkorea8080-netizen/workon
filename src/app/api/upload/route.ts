@@ -9,8 +9,15 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain'
+  'text/plain',
+  'application/x-hwp',
+  'application/haansofthwp',
+  'application/hwp+zip'
 ];
+
+// HWP·DOCX는 브라우저가 MIME을 비우거나 application/octet-stream으로 보내는
+// 경우가 많아 확장자를 1차 기준으로 삼는다.
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.hwp', '.hwpx'];
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./,           // 디렉토리 트래버설
@@ -80,9 +87,12 @@ export async function POST(request: Request) {
   }
 
   // MIME 타입 검증 (departmentId 불필요)
-  if (!ALLOWED_MIME_TYPES.includes(file.type) && !file.name.toLowerCase().endsWith('.docx')) {
+  const lowerFileName = file.name.toLowerCase();
+  const hasAllowedExtension = ALLOWED_EXTENSIONS.some((ext) => lowerFileName.endsWith(ext));
+
+  if (!hasAllowedExtension && !ALLOWED_MIME_TYPES.includes(file.type)) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '지원되지 않는 파일 형식입니다. PDF, DOCX, TXT만 허용됩니다.' } },
+      { ok: false, error: { message: '지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX만 허용됩니다.' } },
       { status: 415 }
     );
   }

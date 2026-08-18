@@ -3,6 +3,7 @@ import mammoth from 'mammoth';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 import { getEmbeddings } from '@/lib/embeddings';
+import { extractTextFromHwp, isHwpFile } from '@/lib/hwp';
 
 export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 100;
@@ -37,7 +38,11 @@ async function extractTextFromFile(fileBuffer: Buffer, mimeType: string, fileNam
     return result.value;
   }
 
-  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT만 업로드할 수 있습니다.');
+  if (isHwpFile(lowerName, mimeType)) {
+    return extractTextFromHwp(fileBuffer, fileName);
+  }
+
+  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX만 업로드할 수 있습니다.');
 }
 
 function chunkText(text: string) {
