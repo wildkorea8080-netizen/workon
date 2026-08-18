@@ -26,6 +26,8 @@ const checks = [
   ['0016', 'agents.visibility',          () => db.from('agents').select('visibility, organization_id').limit(1)],
   ['0016', 'documents.visibility',       () => db.from('documents').select('visibility, organization_id').limit(1)],
   ['0017', 'contracts.billing_type',     () => db.from('contracts').select('billing_type, annual_budget_krw, budget_alert_percent').limit(1)],
+  ['0019', 'agents 카탈로그 컬럼',        () => db.from('agents').select('is_published, display_order, agent_type, link_url').limit(1)],
+  ['0019', 'agent_categories 테이블',    () => db.from('agent_categories').select('id, name, display_order').limit(1)],
 ];
 
 console.log('=== 컬럼 점검 ===');
@@ -122,6 +124,32 @@ console.log('\n=== 과금 기록 규약 (details.cost_krw) ===');
       const days = [...new Set(missing.map((r) => r.created_at?.slice(0, 10)))].sort();
       console.log(`      누락 발생일: ${days.join(', ')}`);
     }
+  }
+}
+
+// ── 비서 카탈로그 (0019) ────────────────────────────────────
+console.log('\n=== 비서 카탈로그 ===');
+{
+  const { data, error } = await db
+    .from('agents')
+    .select('name, icon, category, is_published, agent_type, link_url, is_personal');
+
+  if (error) {
+    console.log(`      조회 실패: ${error.message.slice(0, 60)}`);
+    ok = false;
+  } else {
+    const official = data.filter((a) => !a.is_personal);
+    const hidden = official.filter((a) => !a.is_published);
+    const noIcon = official.filter((a) => !a.icon);
+    const links = official.filter((a) => a.agent_type === 'link');
+    // 링크형인데 주소가 없으면 클릭해도 아무 일이 없다. DB CHECK가 막지만
+    // 제약이 걸리기 전에 들어간 행이 있을 수 있어 여기서도 센다.
+    const brokenLinks = links.filter((a) => !a.link_url);
+
+    console.log(`OK    공식 비서 ${official.length}개 (노출중 ${official.length - hidden.length} / 대기중 ${hidden.length})`);
+    console.log(`${noIcon.length ? '참고' : 'OK  '}  아이콘 없음 ${noIcon.length}개${noIcon.length ? ` — ${noIcon.map((a) => a.name).join(', ')}` : ''}`);
+    console.log(`${brokenLinks.length ? '주의' : 'OK  '}  링크형 ${links.length}개, 주소 없는 것 ${brokenLinks.length}개`);
+    if (brokenLinks.length) ok = false;
   }
 }
 
