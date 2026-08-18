@@ -41,6 +41,7 @@ const ACTION_LABEL: Record<string, string> = {
   chat_message: 'AI 대화',
   qna_search: '문서 질의응답',
   generate_report: '보고서 생성',
+  document_ocr: '스캔 문서 판독',
   create_agent: '비서 생성',
   add_forbidden_word: '금지어 추가',
   delete_forbidden_word: '금지어 삭제',

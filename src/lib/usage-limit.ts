@@ -118,6 +118,24 @@ async function checkAnnualBudget(
  * NOTE: 종량제 경로는 매 요청마다 이번 달 로그를 합산합니다. 기관당 월 수만
  *       건까지는 문제없지만, 그 이상 규모에서는 일별 집계 테이블로 옮겨야 합니다.
  */
+/**
+ * 차단 사유를 담당자가 바로 이해할 말로 바꾼다.
+ *
+ * 공공기관 담당자에게 "토큰 소진"은 의미가 통하지 않는다. 문구를 라우트마다
+ * 따로 쓰면 같은 상황을 다르게 설명하게 되므로 한 곳에 둔다.
+ */
+export function limitMessage(status: TokenLimitStatus): string {
+  if (status.reason === 'org_suspended') {
+    return '기관 이용이 정지되었습니다. 관리자에게 문의하세요.';
+  }
+  if (status.reason === 'budget_exhausted') {
+    const used = Math.round(status.budget?.usedKrw ?? 0).toLocaleString();
+    const total = Math.round(status.budget?.totalKrw ?? 0).toLocaleString();
+    return `연간 계약 금액을 모두 사용했습니다. (${used}원 / ${total}원) 계약 담당자에게 문의하세요.`;
+  }
+  return `이번 달 사용 한도를 모두 사용했습니다. (${status.usedTokens.toLocaleString()} / ${status.limitTokens.toLocaleString()} 토큰) 관리자에게 문의하세요.`;
+}
+
 export async function checkTokenLimit(departmentId: string): Promise<TokenLimitStatus> {
   try {
     const { data: dept } = await supabaseAdmin

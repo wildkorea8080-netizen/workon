@@ -165,9 +165,28 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ### 문서 업로드 시
 ```
-파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts) → chunkText (800단어, 100 겹침)
+파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts)
+→ [PDF에 텍스트 레이어가 없으면 Claude로 스캔 판독 → pdf-ocr.ts]
+→ chunkText (800단어, 100 겹침)
 → getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
 ```
+
+**스캔 PDF는 Claude가 직접 읽습니다** (`src/lib/pdf-ocr.ts`).
+공공기관은 옛 공문·결재문서·붙임이 스캔본인 경우가 많은데, 텍스트 레이어가
+없으면 pdf-parse가 빈 문자열을 주고 업로드가 거부돼 그 자료를 아예 못 썼습니다.
+
+- **이미지로 렌더링하지 않습니다.** Anthropic API가 PDF를 `document` 블록으로
+  직접 받습니다. 렌더링 방식은 pdfium/poppler 바이너리가 필요해 Vercel에서 부담입니다
+- **새 업체를 붙이지 않습니다.** Anthropic은 이미 필수 의존이라 OCR 업체나
+  멀티모달 임베딩 업체를 늘리지 않고 해결됩니다. 공공기관 보안성 검토에서
+  문서 본문이 나가는 곳이 하나 늘고 마는 차이가 큽니다
+- 판정 기준은 **페이지당 글자 수**(50자 미만). 전체 길이만 보면 표지만 텍스트고
+  본문이 스캔인 문서를 놓칩니다
+- 상한 100쪽 / 30MB (Anthropic `document` 블록 제한)
+- 페이지당 대략 1,500~3,000 토큰을 씁니다. **`/api/upload`에 한도 검사와
+  `usage_logs` 기록(`action='document_ocr'`)이 들어 있습니다**
+- 판독을 거치면 업로드 응답에 그 사실을 알립니다. 원문과 다르게 읽혔을 수 있어
+  담당자가 확인할 근거가 됩니다
 
 ### 채팅 시 (`/api/chat`) — SSE 스트리밍
 ```
