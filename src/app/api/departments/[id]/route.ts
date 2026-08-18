@@ -18,7 +18,7 @@ async function requireAdminOrg() {
 
   const { data } = await supabaseAdmin
     .from('departments')
-    .select('organization_id')
+    .select('organization_id, parent_id')
     .eq('id', departmentId)
     .maybeSingle();
 
@@ -27,7 +27,10 @@ async function requireAdminOrg() {
     return { error: NextResponse.json({ ok: false, error: { message: '기관 정보를 찾을 수 없습니다.' } }, { status: 409 }) };
   }
 
-  return { session, departmentId, organizationId };
+  // 기관 직속(최상위) 부서의 관리자인지. 최상위로 올리는 이동을 여기서 가른다.
+  const isRootAdmin = data.parent_id == null;
+
+  return { session, departmentId, organizationId, isRootAdmin };
 }
 
 /** 대상 부서가 관리자의 관리 범위(자기 부서 + 하위) 안인지 확인 */
@@ -70,6 +73,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     if (parentId === target.id) {
       return NextResponse.json({ ok: false, error: { message: '자기 자신을 상위 부서로 지정할 수 없습니다.' } }, { status: 400 });
+    }
+
+    // parent_id를 null로 두면 그 부서가 기관 직속으로 올라간다. 검사가 없으면
+    // 과 단위 관리자가 자기 부서를 최상위로 올려 상위 부서의 관리 범위에서
+    // 빠져나갈 수 있다(관리 범위는 자기 부서 + 하위이므로 상위 관리자가
+    // 그 부서를 더는 보지 못한다). 기관 직속 관리자만 허용한다.
+    if (parentId === null && !ctx.isRootAdmin) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서를 최상위로 올리는 것은 기관 직속 부서의 관리자만 할 수 있습니다.' } },
+        { status: 403 }
+      );
     }
 
     if (parentId) {

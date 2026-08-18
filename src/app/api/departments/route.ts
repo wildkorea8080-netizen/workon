@@ -15,14 +15,14 @@ export interface DepartmentNode {
   children: DepartmentNode[];
 }
 
-/** 관리자가 속한 기관 id. 모든 부서 작업을 이 기관으로 한정한다. */
-async function getAdminOrganizationId(departmentId: string): Promise<string | null> {
+/** 관리자가 속한 기관 id와 자기 부서의 상위. 모든 부서 작업을 이 기관으로 한정한다. */
+async function getAdminDepartment(departmentId: string) {
   const { data } = await supabaseAdmin
     .from('departments')
-    .select('organization_id')
+    .select('organization_id, parent_id')
     .eq('id', departmentId)
     .maybeSingle();
-  return data?.organization_id ?? null;
+  return data ?? null;
 }
 
 async function requireAdminOrg() {
@@ -36,12 +36,18 @@ async function requireAdminOrg() {
     return { error: NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 }) };
   }
 
-  const organizationId = await getAdminOrganizationId(departmentId);
+  const own = await getAdminDepartment(departmentId);
+  const organizationId = own?.organization_id;
   if (!organizationId) {
     return { error: NextResponse.json({ ok: false, error: { message: '기관 정보를 찾을 수 없습니다.' } }, { status: 409 }) };
   }
 
-  return { session, departmentId, organizationId };
+  // 자기 부서가 기관 직속(최상위)인 관리자만 최상위 부서를 만들거나 그리로 옮길 수 있다.
+  // 과 단위 관리자가 부서를 최상위로 올리면 그 부서가 상위 부서의 관리 범위에서
+  // 빠져나가 감독을 벗어난다.
+  const isRootAdmin = own.parent_id == null;
+
+  return { session, departmentId, organizationId, isRootAdmin };
 }
 
 /** 평면 목록을 트리로 조립한다. 부모를 못 찾은 노드는 최상위로 올린다. */
@@ -115,7 +121,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     data: buildTree(departments ?? [], count(users), count(agents)),
-    meta: { myDepartmentId: ctx.departmentId },
+    meta: { myDepartmentId: ctx.departmentId, canCreateRoot: ctx.isRootAdmin },
   });
 }
 
@@ -132,17 +138,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: { message: '부서명을 입력해주세요.' } }, { status: 400 });
   }
 
-  // 상위 부서는 관리 범위 안이어야 한다. 없으면 자기 부서 아래로 만든다
-  // (관리 범위 밖에 최상위 부서를 새로 만들 수 있으면 안 된다).
+  // 상위 부서는 관리 범위 안이어야 한다.
+  // 예전에는 parent_id가 비면 자기 부서 아래로 조용히 붙였다. 화면에서
+  // '(최상위 부서)'를 고른 관리자는 그 사실을 알 수 없었고, 그래서 최상위
+  // 부서를 하나도 더 만들 수 없었다. 이제 명시적으로 갈라 처리한다.
   const managedDeptIds = await getManagedDepartmentIds(ctx.departmentId);
-  const resolvedParentId = parentId ?? ctx.departmentId;
 
-  if (!managedDeptIds.includes(resolvedParentId)) {
+  if (parentId === null) {
+    if (!ctx.isRootAdmin) {
+      return NextResponse.json(
+        { ok: false, error: { message: '최상위 부서는 기관 직속 부서의 관리자만 만들 수 있습니다.' } },
+        { status: 403 }
+      );
+    }
+  } else if (!managedDeptIds.includes(parentId)) {
     return NextResponse.json(
       { ok: false, error: { message: '관리 범위 밖의 부서를 상위로 지정할 수 없습니다.' } },
       { status: 403 }
     );
   }
+
+  const resolvedParentId = parentId;
 
   const slug =
     name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9가-힣-]/g, '') +

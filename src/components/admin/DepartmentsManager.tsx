@@ -31,6 +31,9 @@ export default function DepartmentsManager() {
 
   const [newName, setNewName] = useState('');
   const [newParentId, setNewParentId] = useState('');
+  // 기관 직속 부서의 관리자만 최상위 부서를 만들거나 그리로 옮길 수 있다.
+  // 권한이 없는데 선택지를 보여주면 고른 뒤 403을 보게 된다.
+  const [canCreateRoot, setCanCreateRoot] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -42,6 +45,7 @@ export default function DepartmentsManager() {
     if (result.ok) {
       setTree(result.data ?? []);
       setMyDepartmentId(result.meta?.myDepartmentId ?? null);
+      setCanCreateRoot(Boolean(result.meta?.canCreateRoot));
     } else {
       setError(result.error?.message ?? '부서 목록을 불러오지 못했습니다.');
     }
@@ -51,6 +55,15 @@ export default function DepartmentsManager() {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // '(최상위 부서)'를 숨기면 빈 값에 대응하는 선택지가 없어진다. 그대로 두면
+  // 화면에는 첫 부서가 보이는데 실제로 보내는 값은 빈 값이라 403이 난다.
+  // 자기 부서를 기본값으로 맞춰 보이는 것과 보내는 것을 일치시킨다.
+  useEffect(() => {
+    if (!canCreateRoot && !newParentId && myDepartmentId) {
+      setNewParentId(myDepartmentId);
+    }
+  }, [canCreateRoot, newParentId, myDepartmentId]);
 
   const flat = flatten(tree);
 
@@ -68,7 +81,7 @@ export default function DepartmentsManager() {
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
       setNewName('');
-      setNewParentId('');
+      setNewParentId(canCreateRoot ? '' : (myDepartmentId ?? ''));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : '부서 생성에 실패했습니다.');
@@ -144,7 +157,7 @@ export default function DepartmentsManager() {
                 onChange={(e) => setEditParentId(e.target.value)}
                 className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm bg-white"
               >
-                <option value="">(최상위 부서)</option>
+                {canCreateRoot && <option value="">(최상위 부서)</option>}
                 {flat
                   .filter(({ node: n }) => !excluded.has(n.id))
                   .map(({ node: n, depth: d }) => (
@@ -230,7 +243,7 @@ export default function DepartmentsManager() {
           onChange={(e) => setNewParentId(e.target.value)}
           className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white"
         >
-          <option value="">(최상위 부서)</option>
+          {canCreateRoot && <option value="">(최상위 부서)</option>}
           {flat.map(({ node, depth }) => (
             <option key={node.id} value={node.id}>
               {' '.repeat(depth * 2)}
