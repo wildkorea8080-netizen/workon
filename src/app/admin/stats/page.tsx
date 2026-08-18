@@ -1,6 +1,7 @@
 import Shell from '@/components/Shell';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import StatsDashboard from '@/components/admin/StatsDashboard';
+import UsageSummary from '@/components/admin/UsageSummary';
 
 export default async function AdminStatsPage() {
   const session = await getServerAuthSession();
@@ -26,6 +27,14 @@ export default async function AdminStatsPage() {
         </div>
 
         <StatsDashboard />
+
+        <div className="pt-2">
+          <h2 className="text-lg font-semibold text-slate-900">이용통계</h2>
+          <p className="text-sm text-slate-500 mt-0.5 mb-4">
+            비서별·직원별·부서별 사용량입니다. 조회 범위는 내 부서와 하위 부서입니다.
+          </p>
+          <UsageSummary />
+        </div>
       </section>
     </Shell>
   );
