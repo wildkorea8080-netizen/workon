@@ -14,6 +14,52 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 /** 상위 부서를 몇 단계까지 따라 올라갔는지 로그로 남길 때 쓰는 상한 (순환 방지용 안전장치) */
 const MAX_DEPTH = 20;
 
+export interface AccessScope {
+  organizationId: string | null;
+  /** 자기 부서 + 상위 부서들 */
+  visibleDepartmentIds: string[];
+}
+
+/**
+ * 자료 조회에 필요한 범위 일체.
+ *
+ * 공개 범위가 둘이라 기관 id와 부서 계통을 함께 알아야 합니다:
+ *   visibility='organization' → 같은 기관이면 전부
+ *   visibility='department'   → 내 부서 계통에 걸린 것만
+ */
+export async function getAccessScope(departmentId: string): Promise<AccessScope> {
+  if (!departmentId) return { organizationId: null, visibleDepartmentIds: [] };
+
+  const [{ data: dept }, visibleDepartmentIds] = await Promise.all([
+    supabaseAdmin
+      .from('departments')
+      .select('organization_id')
+      .eq('id', departmentId)
+      .maybeSingle(),
+    getVisibleDepartmentIds(departmentId),
+  ]);
+
+  return {
+    organizationId: dept?.organization_id ?? null,
+    visibleDepartmentIds,
+  };
+}
+
+/**
+ * Supabase `.or()` 필터 문자열.
+ *
+ * 기관 전체 공개이거나, 부서 제한이면서 내 부서 계통에 걸린 것.
+ * 기관 id를 모르면 부서 제한만 남겨 범위를 좁힌다 — 알 수 없을 때 넓히면 안 된다.
+ */
+export function visibilityFilter(scope: AccessScope): string {
+  const deptList = scope.visibleDepartmentIds.join(',');
+  const departmentClause = `and(visibility.eq.department,department_id.in.(${deptList}))`;
+
+  if (!scope.organizationId) return departmentClause;
+
+  return `and(visibility.eq.organization,organization_id.eq.${scope.organizationId}),${departmentClause}`;
+}
+
 /**
  * 이 부서 직원이 접근 가능한 부서 id 목록 (자기 자신 + 모든 상위 부서).
  *

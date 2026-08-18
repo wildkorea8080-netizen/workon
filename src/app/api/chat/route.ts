@@ -16,7 +16,7 @@ import { filterUserInput } from '@/lib/filter';
 import { checkTokenLimit } from '@/lib/usage-limit';
 import type { Conversation, RetrievedChunk } from '@/lib/db';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
-import { getVisibleDepartmentIds } from '@/lib/department-scope';
+import { getAccessScope } from '@/lib/department-scope';
 
 /** Claude에 함께 보낼 직전 대화 메시지 최대 개수 (사용자+어시스턴트 합산) */
 const HISTORY_MESSAGE_LIMIT = 20;
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     // 에이전트 확인
     const { data: agent, error: agentError } = await supabaseAdmin
       .from('agents')
-      .select('id, department_id, system_prompt, name, is_personal, owner_id, enabled_connectors')
+      .select('id, department_id, organization_id, visibility, system_prompt, name, is_personal, owner_id, enabled_connectors')
       .eq('id', agent_id)
       .eq('is_active', true)
       .single();
@@ -99,12 +99,16 @@ export async function POST(request: NextRequest) {
       return jsonError('에이전트를 찾을 수 없습니다.', 404);
     }
 
-    // 접근 권한: 내 부서 또는 상위 부서의 에이전트 OR 내 나만의 비서.
-    // 상위 부서 비서를 하위 부서가 쓸 수 있어야 계층 공유가 성립한다.
-    const visibleDeptIds = await getVisibleDepartmentIds(departmentId);
-    const canAccess =
-      visibleDeptIds.includes(agent.department_id) ||
-      (agent.is_personal && agent.owner_id === session.user.id);
+    // 접근 권한
+    //   나만의 비서  → 소유자 본인만
+    //   기관 전체 공개 → 같은 기관이면 누구나
+    //   부서 제한      → 내 부서와 그 상위 부서에 걸린 것만
+    const scope = await getAccessScope(departmentId);
+    const canAccess = agent.is_personal
+      ? agent.owner_id === session.user.id
+      : agent.visibility === 'organization'
+        ? Boolean(scope.organizationId) && agent.organization_id === scope.organizationId
+        : scope.visibleDepartmentIds.includes(agent.department_id);
 
     if (!canAccess) {
       return jsonError('해당 에이전트에 접근할 권한이 없습니다.', 403);

@@ -12,6 +12,8 @@ export default function DocumentsManager() {
     file:     null as File | null,
     agentIds: [] as string[],
     title:    '',
+    // 규정·매뉴얼 대부분은 전 직원 공통이라 기관 전체가 기본
+    visibility: 'organization' as 'organization' | 'department',
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -109,6 +111,7 @@ export default function DocumentsManager() {
     formData.append('file', uploadForm.file);
     uploadForm.agentIds.forEach(id => formData.append('agentIds', id));
     if (uploadForm.title) formData.append('title', uploadForm.title);
+    formData.append('visibility', uploadForm.visibility);
 
     try {
       const response = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -121,7 +124,7 @@ export default function DocumentsManager() {
           ? `문서가 ${count}개 비서에 등록됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
           : `문서 업로드 및 처리가 완료됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
       );
-      setUploadForm({ file: null, agentIds: [], title: '' });
+      setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization' });
       setUploadProgress(0);
       loadData();
     } catch (err) {
@@ -223,6 +226,30 @@ export default function DocumentsManager() {
               className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
               placeholder="문서 제목을 입력하세요"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">공개 범위</label>
+            <div className="space-y-2 p-3 border border-slate-200 rounded-md">
+              {([
+                ['organization', '기관 전체', '이 기관의 모든 직원이 검색·참고합니다 (복무규정, 공통 매뉴얼 등)'],
+                ['department', '내 부서로 제한', '내 부서와 하위 부서만 참고합니다 (인사·감사·법무 자료 등)'],
+              ] as ['organization' | 'department', string, string][]).map(([value, label, hint]) => (
+                <label key={value} className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="doc-visibility"
+                    checked={uploadForm.visibility === value}
+                    onChange={() => setUploadForm(prev => ({ ...prev, visibility: value }))}
+                    className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-800">{label}</span>
+                    <span className="block text-xs text-slate-400">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div>

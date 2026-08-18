@@ -196,6 +196,7 @@ export async function POST(request: Request) {
   // 공통 문서 메타데이터 (모든 에이전트에 동일)
   const baseRecord = {
     department_id: departmentId,
+    visibility: formData.get('visibility')?.toString() === 'department' ? 'department' : 'organization',
     uploaded_by: session.user.id,
     storage_path: storagePath,
     file_name: file.name,

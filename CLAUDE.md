@@ -121,6 +121,7 @@ src/
 | 0013 | `agents.enabled_connectors` (에이전트별 외부 도구 설정) |
 | 0014 | `departments.parent_id` (부서 계층) + 기관 단위 유일성 + `organization_id` NOT NULL |
 | 0015 | `department_ancestors` RPC + `search_document_chunks` 상위 부서 확장 |
+| 0016 | `agents`·`documents`에 `visibility` + `organization_id` (기관 전체 공개가 기본) |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -311,10 +312,28 @@ MAIL_FROM=
 
 ## 멀티테넌트 격리 원칙
 
+### 공개 범위 — 기관 전체가 기본
+
+**부서 종속은 기본값이 아닙니다.** 공공기관 규정 대부분(복무·여비·문서관리·
+정보공개·행동강령)은 전 직원 공통이라, 부서로 나누면 오히려 못 찾습니다.
+게다가 정기 인사이동 때마다 부서 트리와 자료 배치를 다시 손봐야 합니다.
+
+| `visibility` | 동작 | 용도 |
+|---|---|---|
+| `organization` **(기본)** | 같은 기관 전 직원 | 규정, 공통 매뉴얼, 공문 서식 |
+| `department` | 지정 부서 + 하위 부서 | 인사·감사·법무 자료 |
+
+조회는 `visibilityFilter(scope)`가 만드는 `.or()` 조건을 씁니다.
+`organization_id`는 `department_id`에서 트리거(0016)가 채우므로 insert 시
+직접 넣을 필요가 없습니다.
+
+**0016 마이그레이션은 기존 행을 `department`로 백필합니다.** 기본값을 그대로
+적용하면 부서 전용이던 자료가 갑자기 기관 전체에 공개되기 때문입니다.
+
 ### 부서 계층 공유
 
-공공기관은 `기관 > 국/본부 > 과 > 팀`으로 위계가 깊습니다. 상위 부서에 등록한
-공통 비서·문서를 하위 부서가 함께 씁니다.
+`visibility='department'`일 때 상위 부서에 걸린 자료를 하위 부서가 함께 씁니다.
+공공기관은 `기관 > 국/본부 > 과 > 팀`으로 위계가 깊습니다.
 
 방향을 혼동하면 격리가 깨지므로 이름을 분명히 씁니다 (`src/lib/department-scope.ts`):
 

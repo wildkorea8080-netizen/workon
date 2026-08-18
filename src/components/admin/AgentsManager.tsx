@@ -9,11 +9,14 @@ interface AgentWithOwner extends Agent {
   owner?: { id: string; email: string; full_name?: string | null } | null;
 }
 
+type Visibility = 'organization' | 'department';
+
 type AgentFormData = {
   name: string;
   description: string;
   system_prompt: string;
   enabled_connectors: string[];
+  visibility: Visibility;
 };
 
 type ConnectorInfo = { id: string; label: string; toolNames: string[] };
@@ -30,8 +33,8 @@ export default function AgentsManager() {
   // 공식 비서 탭 상태
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [formData, setFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
-  const [editFormData, setEditFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
+  const [formData, setFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [], visibility: 'organization' });
+  const [editFormData, setEditFormData] = useState<AgentFormData>({ name: '', description: '', system_prompt: '', enabled_connectors: [], visibility: 'organization' });
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -100,7 +103,7 @@ export default function AgentsManager() {
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => [result.data, ...prev]);
-      setFormData({ name: '', description: '', system_prompt: '', enabled_connectors: [] });
+      setFormData({ name: '', description: '', system_prompt: '', enabled_connectors: [], visibility: 'organization' });
       setShowCreateForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류');
@@ -304,6 +307,33 @@ export default function AgentsManager() {
                         onChange={e => setEditFormData(p => ({ ...p, system_prompt: e.target.value }))}
                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
 
+                      <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-700">공개 범위</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            규정·매뉴얼처럼 전 직원이 보는 자료는 기관 전체로 두세요.
+                          </p>
+                        </div>
+                        {([
+                          ['organization', '기관 전체', '이 기관의 모든 직원이 사용합니다'],
+                          ['department', '내 부서로 제한', '내 부서와 하위 부서만 사용합니다 (인사·감사 등)'],
+                        ] as [Visibility, string, string][]).map(([value, label, hint]) => (
+                          <label key={value} className="flex items-start gap-2.5 cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`visibility-${agent.id}`}
+                              checked={editFormData.visibility === value}
+                              onChange={() => setEditFormData(p => ({ ...p, visibility: value }))}
+                              className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium text-slate-800">{label}</span>
+                              <span className="block text-[11px] text-slate-400">{hint}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+
                       {connectors.length > 0 && (
                         <div className="border border-slate-200 rounded-xl p-3 space-y-2">
                           <div>
@@ -364,7 +394,7 @@ export default function AgentsManager() {
                         }`}>
                         {agent.is_active ? '활성' : '비활성'}
                       </button>
-                      <button onClick={() => { setEditingAgent(agent); setEditFormData({ name: agent.name, description: agent.description ?? '', system_prompt: agent.system_prompt ?? '', enabled_connectors: agent.enabled_connectors ?? [] }); }}
+                      <button onClick={() => { setEditingAgent(agent); setEditFormData({ name: agent.name, description: agent.description ?? '', system_prompt: agent.system_prompt ?? '', enabled_connectors: agent.enabled_connectors ?? [], visibility: ((agent as any).visibility ?? 'organization') as Visibility }); }}
                         className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">수정</button>
                       <button onClick={() => handleDeleteAgent(agent)} disabled={deletingId === agent.id}
                         className="px-3 py-1 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50 disabled:opacity-50">

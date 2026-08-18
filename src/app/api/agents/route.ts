@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getVisibleDepartmentIds } from '@/lib/department-scope';
+import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
@@ -52,9 +52,11 @@ export async function GET(request: NextRequest) {
     const personalOnly = searchParams.get('personal') === 'true';
     const favoritesOnly = searchParams.get('favorites') === 'true';
 
-    // 자기 부서 + 상위 부서의 비서를 함께 본다.
-    // 상위 부서에 등록한 공통 비서를 하위 부서가 쓸 수 있어야 전 부서 활용이 된다.
-    const visibleDeptIds = await getVisibleDepartmentIds(departmentId);
+    // 기관 전체 공개 비서 + 내 부서 계통에 걸린 부서 제한 비서.
+    // 대부분의 규정·매뉴얼은 전 직원 공통이므로 기관 전체가 기본이고,
+    // 인사·감사처럼 제한이 필요한 것만 부서로 좁힌다.
+    const scope = await getAccessScope(departmentId);
+    const visibleFilter = visibilityFilter(scope);
 
     // 즐겨찾기 탭: favoriteIds 기반으로 in() 쿼리
     if (favoritesOnly) {
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
       const { data: agents, error } = await supabaseAdmin
         .from('agents')
         .select('*')
-        .in('department_id', visibleDeptIds)
+        .or(visibleFilter)
         .in('id', favoriteIds)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
@@ -101,7 +103,7 @@ export async function GET(request: NextRequest) {
     let query = supabaseAdmin
       .from('agents')
       .select('*')
-      .in('department_id', visibleDeptIds)
+      .or(visibleFilter)
       .eq('is_active', true)
       .eq('is_personal', false);
 
@@ -154,7 +156,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, description, system_prompt, config, enabled_connectors } = body;
+    const { name, description, system_prompt, config, enabled_connectors, visibility } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return NextResponse.json(
@@ -175,6 +177,9 @@ export async function POST(request: NextRequest) {
         created_by: session!.user.id,
         updated_by: session!.user.id,
         enabled_connectors: Array.isArray(enabled_connectors) ? enabled_connectors : [],
+        // 기본은 기관 전체 공개. 규정·매뉴얼 대부분이 전 직원 공통이라
+        // 아무 설정 없이 만들어도 전 직원이 쓸 수 있어야 한다.
+        visibility: visibility === 'department' ? 'department' : 'organization',
       })
       .select()
       .single();

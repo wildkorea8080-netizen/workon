@@ -68,15 +68,15 @@ async function main() {
     process.exit(1);
   }
 
-  const articles = await executeTool('law_get_articles', { mst, article: '15' });
-  const articleOk = show(`law_get_articles {"mst":"${mst}","article":"15"}`, articles);
+  const articles = await executeTool('law_get_content', { id: mst, type: '법령', article: '15' });
+  const articleOk = show(`law_get_content {"id":"${mst}","type":"법령","article":"15"}`, articles);
 
   const unknown = await executeTool('nope_tool', {});
   const guardOk = unknown.isError === true;
   console.log(`\n--- 알 수 없는 도구 처리 --- ${guardOk ? 'PASS (isError)' : 'FAIL'}`);
 
   console.log(
-    `\n[결과] law_search ${searchOk ? 'PASS' : 'FAIL'} / law_get_articles ${articleOk ? 'PASS' : 'FAIL'} / 오류처리 ${guardOk ? 'PASS' : 'FAIL'}`
+    `\n[결과] law_search ${searchOk ? 'PASS' : 'FAIL'} / law_get_content ${articleOk ? 'PASS' : 'FAIL'} / 오류처리 ${guardOk ? 'PASS' : 'FAIL'}`
   );
   if (!searchOk || !articleOk || !guardOk) process.exit(1);
 }

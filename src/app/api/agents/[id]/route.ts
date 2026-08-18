@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const body = await request.json();
-    const { name, description, system_prompt, config, is_active, enabled_connectors } = body;
+    const { name, description, system_prompt, config, is_active, enabled_connectors, visibility } = body;
 
     if (
       !name &&
@@ -37,7 +37,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       system_prompt === undefined &&
       config === undefined &&
       is_active === undefined &&
-      enabled_connectors === undefined
+      enabled_connectors === undefined &&
+      visibility === undefined
     ) {
       return NextResponse.json(
         { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
@@ -59,6 +60,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       updatePayload.enabled_connectors = Array.isArray(enabled_connectors)
         ? enabled_connectors.filter((id: unknown) => typeof id === 'string' && known.has(id))
         : [];
+    }
+
+    if (visibility !== undefined) {
+      if (!['organization', 'department'].includes(visibility)) {
+        return NextResponse.json(
+          { ok: false, error: { message: "공개 범위는 'organization' 또는 'department'만 가능합니다." } },
+          { status: 400 }
+        );
+      }
+      updatePayload.visibility = visibility;
     }
 
     updatePayload.updated_by = session.user.id;
