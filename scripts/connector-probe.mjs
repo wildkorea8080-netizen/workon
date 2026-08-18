@@ -58,27 +58,82 @@ async function main() {
     return;
   }
 
-  // 기본 시나리오: 검색 → 첫 결과의 조문 조회
-  const search = await executeTool('law_search', { query: '개인정보 보호법', limit: 3 });
-  const searchOk = show('law_search {"query":"개인정보 보호법"}', search);
+  // 기본 시나리오: 설정된 커넥터마다 검색 → 상세 조회까지 한 번씩 태운다.
+  // 커넥터는 순수 함수라 여기서 통과하면 /api/chat의 툴 루프에서도 같게 동작한다.
+  const configured = new Set(availableConnectors().map((c) => c.id));
+  const results = [];
 
-  const mst = search.sources[0]?.url.match(/lsiSeq=(\d+)/)?.[1];
-  if (!mst) {
-    console.log('\n[결과] law_search FAIL — mst를 얻지 못해 조문 조회를 건너뜁니다.');
-    process.exit(1);
+  /** 도구를 호출해 출력하고 통과 여부를 기록한다. 실패해도 다음 시나리오를 계속한다. */
+  async function step(label, tool, input, { optional = false } = {}) {
+    const result = await executeTool(tool, input);
+    const ok = show(`${tool} ${JSON.stringify(input)}`, result);
+    results.push({ label, ok: ok || optional, hard: ok, optional });
+    return result;
   }
 
-  const articles = await executeTool('law_get_content', { id: mst, type: '법령', article: '15' });
-  const articleOk = show(`law_get_content {"id":"${mst}","type":"법령","article":"15"}`, articles);
+  // ── 국가법령정보 ──
+  if (configured.has('law')) {
+    const search = await step('law 검색', 'law_search', { query: '개인정보 보호법', limit: 3 });
+    const mst = search.sources[0]?.url.match(/lsiSeq=(\d+)/)?.[1];
+    if (mst) {
+      await step('law 조문', 'law_get_content', { id: mst, type: '법령', article: '15' });
+    } else {
+      results.push({ label: 'law 조문', ok: false, hard: false });
+    }
 
+    // 판례 본문은 기관 자체 OC일 때만 열린다. 기본 OC면 실패가 정상이라 optional.
+    const prec = await step('판례 검색', 'law_search', { query: '개인정보', type: '판례', limit: 1 });
+    const seq = prec.sources[0]?.url.match(/precSeq=(\d+)/)?.[1];
+    if (seq) {
+      await step('판례 본문(자체 OC 필요)', 'law_get_content', { id: seq, type: '판례' }, { optional: true });
+    }
+  }
+
+  // ── KOSIS ──
+  if (configured.has('kosis')) {
+    const tables = await step('KOSIS 검색', 'kosis_search_tables', { query: '소비자물가지수', limit: 3 });
+    const m = tables.sources[0]?.url.match(/orgId=([^&]+)&tblId=([^&]+)/);
+    if (m) {
+      await step('KOSIS 데이터', 'kosis_get_data', { orgId: m[1], tblId: m[2], periods: 2 });
+    } else {
+      results.push({ label: 'KOSIS 데이터', ok: false, hard: false });
+    }
+  }
+
+  // ── 나라장터 ──
+  if (configured.has('g2b')) {
+    await step('나라장터 공고', 'g2b_search_bids', { keyword: '인공지능', days: 30, limit: 3 });
+  }
+
+  // ── DART ──
+  if (configured.has('dart')) {
+    const disc = await step('DART 공시', 'dart_search_disclosures', { limit: 3 });
+    const corp = disc.content?.match(/corp_code\): (\d{8})/)?.[1];
+    if (corp) {
+      await step('DART 기업개황', 'dart_get_company', { corp_code: corp });
+    } else {
+      results.push({ label: 'DART 기업개황', ok: false, hard: false });
+    }
+  }
+
+  // ── 오류 처리 ──
   const unknown = await executeTool('nope_tool', {});
   const guardOk = unknown.isError === true;
   console.log(`\n--- 알 수 없는 도구 처리 --- ${guardOk ? 'PASS (isError)' : 'FAIL'}`);
+  results.push({ label: '오류 처리', ok: guardOk, hard: guardOk });
 
-  console.log(
-    `\n[결과] law_search ${searchOk ? 'PASS' : 'FAIL'} / law_get_content ${articleOk ? 'PASS' : 'FAIL'} / 오류처리 ${guardOk ? 'PASS' : 'FAIL'}`
-  );
-  if (!searchOk || !articleOk || !guardOk) process.exit(1);
+  console.log('\n===== 결과 =====');
+  for (const r of results) {
+    const mark = r.hard ? 'PASS' : r.optional ? 'SKIP (선택)' : 'FAIL';
+    console.log(`  ${mark.padEnd(12)} ${r.label}`);
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) {
+    console.log(`\n실패 ${failed.length}건: ${failed.map((r) => r.label).join(', ')}`);
+    process.exit(1);
+  }
+  console.log('\n전부 통과했습니다.');
 }
 
 main().catch((e) => {

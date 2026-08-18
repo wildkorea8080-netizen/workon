@@ -434,6 +434,14 @@ details: {
 
 키가 없는 커넥터는 `isConfigured()`가 false를 돌려 도구 목록에서 아예 빠집니다.
 
+**판례 본문 조회는 기관 자체 `LAW_API_OC`가 있어야 열립니다.** 기본값 `test`로는
+`lawService.do?target=prec`이 거부됩니다. 자체 OC면 `ID` 파라미터로 열리며
+(`MST`는 빈 응답), 응답 봉투는 `PrecService`이고 본문에 `<br/>`가 섞여 옵니다.
+거부되면 검색 결과의 공개 링크를 안내하도록 폴백합니다.
+
+`npm run connector:probe`가 설정된 커넥터 전부를 검색 → 상세 조회까지 태웁니다.
+판례 본문만 선택(SKIP 허용) 항목입니다 — 기본 OC 환경에서 실패가 정상이기 때문입니다.
+
 새 커넥터는 `Connector` 인터페이스를 구현하고 `connectors/index.ts`의
 `CONNECTORS` 배열에 추가하면 끝입니다.
 

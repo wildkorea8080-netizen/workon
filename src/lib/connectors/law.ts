@@ -30,6 +30,8 @@ const DETAIL_URL = 'https://www.law.go.kr/DRF/lawService.do';
 const MAX_SEARCH_RESULTS = 20;
 /** 조문 전체를 그대로 넘기면 컨텍스트를 다 잡아먹는다 */
 const MAX_ARTICLES = 60;
+/** 판례 본문은 길다. 전문을 다 실으면 다른 근거가 밀려나므로 자른다. */
+const MAX_PREC_CHARS = 4000;
 
 interface ResourceSpec {
   /** API의 target 파라미터 */
@@ -55,6 +57,24 @@ interface ResourceSpec {
 function formatDate(value?: string) {
   if (!value || value.length !== 8) return value ?? '';
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+}
+
+/**
+ * 판례 응답은 본문에 <br/> 등 HTML 태그가 섞여 온다.
+ * 그대로 모델에 넘기면 태그가 답변에 새어 나오므로 줄바꿈으로 바꿔 없앤다.
+ */
+function stripTags(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** 값이 비어 있으면 그 항목 자체를 빼기 위해 빈 문자열을 돌려준다. */
+function section(label: string, value: unknown) {
+  const text = stripTags(toArray(value).flat().join('\n'));
+  return text ? `[${label}]\n${text}` : '';
 }
 
 /**
@@ -112,9 +132,9 @@ const RESOURCES: Record<string, ResourceSpec> = {
     idField: '판례일련번호',
     idParam: 'ID',
     publicUrl: (id) => `https://www.law.go.kr/LSW/precInfoP.do?precSeq=${encodeURIComponent(id)}`,
-    // 본문 조회는 API가 "일치하는 판례가 없습니다"로 거부한다(별도 권한 필요로 보임).
-    // 검색 결과의 사건번호·법원·선고일자와 공개 링크로 안내한다.
-    detail: false,
+    // 본문 조회는 자체 OC로만 열린다. 기본값 OC='test'로는 거부되므로
+    // 실패 시 공개 링크 안내로 떨어진다(getContent의 판례 분기 참조).
+    detail: true,
     describe: (r) => [
       `법원: ${r.법원명 ?? '-'} / 사건번호: ${r.사건번호 ?? '-'}`,
       `선고일자: ${formatDate(r.선고일자)} / ${r.사건종류명 ?? ''} ${r.판결유형 ?? ''}`.trim(),
@@ -167,7 +187,7 @@ const tools: ToolDefinition[] = [
       'law_search로 얻은 id로 원문을 가져온다. ' +
       `본문 조회가 가능한 종류: ${DETAIL_KEYS.join(', ')}. ` +
       "type='법령'일 때는 article로 특정 조문만 지정할 수 있다. " +
-      '판례는 본문 조회가 지원되지 않으니 검색 결과의 링크를 안내한다.',
+      '판례 본문은 기관 자체 OC일 때만 열린다. 거부되면 검색 결과의 링크를 안내한다.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -415,6 +435,48 @@ async function getContent(input: Record<string, unknown>): Promise<ToolResult> {
     if (!content) return toolError(`${name}의 본문을 추출하지 못했습니다.`);
 
     return { content: `${name}\n\n${content}`, sources: [{ ...source, title: name }] };
+  }
+
+  // ── 판례 ──
+  // 응답은 PrecService 봉투이고 본문에 <br/> 태그가 섞여 온다.
+  // 기본 OC('test')로는 거부되므로, 봉투가 없으면 공개 링크로 안내한다.
+  if (typeKey === '판례') {
+    const prec = payload['PrecService'];
+    if (!prec || typeof prec === 'string') {
+      return toolError(
+        `판례 본문 조회 권한이 없습니다(LAW_API_OC 확인). 링크로 안내하세요: ${spec.publicUrl(id)}`
+      );
+    }
+
+    const title = String(prec['사건명'] ?? typeKey);
+    const head = [
+      `${prec['법원명'] ?? '-'} ${formatDate(String(prec['선고일자'] ?? ''))} ${prec['선고'] ?? ''} ${prec['사건번호'] ?? ''}`.trim(),
+      `${prec['사건종류명'] ?? ''} ${prec['판결유형'] ?? ''}`.trim(),
+    ].filter(Boolean);
+
+    // 판시사항·판결요지가 핵심이고 판례내용은 전문이라 길다.
+    // 앞의 것들을 먼저 싣고 전문은 남는 분량만큼만 붙인다.
+    const summary = [
+      section('판시사항', prec['판시사항']),
+      section('판결요지', prec['판결요지']),
+      section('참조조문', prec['참조조문']),
+      section('참조판례', prec['참조판례']),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const full = stripTags(toArray(prec['판례내용']).flat().join('\n'));
+    const room = MAX_PREC_CHARS - summary.length;
+    let bodyText = '';
+    if (full && room > 500) {
+      const cut = full.length > room;
+      bodyText = `\n\n[전문]\n${cut ? `${full.slice(0, room)}\n…(이하 생략, 전문은 링크 참조)` : full}`;
+    } else if (full) {
+      bodyText = '\n\n(전문은 길어 생략했습니다. 링크를 참조하세요.)';
+    }
+
+    const content = [head.join('\n'), summary].filter(Boolean).join('\n\n') + bodyText;
+    return { content: `${title}\n\n${content}`.trim(), sources: [{ ...source, title }] };
   }
 
   // ── 법령해석례 ──
