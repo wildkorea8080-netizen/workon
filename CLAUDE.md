@@ -401,7 +401,7 @@ details: {
 
 | 커넥터 | id | 도구 | 필요 키 |
 |---|---|---|---|
-| 국가법령정보 (법제처) | `law` | `law_search`, `law_get_articles` | `LAW_API_OC` (기본 'test') |
+| 국가법령정보 (법제처) | `law` | `law_search`, `law_get_content` | `LAW_API_OC` (기본 'test') |
 | 국가통계포털 KOSIS | `kosis` | `kosis_search_tables`, `kosis_get_data` | `KOSIS_API_KEY` |
 | 나라장터 (조달청) | `g2b` | `g2b_search_bids` | `G2B_API_KEY` |
 | 전자공시 DART | `dart` | `dart_search_disclosures`, `dart_get_company` | `DART_API_KEY` |
