@@ -90,16 +90,55 @@ export async function getVisibleDepartmentIds(departmentId: string): Promise<str
 }
 
 /**
- * 관리자가 관리할 수 있는 부서 범위 (자기 부서 + 모든 하위 부서).
+ * 관리자가 관리할 수 있는 부서 범위.
  *
- * 계층 의미를 그대로 따릅니다 — 자기 아래를 관리합니다. 최상위 부서 소속
- * 관리자는 기관 전체를, 과 단위 관리자는 자기 과 아래만 관리합니다.
+ * 계층 의미를 그대로 따릅니다 — 자기 아래를 관리합니다. 과 단위 관리자는
+ * 자기 과 아래만, **기관 직속(최상위) 부서 소속 관리자는 기관 전체를** 관리합니다.
  *
- * `getSharedDepartmentIds`와 계산은 같지만 의도가 달라 이름을 나눠 둡니다.
- * (공유 영향 범위 vs 관리 권한 범위)
+ * 뒤쪽이 중요합니다. 예전에는 하위 부서만 돌려줬는데, 그러면 최상위 부서가
+ * 둘 이상인 기관에서 아무도 기관 전체를 관리할 수 없었습니다. 실제로 부서
+ * 셋이 모두 최상위인 기관에서 각 관리자가 자기 부서 하나만 보고 있었고,
+ * 나머지 부서의 직원·자료는 누구의 관리 범위에도 들어가지 않았습니다.
+ * 조직도를 아직 세우지 않은 기관이 흔하므로 도입 초기에 바로 부딪힙니다.
+ *
+ * 기관 경계는 넘지 않습니다. 최상위 관리자라도 자기 기관 안에서만입니다.
+ *
+ * `getSharedDepartmentIds`와 이름을 나눠 둔 이유가 여기서 드러납니다 —
+ * 자료 공유 영향 범위와 관리 권한 범위는 더 이상 같은 계산이 아닙니다.
  */
 export async function getManagedDepartmentIds(departmentId: string): Promise<string[]> {
-  return getSharedDepartmentIds(departmentId);
+  if (!departmentId) return [];
+
+  const { data: own, error } = await supabaseAdmin
+    .from('departments')
+    .select('parent_id, organization_id')
+    .eq('id', departmentId)
+    .maybeSingle();
+
+  // 조회 실패가 권한을 넓히면 안 되므로 가장 좁은 범위로 닫습니다.
+  if (error || !own) {
+    if (error) console.warn('[department-scope] 부서 조회 실패:', error.message);
+    return [departmentId];
+  }
+
+  // 하위 부서를 가진 과 단위 관리자 — 자기 아래만.
+  if (own.parent_id) return getSharedDepartmentIds(departmentId);
+
+  // 기관 직속 부서 소속 — 기관 전체.
+  if (!own.organization_id) return [departmentId];
+
+  const { data: all, error: allError } = await supabaseAdmin
+    .from('departments')
+    .select('id')
+    .eq('organization_id', own.organization_id);
+
+  if (allError || !Array.isArray(all) || all.length === 0) {
+    if (allError) console.warn('[department-scope] 기관 부서 조회 실패:', allError.message);
+    return getSharedDepartmentIds(departmentId);
+  }
+
+  const ids = all.map((row: { id: string }) => row.id);
+  return ids.includes(departmentId) ? ids : [departmentId, ...ids];
 }
 
 /**
