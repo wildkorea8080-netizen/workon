@@ -63,11 +63,6 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
         `/api/stats/usage?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
       );
 
-      if (response.status === 404) {
-        // API doesn't exist yet, show placeholder data
-        setUsageData(generatePlaceholderData(selectedPeriod));
-        return;
-      }
 
       const result = await response.json();
 
@@ -78,31 +73,13 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
       setUsageData(result.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : '사용량 데이터 로드 중 오류가 발생했습니다.');
-      // Fallback to placeholder data
-      setUsageData(generatePlaceholderData(selectedPeriod));
+      // 가짜 데이터로 채우지 않는다. 이 화면을 보고 집행률을 보고하는데,
+      // 무작위 숫자를 '사용량 추이'라는 이름으로 띄우면 아무것도 안 보여주는
+      // 것보다 나쁘다. 실패했으면 실패했다고 두고 빈 차트를 보여준다.
+      setUsageData([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const generatePlaceholderData = (period: string): UsageData[] => {
-    const data: UsageData[] = [];
-    const days = period === '7d' ? 7 : period === '30d' ? 30 : 90;
-
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-
-      data.push({
-        date: date.toISOString().split('T')[0],
-        documents: Math.floor(Math.random() * 5),
-        conversations: Math.floor(Math.random() * 10),
-        reports: Math.floor(Math.random() * 3),
-        tokens: Math.floor(Math.random() * 1000) + 500,
-      });
-    }
-
-    return data;
   };
 
   const formatDate = (dateStr: string) => {
@@ -296,7 +273,7 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
 
       {error && (
         <div className="p-4 text-amber-700 bg-amber-100 rounded-lg">
-          <p className="text-sm">상세 차트는 추후 구현 예정입니다. 현재는 샘플 데이터를 표시합니다.</p>
+          <p className="text-sm">해당 기간에 사용 내역이 없습니다.</p>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -98,8 +99,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 임시 비밀번호 생성 후 bcrypt(saltRounds=12)로 해싱
-    const tempPassword = Math.random().toString(36).slice(-12);
+    // 임시 비밀번호 생성 후 bcrypt(saltRounds=12)로 해싱.
+    //
+    // Math.random()을 쓰면 안 된다. 암호학적으로 안전하지 않아 예측이 가능하고,
+    // 한 번 호출한 값을 toString(36)한 것이라 12자로 보여도 실제 엔트로피는
+    // 그보다 훨씬 낮다. bulk-register·super-admins가 이미 쓰는 방식에 맞춘다.
+    // 혼동하기 쉬운 글자(0/O, 1/l/I)는 뺀다 — 담당자가 구두로 전달하는 경우가 있다.
+    const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const tempPassword = Array.from(crypto.randomBytes(12))
+      .map((b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length])
+      .join('');
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     const { data: newUser, error } = await supabaseAdmin
