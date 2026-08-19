@@ -10,6 +10,8 @@
     "hwp:probe": "tsx scripts/hwp-probe.mjs",
     "connector:probe": "tsx scripts/connector-probe.mjs",
     "tool:probe": "tsx scripts/tool-loop-probe.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:check": "tsx scripts/db-check.mjs",
     "db:migrate": "tsx scripts/db-migrate.mjs",
     "seed:agents": "tsx scripts/seed-agents.mjs"
@@ -50,6 +52,7 @@
     "postcss": "8.4.42",
     "tailwindcss": "3.4.5",
     "tsx": "^4.23.12",
-    "typescript": "5.5.2"
+    "typescript": "5.5.2",
+    "vitest": "^4.1.11"
   }
 }
