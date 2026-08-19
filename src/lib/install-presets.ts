@@ -19,12 +19,33 @@ export interface InstallResult {
   installed: number;
   skipped: number;
   categories: number;
+  /** --update로 프롬프트를 갱신한 수 */
+  updated: number;
+  /** 사람이 손댄 흔적이 있어 건드리지 않은 비서 이름 */
+  preserved: string[];
+}
+
+export interface InstallOptions {
+  /**
+   * 이미 있는 비서의 프롬프트를 프리셋으로 갱신할지.
+   *
+   * 기본값(false)은 건너뛴다. 그런데 그러면 프리셋을 개선해도 이미 만들어진
+   * 기관은 옛 프롬프트를 그대로 쓴다 — 실제로 기관 두 곳의 같은 이름 비서가
+   * 서로 다른 프롬프트를 갖게 됐다(민원인 답변: 89자 vs 211자).
+   *
+   * true로 주면 갱신하되, **사람이 손댄 비서는 건드리지 않는다.**
+   * 판정은 `updated_by`가 채워져 있는지로 한다 — 관리 화면의 수정·노출 토글이
+   * 모두 이 값을 남긴다. 관리자가 기관 사정에 맞춰 고쳐 둔 문구를 덮으면
+   * 되돌릴 방법이 없으므로, 애매하면 건드리지 않는 쪽으로 판단한다.
+   */
+  update?: boolean;
 }
 
 export async function installPresetAgents(
   organizationId: string,
   departmentId: string,
-  organizationType: string | null | undefined
+  organizationType: string | null | undefined,
+  options: InstallOptions = {}
 ): Promise<InstallResult> {
   const presets = presetsForOrganizationType(organizationType);
 
@@ -47,6 +68,8 @@ export async function installPresetAgents(
   const orderByCategory = new Map<string, number>();
   let installed = 0;
   let skipped = 0;
+  let updated = 0;
+  const preserved: string[] = [];
 
   for (const preset of presets) {
     const order = orderByCategory.get(preset.category) ?? 0;
@@ -56,16 +79,66 @@ export async function installPresetAgents(
 
     if (!error) {
       installed += 1;
-    } else if (error.code === '23505') {
-      skipped += 1;
-    } else {
+      continue;
+    }
+
+    if (error.code !== '23505') {
       // 한 개가 실패해도 나머지는 깐다. 전부 되돌리면 기관이 빈 채로 남는다.
       console.warn('[install-presets] 비서 추가 실패', preset.name, error.message);
       skipped += 1;
+      continue;
+    }
+
+    // 이미 있는 비서
+    if (!options.update) {
+      skipped += 1;
+      continue;
+    }
+
+    const { data: existing } = await supabaseAdmin
+      .from('agents')
+      .select('id, updated_by')
+      .eq('organization_id', organizationId)
+      .eq('name', preset.name)
+      .eq('is_personal', false)
+      .maybeSingle();
+
+    if (!existing) {
+      skipped += 1;
+      continue;
+    }
+
+    // 사람이 손댄 흔적이 있으면 그대로 둔다. 기관 사정에 맞춰 고쳐 둔 문구를
+    // 덮으면 되돌릴 방법이 없다.
+    if (existing.updated_by) {
+      preserved.push(preset.name);
+      skipped += 1;
+      continue;
+    }
+
+    // 갱신 대상은 프리셋이 정의하는 것들뿐이다. 노출 여부·공개 범위·정렬처럼
+    // 운영자가 조정하는 값은 건드리지 않는다.
+    const { error: updateError } = await supabaseAdmin
+      .from('agents')
+      .update({
+        description: preset.description,
+        system_prompt: preset.systemPrompt,
+        icon: preset.icon,
+        color: preset.color,
+        category: preset.category,
+        enabled_connectors: preset.connectors ?? [],
+      })
+      .eq('id', existing.id);
+
+    if (updateError) {
+      console.warn('[install-presets] 비서 갱신 실패', preset.name, updateError.message);
+      skipped += 1;
+    } else {
+      updated += 1;
     }
   }
 
-  return { installed, skipped, categories };
+  return { installed, skipped, categories, updated, preserved };
 }
 
 function buildRow(preset: AgentPreset, departmentId: string, order: number) {

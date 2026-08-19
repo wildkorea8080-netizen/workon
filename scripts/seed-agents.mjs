@@ -1,8 +1,9 @@
 /**
  * 기존 기관에 기본 비서 세트를 설치한다.
  *
- *   npm run seed:agents            -- 넣기
- *   npm run seed:agents -- --dry   -- 무엇이 들어갈지만 보기
+ *   npm run seed:agents             -- 없는 것만 넣기
+ *   npm run seed:agents -- --dry    -- 무엇이 들어갈지만 보기
+ *   npm run seed:agents -- --update -- 기존 비서의 프롬프트도 프리셋으로 갱신
  *
  * 새로 만드는 기관은 슈퍼관리자 기관 등록 시 자동으로 깔린다(P3-2).
  * 이 스크립트는 그 이전에 만들어진 기관을 메우는 용도다.
@@ -27,6 +28,9 @@ for (const k of ['NEXTAUTH_URL', 'NEXTAUTH_SECRET']) {
 }
 
 const dryRun = process.argv.includes('--dry');
+// 프리셋을 개선해도 이미 만들어진 기관은 옛 프롬프트를 그대로 쓴다.
+// --update는 그것을 맞춰 준다. 사람이 손댄 비서는 건드리지 않는다.
+const update = process.argv.includes('--update');
 
 const { createClient } = await import('@supabase/supabase-js');
 const { presetsForOrganizationType } = await import('../src/lib/agent-presets.ts');
@@ -88,6 +92,7 @@ for (const org of orgs) {
   console.log(`  세트 ${presets.length}개`);
 
   if (dryRun) {
+    console.log(update ? '  (--update: 기존 비서의 프롬프트도 갱신 대상)' : '  (없는 것만 설치)');
     for (const p of presets) {
       const tools = p.connectors?.length ? `  [${p.connectors.join(', ')}]` : '';
       console.log(`    ${p.icon} ${p.name.padEnd(22)} ${p.category}${tools}`);
@@ -95,8 +100,16 @@ for (const org of orgs) {
     continue;
   }
 
-  const result = await installPresetAgents(org.id, departmentId, org.type);
-  console.log(`  설치 ${result.installed}개 / 건너뜀 ${result.skipped}개 / 카테고리 ${result.categories}개 추가`);
+  const result = await installPresetAgents(org.id, departmentId, org.type, { update });
+  const parts = [`설치 ${result.installed}개`];
+  if (update) parts.push(`갱신 ${result.updated}개`);
+  parts.push(`건너뜀 ${result.skipped}개`, `카테고리 ${result.categories}개 추가`);
+  console.log(`  ${parts.join(' / ')}`);
+
+  if (result.preserved.length > 0) {
+    // 덮지 않은 이유를 밝힌다. 갱신을 기대했는데 안 바뀌면 원인을 알 수 없다.
+    console.log(`  관리자가 수정한 비서라 그대로 둠: ${result.preserved.join(', ')}`);
+  }
 }
 
 if (dryRun) {
