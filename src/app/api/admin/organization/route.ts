@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
+import { enabledModels } from '@/lib/models';
+import { getAllowedModelIds } from '@/lib/model-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +68,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, slug, logo_url, ai_notice, domain, type')
+    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models')
     .eq('id', ctx.organizationId)
     .maybeSingle();
 
@@ -78,7 +80,23 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ ok: true, data });
+  // 고를 수 있는 전체 모델과, 실제로 적용 중인 목록을 함께 준다.
+  // 저장된 값에 레지스트리에서 사라진 모델이 남아 있을 수 있어
+  // 화면이 그대로 믿으면 안 된다.
+  return NextResponse.json({
+    ok: true,
+    data: {
+      ...data,
+      effectiveModels: await getAllowedModelIds(ctx.organizationId),
+      availableModels: enabledModels().map((m) => ({
+        id: m.id,
+        label: m.label,
+        provider: m.provider,
+        inputPerMTok: m.inputPerMTok,
+        outputPerMTok: m.outputPerMTok,
+      })),
+    },
+  });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -167,6 +185,25 @@ export async function PATCH(request: NextRequest) {
       update.ai_notice = notice || null;
     }
 
+    // 허용 모델 정책 (0021)
+    if (body.allowed_models !== undefined) {
+      const known = new Set(enabledModels().map((m) => m.id));
+      const requested = Array.isArray(body.allowed_models) ? body.allowed_models : [];
+      const valid = requested.filter((id: unknown) => typeof id === 'string' && known.has(id));
+
+      if (requested.length > 0 && valid.length === 0) {
+        return NextResponse.json(
+          { ok: false, error: { message: '선택한 모델을 찾을 수 없습니다.' } },
+          { status: 400 }
+        );
+      }
+
+      // 빈 배열을 그대로 저장하면 그 기관은 아무 대화도 못 하게 잠긴다.
+      // 정책 계층이 기본 모델로 되돌리지만, 저장값도 NULL로 두어
+      // "정하지 않음"과 "아무것도 허용 안 함"이 뒤섞이지 않게 한다.
+      update.allowed_models = valid.length > 0 ? valid : null;
+    }
+
     // 로고 제거
     if (body.logo_url === null) update.logo_url = null;
   }
@@ -178,11 +215,23 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
+  // 모델 정책은 이력을 남긴다. 보안성 검토와 감사에서 "그 시점에 무엇이
+  // 허용돼 있었는가"를 실제로 묻는데, 현재 값만 보관하면 답할 수 없다.
+  let beforeModels: string[] | null = null;
+  if (update.allowed_models !== undefined) {
+    const { data: before } = await supabaseAdmin
+      .from('organizations')
+      .select('allowed_models')
+      .eq('id', ctx.organizationId)
+      .maybeSingle();
+    beforeModels = before?.allowed_models ?? null;
+  }
+
   const { data, error } = await supabaseAdmin
     .from('organizations')
     .update(update)
     .eq('id', ctx.organizationId)
-    .select('id, name, slug, logo_url, ai_notice, domain, type')
+    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models')
     .single();
 
   if (error) {
@@ -197,6 +246,15 @@ export async function PATCH(request: NextRequest) {
       { ok: false, error: { message: '기관 정보 저장에 실패했습니다.' } },
       { status: 500 }
     );
+  }
+
+  if (update.allowed_models !== undefined) {
+    await supabaseAdmin.from('model_policy_logs').insert({
+      organization_id: ctx.organizationId,
+      changed_by: ctx.session.user.id,
+      before_models: beforeModels,
+      after_models: (update.allowed_models as string[] | null) ?? null,
+    });
   }
 
   return NextResponse.json({ ok: true, data });

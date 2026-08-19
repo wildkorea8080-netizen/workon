@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveModelForDepartment } from '@/lib/model-policy';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getEmbeddings } from '@/lib/embeddings';
@@ -93,7 +94,9 @@ ${contextText}
       { role: 'user', content: userPrompt },
     ];
 
-    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 2048);
+    // 기관별 허용 모델 정책(0021). 이 라우트도 토큰을 쓰므로 정책 밖에 두면 안 된다.
+    const modelId = await resolveModelForDepartment(departmentId);
+    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 2048, modelId);
 
     const sources = chunks.map((chunk: any) => ({
       document_title: chunk.document_title,

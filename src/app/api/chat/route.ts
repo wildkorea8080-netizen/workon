@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getAllowedModelIds, resolveModel } from '@/lib/model-policy';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import {
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { agent_id, message, conversation_id } = body;
+    const { agent_id, message, conversation_id, model: requestedModel } = body;
 
     if (!agent_id || typeof agent_id !== 'string') {
       return jsonError('에이전트 ID는 필수입니다.', 400);
@@ -235,6 +236,20 @@ export async function POST(request: NextRequest) {
     // 이 에이전트에 허용된 커넥터의 툴만 노출한다.
     // MCP 형식 → Anthropic 형식 변환은 이 어댑터 계층의 책임이며,
     // 커넥터는 프로바이더를 모른다.
+    // 기관별 허용 모델 정책(0021). 화면에서 걸러 보내더라도 그건 표시일 뿐이라
+    // 실제 제한은 여기서 건다. 지금은 모델이 하나뿐이라 하는 일이 거의 없지만,
+    // 두 번째 모델이 붙는 순간부터 자동으로 구속력을 갖는다.
+    const { data: modelDept } = await supabaseAdmin
+      .from('departments')
+      .select('organization_id')
+      .eq('id', departmentId)
+      .maybeSingle();
+    const allowedModels = await getAllowedModelIds(modelDept?.organization_id);
+    const { modelId, substituted } = resolveModel(requestedModel, allowedModels);
+    if (substituted) {
+      console.warn('[chat] 허용되지 않은 모델 요청, 대체함:', requestedModel, '→', modelId);
+    }
+
     const agentTools = toolsForConnectors(agent.enabled_connectors);
     const allowedToolNames = new Set(agentTools.map((tool) => tool.name));
     const tools: ClaudeTool[] = agentTools.map((tool) => ({
@@ -271,7 +286,9 @@ export async function POST(request: NextRequest) {
               claudeMessages,
               fullSystemPrompt,
               4096,
-              tools
+              tools,
+              undefined,
+              modelId
             )) {
               if (event.type === 'text') {
                 roundText += event.text;
@@ -330,13 +347,19 @@ export async function POST(request: NextRequest) {
               // 상한에 걸렸다. 여기서 그냥 끝내면 방금 받은 툴 결과를 모델에
               // 돌려주지 못해, 사용자는 "찾아볼게요" 같은 도입부만 받고 정작
               // 답을 못 받는다. 도구 없이 한 번 더 호출해 답을 마무리시킨다.
-              console.warn('[chat] 툴 라운드 상한 도달 — 도구 없이 마무리');
+              console.warn('[chat] 툴 라운드 상한 도달 — tool_choice=none으로 마무리');
               send('tool_limit', { rounds: MAX_TOOL_ROUNDS });
 
               for await (const event of streamClaudeAPI(
                 claudeMessages,
                 `${fullSystemPrompt}\n\n[중요] 도구 호출 한도에 도달해 더 이상 도구를 사용할 수 없습니다. 앞으로 무엇을 하겠다는 예고는 하지 마세요. 지금까지 확보한 자료만으로 답변을 완성하되, 자료가 부족하면 무엇이 부족한지와 사용자가 무엇을 다시 물으면 되는지를 알려주세요.`,
-                4096
+                4096,
+                // tools를 빼면 안 된다. 이력에 tool_use / tool_result 블록이
+                // 들어 있는데 tools 없이 보내면 Anthropic이 400으로 거부한다.
+                // 정의는 유지한 채 tool_choice='none'으로 호출만 막는다.
+                tools,
+                'none',
+                modelId
               )) {
                 if (event.type === 'text') {
                   fullText += event.text;

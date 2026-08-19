@@ -60,14 +60,20 @@ async function toApiError(response: Response) {
 export async function callClaudeAPI(
   messages: ClaudeMessage[],
   systemPrompt?: string,
-  maxTokens = 4096
+  maxTokens = 4096,
+  /**
+   * 쓸 모델. 기관별 허용 모델 정책(model-policy.ts)이 확정한 값을 받는다.
+   * 여기서 검증하지 않는 이유는, 검증을 두 곳에 두면 어느 쪽이 진짜
+   * 기준인지 모르게 되기 때문이다. 호출 전에 반드시 정책을 거칠 것.
+   */
+  modelId: string = CLAUDE_MODEL
 ): Promise<ClaudeResponse> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다.');
   }
 
   const requestBody: any = {
-    model: CLAUDE_MODEL,
+    model: modelId,
     max_tokens: maxTokens,
     messages: messages,
   };
@@ -93,7 +99,8 @@ export async function callClaudeAPI(
     usage: {
       input_tokens: data.usage?.input_tokens || 0,
       output_tokens: data.usage?.output_tokens || 0,
-      model: CLAUDE_MODEL,
+      // 실제로 쓴 모델을 남긴다. 정책이 다른 모델로 바꿨을 수도 있다.
+      model: data.model ?? modelId,
     },
   };
 }
@@ -111,14 +118,16 @@ export async function* streamClaudeAPI(
    * 'none'이면 도구 정의는 유지한 채 호출만 막는다.
    * 이력에 tool_use 블록이 있는데 tools를 통째로 빼면 모델이 빈 응답을 낸다.
    */
-  toolChoice?: 'auto' | 'none'
+  toolChoice?: 'auto' | 'none',
+  /** 쓸 모델. 기관별 허용 모델 정책이 확정한 값을 받는다. */
+  modelId: string = CLAUDE_MODEL
 ): AsyncGenerator<ClaudeStreamEvent> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다.');
   }
 
   const requestBody: any = {
-    model: CLAUDE_MODEL,
+    model: modelId,
     max_tokens: maxTokens,
     messages: messages,
     stream: true,
@@ -149,7 +158,7 @@ export async function* streamClaudeAPI(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   // input_tokens는 message_start에, output_tokens는 message_delta에 실려 옴
-  const usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0, model: CLAUDE_MODEL };
+  const usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0, model: modelId };
   let stopReason: string | null = null;
   let buffer = '';
 

@@ -2,6 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+interface ModelInfo {
+  id: string;
+  label: string;
+  provider: string;
+  inputPerMTok: number;
+  outputPerMTok: number;
+}
+
 interface OrgInfo {
   id: string;
   name: string;
@@ -10,6 +18,10 @@ interface OrgInfo {
   ai_notice: string | null;
   domain: string | null;
   type: string | null;
+  allowed_models: string[] | null;
+  /** 정책을 거쳐 실제로 적용 중인 목록. 저장값과 다를 수 있다. */
+  effectiveModels: string[];
+  availableModels: ModelInfo[];
 }
 
 interface BudgetInfo {
@@ -35,6 +47,7 @@ export default function OrganizationManager() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [aiNotice, setAiNotice] = useState('');
+  const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +66,9 @@ export default function OrganizationManager() {
       setName(orgRes.data.name ?? '');
       setSlug(orgRes.data.slug ?? '');
       setAiNotice(orgRes.data.ai_notice ?? '');
+      // 저장값이 아니라 정책이 확정한 목록을 보여준다. 레지스트리에서 사라진
+      // 모델이 저장값에 남아 있으면 화면과 실제가 어긋난다.
+      setModels(orgRes.data.effectiveModels ?? []);
     } else {
       setError(orgRes.error?.message ?? '기관 정보를 불러오지 못했습니다.');
     }
@@ -76,7 +92,7 @@ export default function OrganizationManager() {
       const res = await fetch('/api/admin/organization', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, slug, ai_notice: aiNotice }),
+        body: JSON.stringify({ name, slug, ai_notice: aiNotice, allowed_models: models }),
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
@@ -239,6 +255,42 @@ export default function OrganizationManager() {
           />
           <p className="mt-1 text-[11px] text-slate-400">
             대화 화면 하단에 항상 표시됩니다. 생성 결과를 그대로 신뢰하면 안 된다는 안내입니다.
+          </p>
+        </div>
+
+        {/* ── 허용 모델 (0021) ──
+            모델을 늘리기 전에 정책을 먼저 넣는다. 순서가 반대면 정책이 붙기까지
+            쌓인 사용 내역을 보안성 검토에서 설명할 수 없다. */}
+        <div>
+          <label className={label}>사용 허용 모델</label>
+          <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+            {(org?.availableModels ?? []).map((m) => {
+              const checked = models.includes(m.id);
+              return (
+                <label key={m.id} className="flex items-start gap-2.5 px-3 py-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) =>
+                      setModels((prev) =>
+                        e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)
+                      )
+                    }
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-slate-800">{m.label}</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {m.provider} · 100만 토큰당 입력 ${m.inputPerMTok} / 출력 ${m.outputPerMTok}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-400">
+            직원이 대화에 쓸 수 있는 모델입니다. 모두 끄면 기본 모델만 사용됩니다.
+            변경 이력은 감사 대비로 기록됩니다.
           </p>
         </div>
 

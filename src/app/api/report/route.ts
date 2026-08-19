@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveModelForDepartment } from '@/lib/model-policy';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -89,7 +90,8 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: prompt },
     ];
 
-    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 4096);
+    const modelId = await resolveModelForDepartment(user.department_id);
+    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 4096, modelId);
 
     // 보고서 내용 포함하여 사용 로그 기록
     const { data: savedLog } = await supabaseAdmin.from('usage_logs').insert({
