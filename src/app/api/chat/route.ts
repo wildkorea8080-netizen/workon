@@ -379,12 +379,21 @@ export async function POST(request: NextRequest) {
         }
 
         // 메시지 저장
+        //
+        // source_references를 사용자 행에도 반드시 넣는다. 컬럼에 NOT NULL과
+        // 기본값 '{}'가 둘 다 있지만, PostgREST는 배치 삽입 시 모든 행의 컬럼을
+        // 합집합으로 맞추고 빠진 행에는 **명시적 NULL**을 넣는다. 그래서 기본값이
+        // 우회되고 두 행이 함께 23502로 실패한다.
+        //
+        // 실패해도 답변은 이미 스트리밍된 뒤라 사용자는 정상으로 보고, 대화만
+        // 조용히 사라진다. 실제로 그 상태로 메시지가 한 건도 저장되지 않고 있었다.
         const { error: msgError } = await supabaseAdmin.from('messages').insert([
           {
             conversation_id: conversation.id,
             user_id: session.user.id,
             role: 'user',
             content: message,
+            source_references: {},
           },
           {
             conversation_id: conversation.id,
@@ -407,7 +416,13 @@ export async function POST(request: NextRequest) {
         ]);
 
         if (msgError) {
+          // 답변은 이미 스트리밍됐으므로 요청을 실패시킬 수는 없다.
+          // 다만 대화가 저장되지 않았다는 사실은 사용자에게 알려야 한다 —
+          // 모르면 새로고침 후 내용이 사라진 이유를 알 수 없다.
           console.error('[chat] 메시지 저장 오류:', msgError);
+          send('error', {
+            message: '답변은 생성됐지만 대화 저장에 실패했습니다. 필요하면 내용을 복사해 두세요.',
+          });
         }
 
         // 사용 로그 기록 (organization_id는 0012 트리거가 department_id로부터 채움)

@@ -288,6 +288,15 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 잘게 쪼개져 오므로 블록 인덱스별로 모았다가 `content_block_stop`에서 파싱합니다
 (`claude.ts`). 토큰 사용량은 라운드별로 누적합니다.
 
+**Supabase 배치 삽입 주의**: PostgREST는 여러 행을 한 번에 넣을 때 모든 행의
+컬럼을 **합집합**으로 맞추고, 그 컬럼이 없는 행에는 **명시적 NULL**을 넣습니다.
+컬럼에 기본값이 있어도 우회되므로 NOT NULL이면 배치 전체가 23502로 실패합니다.
+
+실제로 `/api/chat`이 사용자 행에만 `source_references`를 빠뜨려 **대화 메시지가
+한 건도 저장되지 않았습니다.** 답변은 이미 스트리밍된 뒤라 화면은 정상이고,
+새로고침해야 사라진 것을 압니다. `.insert([...])`를 쓸 때는 **모든 행이 같은
+키 집합을 갖는지** 확인하세요 (`tests/message-persistence.test.ts`가 봅니다).
+
 **출처 표기**: 응답 텍스트에 덧붙이지 않고 `messages.source_references`에 저장해
 `SourceCitation`(문서 청크)과 `MessageBubble`의 링크 목록(도구 출처)이 렌더링합니다.
 `source_references`는 `{ chunks: [...], links: [...] }` 구조입니다. 텍스트에 덧붙이면 DB 저장 내용과
