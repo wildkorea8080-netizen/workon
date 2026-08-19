@@ -137,10 +137,15 @@ console.log('\n=== usage_logs 기관 채움 트리거 ===');
 console.log('\n=== 과금 기록 규약 (details.cost_krw) ===');
 {
   const CONVENTION_FROM = '2026-08-01';
+  // 토큰을 쓰는 활동만 본다. create_agent 같은 것은 cost_krw가 없는 게 정상이라
+  // 함께 세면 거짓 경보가 나고, 그러면 진짜 누락이 묻힌다.
+  const TOKEN_ACTIONS = ['chat_message', 'qna_search', 'generate_report', 'document_ocr'];
+
   const { data, error } = await db
     .from('usage_logs')
-    .select('created_at, details')
-    .gte('created_at', CONVENTION_FROM);
+    .select('created_at, action, details')
+    .gte('created_at', CONVENTION_FROM)
+    .in('action', TOKEN_ACTIONS);
 
   if (error) {
     console.log(`      조회 실패: ${error.message.slice(0, 60)}`);
