@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendInvitationEmail } from '@/lib/mailer';
+import { APP_URL } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
@@ -86,10 +88,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const inviteUrl = `${baseUrl}/register?token=${token}`;
+    const inviteUrl = `${APP_URL}/register?token=${token}`;
 
-    return NextResponse.json({ ok: true, data: { inviteUrl, invitation } });
+    // 기관명은 메일 본문에만 쓰이므로 조회 실패해도 발송을 막지 않는다
+    const { data: department } = await supabaseAdmin
+      .from('departments')
+      .select('organizations(name)')
+      .eq('id', departmentId)
+      .maybeSingle();
+    const orgRelation = (department as any)?.organizations;
+    const organizationName = Array.isArray(orgRelation) ? orgRelation[0]?.name : orgRelation?.name;
+
+    const mail = await sendInvitationEmail({
+      to: normalizedEmail,
+      inviteUrl,
+      organizationName,
+      expiresAt: invitation.expires_at,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      data: {
+        inviteUrl,
+        invitation,
+        // 발송 실패/미설정 시 관리자가 링크를 직접 전달할 수 있도록 상태를 함께 내려준다
+        emailSent: mail.sent,
+        emailError: mail.sent ? undefined : mail.reason,
+      },
+    });
   } catch (error) {
     console.error('[invite] 오류:', error);
     return NextResponse.json(

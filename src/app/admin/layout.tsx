@@ -2,6 +2,8 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import Link from 'next/link';
 import AdminNav from '@/components/admin/AdminNav';
 import ImpersonateBanner from '@/components/admin/ImpersonateBanner';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { APP_NAME } from '@/lib/config';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerAuthSession();
@@ -24,6 +26,28 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const isImpersonating = session?.user?.isImpersonating === true;
   const orgName = session?.user?.impersonateOrgName ?? '';
 
+  // 기관 브랜딩 (0020). 서버 컴포넌트라 여기서 바로 읽는다.
+  // 클라이언트에서 받아오면 첫 화면에 기본 이름이 잠깐 스쳤다가 바뀐다.
+  let brandName = APP_NAME;
+  let brandLogo: string | null = null;
+  const departmentId = session?.user?.departmentId;
+  if (departmentId) {
+    const { data: dept } = await supabaseAdmin
+      .from('departments')
+      .select('organization_id')
+      .eq('id', departmentId)
+      .maybeSingle();
+    if (dept?.organization_id) {
+      const { data: org } = await supabaseAdmin
+        .from('organizations')
+        .select('name, logo_url')
+        .eq('id', dept.organization_id)
+        .maybeSingle();
+      if (org?.name) brandName = org.name;
+      if (org?.logo_url) brandLogo = `/api/branding/logo?org=${dept.organization_id}`;
+    }
+  }
+
   return (
     <div className="flex h-screen bg-slate-50">
       {/* 대리 접근 배너 */}
@@ -34,9 +58,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         {/* 로고 */}
         <div className="px-6 py-5 border-b border-white/10">
           <Link href="/admin" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <span className="text-lg">🏛️</span>
-            <div>
-              <p className="text-sm font-bold text-white leading-tight">AI 업무도우미</p>
+            {brandLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={brandLogo} alt="" className="h-6 max-w-[100px] object-contain" />
+            ) : (
+              <span className="text-lg">🏛️</span>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white leading-tight truncate">{brandName}</p>
               <p className="text-[10px] text-white/40 mt-0">관리자 포털{isImpersonating ? ' (대리)' : ''}</p>
             </div>
           </Link>

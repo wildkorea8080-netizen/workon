@@ -49,7 +49,15 @@ export default function AgentCard({
     <>
       <div
         className={`group relative flex flex-col gap-3 p-4 bg-white border rounded-xl cursor-pointer transition-all duration-150 hover:shadow-md hover:border-brand-300 ${c.border}`}
-        onClick={() => onSelect(agent)}
+        onClick={() => {
+          // 링크형 비서는 대화를 시작하지 않고 기관 시스템으로 넘긴다.
+          // noopener를 빼면 열린 창이 window.opener로 이 페이지를 조작할 수 있다.
+          if (agent.agent_type === 'link' && agent.link_url) {
+            window.open(agent.link_url, '_blank', 'noopener,noreferrer');
+            return;
+          }
+          onSelect(agent);
+        }}
       >
         {/* 즐겨찾기 버튼 */}
         <button
@@ -75,7 +83,16 @@ export default function AgentCard({
 
         {/* 이름 */}
         <div>
-          <p className="text-sm font-semibold text-slate-900 leading-tight pr-6">{agent.name}</p>
+          <p className="text-sm font-semibold text-slate-900 leading-tight pr-6 flex items-center gap-1">
+            {agent.name}
+            {agent.agent_type === 'link' && (
+              <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                aria-label="새 창으로 열림">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            )}
+          </p>
           {agent.description && (
             <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{agent.description}</p>
           )}

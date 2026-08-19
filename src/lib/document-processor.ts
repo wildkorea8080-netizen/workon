@@ -3,6 +3,10 @@ import mammoth from 'mammoth';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 import { getEmbeddings } from '@/lib/embeddings';
+import { extractTextFromHwp, isHwpFile } from '@/lib/hwp';
+import { extractTextFromScannedPdf, isLikelyScanned } from '@/lib/pdf-ocr';
+import { extractTextFromSpreadsheet, isSpreadsheetFile } from '@/lib/spreadsheet';
+import type { ClaudeUsage } from '@/lib/claude';
 
 export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 100;
@@ -17,16 +21,38 @@ function normalizeText(text: string) {
   return text.replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
 }
 
-async function extractTextFromFile(fileBuffer: Buffer, mimeType: string, fileName: string) {
+/** 추출 결과. 스캔 PDF는 Claude를 거치므로 토큰을 쓴다. */
+interface ExtractedText {
+  text: string;
+  /** 스캔 판독을 거쳤으면 그 사용량. 호출하는 쪽이 usage_logs에 기록해야 한다. */
+  ocrUsage?: ClaudeUsage;
+  ocrPages?: number;
+}
+
+async function extractTextFromFile(
+  fileBuffer: Buffer,
+  mimeType: string,
+  fileName: string
+): Promise<ExtractedText> {
   const lowerName = fileName.toLowerCase();
 
   if (mimeType === 'text/plain' || lowerName.endsWith('.txt')) {
-    return new TextDecoder('utf-8').decode(fileBuffer);
+    return { text: new TextDecoder('utf-8').decode(fileBuffer) };
   }
 
   if (mimeType === 'application/pdf' || lowerName.endsWith('.pdf')) {
     const pdfData = await pdfParse(fileBuffer);
-    return pdfData.text;
+    const pageCount = pdfData.numpages ?? 0;
+
+    // 텍스트 레이어가 없으면 pdf-parse는 오류가 아니라 빈 문자열을 준다.
+    // 그대로 두면 "텍스트를 추출할 수 없습니다"로 거부되고 끝이라,
+    // 공공기관 스캔 공문이 통째로 쓸 수 없는 자료가 된다.
+    if (isLikelyScanned(pdfData.text ?? '', pageCount)) {
+      const ocr = await extractTextFromScannedPdf(fileBuffer, pageCount);
+      return { text: ocr.text, ocrUsage: ocr.usage, ocrPages: ocr.pageCount };
+    }
+
+    return { text: pdfData.text };
   }
 
   if (
@@ -34,10 +60,20 @@ async function extractTextFromFile(fileBuffer: Buffer, mimeType: string, fileNam
     lowerName.endsWith('.docx')
   ) {
     const result = await mammoth.extractRawText({ buffer: fileBuffer });
-    return result.value;
+    return { text: result.value };
   }
 
-  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT만 업로드할 수 있습니다.');
+  if (isHwpFile(lowerName, mimeType)) {
+    return { text: await extractTextFromHwp(fileBuffer, fileName) };
+  }
+
+  // 표 문서는 셀을 이어붙이지 않고 마크다운 표로 복원한다.
+  // 이어붙이면 열 머리글과 값의 대응이 끊긴다.
+  if (isSpreadsheetFile(lowerName, mimeType)) {
+    return { text: await extractTextFromSpreadsheet(fileBuffer, fileName) };
+  }
+
+  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX, XLSX, CSV만 업로드할 수 있습니다.');
 }
 
 function chunkText(text: string) {
@@ -86,8 +122,8 @@ function averageEmbedding(vectors: number[][]) {
 }
 
 export async function processDocumentFile(fileBuffer: Buffer, mimeType: string, fileName: string) {
-  const rawText = await extractTextFromFile(fileBuffer, mimeType, fileName);
-  const normalizedText = normalizeText(rawText);
+  const extracted = await extractTextFromFile(fileBuffer, mimeType, fileName);
+  const normalizedText = normalizeText(extracted.text);
   const chunkTexts = chunkText(normalizedText);
 
   if (chunkTexts.length === 0) {
@@ -117,5 +153,8 @@ export async function processDocumentFile(fileBuffer: Buffer, mimeType: string, 
     summary: normalizedText.slice(0, 250),
     averageEmbedding: embeddingError ? [] : averageEmbedding(embeddings),
     embeddingError,
+    // 스캔 판독을 거쳤으면 토큰을 썼다. 업로드 라우트가 usage_logs에 남긴다.
+    ocrUsage: extracted.ocrUsage,
+    ocrPages: extracted.ocrPages,
   };
 }

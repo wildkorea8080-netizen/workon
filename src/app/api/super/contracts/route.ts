@@ -56,10 +56,10 @@ export async function GET(request: NextRequest) {
       .from('contracts').select('price_per_month, expires_at').eq('status', 'active');
 
     const totalActive = (allActive ?? []).length;
-    const expiringIn30 = (allActive ?? []).filter(c =>
+    const expiringIn30 = (allActive ?? []).filter((c: { expires_at?: string }) =>
       c.expires_at && Math.ceil((new Date(c.expires_at).getTime() - now) / 86400000) <= 30 && new Date(c.expires_at).getTime() > now
     ).length;
-    const totalMonthlyRevenue = (allActive ?? []).reduce((s, c) => s + Number(c.price_per_month ?? 0), 0);
+    const totalMonthlyRevenue = (allActive ?? []).reduce((s: number, c: { price_per_month?: number }) => s + Number(c.price_per_month ?? 0), 0);
 
     return NextResponse.json({
       ok: true,
@@ -78,7 +78,8 @@ export async function POST(request: NextRequest) {
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const { orgId, planType, monthlyFee, startDate, endDate, notes } = await request.json();
+    const { orgId, planType, monthlyFee, startDate, endDate, notes, billingType, annualBudgetKrw, budgetAlertPercent } =
+      await request.json();
     if (!orgId || !planType) return NextResponse.json({ ok: false, error: 'orgId, planType 필수' }, { status: 400 });
 
     const plan = getPlan(planType);
@@ -100,6 +101,17 @@ export async function POST(request: NextRequest) {
         max_agents: plan.maxAgents,
         monthly_token_limit: plan.maxTokensPerMonth,
         price_per_month: monthlyFee ?? plan.monthlyFee,
+        // 공공기관은 확정 금액으로 예산을 편성하므로 연간 정액 계약을 지원한다.
+        // annual_fixed일 때는 토큰이 아니라 누적 사용액(원)으로 한도를 판정한다.
+        billing_type: billingType === 'annual_fixed' ? 'annual_fixed' : 'pay_as_you_go',
+        annual_budget_krw:
+          billingType === 'annual_fixed' && Number(annualBudgetKrw) > 0
+            ? Number(annualBudgetKrw)
+            : null,
+        budget_alert_percent:
+          Number(budgetAlertPercent) > 0 && Number(budgetAlertPercent) <= 100
+            ? Number(budgetAlertPercent)
+            : 80,
         notes: notes ?? null,
         created_by: admin.sub,
       })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -20,10 +21,14 @@ export async function GET(_request: NextRequest) {
       );
     }
 
+    // 기관 전체 공개 문서 + 내 부서 계통에 걸린 부서 제한 문서
+    const scope = await getAccessScope(departmentId);
+    const visibleFilter = visibilityFilter(scope);
+
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, created_at, updated_at')
-      .eq('department_id', departmentId)
+      .select('id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at')
+      .or(visibleFilter)
       .order('created_at', { ascending: false });
 
     if (error) {

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const { data: depts } = await supabaseAdmin
     .from('departments').select('id').eq('organization_id', params.id);
 
-  const deptIds = (depts ?? []).map(d => d.id);
+  const deptIds = (depts ?? []).map((d: { id: string }) => d.id);
   if (!deptIds.length) return NextResponse.json({ ok: true, data: [] });
 
   const { data, error } = await supabaseAdmin
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
-  const result = (data ?? []).map(inv => ({
+  const result = (data ?? []).map((inv: any) => ({
     ...inv,
     inviteUrl: `${baseUrl}/signup?invite=${inv.token}`,
     isExpired: new Date(inv.expires_at) < new Date(),

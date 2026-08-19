@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveModelForDepartment } from '@/lib/model-policy';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getEmbeddings } from '@/lib/embeddings';
 import { callClaudeAPI, type ClaudeMessage } from '@/lib/claude';
 import { MATCH_THRESHOLD, MATCH_COUNT } from '@/lib/rag';
+import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
 export async function POST(request: NextRequest) {
   try {
@@ -92,7 +94,9 @@ ${contextText}
       { role: 'user', content: userPrompt },
     ];
 
-    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 2048);
+    // 기관별 허용 모델 정책(0021). 이 라우트도 토큰을 쓰므로 정책 밖에 두면 안 된다.
+    const modelId = await resolveModelForDepartment(departmentId);
+    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 2048, modelId);
 
     const sources = chunks.map((chunk: any) => ({
       document_title: chunk.document_title,
@@ -109,8 +113,11 @@ ${contextText}
       details: {
         query,
         chunks_found: chunks.length,
+        model: claudeResponse.usage.model,
         input_tokens: claudeResponse.usage.input_tokens,
         output_tokens: claudeResponse.usage.output_tokens,
+        cost_usd: estimateCostUsd(claudeResponse.usage, claudeResponse.usage.model),
+        cost_krw: estimateCostKrw(claudeResponse.usage, claudeResponse.usage.model),
       },
     });
 

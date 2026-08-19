@@ -2,19 +2,30 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+// GFM 표 지원. 없으면 표가 문단으로 취급돼 파이프 문자가 그대로 보이고,
+// HTML이 줄바꿈을 공백으로 접어 한 줄로 뭉개진다. HWP 표를 마크다운으로
+// 복원해 인덱싱하므로(hwp.ts) RAG로 가져온 표도 같은 증상을 겪는다.
+import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
 import type { RetrievedChunk } from '@/lib/db';
 
+interface ToolLink {
+  title: string;
+  url: string;
+}
+
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
   sources?: RetrievedChunk[];
+  /** 외부 도구(국가법령정보 등)가 돌려준 출처 링크 */
+  links?: ToolLink[];
   error?: string;
 }
 
-export default function MessageBubble({ role, content, sources, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, sources, links, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -54,6 +65,7 @@ export default function MessageBubble({ role, content, sources, error }: Message
           ) : (
             <div className={`prose prose-sm max-w-none ${isUser ? 'prose-invert' : ''}`}>
               <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
                 components={{
                   code({ className, children }) {
                     const match = /language-(\w+)/.exec(className || '');
@@ -83,6 +95,29 @@ export default function MessageBubble({ role, content, sources, error }: Message
                     <blockquote className="border-l-4 border-slate-300 pl-3 italic text-slate-600 my-2">{children}</blockquote>
                   ),
                   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+
+                  // 표 — 공공기관 문서의 핵심이라 좁은 화면에서도 읽혀야 한다.
+                  // 넘칠 때 페이지 전체가 가로로 밀리지 않도록 표만 스크롤시킨다.
+                  table: ({ children }) => (
+                    <div className="my-3 overflow-x-auto rounded-lg border border-slate-200">
+                      <table className="w-full text-xs border-collapse">{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children }) => <thead className="bg-slate-50">{children}</thead>,
+                  th: ({ children }) => (
+                    <th className="px-3 py-2 text-left font-semibold text-slate-700 border-b border-slate-200 whitespace-nowrap">
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="px-3 py-2 align-top border-b border-slate-100 text-slate-700">{children}</td>
+                  ),
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer"
+                      className="text-[#003087] underline underline-offset-2 hover:text-[#002070]">
+                      {children}
+                    </a>
+                  ),
                 }}
               >
                 {content}
@@ -95,6 +130,33 @@ export default function MessageBubble({ role, content, sources, error }: Message
         {sources && sources.length > 0 && (
           <div className="mt-2 w-full">
             <SourceCitation sources={sources} />
+          </div>
+        )}
+
+        {/* 외부 도구 출처 — 공공 데이터는 원문 링크를 함께 제시한다 */}
+        {links && links.length > 0 && (
+          <div className="mt-2 w-full space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-1 h-4 bg-[#003087] rounded-full" />
+              <div className="text-xs font-medium text-slate-600">출처</div>
+              <div className="text-xs text-slate-500">({links.length}개)</div>
+            </div>
+            <div className="space-y-1.5">
+              {links.map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-md p-2.5 hover:bg-slate-100 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5 text-[#003087] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  <span className="text-xs text-slate-700 break-all">{link.title}</span>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { installPresetAgents } from '@/lib/install-presets';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
@@ -168,6 +169,18 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single();
 
+    // 기관 유형에 맞는 기본 비서 세트를 깐다. 새 기관이 빈 화면에서
+    // 시작하면 무엇부터 해야 할지 알 수 없다.
+    // 실패해도 기관 생성 자체는 유지한다 — 비서는 나중에 다시 깔 수 있다.
+    let presetResult = { installed: 0, skipped: 0, categories: 0 };
+    if (dept?.id) {
+      try {
+        presetResult = await installPresetAgents(org.id, dept.id, org.type);
+      } catch (presetError: any) {
+        console.warn('[org create] 기본 비서 설치 실패:', presetError?.message);
+      }
+    }
+
     const inviteToken = crypto.randomBytes(32).toString('hex');
     const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
 
@@ -188,14 +201,14 @@ export async function POST(request: NextRequest) {
       action: 'org_created',
       target_type: 'organization',
       target_id: org.id,
-      after_data: { name: org.name, plan, adminEmail },
+      after_data: { name: org.name, plan, adminEmail, presetAgents: presetResult.installed },
     });
     logSystem({ level: 'info', category: 'admin',
       message: `기관 등록: ${org.name}`, details: { plan, adminEmail }, orgId: org.id });
 
     return NextResponse.json({
       ok: true,
-      data: { org, inviteUrl },
+      data: { org, inviteUrl, presetAgents: presetResult.installed },
     });
   } catch (err: any) {
     console.error('[super/organizations POST]', err);

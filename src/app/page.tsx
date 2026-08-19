@@ -7,6 +7,7 @@ import Link from 'next/link';
 import ChatInterface from '@/components/chat/ChatInterface';
 import AgentSelector from '@/components/chat/AgentSelector';
 import Header from '@/components/layout/Header';
+import WelcomeTour from '@/components/chat/WelcomeTour';
 import Sidebar from '@/components/layout/Sidebar';
 import type { Agent } from '@/lib/db';
 import NoticesBanner from '@/components/NoticesBanner';
@@ -154,6 +155,7 @@ export default function HomePage() {
       </Suspense>
 
       {/* 고정 헤더 */}
+      <WelcomeTour />
       <Header />
       {/* 공지 배너 */}
       <NoticesBanner />

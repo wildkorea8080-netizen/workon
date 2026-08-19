@@ -25,18 +25,21 @@ export async function GET(request: NextRequest) {
       .from('organizations')
       .select('id, name');
 
-    const orgMap = Object.fromEntries((orgs ?? []).map(o => [o.id, o.name]));
+    const orgMap = Object.fromEntries((orgs ?? []).map((o: { id: string; name: string }) => [o.id, o.name]));
     const deptMap = Object.fromEntries(
-      (depts ?? []).map(d => [d.id, { deptName: d.name, orgId: d.organization_id, orgName: orgMap[d.organization_id] ?? '' }])
+      (depts ?? []).map((d: { id: string; name: string; organization_id: string }) => [d.id, { deptName: d.name, orgId: d.organization_id, orgName: orgMap[d.organization_id] ?? '' }])
     );
 
     // 2) 특정 기관 필터: 해당 기관 부서 ID 목록
-    let deptFilter: string[] | null = null;
-    if (orgId) {
-      deptFilter = (depts ?? []).filter(d => d.organization_id === orgId).map(d => d.id);
-      if (!deptFilter.length) {
-        return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit } });
-      }
+    const deptFilter: string[] | null = orgId
+      ? (depts ?? [])
+          .filter((d: { organization_id: string }) => d.organization_id === orgId)
+          .map((d: { id: string }) => d.id)
+      : null;
+
+    // 해당 기관에 부서가 하나도 없으면 조회 결과도 비어 있다
+    if (deptFilter && deptFilter.length === 0) {
+      return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit } });
     }
 
     // 3) 사용자 쿼리

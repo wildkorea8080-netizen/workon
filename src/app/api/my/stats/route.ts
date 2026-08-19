@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: true });
 
     const convs = periodConvs ?? [];
-    const convIds = convs.map((c) => c.id);
+    const convIds = convs.map((c: { id: string }) => c.id);
 
     // 2) 기간 내 메시지 (토큰 추정용)
     let msgData: { conversation_id: string; content: string }[] = [];
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
       .eq('user_id', userId)
       .gte('created_at', thisMonthStart.toISOString());
 
-    const thisMonthIds = (thisMonthConvs ?? []).map((c) => c.id);
+    const thisMonthIds = (thisMonthConvs ?? []).map((c: { id: string }) => c.id);
     let monthlyTokenEstimate = 0;
     if (thisMonthIds.length > 0) {
       const { data: monthMsgs } = await supabaseAdmin
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         .in('conversation_id', thisMonthIds)
         .in('role', ['user', 'assistant']);
       monthlyTokenEstimate = (monthMsgs ?? []).reduce(
-        (sum, m) => sum + Math.ceil(m.content.length / 4),
+        (sum: number, m: { content: string }) => sum + Math.ceil(m.content.length / 4),
         0
       );
     }

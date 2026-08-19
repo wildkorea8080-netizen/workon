@@ -6,7 +6,9 @@ export type SecurityEventType =
   | 'personal_info_detected'
   | 'file_upload_blocked'
   | 'suspicious_content'
-  | 'rate_limit_exceeded';
+  | 'rate_limit_exceeded'
+  /** 관리자가 감사 화면에서 직원 질문 원문을 열람함 (D1) */
+  | 'query_revealed';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(

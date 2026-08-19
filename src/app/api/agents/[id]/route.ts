@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { connectorCatalog } from '@/lib/connectors';
+import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -28,13 +30,50 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     }
 
     const body = await request.json();
-    const { name, description, system_prompt, config, is_active } = body;
+    const { name, description, system_prompt, config, is_active, enabled_connectors, visibility } = body;
 
-    if (!name && !description && system_prompt === undefined && config === undefined && is_active === undefined) {
+    const CATALOG_KEYS = ['icon', 'category', 'is_published', 'display_order', 'agent_type', 'link_url'];
+    const touchesCatalog = CATALOG_KEYS.some((key) => body[key] !== undefined);
+
+    if (
+      !name &&
+      !description &&
+      system_prompt === undefined &&
+      config === undefined &&
+      is_active === undefined &&
+      enabled_connectors === undefined &&
+      visibility === undefined &&
+      !touchesCatalog
+    ) {
       return NextResponse.json(
         { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
         { status: 400 }
       );
+    }
+
+    // 링크형 검증은 현재 유형을 알아야 한다. 링크형 비서의 이름만 바꾸는
+    // 요청에는 agent_type이 실려 오지 않으므로, 주소를 지우려는 시도인지
+    // 손대지 않은 것인지 구분하려면 지금 값이 필요하다.
+    const { data: current } = await supabaseAdmin
+      .from('agents')
+      .select('agent_type')
+      .eq('id', params.id)
+      .eq('department_id', departmentId)
+      .maybeSingle();
+
+    if (!current) {
+      return NextResponse.json(
+        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
+        { status: 404 }
+      );
+    }
+
+    const { payload: catalog, error: catalogError } = parseCatalogFields(
+      body,
+      (current.agent_type as AgentType) ?? 'chat'
+    );
+    if (catalogError) {
+      return NextResponse.json({ ok: false, error: { message: catalogError } }, { status: 400 });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -44,6 +83,26 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (config !== undefined) updatePayload.config = config;
     if (is_active !== undefined) updatePayload.is_active = is_active;
 
+    if (enabled_connectors !== undefined) {
+      // 존재하지 않는 커넥터 id가 저장되면 조용히 무시될 뿐이지만,
+      // 설정 화면이 실제와 어긋나 보이므로 여기서 걸러낸다.
+      const known = new Set(connectorCatalog().map((c) => c.id));
+      updatePayload.enabled_connectors = Array.isArray(enabled_connectors)
+        ? enabled_connectors.filter((id: unknown) => typeof id === 'string' && known.has(id))
+        : [];
+    }
+
+    if (visibility !== undefined) {
+      if (!['organization', 'department'].includes(visibility)) {
+        return NextResponse.json(
+          { ok: false, error: { message: "공개 범위는 'organization' 또는 'department'만 가능합니다." } },
+          { status: 400 }
+        );
+      }
+      updatePayload.visibility = visibility;
+    }
+
+    Object.assign(updatePayload, catalog);
     updatePayload.updated_by = session.user.id;
 
     const { data: agent, error } = await supabaseAdmin

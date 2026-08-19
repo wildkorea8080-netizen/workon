@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 import type { Document, Agent } from '@/lib/db';
 
 export default function DocumentsManager() {
@@ -12,6 +13,8 @@ export default function DocumentsManager() {
     file:     null as File | null,
     agentIds: [] as string[],
     title:    '',
+    // 규정·매뉴얼 대부분은 전 직원 공통이라 기관 전체가 기본
+    visibility: 'organization' as 'organization' | 'department',
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -109,6 +112,7 @@ export default function DocumentsManager() {
     formData.append('file', uploadForm.file);
     uploadForm.agentIds.forEach(id => formData.append('agentIds', id));
     if (uploadForm.title) formData.append('title', uploadForm.title);
+    formData.append('visibility', uploadForm.visibility);
 
     try {
       const response = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -121,7 +125,7 @@ export default function DocumentsManager() {
           ? `문서가 ${count}개 비서에 등록됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
           : `문서 업로드 및 처리가 완료됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
       );
-      setUploadForm({ file: null, agentIds: [], title: '' });
+      setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization' });
       setUploadProgress(0);
       loadData();
     } catch (err) {
@@ -207,11 +211,45 @@ export default function DocumentsManager() {
                 );
               })}
             </div>
-            {uploadForm.agentIds.length > 0 && (
-              <p className="text-xs text-blue-600 mt-1">
-                {uploadForm.agentIds.length}개 비서 선택됨
-              </p>
-            )}
+            {/* 선택한 비서를 이름으로 보여준다.
+                목록이 스크롤 영역이라 고른 항목이 화면 밖으로 나가는데,
+                숫자만 보여주면 무엇을 골랐는지 확인할 방법이 없다.
+                문서가 엉뚱한 비서에 붙으면 그 비서만 그 자료를 참고하게 된다. */}
+            <div className="mt-2">
+              {uploadForm.agentIds.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  선택된 비서가 없습니다. 이 문서를 참고할 비서를 골라주세요.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-slate-500">선택됨</span>
+                  {uploadForm.agentIds.map((id) => {
+                    const agent = agents.find((a) => a.id === id);
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs"
+                      >
+                        {agent?.name ?? '(삭제된 비서)'}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUploadForm((prev) => ({
+                              ...prev,
+                              agentIds: prev.agentIds.filter((x) => x !== id),
+                            }))
+                          }
+                          className="text-blue-400 hover:text-blue-700 leading-none"
+                          aria-label={`${agent?.name ?? ''} 선택 해제`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
@@ -223,6 +261,30 @@ export default function DocumentsManager() {
               className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
               placeholder="문서 제목을 입력하세요"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">공개 범위</label>
+            <div className="space-y-2 p-3 border border-slate-200 rounded-md">
+              {([
+                ['organization', '기관 전체', '이 기관의 모든 직원이 검색·참고합니다 (복무규정, 공통 매뉴얼 등)'],
+                ['department', '내 부서로 제한', '내 부서와 하위 부서만 참고합니다 (인사·감사·법무 자료 등)'],
+              ] as ['organization' | 'department', string, string][]).map(([value, label, hint]) => (
+                <label key={value} className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="doc-visibility"
+                    checked={uploadForm.visibility === value}
+                    onChange={() => setUploadForm(prev => ({ ...prev, visibility: value }))}
+                    className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-800">{label}</span>
+                    <span className="block text-xs text-slate-400">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -270,11 +332,11 @@ export default function DocumentsManager() {
                     <p className="font-medium text-slate-700">
                       {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, TXT (최대 20MB)</p>
+                    <p className="text-xs text-slate-500 mt-1">{UPLOAD_FORMATS_LABEL} (최대 20MB) · 스캔 PDF는 자동 판독합니다</p>
                   </div>
                   <input
                     type="file"
-                    accept=".pdf,.docx,.txt"
+                    accept={UPLOAD_ACCEPT_ATTRIBUTE}
                     onChange={(e) => setUploadForm(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
                     className="hidden"
                   />
@@ -300,7 +362,9 @@ export default function DocumentsManager() {
 
           <button
             type="submit"
-            disabled={uploading}
+            // 비서나 파일이 없으면 누를 수 없게 한다. 눌린 뒤 오류를 내면
+            // 무엇이 빠졌는지 한 번 더 찾아야 한다.
+            disabled={uploading || uploadForm.agentIds.length === 0 || !uploadForm.file}
             className="w-full px-4 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2 transition-colors"
           >
             {uploading ? (

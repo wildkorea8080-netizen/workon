@@ -1,15 +1,33 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import type { Agent, RetrievedChunk } from '@/lib/db';
+
+interface ToolLink {
+  title: string;
+  url: string;
+}
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   sources?: RetrievedChunk[];
+  /** 외부 도구가 돌려준 출처 링크 */
+  links?: ToolLink[];
   error?: string;
+}
+
+/** 도구 이름 → 사용자에게 보일 문구 */
+const TOOL_LABELS: Record<string, string> = {
+  law_search: '국가법령정보에서 법령을 찾는 중',
+  law_get_articles: '법령 조문을 읽는 중',
+};
+
+function toolLabel(name: string) {
+  return TOOL_LABELS[name] ?? `${name} 실행 중`;
 }
 
 const AVATAR_COLORS = [
@@ -29,19 +47,46 @@ export interface ChatInterfaceProps {
   onChangeAgent: () => void;
 }
 
+type ModelOption = {
+  id: string;
+  label: string;
+  note: string;
+  inputPerMTok: number;
+  outputPerMTok: number;
+};
+
 export default function ChatInterface({
   selectedAgent,
   conversationId,
   onConversationCreated,
   onChangeAgent,
 }: ChatInterfaceProps) {
+  const branding = useBranding();
+  // 기관이 허용한 모델(0021). 하나뿐이면 고를 것이 없으므로 화면에 내지 않는다.
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
+  // 현재 실행 중인 도구 이름 (없으면 null)
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/models')
+      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return;
+        const list: ModelOption[] = r.data ?? [];
+        setModels(list);
+        // 기본값은 목록의 첫 번째. 서버가 정책 순서대로 준다.
+        setSelectedModel((prev) => prev ?? list[0]?.id ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -69,10 +114,24 @@ export default function ChatInterface({
       .then(r => r.json())
       .then(result => {
         if (!result.ok) return;
+        // 출처는 source_references(JSONB)에 들어 있다.
+        // 예전에는 m.sources를 읽어 항상 undefined였고, 대화를 다시 열면
+        // 출처가 사라졌다.
         setMessages(
-          (result.data.messages ?? []).map((m: { id: string; role: 'user' | 'assistant'; content: string; sources?: RetrievedChunk[] }) => ({
-            id: m.id, role: m.role, content: m.content, sources: m.sources,
-          }))
+          (result.data.messages ?? []).map(
+            (m: {
+              id: string;
+              role: 'user' | 'assistant';
+              content: string;
+              source_references?: { chunks?: RetrievedChunk[]; links?: ToolLink[] };
+            }) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              sources: m.source_references?.chunks,
+              links: m.source_references?.links,
+            })
+          )
         );
       })
       .catch(() => {})
@@ -88,9 +147,17 @@ export default function ChatInterface({
     if (!inputMessage.trim() || isLoading) return;
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: inputMessage.trim() };
+    const assistantId = String(Date.now() + 1);
+
     setMessages(prev => [...prev, userMsg]);
     setInputMessage('');
     setIsLoading(true);
+    setActiveTool(null);
+
+    const patchAssistant = (patch: Partial<Message>) =>
+      setMessages(prev =>
+        prev.map(m => (m.id === assistantId ? { ...m, ...patch } : m))
+      );
 
     try {
       const res = await fetch('/api/chat', {
@@ -100,36 +167,120 @@ export default function ChatInterface({
           agent_id: selectedAgent.id,
           message: userMsg.content,
           conversation_id: conversationId,
+          // 허용되지 않은 값이면 서버가 정책에 맞는 모델로 바꿔 처리한다
+          model: selectedModel ?? undefined,
         }),
       });
-      const result = await res.json();
 
-      if (!result.ok) {
+      // 스트림 시작 전 실패는 JSON으로 돌아온다
+      if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
+        const result = await res.json().catch(() => null);
         setMessages(prev => [...prev, {
-          id: String(Date.now() + 1), role: 'assistant', content: '',
-          error: result.error?.message || '오류가 발생했습니다.',
+          id: assistantId, role: 'assistant', content: '',
+          error: result?.error?.message || '오류가 발생했습니다.',
         }]);
         return;
       }
 
-      if (!conversationId && result.data.conversation_id) {
-        onConversationCreated(result.data.conversation_id);
-        prevConvIdRef.current = result.data.conversation_id;
-      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamed = '';
+      let pendingSources: RetrievedChunk[] | undefined;
+      const collectedLinks: ToolLink[] = [];
+      let bubbleShown = false;
 
-      setMessages(prev => [...prev, {
-        id: String(Date.now() + 1),
-        role: 'assistant',
-        content: result.data.response,
-        sources: result.data.chunks,
-      }]);
+      // 첫 텍스트가 도착하는 순간 말풍선을 만든다.
+      // 그 전까지는 로딩 인디케이터가 계속 보인다.
+      const showBubble = () => {
+        bubbleShown = true;
+        setIsLoading(false);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: streamed,
+            sources: pendingSources,
+            links: collectedLinks.length ? [...collectedLinks] : undefined,
+          },
+        ]);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE 이벤트는 빈 줄로 구분된다. 마지막 조각은 불완전할 수 있어 남겨둔다.
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+
+        for (const raw of events) {
+          const eventLine = raw.split('\n').find(l => l.startsWith('event:'));
+          const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
+          if (!eventLine || !dataLine) continue;
+
+          const name = eventLine.slice(6).trim();
+          let payload: any;
+          try {
+            payload = JSON.parse(dataLine.slice(5).trim());
+          } catch {
+            continue;
+          }
+
+          if (name === 'meta') {
+            if (!conversationId && payload.conversation_id) {
+              onConversationCreated(payload.conversation_id);
+              prevConvIdRef.current = payload.conversation_id;
+            }
+            if (payload.chunks?.length) {
+              pendingSources = payload.chunks;
+              if (bubbleShown) patchAssistant({ sources: payload.chunks });
+            }
+          } else if (name === 'delta') {
+            streamed += payload.text;
+            if (!bubbleShown) showBubble();
+            else patchAssistant({ content: streamed });
+          } else if (name === 'tool_start') {
+            setActiveTool(payload.name);
+          } else if (name === 'tool_end') {
+            setActiveTool(null);
+            for (const source of payload.sources ?? []) {
+              if (!collectedLinks.some((l) => l.url === source.url)) collectedLinks.push(source);
+            }
+            if (bubbleShown && collectedLinks.length) {
+              patchAssistant({ links: [...collectedLinks] });
+            }
+          } else if (name === 'error') {
+            if (!bubbleShown) {
+              setIsLoading(false);
+              setMessages(prev => [...prev, {
+                id: assistantId, role: 'assistant', content: streamed,
+                error: payload.message || '오류가 발생했습니다.',
+              }]);
+              bubbleShown = true;
+            } else {
+              patchAssistant({ error: payload.message || '오류가 발생했습니다.' });
+            }
+          }
+        }
+      }
     } catch {
-      setMessages(prev => [...prev, {
-        id: String(Date.now() + 1), role: 'assistant', content: '',
-        error: '네트워크 오류가 발생했습니다.',
-      }]);
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === assistantId);
+        const errored: Message = {
+          id: assistantId, role: 'assistant', content: '',
+          error: '네트워크 오류가 발생했습니다.',
+        };
+        return exists
+          ? prev.map(m => (m.id === assistantId ? { ...m, error: errored.error } : m))
+          : [...prev, errored];
+      });
     } finally {
       setIsLoading(false);
+      setActiveTool(null);
     }
   };
 
@@ -186,6 +337,7 @@ export default function ChatInterface({
               role={msg.role}
               content={msg.content}
               sources={msg.sources}
+              links={msg.links}
               error={msg.error}
             />
           ))
@@ -198,10 +350,15 @@ export default function ChatInterface({
                 {selectedAgent.icon ?? selectedAgent.name.slice(0, 1)}
               </div>
               <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm">
-                <div className="flex gap-1.5 items-center">
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="flex gap-2 items-center">
+                  <div className="flex gap-1.5 items-center">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  {activeTool && (
+                    <span className="text-xs text-slate-500">{toolLabel(activeTool)}...</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -241,7 +398,31 @@ export default function ChatInterface({
             )}
           </button>
         </div>
-        <p className="text-xs text-slate-400 mt-2 text-center">Enter로 전송 · Shift+Enter로 줄바꿈</p>
+        <div className="flex items-center justify-center gap-3 mt-2 flex-wrap">
+          {/* 모델 선택 — 기관이 허용한 것이 둘 이상일 때만 낸다.
+              하나뿐인데 드롭다운을 보여주면 고를 수 있다는 오해만 준다. */}
+          {models.length > 1 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span>모델</span>
+              <select
+                value={selectedModel ?? ''}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                title={models.find((m) => m.id === selectedModel)?.note}
+                className="px-2 py-1 border border-slate-200 rounded-lg bg-white text-slate-600 text-xs focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id} title={m.note}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="text-xs text-slate-400">Enter로 전송 · Shift+Enter로 줄바꿈</p>
+        </div>
+        {/* AI 고지. senGPT도 명시하고 있고 공공기관 배포에서는 사실상 필수다.
+            생성 결과를 그대로 결재에 올리면 안 된다는 것을 화면이 계속 알려야 한다. */}
+        <p className="text-[11px] text-slate-400 mt-1 text-center px-4">{branding.aiNotice}</p>
       </div>
     </div>
   );

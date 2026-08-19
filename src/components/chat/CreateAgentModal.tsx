@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 
 const EMOJI_ICONS = [
   '🤖', '📝', '📊', '📋', '📨', '💬', '📢', '🎤',
@@ -11,6 +12,13 @@ const CATEGORIES = ['전체', '공공기관', '업무', '문서', '번역', '기
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt'];
+
+type ConnectorOption = {
+  id: string;
+  label: string;
+  toolNames: string[];
+  allowedForPersonal: boolean;
+};
 
 interface CreateAgentModalProps {
   onClose: () => void;
@@ -24,10 +32,22 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
   const [systemPrompt, setSystemPrompt] = useState('');
   const [enhancing, setEnhancing] = useState(false);
   const [fileCapability, setFileCapability] = useState(false);
+  // 기관이 쓰고 있는 커넥터만 내려온다(서버에서 allowedForPersonal로 표시).
+  const [connectors, setConnectors] = useState<ConnectorOption[]>([]);
+  const [selectedConnectors, setSelectedConnectors] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/connectors')
+      .then(r => r.json())
+      .then(r => {
+        if (r.ok) setConnectors((r.data ?? []).filter((c: ConnectorOption) => c.allowedForPersonal));
+      })
+      .catch(() => {});
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleEnhance = async () => {
@@ -77,6 +97,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
           icon,
           category,
           systemPrompt: systemPrompt.trim() || undefined,
+          enabled_connectors: selectedConnectors,
         }),
       });
       const result = await res.json();
@@ -239,13 +260,13 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                       <svg className="w-7 h-7 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                       </svg>
-                      <p className="text-xs text-slate-500">PDF, DOCX, TXT · 최대 10MB · 최대 10개</p>
+                      <p className="text-xs text-slate-500">{UPLOAD_FORMATS_LABEL} · 최대 10MB · 최대 10개</p>
                       <p className="text-xs text-brand-600 font-medium mt-1">클릭하거나 드래그하여 업로드</p>
                       <input
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept=".pdf,.docx,.txt"
+                        accept={UPLOAD_ACCEPT_ATTRIBUTE}
                         className="hidden"
                         onChange={e => addFiles(e.target.files)}
                       />
@@ -274,22 +295,50 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                 )}
               </div>
 
-              {/* 실시간 검색 (준비 중) */}
-              <div className="border border-slate-200 rounded-xl p-4 opacity-60">
-                <div className="flex items-center justify-between">
+              {/* 실시간 검색 — 기관이 켜 둔 커넥터만 노출된다.
+                  커넥터를 쓸지는 관리자가 정한다는 설계를 개인 비서에서도 지킨다.
+                  목록이 비면 기관이 아직 아무 도구도 쓰지 않는다는 뜻이다. */}
+              {connectors.length > 0 && (
+                <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center gap-3">
                     <span className="text-xl">🔍</span>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-800">실시간 검색 능력</p>
-                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full">준비 중</span>
-                      </div>
-                      <p className="text-xs text-slate-500">최신 정보를 검색해서 답합니다</p>
+                      <p className="text-sm font-semibold text-slate-800">실시간 조회 능력</p>
+                      <p className="text-xs text-slate-500">
+                        기관이 사용 중인 공공데이터를 직접 조회해 출처와 함께 답합니다
+                      </p>
                     </div>
                   </div>
-                  <Toggle checked={false} onChange={() => {}} disabled />
+
+                  <div className="space-y-2 pl-9">
+                    {connectors.map(connector => {
+                      const checked = selectedConnectors.includes(connector.id);
+                      return (
+                        <label key={connector.id} className="flex items-start gap-2.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e =>
+                              setSelectedConnectors(prev =>
+                                e.target.checked
+                                  ? [...prev, connector.id]
+                                  : prev.filter(id => id !== connector.id)
+                              )
+                            }
+                            className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-xs font-medium text-slate-800">{connector.label}</span>
+                            <span className="block text-[11px] text-slate-400 font-mono">
+                              {connector.toolNames.join(', ')}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </section>
 

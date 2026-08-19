@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
+import {
+  ALLOWED_UPLOAD_MIME_TYPES,
+  UPLOAD_FORMATS_LABEL,
+  hasAllowedUploadExtension,
+} from '@/lib/file-types';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSecurityEvent } from '@/lib/filter';
 import type { ApiResponse } from '@/lib/db';
+import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
+import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain'
-];
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./,           // 디렉토리 트래버설
@@ -80,9 +82,14 @@ export async function POST(request: Request) {
   }
 
   // MIME 타입 검증 (departmentId 불필요)
-  if (!ALLOWED_MIME_TYPES.includes(file.type) && !file.name.toLowerCase().endsWith('.docx')) {
+  const lowerFileName = file.name.toLowerCase();
+
+  if (
+    !hasAllowedUploadExtension(file.name) &&
+    !(ALLOWED_UPLOAD_MIME_TYPES as readonly string[]).includes(file.type)
+  ) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '지원되지 않는 파일 형식입니다. PDF, DOCX, TXT만 허용됩니다.' } },
+      { ok: false, error: { message: `지원되지 않는 파일 형식입니다. ${UPLOAD_FORMATS_LABEL}만 허용됩니다.` } },
       { status: 415 }
     );
   }
@@ -151,6 +158,18 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  // 스캔 PDF는 판독에 토큰을 쓴다. 페이지당 1,500~3,000 토큰이라 적지 않다.
+  // 토큰을 소비하는 경로에는 한도 검사를 함께 둔다(CLAUDE.md 규약).
+  // 파싱 전이라 스캔 여부를 아직 모르지만, 한도를 넘긴 기관이라면 어차피
+  // 판독을 시작하면 안 되므로 여기서 막는 것이 맞다.
+  const limit = await checkTokenLimit(departmentId);
+  if (!limit.allowed) {
+    return NextResponse.json<ApiResponse<null>>(
+      { ok: false, error: { message: limitMessage(limit) } },
+      { status: 429 }
+    );
+  }
+
   // 문서 처리 + 임베딩 (Voyage AI 실패 시 임베딩 없이 저장)
   let processingResult: Awaited<ReturnType<typeof import('@/lib/document-processor').processDocumentFile>>;
   try {
@@ -186,6 +205,7 @@ export async function POST(request: Request) {
   // 공통 문서 메타데이터 (모든 에이전트에 동일)
   const baseRecord = {
     department_id: departmentId,
+    visibility: formData.get('visibility')?.toString() === 'department' ? 'department' : 'organization',
     uploaded_by: session.user.id,
     storage_path: storagePath,
     file_name: file.name,
@@ -219,9 +239,40 @@ export async function POST(request: Request) {
     );
   }
 
-  const warning = (processingResult as any).embeddingError
-    ? '문서는 저장됐지만 임베딩(Voyage AI)이 실패했습니다. Voyage AI 크레딧을 확인하세요.'
-    : null;
+  // 스캔 판독에 쓴 토큰을 기록한다. model 없이 토큰만 남기면 나중에 모델을
+  // 추가했을 때 과거 사용량을 어디에 귀속시킬지 알 수 없게 된다(CLAUDE.md 규약).
+  const ocrUsage = processingResult.ocrUsage;
+  if (ocrUsage) {
+    await supabaseAdmin.from('usage_logs').insert({
+      department_id: departmentId,
+      user_id: session.user.id,
+      action: 'document_ocr',
+      resource_type: 'document',
+      resource_id: insertedDocs[0]?.id ?? null,
+      details: {
+        file_name: file.name,
+        pages: processingResult.ocrPages ?? null,
+        model: ocrUsage.model,
+        input_tokens: ocrUsage.input_tokens,
+        output_tokens: ocrUsage.output_tokens,
+        cost_usd: estimateCostUsd(ocrUsage, ocrUsage.model),
+        cost_krw: estimateCostKrw(ocrUsage, ocrUsage.model),
+      },
+    });
+  }
+
+  const notices: string[] = [];
+  if (processingResult.embeddingError) {
+    notices.push('임베딩(Voyage AI)이 실패해 이 문서는 검색되지 않습니다. 크레딧을 확인하세요.');
+  }
+  if (ocrUsage) {
+    // 판독을 거쳤다는 사실을 알려야 한다. 원문과 다르게 읽혔을 수 있으므로
+    // 담당자가 결과를 한 번 확인할 근거가 된다.
+    notices.push(
+      `텍스트 레이어가 없어 스캔 문서로 판독했습니다 (${processingResult.ocrPages ?? '?'}쪽). 내용을 확인해주세요.`
+    );
+  }
+  const warning = notices.length > 0 ? notices.join(' ') : null;
 
   return NextResponse.json(
     { ok: true, data: { documentIds: insertedDocs.map((d: { id: string }) => d.id), count: insertedDocs.length, warning } },

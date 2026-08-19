@@ -13,7 +13,21 @@ interface Invitation {
   created_at: string;
 }
 
+interface DeptOption {
+  id: string;
+  name: string;
+  depth: number;
+}
+
 type Tab = 'list' | 'invite' | 'csv';
+
+/** 트리를 드롭다운용 평면 목록으로 */
+function flattenDepts(nodes: any[], depth = 0): DeptOption[] {
+  return nodes.flatMap((n) => [
+    { id: n.id, name: n.name, depth },
+    ...flattenDepts(n.children ?? [], depth + 1),
+  ]);
+}
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -34,19 +48,25 @@ export default function UsersManager() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'USER' | 'ADMIN'>('USER');
   const [inviting, setInviting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ url: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ url: string; emailSent: boolean } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // 부서 이동
+  const [depts, setDepts] = useState<DeptOption[]>([]);
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersRes, invitesRes] = await Promise.all([
+      const [usersRes, invitesRes, deptsRes] = await Promise.all([
         fetch('/api/users').then(r => r.json()),
         fetch('/api/admin/invite').then(r => r.json()),
+        fetch('/api/departments').then(r => r.json()),
       ]);
       if (usersRes.ok) setUsers(usersRes.data);
       if (invitesRes.ok) setInvitations(invitesRes.data);
+      if (deptsRes.ok) setDepts(flattenDepts(deptsRes.data ?? []));
     } catch {
       setError('데이터를 불러올 수 없습니다.');
     } finally {
@@ -68,7 +88,7 @@ export default function UsersManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setInviteResult({ url: result.data.inviteUrl });
+      setInviteResult({ url: result.data.inviteUrl, emailSent: Boolean(result.data.emailSent) });
       await loadData();
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : '초대 발송에 실패했습니다.');
@@ -83,6 +103,27 @@ export default function UsersManager() {
       await fetch(`/api/admin/invite/${id}`, { method: 'DELETE' });
       setInvitations(prev => prev.filter(i => i.id !== id));
     } catch { alert('초대 취소에 실패했습니다.'); }
+  };
+
+  const handleMoveDepartment = async (userId: string, departmentId: string) => {
+    setMovingId(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ department_id: departmentId }),
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '부서 이동에 실패했습니다.');
+      // 실패했으면 화면이 실제 상태와 어긋나므로 다시 불러온다
+      await loadData();
+    } finally {
+      setMovingId(null);
+    }
   };
 
   const handleCopy = async (url: string) => {
@@ -108,7 +149,7 @@ export default function UsersManager() {
       {/* 페이지 헤더 */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">사용자 관리</h1>
-        <p className="text-sm text-slate-500 mt-1">부서 구성원을 초대하고 관리합니다.</p>
+        <p className="text-sm text-slate-500 mt-1">내 부서와 하위 부서의 구성원을 초대하고 관리합니다. 소속 부서는 드롭다운에서 바로 바꿀 수 있습니다.</p>
       </div>
 
       {/* 탭 */}
@@ -156,6 +197,19 @@ export default function UsersManager() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
+                        <select
+                          value={(user as any).department_id ?? ''}
+                          onChange={e => handleMoveDepartment(user.id, e.target.value)}
+                          disabled={movingId === user.id || depts.length === 0}
+                          title="소속 부서 변경"
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 max-w-[180px] disabled:opacity-50"
+                        >
+                          {depts.map(d => (
+                            <option key={d.id} value={d.id}>
+                              {' '.repeat(d.depth * 2)}{d.name}
+                            </option>
+                          ))}
+                        </select>
                         <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${
                           user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
                         }`}>
@@ -267,8 +321,26 @@ export default function UsersManager() {
                 <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
-                <p className="text-sm text-green-700 font-medium">초대 링크가 생성됐습니다!</p>
+                <p className="text-sm text-green-700 font-medium">
+                  {inviteResult.emailSent
+                    ? `${inviteEmail}로 초대 메일을 보냈습니다!`
+                    : '초대 링크가 생성됐습니다!'}
+                </p>
               </div>
+
+              {!inviteResult.emailSent && (
+                <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <svg className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    메일 발송이 설정되지 않아 자동 발송되지 않았습니다. 아래 링크를 직접 전달해주세요.
+                    <br />
+                    <span className="text-amber-700">자동 발송하려면 <code className="font-mono">RESEND_API_KEY</code>와 <code className="font-mono">MAIL_FROM</code> 환경변수를 설정하세요.</span>
+                  </p>
+                </div>
+              )}
+
               <div>
                 <p className="text-xs text-slate-500 mb-2 font-medium">초대 링크 (7일 유효)</p>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">

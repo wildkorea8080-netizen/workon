@@ -7,14 +7,14 @@ export async function GET(request: NextRequest) {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
       return NextResponse.json(
-        { success: false, error: { message: '인증이 필요합니다.' } },
+        { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
       );
     }
 
     if (!isAdminSession(session)) {
       return NextResponse.json(
-        { success: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
         { status: 403 }
       );
     }
@@ -49,6 +49,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
+      );
+    }
+
+    if (!isAdminSession(session)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
       );
     }
 

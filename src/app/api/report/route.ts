@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveModelForDepartment } from '@/lib/model-policy';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { callClaudeAPI, type ClaudeMessage } from '@/lib/claude';
 import type { ReportTemplate } from '@/lib/db';
+import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
 export async function POST(request: NextRequest) {
   try {
@@ -88,7 +90,8 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: prompt },
     ];
 
-    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 4096);
+    const modelId = await resolveModelForDepartment(user.department_id);
+    const claudeResponse = await callClaudeAPI(claudeMessages, systemPrompt, 4096, modelId);
 
     // 보고서 내용 포함하여 사용 로그 기록
     const { data: savedLog } = await supabaseAdmin.from('usage_logs').insert({
@@ -101,8 +104,11 @@ export async function POST(request: NextRequest) {
         template_name: template.name,
         template_id: template.id,
         report_content: claudeResponse.content,
+        model: claudeResponse.usage.model,
         input_tokens: claudeResponse.usage.input_tokens,
         output_tokens: claudeResponse.usage.output_tokens,
+        cost_usd: estimateCostUsd(claudeResponse.usage, claudeResponse.usage.model),
+        cost_krw: estimateCostKrw(claudeResponse.usage, claudeResponse.usage.model),
       },
     }).select('id').single();
 

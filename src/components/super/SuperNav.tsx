@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: string;
+  /** true면 정확히 일치할 때만 활성 (하위 경로에서 활성화되지 않음) */
+  exact?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { href: '/super',              label: '대시보드',        icon: '📊', exact: true  },
   { href: '/super/organizations',label: '기관 관리',       icon: '🏢'               },
   { href: '/super/accounts',     label: '계정 관리',       icon: '👤'               },
@@ -13,7 +21,7 @@ const NAV_ITEMS = [
   { href: '/super/notices',      label: '공지사항',        icon: '📢'               },
   { href: '/super/settings',     label: '시스템 설정',     icon: '⚙️'              },
   { href: '/super/logs',         label: '로그',            icon: '📋'               },
-] as const;
+];
 
 interface SuperNavProps {
   adminName: string;

@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
+import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,8 @@ export async function GET(request: NextRequest) {
       stats: {
         systemKeyOrgCount: orgTotal ?? 0,
         totalTokensThisMonth: totalTokens,
-        estimatedCostUsd: parseFloat(((totalTokens / 1_000_000) * 9).toFixed(4)),
+        // 입출력 비율을 알 수 없어 절반씩으로 가정한 개략 추정치
+        estimatedCostUsd: estimateCostUsd({ input_tokens: totalTokens / 2, output_tokens: totalTokens / 2 }),
       },
     },
   });

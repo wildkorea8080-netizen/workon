@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getPersonalConnectorIds } from '@/lib/connector-scope';
 
 async function getDepartmentId(userId: string, session: { user: { departmentId?: string } }) {
   if (session.user.departmentId) return session.user.departmentId;
@@ -74,7 +75,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, description, systemPrompt, icon, color, category } = body;
+    const { name, description, systemPrompt, icon, color, category, enabled_connectors } = body;
+
+    // 화면에서 걸러 보내더라도 그건 표시일 뿐이다. 실제 제한은 여기서 건다.
+    // 기관이 쓰지 않는 커넥터가 개인 비서로 새어 들어가면 관리자가 커넥터를
+    // 켜고 끄는 결정 자체가 무의미해진다.
+    const permitted = new Set(await getPersonalConnectorIds(departmentId));
+    const allowedConnectors = Array.isArray(enabled_connectors)
+      ? enabled_connectors.filter((id: unknown) => typeof id === 'string' && permitted.has(id))
+      : [];
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return NextResponse.json(
@@ -87,6 +96,7 @@ export async function POST(request: NextRequest) {
       .from('agents')
       .insert({
         department_id: departmentId,
+        enabled_connectors: allowedConnectors,
         name: name.trim(),
         description: description?.trim() ?? null,
         system_prompt: systemPrompt?.trim() ?? null,

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -21,11 +23,14 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    // 관리자는 같은 부서의 모든 사용자 조회 가능
+    // 관리자는 자기 부서와 그 하위 부서의 사용자를 관리한다.
+    // 예전에는 자기 부서만 조회해, 하위 부서 직원을 볼 수도 옮길 수도 없었다.
+    const managedDeptIds = await getManagedDepartmentIds(departmentId);
+
     const { data: users, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, created_at')
-      .eq('department_id', departmentId)
+      .select('id, email, full_name, role, created_at, department_id, departments(id, name)')
+      .in('department_id', managedDeptIds)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -36,7 +41,13 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: users });
+    // Supabase 조인은 객체 또는 배열로 오므로 정규화한다
+    const normalized = (users ?? []).map((user: any) => {
+      const dept = Array.isArray(user.departments) ? user.departments[0] : user.departments;
+      return { ...user, departments: undefined, department_name: dept?.name ?? null };
+    });
+
+    return NextResponse.json({ ok: true, data: normalized });
   } catch (error) {
     console.error('사용자 목록 조회 중 오류:', error);
     return NextResponse.json(
@@ -88,8 +99,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 임시 비밀번호 생성 후 bcrypt(saltRounds=12)로 해싱
-    const tempPassword = Math.random().toString(36).slice(-12);
+    // 임시 비밀번호 생성 후 bcrypt(saltRounds=12)로 해싱.
+    //
+    // Math.random()을 쓰면 안 된다. 암호학적으로 안전하지 않아 예측이 가능하고,
+    // 한 번 호출한 값을 toString(36)한 것이라 12자로 보여도 실제 엔트로피는
+    // 그보다 훨씬 낮다. bulk-register·super-admins가 이미 쓰는 방식에 맞춘다.
+    // 혼동하기 쉬운 글자(0/O, 1/l/I)는 뺀다 — 담당자가 구두로 전달하는 경우가 있다.
+    const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const tempPassword = Array.from(crypto.randomBytes(12))
+      .map((b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length])
+      .join('');
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     const { data: newUser, error } = await supabaseAdmin
