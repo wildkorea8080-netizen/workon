@@ -71,3 +71,22 @@ describe('/api/chat의 메시지 삽입', () => {
     expect(block).toContain("send('error'");
   });
 });
+
+describe('자료 인용 규칙', () => {
+  it('참고 자료를 붙일 때 인용 규칙도 함께 넣는다', async () => {
+    // 프리셋마다 적지 않고 여기 한 곳에 두는 이유: 이 실패는 특정 비서의
+    // 문제가 아니라 문서를 근거로 답하는 모든 경로에서 생긴다. 직원이 만든
+    // 개인 비서에도 똑같이 필요하다.
+    const { readFileSync } = await import('fs');
+    const src = readFileSync('src/app/api/chat/route.ts', 'utf8');
+
+    const start = src.indexOf('if (contextText) {');
+    expect(start).toBeGreaterThan(-1);
+
+    const block = src.slice(start, src.indexOf('} else if (hasDocuments)', start));
+    expect(block).toContain('참고 자료:');
+    expect(block).toContain('자료 인용 규칙');
+    // 단위를 임의로 붙이지 말라는 지침이 핵심이다
+    expect(block).toContain('단위');
+  });
+});
