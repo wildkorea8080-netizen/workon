@@ -41,6 +41,9 @@ export default function AuditLogsManager() {
   const [to, setTo] = useState(initial.to);
   const [userId, setUserId] = useState('');
   const [page, setPage] = useState(1);
+  // 질문 원문 열람(D1). 기본은 가려져 있고, 사유를 남겨야 열린다.
+  const [reveal, setReveal] = useState(false);
+  const [revealReason, setRevealReason] = useState('');
 
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -54,6 +57,10 @@ export default function AuditLogsManager() {
     try {
       const params = new URLSearchParams({ kind, from, to, page: String(page) });
       if (userId) params.set('userId', userId);
+      if (reveal) {
+        params.set('reveal', 'true');
+        params.set('reason', revealReason);
+      }
 
       const res = await fetch(`/api/admin/audit-logs?${params}`);
       const result = await res.json();
@@ -66,7 +73,7 @@ export default function AuditLogsManager() {
     } finally {
       setLoading(false);
     }
-  }, [kind, from, to, userId, page]);
+  }, [kind, from, to, userId, page, reveal, revealReason]);
 
   useEffect(() => {
     load();
@@ -84,6 +91,10 @@ export default function AuditLogsManager() {
   const handleExport = () => {
     const params = new URLSearchParams({ kind, from, to, format: 'csv' });
     if (userId) params.set('userId', userId);
+    if (reveal) {
+      params.set('reveal', 'true');
+      params.set('reason', revealReason);
+    }
     // 브라우저가 Content-Disposition을 처리하도록 그대로 이동시킨다
     window.location.href = `/api/admin/audit-logs?${params}`;
   };
@@ -150,6 +161,44 @@ export default function AuditLogsManager() {
         <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">{error}</div>
       )}
 
+      {/* ── 질문 원문 열람 (D1) ──
+          직원이 무엇을 물었는지는 감사에 필요할 수 있지만 상시로 열려 있으면
+          근로자 감시가 된다. CSV는 정보공개 청구로 기관 밖에 나갈 수도 있다.
+          기본은 가리고, 사유를 남기고 명시적으로 요청할 때만 연다. */}
+      {kind === 'usage' && (
+        <div className={`p-4 rounded-xl border ${reveal ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={reveal}
+              onChange={(e) => {
+                setReveal(e.target.checked);
+                if (!e.target.checked) setRevealReason('');
+                setPage(1);
+              }}
+              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-slate-800">질문 원문 열람</span>
+              <span className="block text-[11px] text-slate-500 mt-0.5">
+                기본적으로 질문 내용은 앞부분만 표시됩니다. 감사·수사 협조 등으로 전문이 필요할 때만 사용하세요.
+                <strong className="text-amber-700"> 열람 사실은 사유와 함께 보안 로그에 기록됩니다.</strong>
+              </span>
+            </span>
+          </label>
+
+          {reveal && (
+            <input
+              type="text"
+              value={revealReason}
+              onChange={(e) => setRevealReason(e.target.value)}
+              placeholder="열람 사유 (예: 2026년 정기감사 자료 제출 요구)"
+              className="mt-3 w-full px-3 py-2 border border-amber-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+          )}
+        </div>
+      )}
+
       {/* 요약 */}
       {meta && (
         <div className="flex flex-wrap gap-6 px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm">
@@ -164,6 +213,9 @@ export default function AuditLogsManager() {
           )}
           <span className="text-slate-400 text-xs self-center">
             시간은 한국 시간(KST) 기준입니다
+          </span>
+          <span className="text-slate-400 text-xs self-center">
+            {reveal ? '질문 원문 표시 중' : '질문 원문 비공개'}
           </span>
         </div>
       )}

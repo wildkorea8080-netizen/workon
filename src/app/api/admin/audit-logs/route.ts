@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
+import { logSecurityEvent } from '@/lib/filter';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,26 @@ export const dynamic = 'force-dynamic';
 
 /** 한 번에 내보낼 수 있는 최대 건수. 그 이상은 기간을 나눠 받도록 안내한다. */
 const MAX_EXPORT_ROWS = 50_000;
+
+/**
+ * 질문 원문 열람 기준.
+ *
+ * 직원이 무엇을 물었는지는 감사에 필요할 수 있지만, 상시로 열려 있으면
+ * 근로자 감시가 된다. 감사 CSV는 정보공개 청구로 기관 밖에 나갈 수도 있다.
+ * 그래서 기본은 가리고, 사유를 남기고 명시적으로 요청할 때만 연다.
+ *
+ * 저장 자체를 막지 않는 이유: 실제 감사에서 "무엇을 물었는지"를 제출하라는
+ * 요구가 들어오면 없는 자료는 만들 수 없다. 수집은 하되 열람을 통제한다.
+ */
+const QUERY_PREVIEW_CHARS = 12;
+
+/** 질문 원문을 앞 일부만 남기고 가린다. 무엇에 관한 건지는 알 수 있게 둔다. */
+function maskQuery(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= QUERY_PREVIEW_CHARS) return `${trimmed} (…)`;
+  return `${trimmed.slice(0, QUERY_PREVIEW_CHARS)}… (전문 비공개)`;
+}
 const DEFAULT_PAGE_SIZE = 100;
 
 type LogKind = 'usage' | 'security';
@@ -50,6 +71,7 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 const SECURITY_LABEL: Record<string, string> = {
+  query_revealed: '질문 원문 열람',
   forbidden_word: '금지어 감지',
   personal_info: '개인정보 패턴 감지',
   blocked_upload: '업로드 차단',
@@ -108,6 +130,9 @@ export async function GET(request: NextRequest) {
     const kind = (searchParams.get('kind') ?? 'usage') as LogKind;
     const userId = searchParams.get('userId') ?? '';
     const format = searchParams.get('format') ?? 'json';
+    // 질문 원문 열람. 사유를 함께 받아 보안 로그에 남긴다.
+    const revealQuery = searchParams.get('reveal') === 'true';
+    const revealReason = (searchParams.get('reason') ?? '').trim();
     const page = Math.max(Number(searchParams.get('page')) || 1, 1);
 
     // 기간 미지정 시 최근 30일
@@ -155,8 +180,41 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const table = kind === 'security' ? 'security_logs' : 'usage_logs';
     const isExport = format === 'csv';
+
+    // 질문 원문을 열려면 사유가 있어야 한다. 사유 없는 열람은 거절한다 —
+    // 기록만 남기고 통과시키면 사실상 상시 열람과 같아진다.
+    if (revealQuery) {
+      if (revealReason.length < 5) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              message:
+                '질문 원문을 열람하려면 사유를 5자 이상 입력해야 합니다. 열람 사실은 보안 로그에 기록됩니다.',
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      // 누가·언제·왜 열었는지 남긴다. 열람 자체가 감사 대상이다.
+      await logSecurityEvent(
+        adminDeptId,
+        session.user.id,
+        'query_revealed',
+        {
+          reason: revealReason,
+          target_user_id: userId || '(전체)',
+          from: from.toISOString(),
+          to: to.toISOString(),
+          exported: isExport,
+        },
+        'high'
+      );
+    }
+
+    const table = kind === 'security' ? 'security_logs' : 'usage_logs';
 
     let query = supabaseAdmin
       .from(table)
@@ -216,7 +274,13 @@ export async function GET(request: NextRequest) {
         이메일: member.email,
         부서: member.dept,
         활동: ACTION_LABEL[log.action] ?? log.action,
-        상세: details.query ?? details.template_name ?? details.name ?? '',
+        // 질문 원문은 기본적으로 가린다(D1). 템플릿명·비서명 같은 식별자는
+        // 개인의 발화가 아니므로 그대로 둔다.
+        상세: details.query
+          ? revealQuery
+            ? String(details.query)
+            : maskQuery(String(details.query))
+          : (details.template_name ?? details.name ?? ''),
         모델: details.model ?? '',
         입력토큰: details.input_tokens ?? '',
         출력토큰: details.output_tokens ?? '',
