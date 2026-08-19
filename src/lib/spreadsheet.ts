@@ -85,28 +85,96 @@ function toMarkdownTable(rows: string[][]): string {
   return lines.join('\n');
 }
 
+const isEmptyRow = (row: string[]) => row.every((cell) => !cell.trim());
+
 /** 앞뒤의 완전히 빈 행을 떼어낸다. 서식만 있는 빈 행이 흔하다. */
 function trimEmptyRows(rows: string[][]): string[][] {
-  const isEmpty = (row: string[]) => row.every((cell) => !cell.trim());
   let start = 0;
   let end = rows.length;
-  while (start < end && isEmpty(rows[start])) start += 1;
-  while (end > start && isEmpty(rows[end - 1])) end -= 1;
+  while (start < end && isEmptyRow(rows[start])) start += 1;
+  while (end > start && isEmptyRow(rows[end - 1])) end -= 1;
   return rows.slice(start, end);
+}
+
+/**
+ * 한 시트에 쌓여 있는 표들을 나눈다.
+ *
+ * 공공기관 엑셀은 시트 하나에 표를 여러 개 세로로 쌓는 일이 흔하다
+ * (품목별·연도별 등). 그대로 이어붙이면 머리글 행이 표 한가운데 끼어들어
+ * 어느 표의 값인지 알 수 없게 된다. 실제로 업체별 배정물량 표 두 개가
+ * 하나로 합쳐져 같은 업체가 두 번 나오는 상태가 됐다.
+ *
+ * 빈 행이 2줄 이상 이어지면 다른 표로 본다. 1줄은 표 안의 여백일 때가 많다.
+ */
+function splitTableBlocks(rows: string[][]): string[][][] {
+  const blocks: string[][][] = [];
+  let current: string[][] = [];
+  let blankRun = 0;
+
+  for (const row of rows) {
+    if (isEmptyRow(row)) {
+      blankRun += 1;
+      // 경계를 넘어선 순간 한 번만 끊는다
+      if (blankRun === 2 && current.length > 0) {
+        blocks.push(current);
+        current = [];
+      }
+      continue;
+    }
+    blankRun = 0;
+    current.push(row);
+  }
+
+  if (current.length > 0) blocks.push(current);
+  return blocks.filter((b) => b.length > 0);
+}
+
+/**
+ * 전부 비어 있는 열을 떼어낸다.
+ *
+ * 엑셀은 서식만 넣은 열이나 표 왼쪽 여백 열을 자주 남긴다. 그대로 두면
+ * 마크다운 표에 빈 칸만 있는 열이 생겨 읽기 어렵고 임베딩에도 잡음이 된다.
+ */
+function dropEmptyColumns(rows: string[][]): string[][] {
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  const keep: number[] = [];
+  for (let c = 0; c < width; c += 1) {
+    if (rows.some((row) => (row[c] ?? '').trim())) keep.push(c);
+  }
+  if (keep.length === 0) return rows;
+  return rows.map((row) => keep.map((c) => row[c] ?? ''));
 }
 
 function renderSheet(name: string, rows: string[][]): string {
   const trimmed = trimEmptyRows(rows);
   if (trimmed.length === 0) return '';
 
-  const truncated = trimmed.length > MAX_ROWS_PER_SHEET;
-  const shown = truncated ? trimmed.slice(0, MAX_ROWS_PER_SHEET) : trimmed;
+  const blocks = splitTableBlocks(trimmed);
+  const sections: string[] = [];
+  let used = 0;
 
-  const note = truncated
-    ? `\n\n[행이 많아 앞 ${MAX_ROWS_PER_SHEET}행만 포함했습니다. 전체 ${trimmed.length}행]`
-    : '';
+  blocks.forEach((block, index) => {
+    if (used >= MAX_ROWS_PER_SHEET) return;
 
-  return `## ${name}\n\n${toMarkdownTable(shown)}${note}`;
+    const cleaned = dropEmptyColumns(block);
+    const room = MAX_ROWS_PER_SHEET - used;
+    const shown = cleaned.length > room ? cleaned.slice(0, room) : cleaned;
+    used += shown.length;
+
+    // 표가 여럿이면 번호를 붙인다. 어느 표의 값인지 물었을 때 구분이 된다.
+    const heading = blocks.length > 1 ? `## ${name} (표 ${index + 1})` : `## ${name}`;
+    sections.push(`${heading}\n\n${toMarkdownTable(shown)}`);
+  });
+
+  if (sections.length === 0) return '';
+
+  // 빈 구분 행은 세지 않는다. 그걸 포함해 비교하면 아무것도 자르지 않았는데
+  // "일부만 포함했다"는 안내가 붙는다.
+  const total = blocks.reduce((sum, block) => sum + block.length, 0);
+  const note =
+    used < total ? `\n\n[행이 많아 앞 ${used}행만 포함했습니다. 전체 ${total}행]` : '';
+
+  return sections.join('\n\n') + note;
 }
 
 async function extractFromXlsx(fileBuffer: Buffer): Promise<string> {

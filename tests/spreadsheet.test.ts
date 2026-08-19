@@ -109,6 +109,52 @@ describe('XLSX', () => {
     expect(out).not.toContain('내부메모');
   });
 
+  it('한 시트에 쌓인 표를 나눈다', async () => {
+    // 공공기관 엑셀은 시트 하나에 표를 여러 개 세로로 쌓는 일이 흔하다.
+    // 이어붙이면 머리글이 표 한가운데 끼어들어 어느 표의 값인지 알 수 없다.
+    const buf = await buildWorkbook((wb) => {
+      const ws = wb.addWorksheet('물량');
+      ws.addRow(['업체명', '배정물량']);
+      ws.addRow(['팜스토리', 4130]);
+      ws.addRow([]);
+      ws.addRow([]);
+      ws.addRow(['업체명', '배정물량']);
+      ws.addRow(['팜스토리', 492]);
+    });
+
+    const out = await extractTextFromSpreadsheet(buf, 'a.xlsx');
+    expect(out).toContain('## 물량 (표 1)');
+    expect(out).toContain('## 물량 (표 2)');
+  });
+
+  it('전부 빈 열은 떼어낸다', async () => {
+    // 엑셀은 서식만 넣은 여백 열을 자주 남긴다. 그대로 두면 표가 읽히지 않는다.
+    const buf = await buildWorkbook((wb) => {
+      const ws = wb.addWorksheet('여백');
+      ws.addRow(['', '업체명', '', '배정물량']);
+      ws.addRow(['', '팜스토리', '', 4130]);
+    });
+
+    const out = await extractTextFromSpreadsheet(buf, 'a.xlsx');
+    expect(out).toContain('| 업체명 | 배정물량 |');
+  });
+
+  it('자르지 않았으면 잘렸다는 안내를 붙이지 않는다', async () => {
+    // 빈 구분 행까지 전체에 세면 아무것도 안 잘렸는데 안내가 붙는다
+    const buf = await buildWorkbook((wb) => {
+      const ws = wb.addWorksheet('짧음');
+      ws.addRow(['항목']);
+      ws.addRow(['값']);
+      ws.addRow([]);
+      ws.addRow([]);
+      ws.addRow(['항목']);
+      ws.addRow(['값']);
+    });
+
+    const out = await extractTextFromSpreadsheet(buf, 'a.xlsx');
+    expect(out).not.toContain('행만 포함');
+  });
+
   it('시트 이름을 제목으로 남긴다', async () => {
     const buf = await buildWorkbook((wb) => {
       const ws = wb.addWorksheet('2026년 예산');
