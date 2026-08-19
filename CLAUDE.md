@@ -1,7 +1,8 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-08-18  
-**분석 기준**: 코드베이스 전수 확인 (`next build` + `tsc --noEmit` 통과 상태에서 검증)
+**최종 업데이트**: 2026-08-19  
+**분석 기준**: 코드베이스 전수 확인
+(`next build` + `tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증)
 
 ---
 
@@ -20,11 +21,11 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | Auth | NextAuth.js 4 (Credentials) — Supabase Auth도 signup에서 일부 사용 |
 | DB | Supabase PostgreSQL + pgvector (임베딩 저장) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
-| AI/LLM | Claude API (`claude-sonnet-4-6`) — 논스트리밍 + SSE 스트리밍 양쪽 지원 |
+| AI/LLM | Claude API — 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
 | 임베딩 | Voyage AI (`voyage-3`) |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
-| 문서 파싱 | `pdf-parse`, `mammoth` (DOCX), 자체 HWP/HWPX 추출기 (`hwp.ts`) |
+| 문서 파싱 | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
@@ -37,7 +38,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 78개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 91개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
 │   ├── employee/         # 직원 서브페이지 (reports/history/qna)
@@ -74,7 +75,27 @@ src/
 
 ---
 
-## API 구조 (78개 라우트)
+## 검증 장치
+
+바꾼 뒤에는 아래를 돌립니다. **단위 테스트만으로는 이 프로젝트에서 실제로 난
+버그를 못 잡습니다** — 트리거 부재·RAG 임계값·기관 격리는 전부 실제 DB에서만
+드러났습니다.
+
+| 명령 | 보는 것 | DB 필요 |
+|---|---|---|
+| `npm test` | 순수 함수 회귀 59개 | 아니오 |
+| `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
+| `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
+| `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
+| `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
+
+`db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
+볼 수 없으므로, 예컨대 "부서에는 기관이 있는데 로그만 NULL"인 상태를 트리거
+부재로 판정하는 식입니다.
+
+---
+
+## API 구조 (91개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -393,7 +414,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수 회귀 테스트 44개가 돕니다 (`tests/`).
+   `npm test`로 순수 함수 회귀 테스트 59개가 돕니다 (`tests/`).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -403,6 +424,8 @@ MAIL_FROM=
    | `agent-catalog.test.ts` | 링크형 `javascript:`·`data:` 차단, 유형 전환 시 주소 처리 |
    | `spreadsheet.test.ts` | 열 머리글 대응, 수식→결과값, BOM·파이프 |
    | `pdf-ocr.test.ts` | 스캔 판정, **RAG 임계값이 실측 분리 구간 안에 있는지** |
+   | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입 |
+   | `file-types.test.ts` | 허용 형식이 한 곳에만 정의돼 있는지 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
@@ -411,20 +434,45 @@ MAIL_FROM=
 
 ### 🟠 기능 공백 (웍스AI 대비)
 
-- 단일 모델 고정 (`claude-sonnet-4-6`) — 모델 선택·멀티 프로바이더 없음
-- MCP / 툴 실행 루프 없음
-- XLSX·PPTX 미지원, OCR·이미지 입력 없음 (HWP/HWPX는 2026-08 지원 시작)
-- 회의록(STT)·번역·이미지/비디오 생성·PPT 생성 없음
-- SSO, IP 제어 없음
+**2026-08-19 기준 실측입니다.** 이 절이 낡으면 이미 있는 기능을 다시 만들거나
+없는 줄 알고 우회 설계를 하게 됩니다. 기능을 추가·제거할 때 함께 고치세요.
 
-상세 분석과 우선순위는 [docs/GAP_ANALYSIS_2026-08.md](docs/GAP_ANALYSIS_2026-08.md) 참조.
+없는 것:
+
+- **멀티 프로바이더** — Anthropic 4종뿐. OpenAI·Google을 붙이려면
+  `src/lib/llm/` 어댑터 계층이 먼저 필요합니다
+- **PPTX 파싱** — 파서 계층은 있으니 `spreadsheet.ts` 자리에 붙이면 됩니다
+- **이미지 입력** — 사용자가 이미지를 첨부해 묻는 경로. 스캔 PDF 판독과는 다릅니다
+- **회의록(STT)·이미지/비디오 생성·PPT 생성** — Anthropic이 제공하지 않아
+  새 업체가 필요합니다. 공공기관 보안성 검토에서 소명할 곳이 하나 더 늘어납니다
+- **SSO** (MS Entra ID / 그룹웨어), **IP 제어**
+  — 도메인 기반 기관 자동 배정은 있습니다(`signup/route.ts`). 웍스AI 문서도
+    "회사 이메일 직접 가입이 가장 많이 쓰인다"고 밝히므로 후순위입니다
+- **폴더 자동 동기화** (OneDrive/SharePoint) — 공공기관은 내부망·자체 EDMS가
+  많아 전제가 맞지 않습니다
+
+있는 것 (예전 이 목록에 '없음'으로 적혀 있던 것들):
+
+| 기능 | 상태 |
+|---|---|
+| 모델 선택 | 4종 + 기관별 허용 정책 (0021) |
+| MCP / 툴 실행 루프 | 커넥터 4종 7개 도구, `MAX_TOOL_ROUNDS` |
+| XLSX·CSV | `spreadsheet.ts` — 표 분리·수식 결과·EUC-KR |
+| 스캔 PDF 판독 | `pdf-ocr.ts` — Claude가 직접 읽음 |
+| 번역 | 프리셋 비서로 제공 (별도 번역 엔진은 아님) |
+
+상세 배경은 [docs/WRKS_MANUAL_BUILD_PLAN_2026-08.md](docs/WRKS_MANUAL_BUILD_PLAN_2026-08.md),
+남은 작업은 [docs/NEXT_STEPS_2026-08-19.md](docs/NEXT_STEPS_2026-08-19.md) 참조.
+([docs/GAP_ANALYSIS_2026-08.md](docs/GAP_ANALYSIS_2026-08.md)는 8월 초 기준이라
+일부 항목이 이미 해결됐습니다.)
 
 ### 🟡 알려진 불일치
 
 - **RAG 구현 2종 공존**: `/api/chat`은 `search_agent_chunks`(에이전트 단위),
   `/api/qna`는 `search_document_chunks`(부서 전체). 의도된 분리지만 통합 검토 필요.
-- **과금 파이프라인 미완성**: `usage_logs`에 토큰은 정확히 쌓이지만
-  원화 환산·`billing_logs` 월 집계·청구서 생성은 미구현.
+- **과금 파이프라인 부분 구현**: `usage_logs`에 토큰·모델·원가(USD/원)가
+  기록되고 예산 소진 판정도 동작합니다. 다만 `billing_logs` 월 집계와
+  청구서 생성은 미구현입니다.
 
 ---
 
