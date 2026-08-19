@@ -211,11 +211,45 @@ export default function DocumentsManager() {
                 );
               })}
             </div>
-            {uploadForm.agentIds.length > 0 && (
-              <p className="text-xs text-blue-600 mt-1">
-                {uploadForm.agentIds.length}개 비서 선택됨
-              </p>
-            )}
+            {/* 선택한 비서를 이름으로 보여준다.
+                목록이 스크롤 영역이라 고른 항목이 화면 밖으로 나가는데,
+                숫자만 보여주면 무엇을 골랐는지 확인할 방법이 없다.
+                문서가 엉뚱한 비서에 붙으면 그 비서만 그 자료를 참고하게 된다. */}
+            <div className="mt-2">
+              {uploadForm.agentIds.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  선택된 비서가 없습니다. 이 문서를 참고할 비서를 골라주세요.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-slate-500">선택됨</span>
+                  {uploadForm.agentIds.map((id) => {
+                    const agent = agents.find((a) => a.id === id);
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs"
+                      >
+                        {agent?.name ?? '(삭제된 비서)'}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUploadForm((prev) => ({
+                              ...prev,
+                              agentIds: prev.agentIds.filter((x) => x !== id),
+                            }))
+                          }
+                          className="text-blue-400 hover:text-blue-700 leading-none"
+                          aria-label={`${agent?.name ?? ''} 선택 해제`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
@@ -328,7 +362,9 @@ export default function DocumentsManager() {
 
           <button
             type="submit"
-            disabled={uploading}
+            // 비서나 파일이 없으면 누를 수 없게 한다. 눌린 뒤 오류를 내면
+            // 무엇이 빠졌는지 한 번 더 찾아야 한다.
+            disabled={uploading || uploadForm.agentIds.length === 0 || !uploadForm.file}
             className="w-full px-4 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2 transition-colors"
           >
             {uploading ? (
