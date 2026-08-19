@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:check": "tsx scripts/db-check.mjs",
+    "isolation:check": "tsx scripts/isolation-check.mjs",
     "db:migrate": "tsx scripts/db-migrate.mjs",
     "seed:agents": "tsx scripts/seed-agents.mjs"
   },

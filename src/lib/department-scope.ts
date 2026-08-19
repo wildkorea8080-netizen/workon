@@ -53,11 +53,29 @@ export async function getAccessScope(departmentId: string): Promise<AccessScope>
  */
 export function visibilityFilter(scope: AccessScope): string {
   const deptList = scope.visibleDepartmentIds.join(',');
-  const departmentClause = `and(visibility.eq.department,department_id.in.(${deptList}))`;
 
-  if (!scope.organizationId) return departmentClause;
+  // 기관 id를 모르면 부서 조건만 남겨 범위를 좁힌다.
+  if (!scope.organizationId) {
+    return `and(visibility.eq.department,department_id.in.(${deptList}))`;
+  }
 
-  return `and(visibility.eq.organization,organization_id.eq.${scope.organizationId}),${departmentClause}`;
+  const org = scope.organizationId;
+
+  // 부서 조건에도 기관을 함께 건다.
+  //
+  // organization_id는 트리거가 department_id로부터 채우므로 정상 상태에서는
+  // 둘이 어긋날 수 없다. 다만 이 프로젝트에서 트리거가 빠진 채 컬럼만 있던
+  // 적이 실제로 있었고(0022), 그런 상태에서 department_id만 보면 기관이
+  // 다른 행도 부서 조건에 걸린다. 조건을 하나 더 걸어 두면 트리거가 다시
+  // 사라져도 자료가 기관을 넘지 않는다.
+  //
+  // organization_id가 NULL인 행은 이 조건에서 빠져 아무에게도 안 보인다.
+  // 보이는 쪽으로 열어 두는 것보다 안전하다 — 그런 행은
+  // `npm run db:check`가 잡아낸다.
+  return [
+    `and(visibility.eq.organization,organization_id.eq.${org})`,
+    `and(visibility.eq.department,organization_id.eq.${org},department_id.in.(${deptList}))`,
+  ].join(',');
 }
 
 /**
