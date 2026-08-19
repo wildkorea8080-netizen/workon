@@ -47,6 +47,14 @@ export interface ChatInterfaceProps {
   onChangeAgent: () => void;
 }
 
+type ModelOption = {
+  id: string;
+  label: string;
+  note: string;
+  inputPerMTok: number;
+  outputPerMTok: number;
+};
+
 export default function ChatInterface({
   selectedAgent,
   conversationId,
@@ -54,6 +62,9 @@ export default function ChatInterface({
   onChangeAgent,
 }: ChatInterfaceProps) {
   const branding = useBranding();
+  // 기관이 허용한 모델(0021). 하나뿐이면 고를 것이 없으므로 화면에 내지 않는다.
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -63,6 +74,19 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/models')
+      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return;
+        const list: ModelOption[] = r.data ?? [];
+        setModels(list);
+        // 기본값은 목록의 첫 번째. 서버가 정책 순서대로 준다.
+        setSelectedModel((prev) => prev ?? list[0]?.id ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -143,6 +167,8 @@ export default function ChatInterface({
           agent_id: selectedAgent.id,
           message: userMsg.content,
           conversation_id: conversationId,
+          // 허용되지 않은 값이면 서버가 정책에 맞는 모델로 바꿔 처리한다
+          model: selectedModel ?? undefined,
         }),
       });
 
@@ -372,7 +398,28 @@ export default function ChatInterface({
             )}
           </button>
         </div>
-        <p className="text-xs text-slate-400 mt-2 text-center">Enter로 전송 · Shift+Enter로 줄바꿈</p>
+        <div className="flex items-center justify-center gap-3 mt-2 flex-wrap">
+          {/* 모델 선택 — 기관이 허용한 것이 둘 이상일 때만 낸다.
+              하나뿐인데 드롭다운을 보여주면 고를 수 있다는 오해만 준다. */}
+          {models.length > 1 && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span>모델</span>
+              <select
+                value={selectedModel ?? ''}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                title={models.find((m) => m.id === selectedModel)?.note}
+                className="px-2 py-1 border border-slate-200 rounded-lg bg-white text-slate-600 text-xs focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id} title={m.note}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="text-xs text-slate-400">Enter로 전송 · Shift+Enter로 줄바꿈</p>
+        </div>
         {/* AI 고지. senGPT도 명시하고 있고 공공기관 배포에서는 사실상 필수다.
             생성 결과를 그대로 결재에 올리면 안 된다는 것을 화면이 계속 알려야 한다. */}
         <p className="text-[11px] text-slate-400 mt-1 text-center px-4">{branding.aiNotice}</p>
