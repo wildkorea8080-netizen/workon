@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 import type { Document, Agent } from '@/lib/db';
 
 export default function DocumentsManager() {
@@ -297,11 +298,11 @@ export default function DocumentsManager() {
                     <p className="font-medium text-slate-700">
                       {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, TXT, HWP, HWPX, XLSX, CSV (최대 20MB) · 스캔 PDF는 자동 판독합니다</p>
+                    <p className="text-xs text-slate-500 mt-1">{UPLOAD_FORMATS_LABEL} (최대 20MB) · 스캔 PDF는 자동 판독합니다</p>
                   </div>
                   <input
                     type="file"
-                    accept=".pdf,.docx,.txt,.hwp,.hwpx"
+                    accept={UPLOAD_ACCEPT_ATTRIBUTE}
                     onChange={(e) => setUploadForm(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
                     className="hidden"
                   />

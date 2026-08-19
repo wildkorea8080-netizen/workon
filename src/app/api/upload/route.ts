@@ -1,4 +1,9 @@
 import { NextResponse } from 'next/server';
+import {
+  ALLOWED_UPLOAD_MIME_TYPES,
+  UPLOAD_FORMATS_LABEL,
+  hasAllowedUploadExtension,
+} from '@/lib/file-types';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
@@ -8,21 +13,6 @@ import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/plain',
-  'application/x-hwp',
-  'application/haansofthwp',
-  'application/hwp+zip',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv'
-];
-
-// HWP·DOCX는 브라우저가 MIME을 비우거나 application/octet-stream으로 보내는
-// 경우가 많아 확장자를 1차 기준으로 삼는다.
-const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.hwp', '.hwpx', '.xlsx', '.xlsm', '.csv'];
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./,           // 디렉토리 트래버설
@@ -93,11 +83,13 @@ export async function POST(request: Request) {
 
   // MIME 타입 검증 (departmentId 불필요)
   const lowerFileName = file.name.toLowerCase();
-  const hasAllowedExtension = ALLOWED_EXTENSIONS.some((ext) => lowerFileName.endsWith(ext));
 
-  if (!hasAllowedExtension && !ALLOWED_MIME_TYPES.includes(file.type)) {
+  if (
+    !hasAllowedUploadExtension(file.name) &&
+    !(ALLOWED_UPLOAD_MIME_TYPES as readonly string[]).includes(file.type)
+  ) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX만 허용됩니다.' } },
+      { ok: false, error: { message: `지원되지 않는 파일 형식입니다. ${UPLOAD_FORMATS_LABEL}만 허용됩니다.` } },
       { status: 415 }
     );
   }

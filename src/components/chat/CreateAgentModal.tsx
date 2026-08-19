@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 
 const EMOJI_ICONS = [
   '🤖', '📝', '📊', '📋', '📨', '💬', '📢', '🎤',
@@ -259,13 +260,13 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                       <svg className="w-7 h-7 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                       </svg>
-                      <p className="text-xs text-slate-500">PDF, DOCX, TXT, HWP, HWPX, XLSX, CSV · 최대 10MB · 최대 10개</p>
+                      <p className="text-xs text-slate-500">{UPLOAD_FORMATS_LABEL} · 최대 10MB · 최대 10개</p>
                       <p className="text-xs text-brand-600 font-medium mt-1">클릭하거나 드래그하여 업로드</p>
                       <input
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept=".pdf,.docx,.txt,.hwp,.hwpx"
+                        accept={UPLOAD_ACCEPT_ATTRIBUTE}
                         className="hidden"
                         onChange={e => addFiles(e.target.files)}
                       />

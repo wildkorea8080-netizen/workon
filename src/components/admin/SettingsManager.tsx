@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 import type { ForbiddenWord } from '@/lib/db';
 
 interface SecurityLog {
@@ -329,7 +330,7 @@ export default function SettingsManager() {
             </p>
             <ul className="text-xs text-slate-500 mt-2 space-y-1">
               <li>• 최대 파일 크기: 20MB</li>
-              <li>• 허용 형식: PDF, DOCX, TXT, HWP, HWPX</li>
+              <li>• 허용 형식: {UPLOAD_FORMATS_LABEL}</li>
               <li>• 위험한 파일명 패턴 차단</li>
               <li>• 실행 파일 확장자 차단 (exe, bat, js 등)</li>
               <li>• 디렉토리 트래버설 공격 방지</li>
