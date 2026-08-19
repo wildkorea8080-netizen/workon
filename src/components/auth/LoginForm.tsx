@@ -50,15 +50,34 @@ export default function LoginForm({ slug }: { slug?: string }) {
 
         {/* 로고 영역 */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/15 backdrop-blur mb-4 shadow-lg">
-            {branding.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={branding.logoUrl} alt="" className="max-w-[44px] max-h-[44px] object-contain" />
-            ) : (
+          {branding.logoUrl ? (
+            // 44x44 정사각형 상자에 넣으면 가로형 CI가 44x13으로 눌려 사실상
+            // 안 보인다. 기관 전용 로그인 화면은 직원이 "우리 기관 시스템"임을
+            // 확인하는 자리라 CI가 읽혀야 한다. 흰 판을 까는 이유는 헤더와 같다.
+            <div className="inline-flex items-center justify-center bg-white rounded-2xl px-6 py-4 mb-4 shadow-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={branding.logoUrl}
+                alt={branding.name}
+                className="h-14 max-w-[240px] object-contain"
+              />
+            </div>
+          ) : (
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/15 backdrop-blur mb-4 shadow-lg">
               <span className="text-3xl">🏛️</span>
-            )}
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">{branding.name}</h1>
+            </div>
+          )}
+          {/* CI에 기관명이 이미 들어 있으면 같은 말을 두 번 하게 된다.
+              다만 제목 자체는 남겨 화면 낭독기와 검색이 읽을 수 있게 한다. */}
+          <h1
+            className={
+              branding.logoUrl
+                ? 'sr-only'
+                : 'text-2xl font-bold text-white tracking-tight'
+            }
+          >
+            {branding.name}
+          </h1>
           <p className="text-white/60 text-sm mt-1">
             {slug ? '기관 전용 로그인' : '공공기관 전용 AI 비서 플랫폼'}
           </p>

@@ -196,7 +196,7 @@ export default function OrganizationManager() {
                 <img
                   src={`/api/branding/logo?org=${org.id}&v=${logoVersion}`}
                   alt="기관 로고"
-                  className="h-10 max-w-[260px] object-contain object-left"
+                  className="h-12 max-w-[280px] object-contain object-left"
                 />
               ) : (
                 <>
@@ -230,7 +230,7 @@ export default function OrganizationManager() {
               {/* 흰 헤더에 높이 40px로 얹는다. 세로형 엠블럼만 올리면 아주
                   작게 보이므로 가로형 CI(엠블럼+기관명)를 권한다. */}
               <p className="text-[11px] text-slate-400">
-                높이 40px로 표시됩니다. <span className="text-slate-500">가로형 CI</span>와
+                높이 48px로 표시됩니다. <span className="text-slate-500">가로형 CI</span>와
                 배경이 투명한 PNG·SVG를 권합니다.
               </p>
               {org?.logo_url && (

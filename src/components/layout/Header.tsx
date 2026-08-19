@@ -37,7 +37,7 @@ export default function Header() {
           <img
             src={branding.logoUrl}
             alt={branding.name}
-            className="h-10 max-w-[260px] object-contain object-left"
+            className="h-12 max-w-[280px] object-contain object-left"
           />
         ) : (
           <>

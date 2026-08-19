@@ -56,23 +56,37 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       {/* 좌측 사이드바 */}
       <aside className={`w-60 bg-[#1C2B4A] text-white flex flex-col flex-shrink-0 ${isImpersonating ? 'mt-[52px]' : ''}`}>
         {/* 로고 */}
-        <div className="px-6 py-5 border-b border-white/10">
-          <Link href="/admin" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <div className="px-4 py-4 border-b border-white/10">
+          <Link href="/admin" className="block hover:opacity-80 transition-opacity">
             {brandLogo ? (
-              // 짙은 남색 위에 CI를 그대로 얹으면 로고 색과 테두리가 뭉개진다.
-              // 흰 판을 깔아 원래 색으로 보이게 한다 — CI 사용 규정에서
-              // 배경색을 지정하는 기관이 있어 그대로 얹을 수 없다.
-              <span className="bg-white rounded-lg px-2 py-1.5 flex items-center">
+              // 로고를 한 줄 통째로 쓴다. 사이드바가 240px뿐이라 로고와
+              // 기관명을 가로로 나란히 두면 로고가 140px 안으로 눌려 읽히지
+              // 않는다. 게다가 기관 CI에는 대개 기관명이 이미 들어 있어
+              // 옆에 또 적는 것은 같은 말을 두 번 하는 것이다.
+              //
+              // 짙은 남색 위에 그대로 얹으면 CI 색과 테두리가 뭉개지므로
+              // 흰 판을 깐다 — 배경색을 규정하는 기관이 있어 얹을 수 없다.
+              <span className="bg-white rounded-lg px-3 py-2.5 flex items-center justify-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={brandLogo} alt="" className="h-8 max-w-[140px] object-contain" />
+                {/* 높이를 고정하면 가로형 CI가 폭을 다 못 쓴다(사이드바 240 −
+                    좌우 여백 = 184px인데 높이 36px에 맞추면 144px로 눌린다).
+                    너비를 채우고 높이만 상한을 둔다 — 가로형은 폭이,
+                    엠블럼형은 높이가 기준이 되어 둘 다 제 크기로 나온다. */}
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="w-full max-h-14 object-contain"
+                />
               </span>
             ) : (
-              <span className="text-lg">🏛️</span>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏛️</span>
+                <p className="text-sm font-bold text-white leading-tight truncate">{brandName}</p>
+              </div>
             )}
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-white leading-tight truncate">{brandName}</p>
-              <p className="text-[10px] text-white/40 mt-0">관리자 포털{isImpersonating ? ' (대리)' : ''}</p>
-            </div>
+            <p className="text-[11px] text-white/40 mt-2 text-center">
+              관리자 포털{isImpersonating ? ' (대리)' : ''}
+            </p>
           </Link>
         </div>
 
