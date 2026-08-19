@@ -14,12 +14,15 @@ const ALLOWED_MIME_TYPES = [
   'text/plain',
   'application/x-hwp',
   'application/haansofthwp',
-  'application/hwp+zip'
+  'application/hwp+zip',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv'
 ];
 
 // HWP·DOCX는 브라우저가 MIME을 비우거나 application/octet-stream으로 보내는
 // 경우가 많아 확장자를 1차 기준으로 삼는다.
-const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.hwp', '.hwpx'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.hwp', '.hwpx', '.xlsx', '.xlsm', '.csv'];
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./,           // 디렉토리 트래버설

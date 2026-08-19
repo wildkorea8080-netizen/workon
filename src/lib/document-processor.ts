@@ -5,6 +5,7 @@ const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 import { getEmbeddings } from '@/lib/embeddings';
 import { extractTextFromHwp, isHwpFile } from '@/lib/hwp';
 import { extractTextFromScannedPdf, isLikelyScanned } from '@/lib/pdf-ocr';
+import { extractTextFromSpreadsheet, isSpreadsheetFile } from '@/lib/spreadsheet';
 import type { ClaudeUsage } from '@/lib/claude';
 
 export const CHUNK_SIZE = 800;
@@ -66,7 +67,13 @@ async function extractTextFromFile(
     return { text: await extractTextFromHwp(fileBuffer, fileName) };
   }
 
-  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX만 업로드할 수 있습니다.');
+  // 표 문서는 셀을 이어붙이지 않고 마크다운 표로 복원한다.
+  // 이어붙이면 열 머리글과 값의 대응이 끊긴다.
+  if (isSpreadsheetFile(lowerName, mimeType)) {
+    return { text: await extractTextFromSpreadsheet(fileBuffer, fileName) };
+  }
+
+  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX, XLSX, CSV만 업로드할 수 있습니다.');
 }
 
 function chunkText(text: string) {
