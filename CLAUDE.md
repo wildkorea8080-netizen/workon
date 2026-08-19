@@ -136,6 +136,16 @@ src/
 
 **0012에 대한 주의**: `usage_logs.organization_id`는 애플리케이션 코드가 아니라
 BEFORE INSERT 트리거가 `department_id`로부터 유도합니다.
+
+**컬럼만 있고 트리거가 없는 상태가 실제로 있었습니다** (2026-08-19 발견).
+그러면 대화는 정상이고 오류도 안 나는데, 새로 쌓이는 로그가 전부
+`organization_id` NULL이 되어 **기관 사용량 집계와 예산 소진 판정에서 조용히
+빠집니다** — 쓴 만큼 청구되지 않고 한도도 걸리지 않습니다.
+0022가 트리거를 복구하고 재백필합니다.
+
+`npm run db:check`가 이 증상을 봅니다. PostgREST로는 `pg_trigger`를 못 보므로,
+**부서에는 `organization_id`가 있는데 로그만 NULL인 경우**를 트리거 부재로
+판정합니다.
 insert 시 이 컬럼을 직접 넣을 필요가 없고, `department_id`만 정확히 넣으면 됩니다.
 
 ---

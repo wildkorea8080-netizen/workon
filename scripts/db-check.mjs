@@ -28,6 +28,9 @@ const checks = [
   ['0017', 'contracts.billing_type',     () => db.from('contracts').select('billing_type, annual_budget_krw, budget_alert_percent').limit(1)],
   ['0019', 'agents 카탈로그 컬럼',        () => db.from('agents').select('is_published, display_order, agent_type, link_url').limit(1)],
   ['0019', 'agent_categories 테이블',    () => db.from('agent_categories').select('id, name, display_order').limit(1)],
+  ['0020', '기관 브랜딩 컬럼',            () => db.from('organizations').select('slug, ai_notice, logo_url').limit(1)],
+  ['0021', 'organizations.allowed_models', () => db.from('organizations').select('allowed_models').limit(1)],
+  ['0021', 'model_policy_logs 테이블',   () => db.from('model_policy_logs').select('id').limit(1)],
 ];
 
 console.log('=== 컬럼 점검 ===');
@@ -90,6 +93,41 @@ for (const table of ['departments', 'agents', 'documents', 'usage_logs']) {
   console.log(`${bad ? '주의' : 'OK  '}  ${table.padEnd(12)} ${count ?? 0}건`);
 }
 
+// ── 트리거 동작 확인 (0012 / 0022) ─────────────────────────
+// PostgREST로는 pg_trigger를 볼 수 없다. 대신 증상을 본다 —
+// 부서에는 organization_id가 있는데 로그만 NULL이면 트리거가 없는 것이다.
+// 실제로 0012의 트리거가 빠진 채 컬럼만 있던 적이 있고, 그동안 쌓인 로그가
+// 전부 기관 집계와 예산 판정에서 조용히 빠졌다.
+console.log('\n=== usage_logs 기관 채움 트리거 ===');
+{
+  const { data: orphans } = await db
+    .from('usage_logs')
+    .select('department_id')
+    .is('organization_id', null);
+
+  const deptIds = [...new Set((orphans ?? []).map((r) => r.department_id).filter(Boolean))];
+
+  if (deptIds.length === 0) {
+    console.log('OK    미연결 로그 없음');
+  } else {
+    const { data: depts } = await db
+      .from('departments')
+      .select('id, name, organization_id')
+      .in('id', deptIds);
+
+    const fixable = (depts ?? []).filter((d) => d.organization_id);
+    if (fixable.length > 0) {
+      ok = false;
+      console.log('주의  부서에는 기관이 있는데 로그만 미연결입니다. 트리거가 빠졌을 수 있습니다.');
+      console.log(`      해당 부서: ${fixable.map((d) => d.name).join(', ')}`);
+      console.log('      → supabase/migrations/0022_restore_usage_org_trigger.sql 적용');
+    } else {
+      console.log('참고  미연결 로그가 있으나 부서에도 기관이 없어 귀속할 수 없습니다.');
+    }
+  }
+}
+
+
 // ── 과금 기록 규약 ───────────────────────────────────────────
 // organization_spend_krw는 details.cost_krw가 있는 행만 센다.
 // 토큰을 쓰는 라우트가 이 필드를 빠뜨리면 그 사용량은 예산 판정에서
@@ -150,6 +188,32 @@ console.log('\n=== 비서 카탈로그 ===');
     console.log(`${noIcon.length ? '참고' : 'OK  '}  아이콘 없음 ${noIcon.length}개${noIcon.length ? ` — ${noIcon.map((a) => a.name).join(', ')}` : ''}`);
     console.log(`${brokenLinks.length ? '주의' : 'OK  '}  링크형 ${links.length}개, 주소 없는 것 ${brokenLinks.length}개`);
     if (brokenLinks.length) ok = false;
+  }
+}
+
+// ── 기관 브랜딩·모델 정책 (0020, 0021) ─────────────────────
+console.log('\n=== 기관 설정 ===');
+{
+  const { data, error } = await db
+    .from('organizations')
+    .select('name, slug, logo_url, ai_notice, allowed_models');
+
+  if (error) {
+    console.log(`      조회 실패: ${error.message.slice(0, 60)}`);
+    ok = false;
+  } else {
+    for (const org of data) {
+      const models = Array.isArray(org.allowed_models) && org.allowed_models.length
+        ? org.allowed_models.join(', ')
+        : '미설정(기본 모델만)';
+      // slug가 org-xxxxxxxx 형태면 이름에서 못 만든 자동 생성분이다.
+      // 동작에는 문제없지만 직원에게 안내하기엔 알아보기 어렵다.
+      const autoSlug = /^org-[0-9a-f]{8}$/.test(org.slug ?? '');
+      console.log(`      ${org.name}`);
+      console.log(`        ${autoSlug ? '참고' : 'OK  '} 로그인 경로 /signin/${org.slug}${autoSlug ? ' (자동 생성 — 알아보기 쉬운 값 권장)' : ''}`);
+      console.log(`        ${org.logo_url ? 'OK  ' : '참고'} 로고 ${org.logo_url ? '있음' : '없음'}`);
+      console.log(`        OK   허용 모델 ${models}`);
+    }
   }
 }
 
