@@ -4,6 +4,8 @@ import { DEFAULT_MODEL_ID } from '@/lib/models';
 /** 툴 사용 시 메시지 content는 문자열이 아니라 블록 배열이 된다 */
 export type ClaudeContentBlock =
   | { type: 'text'; text: string }
+  // 사용자가 첨부한 이미지. pdf-ocr의 document 블록과 같은 형태다.
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
 

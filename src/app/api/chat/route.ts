@@ -18,6 +18,11 @@ import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import type { Conversation, RetrievedChunk } from '@/lib/db';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 import { getAccessScope } from '@/lib/department-scope';
+import {
+  validateChatImages,
+  imageAttachmentMarker,
+  type ChatImage,
+} from '@/lib/chat-images';
 
 /** Claude에 함께 보낼 직전 대화 메시지 최대 개수 (사용자+어시스턴트 합산) */
 const HISTORY_MESSAGE_LIMIT = 20;
@@ -45,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { agent_id, message, conversation_id, model: requestedModel } = body;
+    const { agent_id, message, conversation_id, model: requestedModel, images } = body;
 
     if (!agent_id || typeof agent_id !== 'string') {
       return jsonError('에이전트 ID는 필수입니다.', 400);
@@ -54,6 +59,15 @@ export async function POST(request: NextRequest) {
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return jsonError('메시지는 필수입니다.', 400);
     }
+
+    // 화면에서도 거르지만 그건 표시일 뿐이고 실제 제한은 여기서 건다.
+    // 잘못된 base64를 그대로 넘기면 Anthropic이 400을 주는데, 그 오류로는
+    // 어느 이미지가 문제인지 알 수 없다.
+    const imageError = validateChatImages(images);
+    if (imageError) {
+      return jsonError(imageError, 400);
+    }
+    const attachedImages: ChatImage[] = Array.isArray(images) ? images : [];
 
     // 부서 확인: 세션 캐시 우선, 없으면 DB 조회, 그래도 없으면 첫 번째 부서 자동 배정
     let departmentId: string | null = session.user.departmentId ?? null;
@@ -252,7 +266,22 @@ export async function POST(request: NextRequest) {
       fullSystemPrompt = systemMessage;
     }
 
-    const claudeMessages: ClaudeMessage[] = [...history, { role: 'user', content: message }];
+    // 이미지가 있으면 블록 배열로 보낸다. 이미지를 텍스트보다 앞에 두는 것이
+    // Anthropic 권장이다 — 모델이 무엇을 보고 답해야 하는지 먼저 잡는다.
+    const userContent: string | ClaudeContentBlock[] =
+      attachedImages.length > 0
+        ? [
+            ...attachedImages.map(
+              (img): ClaudeContentBlock => ({
+                type: 'image',
+                source: { type: 'base64', media_type: img.media_type, data: img.data },
+              })
+            ),
+            { type: 'text', text: message },
+          ]
+        : message;
+
+    const claudeMessages: ClaudeMessage[] = [...history, { role: 'user', content: userContent }];
 
     // 이 에이전트에 허용된 커넥터의 툴만 노출한다.
     // MCP 형식 → Anthropic 형식 변환은 이 어댑터 계층의 책임이며,
@@ -413,7 +442,16 @@ export async function POST(request: NextRequest) {
             conversation_id: conversation.id,
             user_id: session.user.id,
             role: 'user',
-            content: message,
+            // 이미지 자체는 저장하지 않는다. 이력에 실어 되돌려 보내면 매 턴마다
+            // 이미지 토큰이 다시 청구되고(이력 20개), 현장 사진·명단 같은
+            // 개인정보를 보관하게 되어 파기·열람 통제 대상이 하나 는다.
+            // 대신 첨부가 있었다는 사실은 남긴다 — 없으면 나중에 대화를 봤을 때
+            // 답변의 근거가 무엇이었는지 알 수 없다.
+            content:
+              attachedImages.length > 0
+                ? `${imageAttachmentMarker(attachedImages.length)}
+${message}`
+                : message,
             source_references: {},
           },
           {

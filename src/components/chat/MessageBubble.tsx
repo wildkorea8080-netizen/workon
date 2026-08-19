@@ -19,13 +19,15 @@ interface ToolLink {
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
+  /** 사용자가 첨부한 이미지 미리보기 (blob URL) */
+  imagePreviews?: string[];
   sources?: RetrievedChunk[];
   /** 외부 도구(국가법령정보 등)가 돌려준 출처 링크 */
   links?: ToolLink[];
   error?: string;
 }
 
-export default function MessageBubble({ role, content, sources, links, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, imagePreviews, sources, links, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -58,6 +60,20 @@ export default function MessageBubble({ role, content, sources, links, error }: 
               : 'bg-white text-slate-900 border border-slate-200 rounded-2xl rounded-tl-sm shadow-sm'
           }`}
         >
+          {imagePreviews && imagePreviews.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {imagePreviews.map((src, index) => (
+                // next/image는 blob URL을 다루지 않는다
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={src}
+                  src={src}
+                  alt={`첨부 이미지 ${index + 1}`}
+                  className="w-20 h-20 object-cover rounded-lg border border-white/30"
+                />
+              ))}
+            </div>
+          )}
           {error ? (
             <div>
               <span className="font-semibold">오류: </span>{error}

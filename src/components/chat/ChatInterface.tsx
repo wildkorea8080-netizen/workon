@@ -4,6 +4,13 @@ import { useState, useRef, useEffect } from 'react';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import type { Agent, RetrievedChunk } from '@/lib/db';
+import {
+  MAX_CHAT_IMAGES,
+  IMAGE_ACCEPT_ATTRIBUTE,
+  validateChatImages,
+  type ChatImage,
+} from '@/lib/chat-images';
+import { fileToChatImage } from '@/lib/image-resize';
 
 interface ToolLink {
   title: string;
@@ -14,6 +21,8 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** 사용자가 이 메시지에 붙인 이미지 미리보기 (blob URL) */
+  imagePreviews?: string[];
   sources?: RetrievedChunk[];
   /** 외부 도구가 돌려준 출처 링크 */
   links?: ToolLink[];
@@ -71,6 +80,11 @@ export default function ChatInterface({
   const [loadingConv, setLoadingConv] = useState(false);
   // 현재 실행 중인 도구 이름 (없으면 null)
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  // 보내기 전에 붙여 둔 이미지. 전송 후 비운다.
+  const [pendingImages, setPendingImages] = useState<{ image: ChatImage; preview: string }[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [preparingImages, setPreparingImages] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
@@ -143,14 +157,72 @@ export default function ChatInterface({
     if (!conversationId) setMessages([]);
   }, [selectedAgent.id, conversationId]);
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+  const addFiles = async (files: FileList | File[]) => {
+    setImageError(null);
+    const picked = Array.from(files);
+    if (picked.length === 0) return;
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: inputMessage.trim() };
+    const room = MAX_CHAT_IMAGES - pendingImages.length;
+    if (room <= 0) {
+      setImageError(`이미지는 ${MAX_CHAT_IMAGES}장까지 첨부할 수 있습니다.`);
+      return;
+    }
+
+    setPreparingImages(true);
+    try {
+      const added: { image: ChatImage; preview: string }[] = [];
+      for (const file of picked.slice(0, room)) {
+        try {
+          // 브라우저에서 줄여 보낸다. 요청 본문 상한과 토큰이 함께 줄어든다.
+          added.push({ image: await fileToChatImage(file), preview: URL.createObjectURL(file) });
+        } catch (err) {
+          setImageError(err instanceof Error ? err.message : '이미지를 처리하지 못했습니다.');
+        }
+      }
+      if (added.length > 0) setPendingImages(prev => [...prev, ...added]);
+      if (picked.length > room) {
+        setImageError(`이미지는 ${MAX_CHAT_IMAGES}장까지 첨부할 수 있습니다.`);
+      }
+    } finally {
+      setPreparingImages(false);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setImageError(null);
+    setPendingImages(prev => {
+      // blob URL을 놓아주지 않으면 대화가 길어질수록 메모리가 는다
+      URL.revokeObjectURL(prev[index]?.preview ?? '');
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleSendMessage = async () => {
+    if ((!inputMessage.trim() && pendingImages.length === 0) || isLoading) return;
+    if (preparingImages) return;
+
+    // 화면 검사는 편의일 뿐이고 서버가 다시 본다. 다만 여기서 걸러야
+    // 사용자가 보낸 뒤에야 거절당하는 일이 없다.
+    const images = pendingImages.map(p => p.image);
+    const localError = validateChatImages(images);
+    if (localError) {
+      setImageError(localError);
+      return;
+    }
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputMessage.trim(),
+      imagePreviews: pendingImages.map(p => p.preview),
+    };
     const assistantId = String(Date.now() + 1);
 
     setMessages(prev => [...prev, userMsg]);
     setInputMessage('');
+    // 미리보기 URL은 말풍선이 계속 쓰므로 여기서 revoke 하지 않는다
+    setPendingImages([]);
+    setImageError(null);
     setIsLoading(true);
     setActiveTool(null);
 
@@ -165,8 +237,9 @@ export default function ChatInterface({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent_id: selectedAgent.id,
-          message: userMsg.content,
+          message: userMsg.content || '이 이미지를 설명해주세요.',
           conversation_id: conversationId,
+          images: images.length > 0 ? images : undefined,
           // 허용되지 않은 값이면 서버가 정책에 맞는 모델로 바꿔 처리한다
           model: selectedModel ?? undefined,
         }),
@@ -336,6 +409,7 @@ export default function ChatInterface({
               key={msg.id}
               role={msg.role}
               content={msg.content}
+              imagePreviews={msg.imagePreviews}
               sources={msg.sources}
               links={msg.links}
               error={msg.error}
@@ -369,7 +443,71 @@ export default function ChatInterface({
 
       {/* 입력 영역 */}
       <div className="px-5 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+        {imageError && (
+          <p className="mb-2 text-xs text-red-600">{imageError}</p>
+        )}
+
+        {pendingImages.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingImages.map((item, index) => (
+              <div key={item.preview} className="relative group">
+                {/* next/image는 blob URL을 다루지 않는다 */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.preview}
+                  alt={`첨부 이미지 ${index + 1}`}
+                  className="w-16 h-16 object-cover rounded-lg border border-slate-200"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(index)}
+                  aria-label={`첨부 이미지 ${index + 1} 제거`}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white text-xs flex items-center justify-center hover:bg-slate-900"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {/* 다음 턴에 왜 "아까 그 사진"이 안 되는지 미리 알린다 */}
+            <p className="w-full text-[11px] text-slate-400">
+              이미지는 이번 질문에만 전달됩니다. 다음 질문에서 다시 보려면 새로 첨부하세요.
+            </p>
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={IMAGE_ACCEPT_ATTRIBUTE}
+          multiple
+          className="hidden"
+          onChange={e => {
+            if (e.target.files) addFiles(e.target.files);
+            // 같은 파일을 다시 고를 수 있게 비운다
+            e.target.value = '';
+          }}
+        />
+
         <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#003087] focus-within:ring-2 focus-within:ring-[#003087]/10 transition-all">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading || preparingImages || pendingImages.length >= MAX_CHAT_IMAGES}
+            aria-label="이미지 첨부"
+            title={`이미지 첨부 (최대 ${MAX_CHAT_IMAGES}장)`}
+            className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+          >
+            {preparingImages ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            )}
+          </button>
           <textarea
             ref={textareaRef}
             value={inputMessage}
@@ -383,7 +521,7 @@ export default function ChatInterface({
           />
           <button
             onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || isLoading}
+            disabled={(!inputMessage.trim() && pendingImages.length === 0) || isLoading || preparingImages}
             className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#003087] hover:bg-[#002070] disabled:bg-slate-200 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors"
           >
             {isLoading ? (
