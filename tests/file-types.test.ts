@@ -29,7 +29,7 @@ describe('허용 확장자 판정', () => {
   });
 
   it('등록되지 않은 형식은 막는다', () => {
-    for (const name of ['악성.exe', '보고서.pptx', '사진.png']) {
+    for (const name of ['악성.exe', '발표자료.ppt', '사진.png']) {
       expect(hasAllowedUploadExtension(name), name).toBe(false);
     }
   });

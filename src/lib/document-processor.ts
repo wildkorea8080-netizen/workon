@@ -6,6 +6,8 @@ import { getEmbeddings } from '@/lib/embeddings';
 import { extractTextFromHwp, isHwpFile } from '@/lib/hwp';
 import { extractTextFromScannedPdf, isLikelyScanned } from '@/lib/pdf-ocr';
 import { extractTextFromSpreadsheet, isSpreadsheetFile } from '@/lib/spreadsheet';
+import { extractTextFromPptx, isPptxFile } from '@/lib/pptx';
+import { UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 import type { ClaudeUsage } from '@/lib/claude';
 
 export const CHUNK_SIZE = 800;
@@ -73,7 +75,16 @@ async function extractTextFromFile(
     return { text: await extractTextFromSpreadsheet(fileBuffer, fileName) };
   }
 
-  throw new Error('지원되지 않는 파일 형식입니다. PDF, DOCX, TXT, HWP, HWPX, XLSX, CSV만 업로드할 수 있습니다.');
+  // 발표자료. 슬라이드 경계와 표를 살려 마크다운으로 복원한다.
+  if (isPptxFile(lowerName, mimeType)) {
+    return { text: await extractTextFromPptx(fileBuffer) };
+  }
+
+  // 목록을 여기 적지 않는다. 예전에 HWP를 추가했을 때 이 문구만 옛 목록으로
+  // 남아 사용자가 올릴 수 있는 파일을 못 올린다고 읽었다.
+  throw new Error(
+    `지원되지 않는 파일 형식입니다. ${UPLOAD_FORMATS_LABEL}만 업로드할 수 있습니다.`
+  );
 }
 
 function chunkText(text: string) {

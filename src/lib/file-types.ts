@@ -20,6 +20,7 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   '.xlsx',
   '.xlsm',
   '.csv',
+  '.pptx',
 ] as const;
 
 /**
@@ -38,6 +39,8 @@ export const ALLOWED_UPLOAD_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
   'text/csv',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
 ] as const;
 
 /** `<input type="file" accept="...">`에 그대로 넣는다 */

@@ -25,7 +25,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | 임베딩 | Voyage AI (`voyage-3`) |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
-| 문서 파싱 | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
+| 문서 파싱 | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
@@ -199,7 +199,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ### 문서 업로드 시
 ```
-파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts / spreadsheet.ts)
+파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts / spreadsheet.ts / pptx.ts)
 → [PDF에 텍스트 레이어가 없으면 Claude로 스캔 판독 → pdf-ocr.ts]
 → chunkText (800단어, 100 겹침)
 → getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
@@ -234,6 +234,26 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 - 전부 빈 열은 떼어냅니다. 서식만 넣은 여백 열이 자주 남습니다
 - 시트당 500행 상한. 수만 행을 통째로 임베딩하면 비용이 감당되지 않습니다
 - `exceljs`는 무거워 표 문서를 올릴 때만 동적으로 불러옵니다
+
+**발표자료(PPTX)는 슬라이드 경계를 남깁니다** (`src/lib/pptx.ts`).
+
+공공기관은 업무보고·사업설명회·정책브리핑이 전부 PPTX로 쌓입니다.
+
+- **전부 이어붙이지 않습니다.** 슬라이드마다 `## 슬라이드 N`을 답니다.
+  발표자료는 "몇 페이지 내용이냐"로 논의되는 문서라 이 경계가 곧 출처입니다.
+  번호는 파일명(`slide12.xml`)에서 가져옵니다 — 배열 순번을 쓰면 빈 슬라이드를
+  건너뛴 만큼 어긋나 원본에서 그 자리를 못 찾습니다
+- **정렬은 숫자로.** 문자열 정렬은 slide10을 slide2보다 앞에 놓는데,
+  발표자료는 순서가 곧 내용입니다(현황 → 문제 → 대안)
+- **런(`a:r`)은 공백 없이 붙입니다.** 서식이 바뀔 때마다 런이 쪼개져
+  "2026년도 예산"이 세 조각으로 옵니다. 파서의 `trimValues`를 켜면 런 끝의
+  공백(`xml:space="preserve"`)이 지워져 "2026년도예산"이 됩니다
+- 표는 마크다운 표로 복원하고 **그 아래로는 다시 내려가지 않습니다.**
+  내려가면 셀 글자가 본문으로도 잡혀 같은 값이 두 번 임베딩됩니다
+- **발표자 노트**도 가져옵니다. 화면에는 결론만 적고 근거는 노트에 두는 일이 많습니다
+- 구형 `.ppt`(CFB)는 zip이 아니라 열리지 않습니다. "PPTX로 저장하라"고 안내합니다
+- 상한 300장. 새 업체·새 의존이 필요 없습니다 — `jszip`·`fast-xml-parser`는
+  HWPX 처리를 위해 이미 들어와 있습니다
 
 ### 기본 비서 세트 (P3-2)
 
@@ -417,7 +437,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수 회귀 테스트 65개가 돕니다 (`tests/`).
+   `npm test`로 순수 함수 회귀 테스트 78개가 돕니다 (`tests/`).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -430,6 +450,7 @@ MAIL_FROM=
    | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입 |
    | `file-types.test.ts` | 허용 형식이 한 곳에만 정의돼 있는지 |
    | `route-auth.test.ts` | **모든 API 핸들러의 인증·관리자 검사 누락** |
+   | `pptx.test.ts` | 런 분할·슬라이드 번호·표 중복, 실제 zip으로 검증 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
@@ -452,7 +473,6 @@ MAIL_FROM=
 
 - **멀티 프로바이더** — Anthropic 4종뿐. OpenAI·Google을 붙이려면
   `src/lib/llm/` 어댑터 계층이 먼저 필요합니다
-- **PPTX 파싱** — 파서 계층은 있으니 `spreadsheet.ts` 자리에 붙이면 됩니다
 - **이미지 입력** — 사용자가 이미지를 첨부해 묻는 경로. 스캔 PDF 판독과는 다릅니다
 - **회의록(STT)·이미지/비디오 생성·PPT 생성** — Anthropic이 제공하지 않아
   새 업체가 필요합니다. 공공기관 보안성 검토에서 소명할 곳이 하나 더 늘어납니다
@@ -469,6 +489,7 @@ MAIL_FROM=
 | 모델 선택 | 4종 + 기관별 허용 정책 (0021) |
 | MCP / 툴 실행 루프 | 커넥터 4종 7개 도구, `MAX_TOOL_ROUNDS` |
 | XLSX·CSV | `spreadsheet.ts` — 표 분리·수식 결과·EUC-KR |
+| PPTX | `pptx.ts` — 슬라이드 경계·표·발표자 노트 |
 | 스캔 PDF 판독 | `pdf-ocr.ts` — Claude가 직접 읽음 |
 | 번역 | 프리셋 비서로 제공 (별도 번역 엔진은 아님) |
 
