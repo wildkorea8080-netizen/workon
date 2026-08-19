@@ -111,6 +111,9 @@ src/
 **관리자 전용 라우트를 추가할 때는 GET/POST/PUT/DELETE 각 핸들러마다
 `isAdminSession(session)` 검사를 넣어야 합니다.** 한 핸들러에만 넣고 다른
 핸들러를 빠뜨리는 실수가 실제로 있었습니다 (`forbidden-words` POST, 2026-08 수정).
+그때 같은 파일의 `[id]` PATCH·DELETE는 함께 고치지 못해 한동안 **직원이 금지어를
+끄거나 지울 수 있었습니다.** 사람이 매번 세는 대신 `tests/route-auth.test.ts`가
+핸들러 전수를 봅니다.
 
 ---
 
@@ -414,7 +417,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수 회귀 테스트 59개가 돕니다 (`tests/`).
+   `npm test`로 순수 함수 회귀 테스트 65개가 돕니다 (`tests/`).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -426,11 +429,19 @@ MAIL_FROM=
    | `pdf-ocr.test.ts` | 스캔 판정, **RAG 임계값이 실측 분리 구간 안에 있는지** |
    | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입 |
    | `file-types.test.ts` | 허용 형식이 한 곳에만 정의돼 있는지 |
+   | `route-auth.test.ts` | **모든 API 핸들러의 인증·관리자 검사 누락** |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
-   **아직 없는 것**: DB를 거치는 경로(테넌트 격리, 관리 범위, 트리거)와 API 라우트.
-   그쪽은 `npm run db:check`·`npm run connector:probe`가 실측으로 봅니다.
+   `route-auth.test.ts`는 `src/app/api`의 라우트 파일을 전부 읽어 핸들러마다
+   인증 호출이 있는지 봅니다. 공개해도 되는 라우트는 **이유와 함께** 목록에
+   적어야 통과합니다 — 목록에 넣는 순간 그 판단이 코드로 남습니다.
+   이 테스트를 쓰면서 `forbidden-words/[id]`의 PATCH·DELETE, `documents` DELETE,
+   `stats` GET에 관리자 검사가 없던 것을 찾았습니다.
+
+   **아직 없는 것**: DB를 거치는 경로(테넌트 격리, 관리 범위, 트리거).
+   그쪽은 `npm run db:check`·`npm run isolation:check`·`npm run connector:probe`가
+   실측으로 봅니다.
 
 ### 🟠 기능 공백 (웍스AI 대비)
 

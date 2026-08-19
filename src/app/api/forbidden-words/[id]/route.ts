@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerAuthSession } from '@/lib/auth';
+import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 
 export async function PATCH(
@@ -12,6 +12,15 @@ export async function PATCH(
       return NextResponse.json(
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
+      );
+    }
+
+    // 금지어는 관리자가 정하는 보안 통제다. 직원이 끄거나 지울 수 있으면
+    // 통제 자체가 무의미해진다. POST에는 이 검사가 있었는데 여기만 빠져 있었다.
+    if (!isAdminSession(session)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
       );
     }
 
@@ -103,6 +112,15 @@ export async function DELETE(
       return NextResponse.json(
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
+      );
+    }
+
+    // 금지어는 관리자가 정하는 보안 통제다. 직원이 끄거나 지울 수 있으면
+    // 통제 자체가 무의미해진다. POST에는 이 검사가 있었는데 여기만 빠져 있었다.
+    if (!isAdminSession(session)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
       );
     }
 

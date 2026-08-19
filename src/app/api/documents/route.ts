@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerAuthSession } from '@/lib/auth';
+import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 
@@ -54,6 +54,15 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
+      );
+    }
+
+    // 문서는 관리자가 올려 부서가 함께 쓰는 자산이다. 직원이 지울 수 있으면
+    // 한 사람의 실수로 부서 전체가 근거 자료를 잃는다. 되돌릴 방법도 없다.
+    if (!isAdminSession(session)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
       );
     }
 
