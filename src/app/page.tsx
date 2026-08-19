@@ -154,14 +154,15 @@ export default function HomePage() {
         <ConvLoader onLoad={handleConversationSelect} />
       </Suspense>
 
-      {/* 고정 헤더 */}
+      {/* 헤더를 fixed로 두면 흐름에서 빠져 바로 아래 공지 배너가 그 뒤에 깔린다.
+          슈퍼관리자가 공지를 띄워도 직원 화면에서는 보이지 않았다.
+          바깥이 이미 h-screen flex-col이라 고정할 이유가 없다 — 흐름에 두면
+          헤더·배너·본문이 순서대로 쌓이고 배너 높이도 저절로 반영된다. */}
       <WelcomeTour />
       <Header />
-      {/* 공지 배너 */}
       <NoticesBanner />
 
-      {/* 헤더 아래 영역 */}
-      <div className="flex flex-1 overflow-hidden pt-14">
+      <div className="flex flex-1 overflow-hidden">
         {/* 사이드바 */}
         <Sidebar
           selectedConversationId={conversationId}
@@ -219,7 +220,13 @@ function WelcomeView({
         <h1 className="text-2xl font-bold text-slate-900 mb-1">
           안녕하세요, {userName}님! 👋
         </h1>
-        <p className="text-slate-500 text-sm mb-8">오늘 어떤 업무를 도와드릴까요?</p>
+        {/* 무엇이 되는지 첫 화면에서 알린다. 이미지 첨부는 새로 생긴 기능이라
+            알리지 않으면 아무도 쓰지 않는다.
+            **되는 것만 적는다** — 그림 생성처럼 없는 기능을 적으면 담당자가
+            시도했다가 안 되는 것을 발견하고 신뢰를 잃는다. */}
+        <p className="text-slate-500 text-sm mb-8">
+          기관 문서를 근거로 답하고, 사진·화면 캡처도 읽습니다.
+        </p>
 
         {/* 빠른 입력창 */}
         <div className="w-full max-w-2xl">
@@ -233,7 +240,7 @@ function WelcomeView({
                   onQuickSend();
                 }
               }}
-              placeholder="비서에게 바로 질문하거나 아래에서 비서를 선택하세요"
+              placeholder="무엇이든 물어보세요. 아래에서 비서를 고르면 더 정확합니다"
               rows={1}
               className="flex-1 bg-transparent text-sm text-slate-900 placeholder-slate-400 resize-none focus:outline-none leading-relaxed"
               style={{ minHeight: '24px', maxHeight: '120px' }}

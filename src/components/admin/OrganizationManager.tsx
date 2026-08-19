@@ -186,19 +186,33 @@ export default function OrganizationManager() {
 
         <div>
           <label className={label}>로고</label>
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 flex-shrink-0 flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+          {/* 미리보기는 직원 화면의 헤더와 같은 조건으로 보여준다.
+              정사각형 상자에 축소해 보여주면 실제로 어떻게 보이는지 알 수 없어
+              올려보고 직원 화면까지 가서 확인하는 왕복이 생긴다. */}
+          <div className="mb-3 rounded-xl border border-slate-200 overflow-hidden">
+            <div className="h-16 bg-white flex items-center px-5 gap-2.5">
               {org?.logo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={`/api/branding/logo?org=${org.id}&v=${logoVersion}`}
                   alt="기관 로고"
-                  className="max-w-full max-h-full object-contain"
+                  className="h-10 max-w-[260px] object-contain object-left"
                 />
               ) : (
-                <span className="text-2xl">🏛️</span>
+                <>
+                  <span className="text-2xl">🏛️</span>
+                  <span className="text-slate-900 font-bold text-lg tracking-tight">
+                    {org?.name ?? '기관명'}
+                  </span>
+                </>
               )}
             </div>
+            <p className="bg-slate-50 border-t border-slate-200 px-5 py-1.5 text-[11px] text-slate-400">
+              직원 화면 좌측 상단에 이렇게 보입니다
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
             <div className="space-y-2">
               <input
                 ref={fileRef}
@@ -210,7 +224,15 @@ export default function OrganizationManager() {
                 }}
                 className="block text-xs text-slate-500 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:text-xs file:font-medium hover:file:bg-slate-200"
               />
-              <p className="text-[11px] text-slate-400">PNG · JPG · SVG · WEBP, 500KB 미만</p>
+              <p className="text-[11px] text-slate-400">
+                PNG · JPG · SVG · WEBP, 500KB 미만
+              </p>
+              {/* 흰 헤더에 높이 40px로 얹는다. 세로형 엠블럼만 올리면 아주
+                  작게 보이므로 가로형 CI(엠블럼+기관명)를 권한다. */}
+              <p className="text-[11px] text-slate-400">
+                높이 40px로 표시됩니다. <span className="text-slate-500">가로형 CI</span>와
+                배경이 투명한 PNG·SVG를 권합니다.
+              </p>
               {org?.logo_url && (
                 <button
                   onClick={handleLogoRemove}

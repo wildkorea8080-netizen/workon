@@ -14,6 +14,7 @@
  * 이 흐름을 툴 description에 명시해 모델이 순서를 지키게 한다.
  */
 
+import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { KOSIS_API_KEY } from '@/lib/config';
 import {
   fetchJson,
@@ -218,7 +219,7 @@ async function getData(input: Record<string, unknown>): Promise<ToolResult> {
 
 export const kosisConnector: Connector = {
   id: 'kosis',
-  label: '국가통계포털 KOSIS (통계청)',
+  label: CONNECTOR_LABELS.kosis,
   tools,
   isConfigured: () => Boolean(KOSIS_API_KEY),
   execute(toolName, input) {

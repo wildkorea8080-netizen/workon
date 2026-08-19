@@ -13,6 +13,7 @@
  * 인용 링크는 https://dart.fss.or.kr/dsaf001/main.do?rcpNo={접수번호} 를 씁니다.
  */
 
+import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { DART_API_KEY } from '@/lib/config';
 import {
   fetchJson,
@@ -208,7 +209,7 @@ async function getCompany(input: Record<string, unknown>): Promise<ToolResult> {
 
 export const dartConnector: Connector = {
   id: 'dart',
-  label: '전자공시 DART (금융감독원)',
+  label: CONNECTOR_LABELS.dart,
   tools,
   isConfigured: () => Boolean(DART_API_KEY),
   execute(toolName, input) {

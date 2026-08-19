@@ -15,6 +15,7 @@
  * 정상 응답을 받는다.
  */
 
+import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { G2B_API_KEY } from '@/lib/config';
 import {
   fetchJson,
@@ -199,7 +200,7 @@ async function searchBids(input: Record<string, unknown>): Promise<ToolResult> {
 
 export const g2bConnector: Connector = {
   id: 'g2b',
-  label: '나라장터 입찰공고 (조달청)',
+  label: CONNECTOR_LABELS.g2b,
   tools,
   isConfigured: () => Boolean(G2B_API_KEY),
   execute(toolName, input) {

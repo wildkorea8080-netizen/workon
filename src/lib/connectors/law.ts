@@ -14,6 +14,7 @@
  * 판례는 검색만 되고 본문 조회는 OC=test로 거부됩니다.
  */
 
+import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { LAW_API_OC } from '@/lib/config';
 import {
   fetchJson,
@@ -500,7 +501,7 @@ async function getContent(input: Record<string, unknown>): Promise<ToolResult> {
 
 export const lawConnector: Connector = {
   id: 'law',
-  label: '국가법령정보 (법제처)',
+  label: CONNECTOR_LABELS.law,
   tools,
   // OC는 기본값이 있어 항상 사용 가능하다. 운영에서는 자체 OC 발급을 권장한다.
   isConfigured: () => Boolean(LAW_API_OC),

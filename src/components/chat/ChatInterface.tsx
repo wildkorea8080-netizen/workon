@@ -11,6 +11,7 @@ import {
   type ChatImage,
 } from '@/lib/chat-images';
 import { fileToChatImage } from '@/lib/image-resize';
+import { connectorShortLabel } from '@/lib/connector-labels';
 
 interface ToolLink {
   title: string;
@@ -365,6 +366,8 @@ export default function ChatInterface({
   };
 
   const bg = pickBg(selectedAgent.name);
+  // 이 비서가 쓸 수 있는 외부 도구. 이름은 connector-labels.ts 한 곳에서 온다.
+  const connectorNames = (selectedAgent.enabled_connectors ?? []).map(connectorShortLabel);
 
   return (
     <div className="flex flex-col h-full">
@@ -387,20 +390,48 @@ export default function ChatInterface({
         </button>
       </div>
 
+      {/* 민감정보 안내.
+          공공기관은 주민등록번호·연락처가 담긴 공문과 명단을 상시 다룬다.
+          하단 AI 고지와 별개로, 무엇을 넣기 **전에** 보여야 뜻이 있다. */}
+      <div className="px-5 pt-3 bg-[#F5F7FA] flex-shrink-0">
+        <div className="flex items-start gap-2 bg-[#003087]/5 border border-[#003087]/10 rounded-xl px-3.5 py-2.5">
+          <svg className="w-4 h-4 text-[#003087] flex-shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0l-7.1 12.25A2 2 0 004.99 19z" />
+          </svg>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            <span className="font-semibold text-slate-800">{selectedAgent.name}</span>와(과) 일합니다.
+            주민등록번호·연락처 등 개인정보는 지우고 입력·업로드해주세요.
+          </p>
+        </div>
+      </div>
+
       {/* 메시지 영역 */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-1 bg-[#F5F7FA]">
+      <div className="flex-1 overflow-y-auto px-5 pt-3 pb-5 space-y-1 bg-[#F5F7FA]">
         {loadingConv ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-5 h-5 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-3 pb-16">
-            <div className={`w-14 h-14 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold shadow-lg`}>
-              {selectedAgent.icon ?? selectedAgent.name.slice(0, 1)}
-            </div>
-            <div>
-              <p className="text-base font-semibold text-slate-800">{selectedAgent.name}</p>
-              <p className="text-sm text-slate-400 mt-1">{selectedAgent.description || '무엇이든 질문해보세요.'}</p>
+          // 아이콘과 이름만 띄우면 무엇을 넣어야 하는지 알 수 없다.
+          // 비서마다 필요한 입력이 달라(공문은 내용, 회의록은 녹취) 여기서 알린다.
+          <div className="flex flex-col items-center justify-center h-full pb-10">
+            <div className="w-full max-w-xl">
+              <div className="flex flex-col items-center text-center gap-3">
+                <div className={`w-14 h-14 rounded-2xl ${bg} flex items-center justify-center text-white text-2xl font-bold shadow-lg`}>
+                  {selectedAgent.icon ?? selectedAgent.name.slice(0, 1)}
+                </div>
+                <p className="text-base font-semibold text-slate-800">{selectedAgent.name}</p>
+              </div>
+
+              <div className="mt-4 bg-white border border-slate-200 rounded-2xl px-5 py-4 text-sm text-slate-600 leading-relaxed">
+                {selectedAgent.description || '무엇이든 질문해보세요.'}
+                {connectorNames.length > 0 && (
+                  <p className="mt-2.5 text-slate-500">
+                    필요하면 <span className="font-semibold text-slate-700">{connectorNames.join(' · ')}</span>
+                    에서 자료를 찾아 근거와 함께 답합니다.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -443,6 +474,22 @@ export default function ChatInterface({
 
       {/* 입력 영역 */}
       <div className="px-5 py-4 bg-white border-t border-slate-100 flex-shrink-0">
+        {/* 대화가 이어진 뒤에만 알린다. 첫 화면에서는 잔소리가 된다. */}
+        {messages.length > 0 && (
+          <div className="mb-2.5 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onChangeAgent}
+              className="text-xs font-semibold text-[#003087] border border-[#003087]/20 hover:bg-[#003087]/5 rounded-lg px-2.5 py-1.5 transition-colors"
+            >
+              다른 비서와 새 대화
+            </button>
+            <span className="text-[11px] text-slate-400 leading-relaxed">
+              앞 질문과 이어지지 않는 내용은 새 대화로 물어야 정확합니다.
+            </span>
+          </div>
+        )}
+
         {imageError && (
           <p className="mb-2 text-xs text-red-600">{imageError}</p>
         )}

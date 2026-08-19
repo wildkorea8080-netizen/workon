@@ -59,8 +59,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <div className="px-6 py-5 border-b border-white/10">
           <Link href="/admin" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             {brandLogo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={brandLogo} alt="" className="h-6 max-w-[100px] object-contain" />
+              // 짙은 남색 위에 CI를 그대로 얹으면 로고 색과 테두리가 뭉개진다.
+              // 흰 판을 깔아 원래 색으로 보이게 한다 — CI 사용 규정에서
+              // 배경색을 지정하는 기관이 있어 그대로 얹을 수 없다.
+              <span className="bg-white rounded-lg px-2 py-1.5 flex items-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={brandLogo} alt="" className="h-8 max-w-[140px] object-contain" />
+              </span>
             ) : (
               <span className="text-lg">🏛️</span>
             )}
