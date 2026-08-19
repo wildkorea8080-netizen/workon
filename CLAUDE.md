@@ -165,7 +165,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ### 문서 업로드 시
 ```
-파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts)
+파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts / spreadsheet.ts)
 → [PDF에 텍스트 레이어가 없으면 Claude로 스캔 판독 → pdf-ocr.ts]
 → chunkText (800단어, 100 겹침)
 → getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
@@ -187,6 +187,27 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
   `usage_logs` 기록(`action='document_ocr'`)이 들어 있습니다**
 - 판독을 거치면 업로드 응답에 그 사실을 알립니다. 원문과 다르게 읽혔을 수 있어
   담당자가 확인할 근거가 됩니다
+
+**표 문서(XLSX·CSV)도 마크다운 표로 복원합니다** (`src/lib/spreadsheet.ts`).
+공공기관 업무의 상당량이 표입니다 — 예산서, 집행내역, 통계표.
+
+- 수식 셀은 **계산 결과**를 씁니다. `=SUM(...)`을 색인해도 검색에 안 걸립니다
+- 숨긴 시트는 제외합니다 (대개 계산용 보조 자료)
+- CSV는 UTF-8로 읽어 깨지면 **EUC-KR로 재시도**합니다. 공공기관 CSV는 EUC-KR이 흔합니다
+- 시트당 500행 상한. 수만 행을 통째로 임베딩하면 비용이 감당되지 않습니다
+- `exceljs`는 무거워 표 문서를 올릴 때만 동적으로 불러옵니다
+
+### 기본 비서 세트 (P3-2)
+
+기관을 등록하면 `src/lib/agent-presets.ts`의 세트가 기본 부서에 깔립니다
+(`installPresetAgents`). **정의는 그 파일 한 곳에만 둡니다** — 스크립트가
+목록을 따로 들고 있으면 한쪽만 바뀌어 기관마다 다른 세트를 받습니다.
+
+`npm run seed:agents`는 이 기능 이전에 만들어진 기관을 메우는 용도입니다.
+여러 번 돌려도 같은 이름은 건너뜁니다.
+
+프리셋 비서는 `is_published=true`로 깔립니다. 관리자가 직접 만드는 비서가
+'노출 대기중'에서 시작하는 것과 다릅니다 — 큐레이션한 세트라 바로 쓸 수 있어야 합니다.
 
 ### 채팅 시 (`/api/chat`) — SSE 스트리밍
 ```
