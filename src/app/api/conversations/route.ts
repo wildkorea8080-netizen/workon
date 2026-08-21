@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     // 사용자의 대화 목록 조회
     const { data: conversations, error } = await supabaseAdmin
       .from('conversations')
-      .select('id, title, created_at, updated_at, agent:agents(name)')
+      .select('id, title, created_at, updated_at, is_shared, agent:agents(name)')
       .eq('user_id', session.user.id)
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);

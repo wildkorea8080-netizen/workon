@@ -22,6 +22,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    // exceljs로 실제 통합문서를 만들어 넣는 표 테스트가 여러 파일을 동시에
+    // 돌릴 때 기본 5초를 넘긴다. 실측 13초. 목을 세우면 빨라지지만 그러면
+    // "우리가 상상한 엑셀"만 검증하게 되므로 시간을 늘리는 쪽을 택한다.
+    // 간헐적으로 실패하는 테스트는 통과해도 믿지 않게 되어 더 나쁘다.
+    testTimeout: 30_000,
     // 환경변수를 읽는 모듈(config.ts)이 import 시점에 검사를 돈다.
     // 테스트가 실제 키를 요구하지 않도록 자리표시자를 채운다.
     env: {
