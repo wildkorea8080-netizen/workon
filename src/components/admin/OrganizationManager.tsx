@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { parseIpList, isIpAllowed, isValidIpPattern } from '@/lib/ip-access';
 
 interface ModelInfo {
   id: string;
@@ -19,6 +20,10 @@ interface OrgInfo {
   domain: string | null;
   type: string | null;
   allowed_models: string[] | null;
+  /** 접속 허용 IP/CIDR. NULL이면 제한 없음 (0023) */
+  allowed_ips: string[] | null;
+  /** 지금 이 관리자가 접속한 주소. 잠금 사고를 막는 데 쓴다. */
+  currentIp: string | null;
   /** 정책을 거쳐 실제로 적용 중인 목록. 저장값과 다를 수 있다. */
   effectiveModels: string[];
   availableModels: ModelInfo[];
@@ -47,6 +52,7 @@ export default function OrganizationManager() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [aiNotice, setAiNotice] = useState('');
+  const [allowedIps, setAllowedIps] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,6 +71,7 @@ export default function OrganizationManager() {
       setOrg(orgRes.data);
       setName(orgRes.data.name ?? '');
       setSlug(orgRes.data.slug ?? '');
+      setAllowedIps((orgRes.data.allowed_ips ?? []).join('\n'));
       setAiNotice(orgRes.data.ai_notice ?? '');
       // 저장값이 아니라 정책이 확정한 목록을 보여준다. 레지스트리에서 사라진
       // 모델이 저장값에 남아 있으면 화면과 실제가 어긋난다.
@@ -85,18 +92,46 @@ export default function OrganizationManager() {
     setTimeout(() => setMessage(null), 4000);
   };
 
+  /**
+   * 지금 내 주소가 허용 목록 밖인가.
+   *
+   * 이대로 저장하면 **관리자 본인부터 잠깁니다.** 기관 전체가 못 들어오게
+   * 되고, 되돌리려면 슈퍼관리자를 거쳐야 합니다. 저장 전에 붙잡는 편이
+   * 훨씬 쌉니다.
+   */
+  const ipList = parseIpList(allowedIps);
+  const badPatterns = ipList.filter((p) => !isValidIpPattern(p));
+  const wouldLockOut =
+    ipList.length > 0 &&
+    badPatterns.length === 0 &&
+    !!org?.currentIp &&
+    !isIpAllowed(org.currentIp, ipList);
+
   const handleSave = async () => {
+    if (wouldLockOut) {
+      const msg =
+        `지금 접속한 주소(${org?.currentIp})가 허용 목록에 없습니다. ` +
+        '이대로 저장하면 관리자 본인을 포함해 기관 전체가 접속하지 못합니다. 그래도 저장할까요?';
+      if (!confirm(msg)) return;
+    }
     setSaving(true);
     setError(null);
     try {
       const res = await fetch('/api/admin/organization', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, slug, ai_notice: aiNotice, allowed_models: models }),
+        body: JSON.stringify({
+          name,
+          slug,
+          ai_notice: aiNotice,
+          allowed_models: models,
+          allowed_ips: allowedIps,
+        }),
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
       setOrg(result.data);
+      setAllowedIps((result.data.allowed_ips ?? []).join('\n'));
       notify('저장했습니다.');
     } catch (err) {
       setError(err instanceof Error ? err.message : '저장에 실패했습니다.');
@@ -278,6 +313,54 @@ export default function OrganizationManager() {
           <p className="mt-1 text-[11px] text-slate-400">
             대화 화면 하단에 항상 표시됩니다. 생성 결과를 그대로 신뢰하면 안 된다는 안내입니다.
           </p>
+        </div>
+
+        <div>
+          <label className={label}>접속 허용 IP</label>
+          <textarea
+            value={allowedIps}
+            onChange={(e) => setAllowedIps(e.target.value)}
+            rows={4}
+            placeholder={'비워 두면 어디서나 접속할 수 있습니다.\n한 줄에 하나씩 적으세요.\n예) 203.0.113.0/24'}
+            className={`${input} resize-none font-mono text-xs`}
+          />
+
+          <p className="mt-1 text-[11px] text-slate-400">
+            기관 청사 대역을 적으면 그 밖에서는 접속할 수 없습니다. 한 줄에 하나씩,
+            대역(<code>203.0.113.0/24</code>) 또는 주소 하나(<code>198.51.100.7</code>)를 적습니다.
+          </p>
+
+          {org?.currentIp && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              지금 접속한 주소: <code className="font-mono text-slate-700">{org.currentIp}</code>
+              {!allowedIps.includes(org.currentIp) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAllowedIps((prev) => (prev.trim() ? `${prev.trim()}\n${org.currentIp}` : org.currentIp!))
+                  }
+                  className="ml-2 text-[#003087] hover:underline"
+                >
+                  목록에 추가
+                </button>
+              )}
+            </p>
+          )}
+
+          {badPatterns.length > 0 && (
+            <p className="mt-1 text-[11px] text-red-600">
+              형식이 올바르지 않습니다: {badPatterns.slice(0, 3).join(', ')}
+            </p>
+          )}
+
+          {/* 저장하는 순간 관리자 본인부터 잠긴다. 되돌리려면 슈퍼관리자를
+              거쳐야 하므로 누르기 전에 보여 준다. */}
+          {wouldLockOut && (
+            <p className="mt-1 text-[11px] text-amber-600">
+              지금 접속한 주소가 목록에 없습니다. 이대로 저장하면 관리자 본인을 포함해
+              기관 전체가 접속하지 못합니다.
+            </p>
+          )}
         </div>
 
         {/* ── 허용 모델 (0021) ──

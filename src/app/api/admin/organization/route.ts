@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { enabledModels } from '@/lib/models';
+import { isValidIpPattern, parseIpList, clientIpFrom } from '@/lib/ip-access';
 import { getAllowedModelIds } from '@/lib/model-policy';
 
 export const dynamic = 'force-dynamic';
@@ -62,13 +63,13 @@ async function requireAdminOrg() {
   return { session, organizationId };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
   const { data, error } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models')
+    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models, allowed_ips')
     .eq('id', ctx.organizationId)
     .maybeSingle();
 
@@ -87,6 +88,9 @@ export async function GET() {
     ok: true,
     data: {
       ...data,
+      // 지금 관리자가 접속한 주소. 허용 목록을 정할 때 이 값을 넣지 않으면
+      // 저장하는 순간 본인부터 잠긴다. 화면이 그걸 막으려면 값을 알아야 한다.
+      currentIp: clientIpFrom(request.headers, request.ip),
       effectiveModels: await getAllowedModelIds(ctx.organizationId),
       availableModels: enabledModels().map((m) => ({
         id: m.id,
@@ -202,6 +206,35 @@ export async function PATCH(request: NextRequest) {
       // 정책 계층이 기본 모델로 되돌리지만, 저장값도 NULL로 두어
       // "정하지 않음"과 "아무것도 허용 안 함"이 뒤섞이지 않게 한다.
       update.allowed_models = valid.length > 0 ? valid : null;
+    }
+
+    // 접속 허용 IP (0023)
+    if (body.allowed_ips !== undefined) {
+      const raw =
+        typeof body.allowed_ips === 'string'
+          ? parseIpList(body.allowed_ips)
+          : Array.isArray(body.allowed_ips)
+          ? body.allowed_ips.map((v: unknown) => String(v ?? '').trim()).filter(Boolean)
+          : [];
+
+      // 오타 하나가 조용히 아무에게도 안 맞는 항목으로 남으면, 관리자는
+      // 막았다고 믿는데 그 대역만 빠져 있다. 저장 전에 알려준다.
+      const bad = raw.filter((p: string) => !isValidIpPattern(p));
+      if (bad.length > 0) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              message: `IP 형식이 올바르지 않습니다: ${bad.slice(0, 3).join(', ')}`,
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      // 빈 값은 NULL로. 빈 배열을 저장하면 "정하지 않음"과 구분되지 않는다
+      // (allowed_models와 같은 규칙).
+      update.allowed_ips = raw.length > 0 ? raw : null;
     }
 
     // 로고 제거
