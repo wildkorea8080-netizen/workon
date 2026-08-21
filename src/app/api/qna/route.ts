@@ -6,6 +6,7 @@ import { getEmbeddings } from '@/lib/embeddings';
 import { callClaudeAPI, type ClaudeMessage } from '@/lib/claude';
 import { MATCH_THRESHOLD, MATCH_COUNT } from '@/lib/rag';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
+import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,6 +33,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
         { status: 403 }
+      );
+    }
+
+
+    // 토큰을 소비하는 라우트는 한도를 확인해야 한다. 이 검사가 없어서
+    // 예산을 소진한 기관도 이 경로로는 계속 쓸 수 있었다 — 차단이
+    // 동작한다고 믿는데 새는 구멍이 남아 있던 자리다.
+    const limitStatus = await checkTokenLimit(departmentId, session.user.id);
+    if (!limitStatus.allowed) {
+      return NextResponse.json(
+        { ok: false, error: { message: limitMessage(limitStatus) } },
+        { status: 429 }
       );
     }
 

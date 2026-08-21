@@ -7,7 +7,20 @@ export interface TokenLimitStatus {
   limitTokens: number;
   organizationName?: string;
   /** 차단 사유 (allowed=false일 때만) */
-  reason?: 'org_suspended' | 'token_limit_exceeded' | 'budget_exhausted';
+  reason?:
+    | 'org_suspended'
+    | 'token_limit_exceeded'
+    | 'budget_exhausted'
+    | 'department_budget_exhausted'
+    | 'user_budget_exhausted';
+
+  /** 부서·개인 월 한도(0024). 설정된 경우에만 채워진다 */
+  monthly?: {
+    scope: 'department' | 'user';
+    usedKrw: number;
+    limitKrw: number;
+    percent: number;
+  };
 
   /** 연간 정액 계약일 때만 채워진다 */
   budget?: {
@@ -25,9 +38,22 @@ export interface TokenLimitStatus {
 
 const ALLOWED: TokenLimitStatus = { allowed: true, usedTokens: 0, limitTokens: 0 };
 
+/**
+ * 이번 달 1일 0시(KST)의 ISO 문자열.
+ *
+ * **서버 로컬 시간을 쓰면 안 된다.** Vercel은 UTC로 돌기 때문에, 한국 시간
+ * 기준 매월 1일 0시~9시 사이에는 UTC로 아직 지난달이다. 그 아홉 시간 동안
+ * 한도가 풀리지 않아 담당자는 "새 달인데 왜 막혀 있냐"를 겪는다.
+ * 감사 자료를 KST로 내는 것과 같은 이유로 여기도 KST로 자른다.
+ */
 function monthStartISO() {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  // UTC에 9시간을 더하면 그 시각의 '한국 달력'이 된다
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = kst.getUTCMonth();
+  // 한국 1일 0시 = UTC 전날 15시
+  return new Date(Date.UTC(y, m, 1, -9, 0, 0)).toISOString();
 }
 
 interface ActiveContract {
@@ -133,10 +159,127 @@ export function limitMessage(status: TokenLimitStatus): string {
     const total = Math.round(status.budget?.totalKrw ?? 0).toLocaleString();
     return `연간 계약 금액을 모두 사용했습니다. (${used}원 / ${total}원) 계약 담당자에게 문의하세요.`;
   }
+  if (status.reason === 'department_budget_exhausted') {
+    const used = Math.round(status.monthly?.usedKrw ?? 0).toLocaleString();
+    const total = Math.round(status.monthly?.limitKrw ?? 0).toLocaleString();
+    return `부서의 이번 달 사용 한도를 모두 사용했습니다. (${used}원 / ${total}원) 부서 관리자에게 문의하세요.`;
+  }
+  if (status.reason === 'user_budget_exhausted') {
+    const used = Math.round(status.monthly?.usedKrw ?? 0).toLocaleString();
+    const total = Math.round(status.monthly?.limitKrw ?? 0).toLocaleString();
+    return `이번 달 개인 사용 한도를 모두 사용했습니다. (${used}원 / ${total}원) 관리자에게 한도 조정을 요청하세요.`;
+  }
   return `이번 달 사용 한도를 모두 사용했습니다. (${status.usedTokens.toLocaleString()} / ${status.limitTokens.toLocaleString()} 토큰) 관리자에게 문의하세요.`;
 }
 
-export async function checkTokenLimit(departmentId: string): Promise<TokenLimitStatus> {
+/**
+ * 부서·개인 월 한도 판정 (0024).
+ *
+ * 기관 한도만 있으면 **한 사람이 한 달 치 예산을 혼자 태워도** 막을 수
+ * 없었다. 공공기관은 부서별로 금액을 배정받으므로 그 단위로도 통제해야 한다.
+ *
+ * 부서를 먼저 본다. 부서가 이미 소진됐으면 그 안의 누가 얼마 남았든
+ * 쓸 수 없기 때문이다.
+ *
+ * 합산은 DB 함수가 한다. 매 대화마다 로그를 앱으로 끌어오면 월 수천 건만
+ * 되어도 무겁다.
+ */
+async function checkMonthlyBudget(
+  departmentId: string,
+  userId: string | undefined,
+  organizationName: string
+): Promise<TokenLimitStatus | null> {
+  const { data: dept } = await supabaseAdmin
+    .from('departments')
+    .select('monthly_budget_krw, user_monthly_budget_krw')
+    .eq('id', departmentId)
+    .maybeSingle();
+
+  if (!dept) return null;
+
+  const from = monthStartISO();
+  const to = new Date().toISOString();
+
+  // ── 부서 한도 ──
+  const deptLimit = Number(dept.monthly_budget_krw ?? 0);
+  if (deptLimit > 0) {
+    const { data, error } = await supabaseAdmin.rpc('department_spend_krw', {
+      p_department_id: departmentId,
+      p_from: from,
+      p_to: to,
+    });
+
+    if (error) {
+      // 집계 실패로 서비스를 멈추지 않는다 (기관 한도와 같은 규칙)
+      console.warn('[usage-limit] department_spend_krw 실패, 허용으로 진행:', error.message);
+    } else {
+      const usedKrw = Number(data ?? 0);
+      if (usedKrw >= deptLimit) {
+        return {
+          allowed: false,
+          usedTokens: 0,
+          limitTokens: 0,
+          organizationName,
+          reason: 'department_budget_exhausted',
+          monthly: {
+            scope: 'department',
+            usedKrw,
+            limitKrw: deptLimit,
+            percent: Math.round((usedKrw / deptLimit) * 100),
+          },
+        };
+      }
+    }
+  }
+
+  // ── 개인 한도 ──
+  // users.monthly_budget_krw가 있으면 그 값을, 없으면 부서 기본값을 쓴다.
+  if (!userId) return null;
+
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('monthly_budget_krw')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const userLimit = Number(user?.monthly_budget_krw ?? dept.user_monthly_budget_krw ?? 0);
+  if (userLimit <= 0) return null;
+
+  const { data, error } = await supabaseAdmin.rpc('user_spend_krw', {
+    p_user_id: userId,
+    p_from: from,
+    p_to: to,
+  });
+
+  if (error) {
+    console.warn('[usage-limit] user_spend_krw 실패, 허용으로 진행:', error.message);
+    return null;
+  }
+
+  const usedKrw = Number(data ?? 0);
+  if (usedKrw >= userLimit) {
+    return {
+      allowed: false,
+      usedTokens: 0,
+      limitTokens: 0,
+      organizationName,
+      reason: 'user_budget_exhausted',
+      monthly: {
+        scope: 'user',
+        usedKrw,
+        limitKrw: userLimit,
+        percent: Math.round((usedKrw / userLimit) * 100),
+      },
+    };
+  }
+
+  return null;
+}
+
+export async function checkTokenLimit(
+  departmentId: string,
+  userId?: string
+): Promise<TokenLimitStatus> {
   try {
     const { data: dept } = await supabaseAdmin
       .from('departments')
@@ -165,12 +308,21 @@ export async function checkTokenLimit(departmentId: string): Promise<TokenLimitS
       };
     }
 
+    // ── 부서·개인 월 한도 (0024) ──
+    // 기관보다 좁은 층이라 먼저 본다. 기관 예산이 남아 있어도 부서나 개인이
+    // 소진했으면 거기서 끊긴다.
+    const monthly = await checkMonthlyBudget(departmentId, userId, org.name);
+    if (monthly) return monthly;
+
     // ── 연간 정액 계약이면 금액 기준으로 판정 ──
     const contract = await getActiveContract(organizationId);
     if (contract?.billing_type === 'annual_fixed') {
       const budgetStatus = await checkAnnualBudget(organizationId, org.name, contract);
-      if (budgetStatus) return budgetStatus;
-      // 금액이 설정되지 않았으면 아래 토큰 기준으로 폴백한다
+      if (budgetStatus) {
+        // 기관 예산이 남아 있으면 부서·개인 사용액도 함께 실어 보낸다.
+        // 화면이 두 값을 한 번에 보여줄 수 있다.
+        return budgetStatus;
+      }
     }
 
     // ── 종량제: 이번 달 토큰 합산 ──

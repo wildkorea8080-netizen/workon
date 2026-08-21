@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest) {
 
     const { data: users, error } = await supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, created_at, department_id, departments(id, name)')
+      .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, departments(id, name)')
       .in('department_id', managedDeptIds)
       .order('created_at', { ascending: false });
 

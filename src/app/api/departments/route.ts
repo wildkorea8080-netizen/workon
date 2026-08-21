@@ -93,7 +93,7 @@ export async function GET() {
 
   const { data: departments, error } = await supabaseAdmin
     .from('departments')
-    .select('id, name, parent_id, description')
+    .select('id, name, parent_id, description, monthly_budget_krw, user_monthly_budget_krw')
     .eq('organization_id', ctx.organizationId)
     .in('id', managedDeptIds);
 
@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
   const { data: created, error } = await supabaseAdmin
     .from('departments')
     .insert({ name, slug, parent_id: resolvedParentId, organization_id: ctx.organizationId })
-    .select('id, name, parent_id, description')
+    .select('id, name, parent_id, description, monthly_budget_krw, user_monthly_budget_krw')
     .single();
 
   if (error) {

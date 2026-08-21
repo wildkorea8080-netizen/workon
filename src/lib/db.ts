@@ -19,6 +19,8 @@ export type User = {
   email: string;
   full_name?: string;
   role: UserRole;
+  /** 개인 월 한도(원). null이면 소속 부서의 기본값을 따른다 (0024) */
+  monthly_budget_krw?: number | null;
   department_id?: string;
   created_at: string;
   updated_at: string;

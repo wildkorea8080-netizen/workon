@@ -162,7 +162,7 @@ export async function POST(request: Request) {
   // 토큰을 소비하는 경로에는 한도 검사를 함께 둔다(CLAUDE.md 규약).
   // 파싱 전이라 스캔 여부를 아직 모르지만, 한도를 넘긴 기관이라면 어차피
   // 판독을 시작하면 안 되므로 여기서 막는 것이 맞다.
-  const limit = await checkTokenLimit(departmentId);
+  const limit = await checkTokenLimit(departmentId, session.user.id);
   if (!limit.allowed) {
     return NextResponse.json<ApiResponse<null>>(
       { ok: false, error: { message: limitMessage(limit) } },

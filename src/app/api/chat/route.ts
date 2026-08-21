@@ -89,7 +89,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 기관 상태 + 사용 한도 확인 (계약 형태에 따라 금액 또는 토큰 기준)
-    const limitStatus = await checkTokenLimit(departmentId);
+    // 사용자를 함께 넘긴다. 빠뜨리면 개인 한도가 조용히 적용되지 않는다 —
+    // 관리자는 한도를 걸었다고 믿는데 아무도 안 걸린다.
+    const limitStatus = await checkTokenLimit(departmentId, session.user.id);
     if (!limitStatus.allowed) {
       return jsonError(limitMessage(limitStatus), 429, {
         reason: limitStatus.reason,

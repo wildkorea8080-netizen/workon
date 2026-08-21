@@ -105,6 +105,31 @@ export default function UsersManager() {
     } catch { alert('초대 취소에 실패했습니다.'); }
   };
 
+  /**
+   * 개인 월 한도 저장 (0024).
+   *
+   * 부서 기본값을 덮어쓰는 예외다. 비우면 부서 기본값으로 되돌아간다.
+   */
+  const handleBudget = async (userId: string, value: string) => {
+    setMovingId(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthly_budget_krw: value.trim() === '' ? null : Number(value) }),
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '한도 저장에 실패했습니다.');
+      await loadData();
+    } finally {
+      setMovingId(null);
+    }
+  };
+
   const handleMoveDepartment = async (userId: string, departmentId: string) => {
     setMovingId(userId);
     setError(null);
@@ -210,6 +235,23 @@ export default function UsersManager() {
                             </option>
                           ))}
                         </select>
+                        {/* 개인 월 한도. 비우면 부서 기본값을 따른다.
+                            포커스가 빠질 때 저장한다 — 한 글자마다 저장하면
+                            "20000"을 치는 동안 2원·20원 한도가 잠깐씩 걸린다. */}
+                        <input
+                          type="number"
+                          min={0}
+                          defaultValue={user.monthly_budget_krw ?? ''}
+                          onBlur={(e) => {
+                            const next = e.target.value;
+                            const now = user.monthly_budget_krw != null ? String(user.monthly_budget_krw) : '';
+                            if (next.trim() !== now) handleBudget(user.id, next);
+                          }}
+                          disabled={movingId === user.id}
+                          placeholder="부서 기본값"
+                          title="개인 월 한도(원). 비우면 소속 부서의 기본값을 따릅니다"
+                          className="w-28 px-2 py-1 border border-slate-200 rounded-lg text-xs disabled:bg-slate-50"
+                        />
                         <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${
                           user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
                         }`}>

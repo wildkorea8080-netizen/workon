@@ -66,6 +66,27 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       update.department_id = newDeptId;
     }
 
+    // ── 개인 월 한도 (0024) ──
+    // 부서 기본값(user_monthly_budget_krw)을 덮어쓰는 예외다. 담당 업무가
+    // 무거운 직원 한둘에게 더 주는 용도이지 전원에게 적으라는 뜻이 아니다.
+    if (body.monthly_budget_krw !== undefined) {
+      const raw = body.monthly_budget_krw;
+      if (raw === null || raw === '') {
+        // 비우면 부서 기본값으로 되돌아간다. 0을 저장하면 "부서 기본값 따름"과
+        // "한 푼도 못 씀"이 구분되지 않는다.
+        update.monthly_budget_krw = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0) {
+          return NextResponse.json(
+            { ok: false, error: { message: '월 한도는 0 이상의 숫자여야 합니다.' } },
+            { status: 400 }
+          );
+        }
+        update.monthly_budget_krw = n > 0 ? n : null;
+      }
+    }
+
     if (body.role !== undefined) {
       const role = String(body.role).toUpperCase();
       if (!['ADMIN', 'USER'].includes(role)) {

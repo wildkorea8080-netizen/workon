@@ -68,6 +68,30 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     update.name = name;
   }
 
+
+  // ── 월 금액 한도 (0024) ──
+  // 빈 값은 NULL로 되돌린다. 0을 저장하면 "제한 없음"과 "한 푼도 못 씀"이
+  // 구분되지 않고, 후자를 의도해 0을 넣는 관리자는 없다.
+  for (const [key, label] of [
+    ['monthly_budget_krw', '부서 월 한도'],
+    ['user_monthly_budget_krw', '1인당 월 한도'],
+  ] as const) {
+    if (body[key] === undefined) continue;
+    const raw = body[key];
+    if (raw === null || raw === '') {
+      update[key] = null;
+      continue;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      return NextResponse.json(
+        { ok: false, error: { message: `${label}는 0 이상의 숫자여야 합니다.` } },
+        { status: 400 }
+      );
+    }
+    update[key] = n > 0 ? n : null;
+  }
+
   if (body.parent_id !== undefined) {
     const parentId = typeof body.parent_id === 'string' && body.parent_id ? body.parent_id : null;
 
@@ -115,7 +139,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     .update(update)
     .eq('id', target.id)
     .eq('organization_id', ctx.organizationId)
-    .select('id, name, parent_id, description')
+    .select('id, name, parent_id, description, monthly_budget_krw, user_monthly_budget_krw')
     .single();
 
   if (error) {

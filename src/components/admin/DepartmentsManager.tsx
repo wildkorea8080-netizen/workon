@@ -7,6 +7,10 @@ interface DepartmentNode {
   name: string;
   parent_id: string | null;
   description: string | null;
+  /** 부서 월 한도(원). null이면 제한 없음 (0024) */
+  monthly_budget_krw: number | null;
+  /** 이 부서 직원 1인당 월 기본 한도(원) */
+  user_monthly_budget_krw: number | null;
   userCount: number;
   agentCount: number;
   children: DepartmentNode[];
@@ -36,6 +40,8 @@ export default function DepartmentsManager() {
   const [canCreateRoot, setCanCreateRoot] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBudget, setEditBudget] = useState('');
+  const [editUserBudget, setEditUserBudget] = useState('');
   const [editName, setEditName] = useState('');
   const [editParentId, setEditParentId] = useState('');
 
@@ -97,7 +103,13 @@ export default function DepartmentsManager() {
       const res = await fetch(`/api/departments/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName, parent_id: editParentId || null }),
+        body: JSON.stringify({
+          name: editName,
+          parent_id: editParentId || null,
+          monthly_budget_krw: editBudget.trim() === '' ? null : Number(editBudget),
+          user_monthly_budget_krw:
+            editUserBudget.trim() === '' ? null : Number(editUserBudget),
+        }),
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
@@ -130,6 +142,10 @@ export default function DepartmentsManager() {
     setEditingId(node.id);
     setEditName(node.name);
     setEditParentId(node.parent_id ?? '');
+    setEditBudget(node.monthly_budget_krw != null ? String(node.monthly_budget_krw) : '');
+    setEditUserBudget(
+      node.user_monthly_budget_krw != null ? String(node.user_monthly_budget_krw) : ''
+    );
     setError(null);
   };
 
@@ -167,6 +183,26 @@ export default function DepartmentsManager() {
                     </option>
                   ))}
               </select>
+              {/* 월 한도 (0024). 금액으로 받는다 — 토큰 수는 모델이 늘면
+                  뜻이 달라지고, 공공기관은 부서별로 금액을 배정받는다. */}
+              <input
+                type="number"
+                min={0}
+                value={editBudget}
+                onChange={(e) => setEditBudget(e.target.value)}
+                placeholder="부서 월 한도(원)"
+                title="비우면 제한 없음"
+                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+              />
+              <input
+                type="number"
+                min={0}
+                value={editUserBudget}
+                onChange={(e) => setEditUserBudget(e.target.value)}
+                placeholder="1인당 월 한도(원)"
+                title="이 부서 직원 한 명이 쓸 수 있는 기본 금액. 비우면 제한 없음"
+                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+              />
               <button
                 onClick={() => handleUpdate(node.id)}
                 disabled={busy}
@@ -196,6 +232,17 @@ export default function DepartmentsManager() {
                 <span className="ml-2 text-xs text-slate-400">
                   직원 {node.userCount} · 비서 {node.agentCount}
                 </span>
+                {/* 한도를 목록에서 바로 보여준다. 부서마다 수정 화면을 열어야
+                    알 수 있으면 어디에 얼마를 걸어 뒀는지 파악할 수 없다. */}
+                {(node.monthly_budget_krw != null || node.user_monthly_budget_krw != null) && (
+                  <span className="ml-2 text-xs text-[#003087]">
+                    {node.monthly_budget_krw != null &&
+                      `한도 ${Number(node.monthly_budget_krw).toLocaleString()}원`}
+                    {node.monthly_budget_krw != null && node.user_monthly_budget_krw != null && ' · '}
+                    {node.user_monthly_budget_krw != null &&
+                      `1인당 ${Number(node.user_monthly_budget_krw).toLocaleString()}원`}
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => startEdit(node)}
