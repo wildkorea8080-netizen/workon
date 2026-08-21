@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { getModel, LEGACY_PRICING_MODEL_ID } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,16 @@ export const dynamic = 'force-dynamic';
 
 type Axis = 'agent' | 'user' | 'department';
 
+/** 한 행 안에서 모델·활동별로 다시 나눈 내역 */
+interface Breakdown {
+  key: string;
+  label: string;
+  count: number;
+  inputTokens: number;
+  outputTokens: number;
+  costKrw: number;
+}
+
 interface SummaryRow {
   key: string;
   name: string;
@@ -28,6 +39,37 @@ interface SummaryRow {
   inputTokens: number;
   outputTokens: number;
   costKrw: number;
+  /**
+   * 어떤 모델을 얼마나 썼는지 (0021 이후 모델이 넷).
+   *
+   * 합계만 보면 "이 부서가 비싸다"까지는 알아도 **왜 비싼지**를 모른다.
+   * Opus를 쓰고 있는 것과 Haiku를 많이 쓰는 것은 대응이 다르다.
+   * 기록은 usage_logs.details.model에 이미 들어 있었고 화면에 내지 않았을
+   * 뿐이다.
+   */
+  models: Breakdown[];
+  /** 어떤 종류의 활동인지 (대화·문서 판독·Q&A·보고서) */
+  actions: Breakdown[];
+}
+
+/** usage_logs.action을 담당자가 읽을 말로. 감사 화면과 같은 어휘를 쓴다. */
+const ACTION_LABELS: Record<string, string> = {
+  chat_message: 'AI 대화',
+  qna_search: '문서 질의',
+  generate_report: '보고서 생성',
+  document_ocr: '스캔 문서 판독',
+};
+
+function bump(list: Breakdown[], key: string, label: string, d: any) {
+  let row = list.find((r) => r.key === key);
+  if (!row) {
+    row = { key, label, count: 0, inputTokens: 0, outputTokens: 0, costKrw: 0 };
+    list.push(row);
+  }
+  row.count += 1;
+  row.inputTokens += Number(d.input_tokens ?? 0);
+  row.outputTokens += Number(d.output_tokens ?? 0);
+  row.costKrw += Number(d.cost_krw ?? 0);
 }
 
 function csvCell(value: unknown): string {
@@ -150,35 +192,65 @@ export async function GET(request: NextRequest) {
       inputTokens: 0,
       outputTokens: 0,
       costKrw: 0,
+      models: [],
+      actions: [],
     };
 
     row.count += 1;
     row.inputTokens += Number(details.input_tokens ?? 0);
     row.outputTokens += Number(details.output_tokens ?? 0);
     row.costKrw += Number(details.cost_krw ?? 0);
+
+    // 2026-08 이전 로그에는 details.model이 없다. 그때 실제로 돌던 모델은
+    // 하나뿐이었으므로 그 값으로 묶는다 — sumCostUsd의 폴백과 같은 판단이고,
+    // 기본 모델을 바꿔도 과거 집계가 흔들리지 않도록 LEGACY 상수를 쓴다.
+    if (Number(details.input_tokens ?? 0) > 0 || Number(details.output_tokens ?? 0) > 0) {
+      const modelId = String(details.model ?? LEGACY_PRICING_MODEL_ID);
+      bump(row.models, modelId, getModel(modelId).label, details);
+    }
+    bump(row.actions, log.action, ACTION_LABELS[log.action] ?? log.action, details);
+
     buckets.set(key, row);
   }
 
   const rows = [...buckets.values()].sort((a, b) => b.costKrw - a.costKrw || b.count - a.count);
+  for (const row of rows) {
+    row.models.sort((a, b) => b.costKrw - a.costKrw || b.count - a.count);
+    row.actions.sort((a, b) => b.count - a.count);
+  }
 
   if (isExport) {
     const axisLabel = axis === 'agent' ? '비서별' : axis === 'user' ? '직원별' : '부서별';
-    const headers = ['구분', '이름', '상세', '사용횟수', '입력토큰', '출력토큰', '비용(원)'];
+    // **모델별로 한 줄씩 낸다.** 감사에서 "어떤 데이터가 어느 모델로 갔는가"를
+    // 실제로 묻는데, 합계만 있으면 답할 수 없다.
+    //
+    // 합계 줄을 함께 넣지 않는 이유는, 비용 열을 통째로 더하는 사람이
+    // 반드시 있기 때문이다. 두 층위를 한 파일에 섞으면 그 합이 두 배가 된다.
+    // 모델 줄만 두면 열을 더한 값이 곧 총액이다.
+    const headers = ['구분', '이름', '상세', '모델', '사용횟수', '입력토큰', '출력토큰', '비용(원)'];
     const lines = [
       headers.join(','),
-      ...rows.map((r) =>
-        [
-          axisLabel,
-          r.name,
-          r.sub,
-          r.count,
-          r.inputTokens,
-          r.outputTokens,
-          Math.round(r.costKrw),
-        ]
-          .map(csvCell)
-          .join(',')
-      ),
+      ...rows.flatMap((r) => {
+        // 토큰을 쓰지 않은 활동만 있는 행(비서 생성 등)도 빠뜨리지 않는다
+        const parts = r.models.length > 0
+          ? r.models
+          : [{ label: '(해당 없음)', count: r.count, inputTokens: 0, outputTokens: 0, costKrw: 0 }];
+
+        return parts.map((m) =>
+          [
+            axisLabel,
+            r.name,
+            r.sub,
+            m.label,
+            m.count,
+            m.inputTokens,
+            m.outputTokens,
+            Math.round(m.costKrw),
+          ]
+            .map(csvCell)
+            .join(',')
+        );
+      }),
     ];
     const period = `${from.toISOString().slice(0, 10)}_${to.toISOString().slice(0, 10)}`;
     const filename = `이용통계_${axisLabel}_${period}.csv`;
