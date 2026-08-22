@@ -1,7 +1,13 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
+import {
+  UPLOAD_ACCEPT_ATTRIBUTE,
+  UPLOAD_FORMATS_LABEL,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_SIZE_LABEL,
+  MAX_AGENT_DOCUMENTS,
+} from '@/lib/file-types';
 
 const EMOJI_ICONS = [
   '🤖', '📝', '📊', '📋', '📨', '💬', '📢', '🎤',
@@ -10,7 +16,8 @@ const EMOJI_ICONS = [
 
 const CATEGORIES = ['전체', '공공기관', '업무', '문서', '번역', '기타'];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// 크기·개수는 file-types.ts 한 곳에서 온다. 여기 따로 두었더니 화면은
+// 10MB, 서버는 20MB로 갈라져 안내와 실제가 어긋났다.
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt'];
 
 type ConnectorOption = {
@@ -72,9 +79,9 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
     if (!incoming) return;
     const valid = Array.from(incoming).filter(f => {
       const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
-      return ALLOWED_EXTENSIONS.includes(ext) && f.size <= MAX_FILE_SIZE;
+      return ALLOWED_EXTENSIONS.includes(ext) && f.size <= MAX_UPLOAD_BYTES;
     });
-    setFiles(prev => [...prev, ...valid].slice(0, 10));
+    setFiles(prev => [...prev, ...valid].slice(0, MAX_AGENT_DOCUMENTS));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -260,7 +267,16 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                       <svg className="w-7 h-7 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                       </svg>
-                      <p className="text-xs text-slate-500">{UPLOAD_FORMATS_LABEL} · 최대 10MB · 최대 10개</p>
+                      <p className="text-xs text-slate-500">
+                        {UPLOAD_FORMATS_LABEL} · 파일당 {MAX_UPLOAD_SIZE_LABEL} · 최대 {MAX_AGENT_DOCUMENTS}개
+                      </p>
+                      {/* 청크 단위로 검색하기 때문에, 질문에 걸릴 만한 표현이
+                          문서 안에 있어야 찾아온다. 규정 원문만 올리면
+                          "출장비 얼마예요" 같은 실제 질문과 말이 달라 놓친다. */}
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        자주 묻는 내용을 <span className="text-slate-500">질문/답변 형식</span>으로 정리해 함께
+                        올리면 훨씬 잘 찾습니다.
+                      </p>
                       <p className="text-xs text-brand-600 font-medium mt-1">클릭하거나 드래그하여 업로드</p>
                       <input
                         ref={fileInputRef}

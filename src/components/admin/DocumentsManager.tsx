@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
+import {
+  UPLOAD_ACCEPT_ATTRIBUTE,
+  UPLOAD_FORMATS_LABEL,
+  MAX_UPLOAD_SIZE_LABEL,
+} from '@/lib/file-types';
 import type { Document, Agent } from '@/lib/db';
 
 export default function DocumentsManager() {
@@ -332,7 +336,19 @@ export default function DocumentsManager() {
                     <p className="font-medium text-slate-700">
                       {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">{UPLOAD_FORMATS_LABEL} (최대 20MB) · 스캔 PDF는 자동 판독합니다</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {UPLOAD_FORMATS_LABEL} (최대 {MAX_UPLOAD_SIZE_LABEL}) · 스캔 PDF는 자동 판독합니다
+                    </p>
+                    {/* 검색은 문서 전체가 아니라 **청크(문단) 단위**로 걸린다.
+                        그래서 질문에 쓰일 만한 표현이 문서 안에 있어야 찾아온다.
+                        규정 원문만 올리면 "출장비 얼마예요" 같은 실제 질문과
+                        말이 달라 놓치는 일이 잦다. */}
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      자주 묻는 내용은 <span className="text-slate-600 font-medium">질문/답변 형식</span>으로
+                      정리해 함께 올리면 훨씬 잘 찾습니다.
+                      <br />
+                      예) Q. 출장 여비 규정 / A. 임원 이상 100,000원, 그 외 70,000원
+                    </p>
                   </div>
                   <input
                     type="file"

@@ -14,6 +14,10 @@ export type AgentType = 'chat' | 'link';
 /** 이모지 하나를 상정한다. 길면 목록에서 줄이 깨진다. */
 const MAX_ICON_LENGTH = 8;
 const MAX_CATEGORY_LENGTH = 30;
+const MAX_USAGE_GUIDE_LENGTH = 500;
+/** 화면에 칩으로 늘어놓는다. 많으면 오히려 고르기 어렵다. */
+const MAX_STARTERS = 6;
+const MAX_STARTER_LENGTH = 120;
 
 export interface CatalogPayload {
   icon?: string | null;
@@ -22,6 +26,10 @@ export interface CatalogPayload {
   display_order?: number;
   agent_type?: AgentType;
   link_url?: string | null;
+  /** 직원에게 보여줄 사용 방법 (0025) */
+  usage_guide?: string | null;
+  /** 눌러서 입력창에 채우는 예시 입력 (0025) */
+  starter_prompts?: string[] | null;
 }
 
 export interface CatalogParseResult {
@@ -100,6 +108,38 @@ export function parseCatalogFields(
       return { payload, error: '정렬 순서는 숫자여야 합니다.' };
     }
     payload.display_order = Math.trunc(order);
+  }
+
+  // ── 사용 방법 · 대화 시작 예시 (0025) ──
+  // 라우트마다 따로 파싱하지 않는다. 생성과 수정이 다른 규칙을 갖게 되면
+  // "만들 때는 들어갔는데 고치면 사라진다" 같은 상태가 된다.
+  if (body.usage_guide !== undefined) {
+    const guide = trimOrNull(body.usage_guide);
+    if (guide && guide.length > MAX_USAGE_GUIDE_LENGTH) {
+      return { payload, error: `사용 방법은 ${MAX_USAGE_GUIDE_LENGTH}자 이내로 입력해주세요.` };
+    }
+    payload.usage_guide = guide;
+  }
+
+  if (body.starter_prompts !== undefined) {
+    // 화면은 줄바꿈으로 구분해 보내고, API를 직접 부르면 배열로 올 수 있다.
+    const raw = Array.isArray(body.starter_prompts)
+      ? body.starter_prompts
+      : String(body.starter_prompts ?? '').split('\n');
+
+    const items = raw
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean);
+
+    if (items.some((v) => v.length > MAX_STARTER_LENGTH)) {
+      return { payload, error: `예시는 하나에 ${MAX_STARTER_LENGTH}자 이내로 입력해주세요.` };
+    }
+    if (items.length > MAX_STARTERS) {
+      return { payload, error: `예시는 최대 ${MAX_STARTERS}개까지 넣을 수 있습니다.` };
+    }
+
+    // 빈 배열은 NULL로. 빈 배열을 저장하면 "안 정함"과 구분되지 않는다.
+    payload.starter_prompts = items.length > 0 ? items : null;
   }
 
   // ── 유형과 주소는 짝으로 움직인다 ──

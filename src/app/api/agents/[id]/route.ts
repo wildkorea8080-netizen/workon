@@ -32,7 +32,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const body = await request.json();
     const { name, description, system_prompt, config, is_active, enabled_connectors, visibility } = body;
 
-    const CATALOG_KEYS = ['icon', 'category', 'is_published', 'display_order', 'agent_type', 'link_url'];
+    const CATALOG_KEYS = [
+      'icon', 'category', 'is_published', 'display_order', 'agent_type', 'link_url',
+      // 0025. 이 목록에 넣어야 "업데이트할 필드가 없습니다" 검사도 함께 통과한다.
+      'usage_guide', 'starter_prompts',
+    ];
     const touchesCatalog = CATALOG_KEYS.some((key) => body[key] !== undefined);
 
     if (
@@ -81,6 +85,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (description !== undefined) updatePayload.description = typeof description === 'string' ? description.trim() : description;
     if (system_prompt !== undefined) updatePayload.system_prompt = typeof system_prompt === 'string' ? system_prompt.trim() : system_prompt;
     if (config !== undefined) updatePayload.config = config;
+
     if (is_active !== undefined) updatePayload.is_active = is_active;
 
     if (enabled_connectors !== undefined) {

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import {
   ALLOWED_UPLOAD_MIME_TYPES,
   UPLOAD_FORMATS_LABEL,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_SIZE_LABEL,
+  MAX_AGENT_DOCUMENTS,
   hasAllowedUploadExtension,
 } from '@/lib/file-types';
 import { getServerAuthSession } from '@/lib/auth';
@@ -12,7 +15,8 @@ import type { ApiResponse } from '@/lib/db';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+// 크기·개수 상한은 file-types.ts 한 곳에 있다. 화면과 서버가 서로 다른
+// 숫자를 들고 있어 안내와 실제가 어긋난 적이 있다.
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./,           // 디렉토리 트래버설
@@ -74,6 +78,41 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── 비서당 문서 수 상한 ──
+  //
+  // 상한이 화면에만 있었다. 여기 검사가 없어 화면을 거치지 않으면 얼마든지
+  // 붙일 수 있었고, 문서마다 청킹·임베딩 비용이 그대로 나간다.
+  // 개인 비서 커넥터 범위와 같은 원칙 — 화면 검사는 표시일 뿐이다.
+  {
+    // **선택한 비서 전부를 본다.** 문서는 비서마다 한 행씩 들어가므로
+    // 첫 번째만 검사하면 나머지는 상한을 넘겨 쌓인다.
+    const { data: existing, error: countError } = await supabaseAdmin
+      .from('documents')
+      .select('agent_id')
+      .in('agent_id', agentIds);
+
+    const perAgent = new Map<string, number>();
+    for (const row of existing ?? []) {
+      const id = (row as { agent_id: string }).agent_id;
+      perAgent.set(id, (perAgent.get(id) ?? 0) + 1);
+    }
+    const full = agentIds.filter((id) => (perAgent.get(id) ?? 0) >= MAX_AGENT_DOCUMENTS);
+
+    // 세는 데 실패하면 막지 않는다. 집계 오류로 업로드가 멈추면
+    // 담당자는 원인을 알 수 없다 (한도 판정과 같은 규칙).
+    if (!countError && full.length > 0) {
+      return NextResponse.json<ApiResponse<null>>(
+        {
+          ok: false,
+          error: {
+            message: `비서 하나에는 문서를 ${MAX_AGENT_DOCUMENTS}개까지 연결할 수 있습니다. 쓰지 않는 문서를 지운 뒤 다시 시도해주세요.`,
+          },
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   if (!(file instanceof File)) {
     return NextResponse.json<ApiResponse<null>>(
       { ok: false, error: { message: '파일을 업로드해야 합니다.' } },
@@ -95,9 +134,9 @@ export async function POST(request: Request) {
   }
 
   // 파일 크기 검증 (departmentId 불필요)
-  if (file.size > MAX_FILE_SIZE) {
+  if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: '파일 크기가 너무 큽니다. 최대 20MB까지 업로드할 수 있습니다.' } },
+      { ok: false, error: { message: `파일 크기가 너무 큽니다. 최대 ${MAX_UPLOAD_SIZE_LABEL}까지 업로드할 수 있습니다.` } },
       { status: 413 }
     );
   }

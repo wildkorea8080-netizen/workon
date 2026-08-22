@@ -50,6 +50,10 @@ export type Agent = {
   is_published?: boolean;
   /** 카테고리 안에서의 순서. 작을수록 앞. 동률이면 이름순. */
   display_order?: number;
+  /** 직원에게 보여줄 사용 방법. 대화 시작 화면에 표시된다 (0025) */
+  usage_guide?: string | null;
+  /** 눌러서 입력창에 채우는 예시 입력 (0025) */
+  starter_prompts?: string[] | null;
   /** chat=대화형, link=외부 링크 연결형(새 탭) */
   agent_type?: 'chat' | 'link';
   link_url?: string | null;

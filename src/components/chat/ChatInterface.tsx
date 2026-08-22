@@ -425,6 +425,16 @@ export default function ChatInterface({
 
               <div className="mt-4 bg-white border border-slate-200 rounded-2xl px-5 py-4 text-sm text-slate-600 leading-relaxed">
                 {selectedAgent.description || '무엇이든 질문해보세요.'}
+
+                {/* 관리자가 적어 둔 사용 방법 (0025).
+                    비서마다 필요한 입력이 다르다 — 공문은 주요 내용, 회의록은
+                    녹취 전문. 설명 한 줄로는 그걸 담을 수 없다. */}
+                {selectedAgent.usage_guide && (
+                  <p className="mt-3 pt-3 border-t border-slate-100 text-slate-700 whitespace-pre-line">
+                    {selectedAgent.usage_guide}
+                  </p>
+                )}
+
                 {connectorNames.length > 0 && (
                   <p className="mt-2.5 text-slate-500">
                     필요하면 <span className="font-semibold text-slate-700">{connectorNames.join(' · ')}</span>
@@ -432,6 +442,27 @@ export default function ChatInterface({
                   </p>
                 )}
               </div>
+
+              {/* 대화 시작 예시. 빈 화면 앞에서 첫 문장을 못 쓰는 경우가 많다.
+                  누르면 입력창에 채우고 **보내지는 않는다** — 담당자가 자기
+                  상황에 맞게 고쳐 써야 하기 때문이다. */}
+              {(selectedAgent.starter_prompts ?? []).length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2 justify-center">
+                  {(selectedAgent.starter_prompts ?? []).map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => {
+                        setInputMessage(prompt);
+                        textareaRef.current?.focus();
+                      }}
+                      className="text-xs text-slate-600 bg-white border border-slate-200 hover:border-[#003087] hover:text-[#003087] rounded-full px-3 py-1.5 transition-colors"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ) : (

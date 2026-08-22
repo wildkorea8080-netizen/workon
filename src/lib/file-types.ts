@@ -55,3 +55,29 @@ export function hasAllowedUploadExtension(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return ALLOWED_UPLOAD_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
+
+/**
+ * 파일 하나의 상한.
+ *
+ * 화면과 서버가 서로 다른 숫자를 들고 있었다 — 화면은 10MB라 안내하고
+ * 서버는 20MB까지 받았다. 담당자는 12MB 문서를 올릴 수 있는데도 못 올린다고
+ * 읽는다. 형식 목록을 한 곳에 모은 것과 같은 이유로 크기도 여기 둔다.
+ */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 비서 하나에 붙일 수 있는 문서 수.
+ *
+ * 10개는 실무에서 금방 막힌다 — 복무·여비·문서관리 규정을 한 질만 올려도
+ * 넘는다. 그렇다고 무제한으로 둘 수는 없다. 문서를 붙일 때마다 청킹과
+ * 임베딩 비용이 선형으로 늘고, 검색 대상이 넓어질수록 엉뚱한 청크가
+ * 딸려 올 확률도 함께 는다.
+ *
+ * **상한이 화면에만 있었다.** `/api/upload`에는 개수 검사가 아예 없어,
+ * 화면을 거치지 않으면 얼마든지 붙일 수 있었다. 개인 비서 커넥터 범위와
+ * 같은 원칙으로 서버가 판정한다 — 화면 검사는 표시일 뿐이다.
+ */
+export const MAX_AGENT_DOCUMENTS = 50;
+
+/** 사람이 읽는 크기 표기 */
+export const MAX_UPLOAD_SIZE_LABEL = `${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`;

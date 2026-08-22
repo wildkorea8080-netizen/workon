@@ -23,6 +23,10 @@ type AgentFormData = {
   category: string;
   agent_type: AgentType;
   link_url: string;
+  /** 직원에게 보여줄 사용 방법 (0025) */
+  usage_guide: string;
+  /** 예시 입력. 화면에서는 한 줄에 하나씩 적는다 (0025) */
+  starter_prompts: string;
 };
 
 const EMPTY_FORM: AgentFormData = {
@@ -33,6 +37,8 @@ const EMPTY_FORM: AgentFormData = {
   visibility: 'organization',
   icon: '',
   category: '',
+  usage_guide: '',
+  starter_prompts: '',
   agent_type: 'chat',
   link_url: '',
 };
@@ -46,6 +52,8 @@ function toFormData(agent: Agent): AgentFormData {
     name: agent.name,
     description: agent.description ?? '',
     system_prompt: agent.system_prompt ?? '',
+    usage_guide: agent.usage_guide ?? '',
+    starter_prompts: (agent.starter_prompts ?? []).join('\n'),
     enabled_connectors: agent.enabled_connectors ?? [],
     visibility: (agent.visibility ?? 'organization') as Visibility,
     icon: agent.icon ?? '',
@@ -166,6 +174,40 @@ function CatalogFields({
         </div>
       ) : (
         <>
+          {/* 사용 방법 · 대화 시작 가이드 (0025)
+              직원이 비서를 열었을 때 무엇을 넣어야 하는지 모르는 것이 도입
+              단계에서 가장 자주 막히는 지점이다. 비서마다 필요한 입력이
+              다르고(공문은 주요 내용, 회의록은 녹취 전문) 기관마다 표현이
+              달라, 코드가 대신 지어내지 않고 관리자가 적게 한다. */}
+          <div>
+            <label className={label}>사용 방법 (선택)</label>
+            <textarea
+              rows={2}
+              value={form.usage_guide}
+              onChange={e => onChange({ usage_guide: e.target.value })}
+              placeholder="예) 공문으로 만들 주요 내용을 알려주세요. 수신처와 시행일이 있으면 함께 적어주세요."
+              className={`${input} resize-none`}
+              maxLength={500}
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              직원이 이 비서를 열었을 때 대화 시작 화면에 표시됩니다.
+            </p>
+          </div>
+
+          <div>
+            <label className={label}>대화 시작 예시 (선택)</label>
+            <textarea
+              rows={3}
+              value={form.starter_prompts}
+              onChange={e => onChange({ starter_prompts: e.target.value })}
+              placeholder={'한 줄에 하나씩, 최대 6개\n예) 교육 참가 안내 공문\n예) 자료 제출 요청 공문'}
+              className={`${input} resize-none`}
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              직원이 눌러서 바로 시작할 수 있습니다. 빈 화면 앞에서 첫 문장을 못 쓰는 경우가 많습니다.
+            </p>
+          </div>
+
           <div className="border border-slate-200 rounded-xl p-3 space-y-2">
             <div>
               <p className="text-xs font-semibold text-slate-700">공개 범위</p>
