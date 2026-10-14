@@ -13,7 +13,7 @@ import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSecurityEvent } from '@/lib/filter';
 import type { ApiResponse } from '@/lib/db';
 import { getActorScope } from '@/lib/actor-scope';
-import { canEditAgent } from '@/lib/agent-permissions';
+import { canEditAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { loadAgentAccess, recordAgentEvent, enableAgentCapability } from '@/lib/agent-store';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
@@ -52,8 +52,11 @@ export async function POST(request: Request) {
   // 단일 agentId 또는 복수 agentIds 모두 지원
   const agentIdSingle = formData.get('agentId')?.toString();
   const agentIdsRaw   = formData.getAll('agentIds').map(v => v.toString());
-  const agentIds: string[] = agentIdsRaw.length > 0 ? agentIdsRaw
-    : agentIdSingle ? [agentIdSingle] : [];
+  // 같은 id가 두 번 오면 문서 행이 둘 생기고 상한 검사도 한 번만 센다. 처음에 한 번 걸러
+  // 권한 검사·상한 검사·행 만들기가 모두 같은 목록을 쓰게 한다.
+  const agentIds: string[] = [...new Set(
+    agentIdsRaw.length > 0 ? agentIdsRaw : agentIdSingle ? [agentIdSingle] : []
+  )];
   const title = formData.get('title')?.toString() ?? '';
 
   if (agentIds.length === 0) {
@@ -71,6 +74,8 @@ export async function POST(request: Request) {
       { status: 403 }
     );
   }
+  // 읽은 비서 정보는 행을 만들 때 다시 쓴다(공개 범위를 비서 단계에 맞춘다)
+  const targets = new Map<string, AgentAccessInfo>();
   for (const id of agentIds) {
     const target = await loadAgentAccess(id);
     if (!target || !canEditAgent(target, actor)) {
@@ -79,6 +84,7 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+    targets.set(id, target);
   }
 
   // ── 비서당 문서 수 상한 ──
@@ -267,7 +273,18 @@ export async function POST(request: Request) {
   };
 
   // 선택한 모든 에이전트에 문서 레코드 생성 (storage 파일은 공유)
-  const insertRows = agentIds.map(aid => ({ ...baseRecord, agent_id: aid }));
+  //
+  // 부서·나만의 비서에 올린 문서는 그 비서의 부서 안에 둔다. 올리는 사람이
+  // '기관 전체'를 골라도 따르지 않는다 — 문서 목록과 Q&A 검색은 비서 단계가
+  // 아니라 visibility로 거르므로, 부서 비서에 붙인 자료가 기관 전체에 보이게 된다.
+  // baseRecord에 이미 있는 두 키만 덮어쓴다. 행마다 키 집합이 달라지면
+  // PostgREST 배치 insert가 빠진 칸에 NULL을 넣는다(CLAUDE.md).
+  const insertRows = agentIds.map((aid) => {
+    const target = targets.get(aid)!;
+    return target.tier === 'official'
+      ? { ...baseRecord, agent_id: aid }
+      : { ...baseRecord, visibility: 'department', department_id: target.department_id, agent_id: aid };
+  });
   const { data: insertedDocs, error: insertError } = await supabaseAdmin
     .from('documents')
     .insert(insertRows)

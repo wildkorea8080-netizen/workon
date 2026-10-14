@@ -69,10 +69,14 @@ export async function GET(request: NextRequest) {
       if (favoriteIds.length === 0) {
         return NextResponse.json({ ok: true, data: [] });
       }
+      // 나만의 비서는 visibility만으로 거르면 같은 기관·부서 사람에게 보인다.
+      // 남의 나만의 비서 id를 즐겨찾기에 넣어 읽어 가지 못하게 주인만 남긴다.
+      // (두 .or()는 AND로 묶인다)
       const { data: agents, error } = await supabaseAdmin
         .from('agents')
         .select('*')
         .or(visibleFilter)
+        .or(`tier.neq.personal,owner_id.eq.${session.user.id}`)
         .in('id', favoriteIds)
         .is('deleted_at', null)
         .eq('is_active', true)

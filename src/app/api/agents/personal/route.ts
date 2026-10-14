@@ -81,7 +81,9 @@ export async function POST(request: NextRequest) {
         capabilities,
         category: split.settings.category ?? '전체',
         owner_id: tier === 'personal' ? actor.userId : null,
-        visibility: tier === 'department' ? 'department' : 'organization',
+        // 둘 다 부서로 둔다. 나만의 비서를 기관 전체로 두면 visibility만 보는
+        // 조회(즐겨찾기 등)에서 기관 전체에 열린다 — 좁은 쪽이 기본(0016 관례).
+        visibility: 'department',
         // 부서 비서는 승인 없이 바로 쓴다. 나만의 비서는 본인만 본다.
         is_published: true,
         created_by: actor.userId,
