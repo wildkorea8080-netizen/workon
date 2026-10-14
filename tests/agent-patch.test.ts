@@ -1,6 +1,7 @@
 // tests/agent-patch.test.ts
 import { describe, it, expect } from 'vitest';
-import { splitAgentBody, changedSettingKeys, SNAPSHOT_KEYS } from '@/lib/agent-patch';
+import { readFileSync } from 'fs';
+import { splitAgentBody, changedSettingKeys, SNAPSHOT_KEYS, parseBaseVersion } from '@/lib/agent-patch';
 
 const opts = { currentType: 'chat' as const, knownConnectorIds: ['law'], knownModelIds: ['claude-sonnet-4-6', 'claude-haiku-4-5'] };
 
@@ -52,6 +53,26 @@ describe('요청 본문 나누기', () => {
   });
 });
 
+describe('판 번호 읽기 (폼·주소 값)', () => {
+  it('숫자 문자열만 받는다', () => {
+    expect(parseBaseVersion('3')).toBe(3);
+    expect(parseBaseVersion('0')).toBe(0);
+  });
+
+  it('빈 값·누락은 판 번호가 아니다', () => {
+    // Number('')와 Number(null)은 0이라, 예전에는 판 0으로 저장을 시도했다
+    expect(parseBaseVersion('')).toBeNull();
+    expect(parseBaseVersion(null)).toBeNull();
+    expect(parseBaseVersion(undefined)).toBeNull();
+  });
+
+  it('숫자처럼 보이는 다른 꼴도 받지 않는다', () => {
+    for (const raw of [' 3', '3.0', '-1', '1e2', '0x10', 'abc']) {
+      expect(parseBaseVersion(raw), raw).toBeNull();
+    }
+  });
+});
+
 describe('바뀐 칸 찾기', () => {
   it('같은 값을 다시 보내면 바뀐 것이 없다', () => {
     const current = { name: 'A', starter_prompts: ['x'], capabilities: { image: {} } };
@@ -81,5 +102,15 @@ describe('바뀐 칸 찾기', () => {
 
   it('판 사본 칸은 11개다', () => {
     expect(SNAPSHOT_KEYS).toHaveLength(11);
+  });
+
+  it('SNAPSHOT_KEYS가 0026의 agent_snapshot과 같다', () => {
+    // 한쪽에만 칸을 더하면 바뀐 칸 찾기·되돌리기가 그 칸을 조용히 빠뜨린다.
+    const sql = readFileSync('supabase/migrations/0026_agent_tiers.sql', 'utf8');
+    const start = sql.indexOf('CREATE OR REPLACE FUNCTION agent_snapshot');
+    const body = sql.slice(start, sql.indexOf('$$;', start));
+    const keys = [...body.matchAll(/'(\w+)',/g)].map((m) => m[1]);
+    expect(keys).toHaveLength(11);
+    expect(new Set(keys)).toEqual(new Set(SNAPSHOT_KEYS));
   });
 });

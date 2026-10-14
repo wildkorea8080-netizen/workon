@@ -6,6 +6,7 @@ import { getActorScope } from '@/lib/actor-scope';
 import { canEditAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, saveAgentSettings, saveFailureResponse } from '@/lib/agent-store';
 import { jsonError } from '@/lib/agent-route-helpers';
+import { parseBaseVersion } from '@/lib/agent-patch';
 
 /** 양식 빼기. 행과 파일은 남긴다 — 판을 되돌리면 다시 살아난다. */
 export async function DELETE(request: NextRequest, { params }: { params: { id: string; templateId: string } }) {
@@ -20,8 +21,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
     if (!canEditAgent(agent, actor)) return jsonError('양식을 뺄 권한이 없습니다.', 403);
 
-    const baseVersion = Number(new URL(request.url).searchParams.get('base_version'));
-    if (!Number.isInteger(baseVersion)) return jsonError('base_version이 필요합니다.', 400);
+    const baseVersion = parseBaseVersion(new URL(request.url).searchParams.get('base_version'));
+    if (baseVersion === null) return jsonError('base_version이 필요합니다.', 400);
 
     const { data } = await supabaseAdmin
       .from('agent_templates')

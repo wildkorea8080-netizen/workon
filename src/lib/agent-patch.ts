@@ -107,6 +107,19 @@ export function splitAgentBody(
 }
 
 /**
+ * 폼·주소로 받은 판 번호. 숫자만 있는 문자열일 때만 받고 아니면 null.
+ *
+ * Number('')와 Number(null)은 0이라 `Number.isInteger(Number(raw))`로는 빈 값과
+ * 누락이 판 0으로 통과한다. 판 0은 늘 충돌로 거절되긴 하지만, 사용자는 원인 대신
+ * "다른 분이 먼저 고쳤습니다"를 보게 된다.
+ */
+export function parseBaseVersion(raw: unknown): number | null {
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
  * 객체 키를 정렬해 직렬화한다. jsonb는 키 순서를 바꿔 돌려주므로 순서에 기대면
  * 같은 값도 바뀐 것으로 보인다. 배열 순서는 그대로 둔다(커넥터 순서는 실제 변경).
  */

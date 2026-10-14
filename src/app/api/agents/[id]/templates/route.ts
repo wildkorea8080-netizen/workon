@@ -7,6 +7,7 @@ import { getActorScope } from '@/lib/actor-scope';
 import { canEditAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, saveAgentSettings, saveFailureResponse } from '@/lib/agent-store';
 import { jsonError } from '@/lib/agent-route-helpers';
+import { parseBaseVersion } from '@/lib/agent-patch';
 import { validateTemplateFile, templateStoragePath, MAX_TEMPLATES } from '@/lib/template-files';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 
@@ -59,11 +60,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const form = await request.formData();
     const file = form.get('file');
     const name = String(form.get('name') ?? '').trim();
-    const baseVersion = Number(form.get('base_version'));
+    // 판 번호는 파일을 올리기 전에 본다. 뒤에서 거절하면 꺼진 행과 파일만 남는다.
+    const baseVersion = parseBaseVersion(form.get('base_version'));
 
+    if (baseVersion === null) return jsonError('base_version이 필요합니다.', 400);
     if (!(file instanceof File)) return jsonError('양식 파일이 필요합니다.', 400);
     if (!name || name.length > 60) return jsonError('양식 이름은 1~60자로 입력해 주세요.', 400);
-    if (!Number.isInteger(baseVersion)) return jsonError('base_version이 필요합니다.', 400);
 
     const fileError = validateTemplateFile(file.name, file.size);
     if (fileError) return jsonError(fileError, 400);

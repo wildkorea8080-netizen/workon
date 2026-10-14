@@ -175,15 +175,27 @@ for (const [table, labelCol] of [
 // 보인다. 주인 부서와 비서의 기관이 어긋나면 그 조건이 기관을 넘는다.
 console.log('\n=== 4-1. 부서 비서 기관 일치 ===');
 {
-  const { data: deptAgents } = await db
+  const { data: deptAgents, error } = await db
     .from('agents')
     .select('name, department_id, organization_id')
     .eq('tier', 'department')
     .is('deleted_at', null);
-  const deptOrg = new Map(depts.map((d) => [d.id, d.organization_id]));
-  const crossed = (deptAgents ?? []).filter((a) => deptOrg.get(a.department_id) !== a.organization_id);
-  violations += crossed.length;
-  console.log(`${crossed.length ? '위반' : 'OK  '}  부서 비서 ${deptAgents?.length ?? 0}개 중 기관 어긋남 ${crossed.length}개`);
+  if (error) {
+    // 조회가 실패하면 빈 목록이 되어 '어긋남 0개'로 통과해 보인다. 확인 못 한 것은 위반으로 센다.
+    // (0026 전이면 tier·deleted_at 칸이 없어 여기서 실패한다)
+    fail('부서 비서 조회 실패', error.message);
+  } else {
+    const deptOrg = new Map(depts.map((d) => [d.id, d.organization_id]));
+    const crossed = (deptAgents ?? []).filter((a) => deptOrg.get(a.department_id) !== a.organization_id);
+    if (crossed.length > 0) {
+      fail(
+        `부서 비서 ${deptAgents.length}개 중 기관 어긋남 ${crossed.length}개`,
+        crossed.slice(0, 3).map((a) => a.name).join(', ')
+      );
+    } else {
+      pass(`부서 비서 ${deptAgents?.length ?? 0}개 — 주인 부서와 기관이 일치`);
+    }
+  }
 }
 
 // ── 5. 대화·메시지 ──────────────────────────────────────────
