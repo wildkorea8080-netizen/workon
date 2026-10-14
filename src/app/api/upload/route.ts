@@ -17,6 +17,7 @@ import { canEditAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { loadAgentAccess, recordAgentEvent, enableAgentCapability } from '@/lib/agent-store';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
+import { resolveModelForDepartment } from '@/lib/model-policy';
 
 // 크기·개수 상한은 file-types.ts 한 곳에 있다. 화면과 서버가 서로 다른
 // 숫자를 들고 있어 안내와 실제가 어긋난 적이 있다.
@@ -218,10 +219,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // 스캔 판독도 기관의 허용 모델 정책을 따른다. 기본 모델로 고정하면
+  // 정책 밖 모델(또는 허용 목록에 없는 업체 설정)로 문서 본문이 나갈 수 있다.
+  const ocrModel = await resolveModelForDepartment(departmentId);
+
   // 문서 처리 + 임베딩 (Voyage AI 실패 시 임베딩 없이 저장)
   let processingResult: Awaited<ReturnType<typeof import('@/lib/document-processor').processDocumentFile>>;
   try {
-    processingResult = await (await import('@/lib/document-processor')).processDocumentFile(buffer, file.type, file.name);
+    processingResult = await (await import('@/lib/document-processor')).processDocumentFile(buffer, file.type, file.name, { ocrModel });
   } catch (procErr: any) {
     console.error('[upload] 문서 처리 실패:', procErr.message);
     return NextResponse.json<ApiResponse<null>>(

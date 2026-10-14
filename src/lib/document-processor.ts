@@ -8,7 +8,7 @@ import { extractTextFromScannedPdf, isLikelyScanned } from '@/lib/pdf-ocr';
 import { extractTextFromSpreadsheet, isSpreadsheetFile } from '@/lib/spreadsheet';
 import { extractTextFromPptx, isPptxFile } from '@/lib/pptx';
 import { UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
-import type { ClaudeUsage } from '@/lib/claude';
+import type { LlmUsage } from '@/lib/llm/types';
 
 export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 100;
@@ -27,14 +27,15 @@ function normalizeText(text: string) {
 interface ExtractedText {
   text: string;
   /** 스캔 판독을 거쳤으면 그 사용량. 호출하는 쪽이 usage_logs에 기록해야 한다. */
-  ocrUsage?: ClaudeUsage;
+  ocrUsage?: LlmUsage;
   ocrPages?: number;
 }
 
 async function extractTextFromFile(
   fileBuffer: Buffer,
   mimeType: string,
-  fileName: string
+  fileName: string,
+  ocrModel?: string
 ): Promise<ExtractedText> {
   const lowerName = fileName.toLowerCase();
 
@@ -50,7 +51,7 @@ async function extractTextFromFile(
     // 그대로 두면 "텍스트를 추출할 수 없습니다"로 거부되고 끝이라,
     // 공공기관 스캔 공문이 통째로 쓸 수 없는 자료가 된다.
     if (isLikelyScanned(pdfData.text ?? '', pageCount)) {
-      const ocr = await extractTextFromScannedPdf(fileBuffer, pageCount);
+      const ocr = await extractTextFromScannedPdf(fileBuffer, pageCount, ocrModel);
       return { text: ocr.text, ocrUsage: ocr.usage, ocrPages: ocr.pageCount };
     }
 
@@ -132,8 +133,13 @@ function averageEmbedding(vectors: number[][]) {
   return result;
 }
 
-export async function processDocumentFile(fileBuffer: Buffer, mimeType: string, fileName: string) {
-  const extracted = await extractTextFromFile(fileBuffer, mimeType, fileName);
+export async function processDocumentFile(
+  fileBuffer: Buffer,
+  mimeType: string,
+  fileName: string,
+  options: { ocrModel?: string } = {}
+) {
+  const extracted = await extractTextFromFile(fileBuffer, mimeType, fileName, options.ocrModel);
   const normalizedText = normalizeText(extracted.text);
   const chunkTexts = chunkText(normalizedText);
 

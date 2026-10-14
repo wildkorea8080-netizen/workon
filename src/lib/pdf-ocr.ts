@@ -65,7 +65,8 @@ export interface OcrResult {
  */
 export async function extractTextFromScannedPdf(
   fileBuffer: Buffer,
-  pageCount: number
+  pageCount: number,
+  modelId: string = CLAUDE_MODEL
 ): Promise<OcrResult> {
   if (pageCount > MAX_OCR_PAGES) {
     throw new Error(
@@ -82,7 +83,7 @@ export async function extractTextFromScannedPdf(
   let result;
   try {
     result = await complete({
-      model: CLAUDE_MODEL,
+      model: modelId,
       // 페이지가 많으면 출력도 길어진다. 부족하면 뒷부분이 잘린다.
       maxTokens: 16000,
       messages: [
