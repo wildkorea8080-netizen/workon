@@ -147,6 +147,51 @@ try {
   );
   check('새 능력이 옛 커넥터 칸으로 따라간다', JSON.stringify(conn.enabled_connectors) === '["kosis"]');
 
+  // S1-b 전까지 옛 화면·코드는 enabled_connectors만 쓴다. 반대 방향도 따라가야 한다.
+  const { rows: [legacyConn] } = await client.query(
+    `UPDATE agents SET enabled_connectors = '{law}' WHERE id = $1 RETURNING capabilities`, [created.id]
+  );
+  check('옛 커넥터 칸을 바꾸면 능력이 따라간다',
+    JSON.stringify(legacyConn.capabilities?.public_data?.connectors) === '["law"]');
+
+  // ── 자동 켜기 (문서 업로드) ──
+  // 올린 사람을 넘겨도 updated_by는 그대로여야 한다. 바뀌면 기본 비서 갱신(--update)이
+  // 이 비서를 '관리자가 고친 것'으로 보고 건너뛴다.
+  const { rows: [someone] } = await client.query(
+    'SELECT id FROM users WHERE department_id = $1 LIMIT 1', [dept.id]
+  );
+  const uploader = someone?.id ?? null;
+  const { rows: [beforeEnable] } = await client.query(
+    `SELECT version, updated_by FROM agents WHERE id = $1`, [created.id]
+  );
+  await client.query(`SELECT enable_agent_capability($1, 'doc_search', $2)`, [created.id, uploader]);
+  const { rows: [afterEnable] } = await client.query(
+    `SELECT version, updated_by, capabilities FROM agents WHERE id = $1`, [created.id]
+  );
+  check('자동 켜기는 능력을 켜고 판을 올린다',
+    'doc_search' in afterEnable.capabilities && afterEnable.version === beforeEnable.version + 1);
+  check('자동 켜기는 updated_by를 바꾸지 않는다',
+    afterEnable.updated_by === beforeEnable.updated_by, `${beforeEnable.updated_by} → ${afterEnable.updated_by}`);
+  const { rows: [enableRow] } = await client.query(
+    `SELECT changed_by, detail FROM agent_history WHERE agent_id = $1 AND version = $2`,
+    [created.id, afterEnable.version]
+  );
+  check('자동 켜기는 올린 사람을 detail에만 남긴다',
+    enableRow?.changed_by === null && (enableRow?.detail?.actor ?? null) === uploader);
+  if (!uploader) console.log('참고  부서에 직원이 없어 NULL로 호출함 (updated_by 검사가 약해짐)');
+
+  // ── 승인 판 번호 (옛 신청 코드) ──
+  // 옛 신청 코드는 approval_status만 바꾼다. 트리거가 그때의 판을 채워야 승인이 판을 확인한다.
+  await client.query(
+    `UPDATE agents SET approval_status = 'approved', approval_version = NULL WHERE id = $1`, [created.id]
+  );
+  const { rows: [pending] } = await client.query(
+    `UPDATE agents SET approval_status = 'pending' WHERE id = $1 RETURNING version, approval_version`,
+    [created.id]
+  );
+  check('대기로 바뀌면 승인 판 번호가 지금 판으로 찬다',
+    pending.approval_version === pending.version, `version ${pending.version}, approval_version ${pending.approval_version}`);
+
   // ── 이름 유일성 ──
   await expectError(
     '같은 부서에 같은 이름의 공유 비서는 막는다',

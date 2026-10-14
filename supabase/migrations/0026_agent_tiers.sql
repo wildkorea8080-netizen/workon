@@ -29,6 +29,12 @@ UPDATE agents
 
 ALTER TABLE agents ALTER COLUMN tier SET NOT NULL;
 
+-- 이미 승인 대기 중인 신청에 신청 당시 판을 채운다. 비어 있으면 승인할 때
+-- "신청한 판 그대로인가"를 확인할 근거가 없어, 신청 뒤 고친 내용이 그대로
+-- 공식 비서가 된다. (배포 사이 옛 신청 코드가 남기는 신청은 아래 트리거가 채운다.)
+UPDATE agents SET approval_version = version
+ WHERE approval_status = 'pending' AND approval_version IS NULL;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agents_tier_check') THEN
@@ -70,6 +76,32 @@ UPDATE agents a
 -- 이름의 나만의 비서를 만들 수 없었다. 나만의 비서는 본인 안에서만 겹치지
 -- 않으면 된다. 지운 비서는 이름을 놓아준다.
 DROP INDEX IF EXISTS agents_department_name_idx;
+
+-- 예전 유일성은 부서 단위라, 같은 사람이 부서를 옮기며 같은 이름의 나만의
+-- 비서를 둘 가질 수 있었다. 그대로 두면 아래 인덱스 생성이 실패해 마이그레이션
+-- 전체가 멈춘다. 먼저 만든 것은 그대로 두고 두 번째부터 ' (2)', ' (3)'을 붙인다.
+-- owner_id가 NULL인 행은 인덱스가 겹침으로 보지 않으므로 건드리지 않는다.
+-- 바꾼 목록은 맨 끝 확인 쿼리에서 센다.
+CREATE TEMP TABLE IF NOT EXISTS _0026_personal_renamed (
+  agent_id uuid, old_name text, new_name text
+) ON COMMIT DROP;
+
+WITH ranked AS (
+  SELECT id, name,
+         row_number() OVER (PARTITION BY owner_id, name
+                            ORDER BY created_at, id) AS n
+    FROM agents
+   WHERE tier = 'personal' AND deleted_at IS NULL AND owner_id IS NOT NULL
+), renamed AS (
+  UPDATE agents a
+     SET name = r.name || ' (' || r.n || ')'
+    FROM ranked r
+   WHERE a.id = r.id AND r.n > 1
+  RETURNING a.id, r.name AS old_name, a.name AS new_name
+)
+INSERT INTO _0026_personal_renamed (agent_id, old_name, new_name)
+SELECT id, old_name, new_name FROM renamed;
+
 CREATE UNIQUE INDEX IF NOT EXISTS agents_shared_name_idx
   ON agents(department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS agents_personal_name_idx
@@ -117,6 +149,17 @@ BEGIN
                jsonb_build_object('connectors', to_jsonb(NEW.enabled_connectors)))
       ELSE NEW.capabilities - 'public_data'
     END;
+  END IF;
+
+  -- 승인 신청 ↔ 승인 판 번호
+  -- 옛 신청 코드는 approval_status='pending'만 바꾼다. 판 번호가 비면 승인이
+  -- 판 확인을 건너뛰므로, 대기로 들어오는 순간의 판을 신청 판으로 잡는다.
+  IF NEW.approval_status = 'pending' AND NEW.approval_version IS NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      NEW.approval_version := NEW.version;
+    ELSIF OLD.approval_status IS DISTINCT FROM 'pending' THEN
+      NEW.approval_version := NEW.version;
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -201,7 +244,8 @@ RETURNS jsonb LANGUAGE sql STABLE AS $$
     'model_id',        a.model_id,
     'capabilities',    a.capabilities,
     'template_ids',    COALESCE(
-                         (SELECT jsonb_agg(t.id ORDER BY t.created_at)
+                         -- 같은 시각에 만든 양식도 순서가 흔들리지 않게 id로 한 번 더 정렬
+                         (SELECT jsonb_agg(t.id ORDER BY t.created_at, t.id)
                             FROM agent_templates t
                            WHERE t.agent_id = a.id AND t.retired_at IS NULL),
                          '[]'::jsonb))
@@ -340,6 +384,10 @@ BEGIN
   IF p_tier NOT IN ('department', 'official') THEN
     RAISE EXCEPTION 'change_agent_tier: 올릴 수 없는 단계 %', p_tier;
   END IF;
+  -- NULL을 그대로 쓰면 공개 범위가 빈 비서가 되어 visibilityFilter에 걸리지 않는다
+  IF p_visibility IS NULL OR p_visibility NOT IN ('organization', 'department') THEN
+    RAISE EXCEPTION 'change_agent_tier: 허용되지 않는 공개 범위 %', p_visibility;
+  END IF;
 
   SELECT * INTO cur FROM agents WHERE id = p_agent_id AND deleted_at IS NULL FOR UPDATE;
   IF NOT FOUND THEN
@@ -379,15 +427,22 @@ BEGIN
   IF NOT FOUND OR cur.capabilities ? p_capability THEN
     RETURN;
   END IF;
+  -- 사람이 고친 것이 아니다. p_actor를 넘기면 save_agent가 updated_by를 바꿔
+  -- 기본 비서 갱신(--update)이 이 비서를 '관리자가 고친 것'으로 보고 건너뛴다.
+  -- 누가 문서를 올려 켜졌는지는 detail에 남긴다.
   PERFORM save_agent(
     p_agent_id, cur.version,
     jsonb_build_object('capabilities', cur.capabilities || jsonb_build_object(p_capability, '{}'::jsonb)),
-    p_actor, 'settings', jsonb_build_object('reason', 'auto_enable', 'capability', p_capability));
+    NULL, 'settings',
+    jsonb_build_object('reason', 'auto_enable', 'capability', p_capability, 'actor', p_actor));
 END $$;
 
 
 -- ── 확인 ─────────────────────────────────────────────────────
+-- 이름정리: 3절에서 ' (N)'을 붙인 나만의 비서 수(단계와 무관하게 모든 줄에 같은 값).
+-- 0이 아니면 _0026_personal_renamed에 old_name → new_name이 있다(이 트랜잭션 안에서만).
 SELECT tier AS 단계, count(*) AS 비서수,
        count(*) FILTER (WHERE capabilities ? 'doc_search')  AS 문서찾기,
-       count(*) FILTER (WHERE capabilities ? 'public_data') AS 공공데이터
+       count(*) FILTER (WHERE capabilities ? 'public_data') AS 공공데이터,
+       (SELECT count(*) FROM _0026_personal_renamed)         AS 이름정리
   FROM agents GROUP BY tier ORDER BY tier;
