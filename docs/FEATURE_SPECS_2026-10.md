@@ -1,3 +1,7 @@
+> **이 문서는 대체되었습니다 (2026-10-14).** 서비스의 방향·기능·운영은
+> [`superpowers/specs/2026-10-14-workon-service-definition-design.md`](superpowers/specs/2026-10-14-workon-service-definition-design.md)를 따릅니다.
+> 업로드 결재(A1)·스마트 라우팅(A3)·정기 실행(A4) 명세는 그 문서의 "나중" 항목을 다룰 때 재료로 씁니다.
+
 # 기능 명세서 — 구축 대상 전체
 
 **작성일**: 2026-10-14 · **기준 코드**: WORKON `e3c7905` · **상위 문서**: [`BUILD_PLAN_2026-10.md`](BUILD_PLAN_2026-10.md)

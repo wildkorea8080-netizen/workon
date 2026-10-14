@@ -1,3 +1,7 @@
+> **이 문서는 대체되었습니다 (2026-10-14).** 서비스의 방향·기능·운영은
+> [`superpowers/specs/2026-10-14-workon-service-definition-design.md`](superpowers/specs/2026-10-14-workon-service-definition-design.md)를 따릅니다.
+> 아래는 그 논의 이전의 기록으로만 남깁니다.
+
 # 공공기관 업무지원 시스템 구축 계획 (전체)
 
 **작성일**: 2026-10-14
