@@ -57,6 +57,17 @@ export type Agent = {
   /** chat=대화형, link=외부 링크 연결형(새 탭) */
   agent_type?: 'chat' | 'link';
   link_url?: string | null;
+  /** 단계 — 권한의 근거 (0026). is_personal은 0027에서 사라진다 */
+  tier: 'personal' | 'department' | 'official';
+  /** 이 비서의 모델. null이면 기관 기본 모델 (0026) */
+  model_id?: string | null;
+  /** 켜진 능력과 설정 (0026). 정규화는 capabilities/settings.ts */
+  capabilities?: Record<string, unknown>;
+  /** 현재 판 번호 (0026). 저장할 때 base_version으로 돌려보낸다 */
+  version: number;
+  deleted_at?: string | null;
+  approval_version?: number | null;
+  approval_requested_by?: string | null;
   created_by?: string;
   updated_by?: string;
   created_at: string;
