@@ -44,11 +44,11 @@ const db = createClient(
 // ── 0019 적용 여부 ──
 const { error: schemaError } = await db
   .from('agents')
-  .select('is_published, display_order, agent_type')
+  .select('is_published, display_order, agent_type, tier, version')
   .limit(1);
 
 if (schemaError) {
-  console.error('0019_agent_catalog.sql이 적용되지 않았습니다.');
+  console.error('0019 또는 0026 마이그레이션이 적용되지 않았습니다.');
   console.error(`  ${schemaError.message}`);
   process.exit(1);
 }
@@ -77,7 +77,7 @@ for (const org of orgs) {
   const { data: existing } = await db
     .from('agents')
     .select('department_id')
-    .eq('is_personal', false)
+    .eq('tier', 'official')
     .in('department_id', depts.map((d) => d.id));
 
   const tally = new Map();

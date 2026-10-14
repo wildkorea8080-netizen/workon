@@ -170,6 +170,22 @@ for (const [table, labelCol] of [
   }
 }
 
+// ── 4-1. 부서 비서의 주인 부서와 기관 ───────────────────────
+// 부서 비서는 visibility='department'라 visibilityFilter의 부서 조건으로만
+// 보인다. 주인 부서와 비서의 기관이 어긋나면 그 조건이 기관을 넘는다.
+console.log('\n=== 4-1. 부서 비서 기관 일치 ===');
+{
+  const { data: deptAgents } = await db
+    .from('agents')
+    .select('name, department_id, organization_id')
+    .eq('tier', 'department')
+    .is('deleted_at', null);
+  const deptOrg = new Map(depts.map((d) => [d.id, d.organization_id]));
+  const crossed = (deptAgents ?? []).filter((a) => deptOrg.get(a.department_id) !== a.organization_id);
+  violations += crossed.length;
+  console.log(`${crossed.length ? '위반' : 'OK  '}  부서 비서 ${deptAgents?.length ?? 0}개 중 기관 어긋남 ${crossed.length}개`);
+}
+
 // ── 5. 대화·메시지 ──────────────────────────────────────────
 // messages에는 department_id가 없다. conversations를 거쳐야만 범위가 정해지므로
 // 고아 메시지가 있으면 어느 기관 것인지 판정할 수 없다.

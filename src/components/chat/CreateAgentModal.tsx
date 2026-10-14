@@ -104,7 +104,10 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
           icon,
           category,
           systemPrompt: systemPrompt.trim() || undefined,
-          enabled_connectors: selectedConnectors,
+          capabilities: {
+            image: {},
+            ...(selectedConnectors.length > 0 ? { public_data: { connectors: selectedConnectors } } : {}),
+          },
         }),
       });
       const result = await res.json();

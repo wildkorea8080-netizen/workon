@@ -27,6 +27,10 @@ type AgentFormData = {
   usage_guide: string;
   /** 예시 입력. 화면에서는 한 줄에 하나씩 적는다 (0025) */
   starter_prompts: string;
+  /** 저장 시점의 판. 수정 요청의 base_version으로만 쓰고 본문에는 싣지 않는다 (0026) */
+  version: number;
+  /** 켜진 능력 전체. 공공데이터 연결만 화면에서 고치고 나머지는 그대로 돌려 보낸다 (0026) */
+  capabilities: Record<string, unknown>;
 };
 
 const EMPTY_FORM: AgentFormData = {
@@ -41,6 +45,8 @@ const EMPTY_FORM: AgentFormData = {
   starter_prompts: '',
   agent_type: 'chat',
   link_url: '',
+  version: 0,
+  capabilities: { image: {} },
 };
 
 type ConnectorInfo = { id: string; label: string; toolNames: string[] };
@@ -60,14 +66,22 @@ function toFormData(agent: Agent): AgentFormData {
     category: agent.category ?? '',
     agent_type: (agent.agent_type ?? 'chat') as AgentType,
     link_url: agent.link_url ?? '',
+    version: agent.version,
+    capabilities: (agent.capabilities as Record<string, unknown>) ?? {},
   };
 }
 
 /** 서버로 보낼 형태로 정리. 링크형이 아니면 주소를 아예 빼서 제약과 어긋나지 않게 한다. */
 function toRequestBody(form: AgentFormData) {
-  const { link_url, category, icon, ...rest } = form;
+  const { link_url, category, icon, enabled_connectors, version: _version, capabilities, ...rest } = form;
+  // 공공데이터 연결은 능력 설정의 일부다. 다른 능력(문서 찾기·사진)은 그대로 둔다.
+  const { public_data: _old, ...others } = capabilities;
   return {
     ...rest,
+    capabilities:
+      enabled_connectors.length > 0
+        ? { ...others, public_data: { connectors: enabled_connectors } }
+        : others,
     icon: icon.trim() || null,
     category: category.trim() || null,
     link_url: form.agent_type === 'link' ? link_url.trim() : null,
@@ -384,11 +398,28 @@ export default function AgentsManager() {
     setSubmitting(true);
     setError(null);
     try {
+      const body: Record<string, unknown> = {
+        ...toRequestBody(editFormData),
+        base_version: editFormData.version,
+      };
+      // 운영 칸(유형·주소·공개 범위)은 공식 비서만 고칠 수 있다. 서버가 거절한다.
+      if (editingAgent.tier !== 'official') {
+        delete body.agent_type;
+        delete body.link_url;
+        delete body.visibility;
+      }
       const res = await fetch(`/api/agents/${editingAgent.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(toRequestBody(editFormData)),
+        body: JSON.stringify(body),
       });
+      if (res.status === 409) {
+        setError('다른 분이 먼저 고쳤습니다. 목록을 새로고침한 뒤 다시 고쳐 주세요.');
+        // 낡은 판으로 다시 저장하면 같은 거절이 반복된다. 편집을 닫고 새 목록에서 다시 연다.
+        setEditingAgent(null);
+        await loadOfficialAgents();
+        return;
+      }
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => prev.map(a => a.id === editingAgent.id ? result.data : a));
@@ -529,7 +560,7 @@ export default function AgentsManager() {
       const res = await fetch(`/api/admin/agents/${approveModal.id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: approveScope }),
+        body: JSON.stringify({ visibility: approveScope === 'all' ? 'organization' : 'department' }),
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);

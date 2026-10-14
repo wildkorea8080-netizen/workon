@@ -1,4 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { saveAgentSettings } from '@/lib/agent-store';
+import type { CapabilitySettings } from '@/lib/capabilities/settings';
 import {
   presetsForOrganizationType,
   PRESET_CATEGORIES,
@@ -97,10 +99,11 @@ export async function installPresetAgents(
 
     const { data: existing } = await supabaseAdmin
       .from('agents')
-      .select('id, updated_by')
+      .select('id, updated_by, version')
       .eq('organization_id', organizationId)
       .eq('name', preset.name)
-      .eq('is_personal', false)
+      .eq('tier', 'official')
+      .is('deleted_at', null)
       .maybeSingle();
 
     if (!existing) {
@@ -108,8 +111,8 @@ export async function installPresetAgents(
       continue;
     }
 
-    // 사람이 손댄 흔적이 있으면 그대로 둔다. 기관 사정에 맞춰 고쳐 둔 문구를
-    // 덮으면 되돌릴 방법이 없다.
+    // 사람이 손댄 흔적이 있으면 그대로 둔다. save_agent는 사람의 저장에서
+    // updated_by를 채우고 기본 비서 갱신(actor NULL)에서는 비워 둔다.
     if (existing.updated_by) {
       preserved.push(preset.name);
       skipped += 1;
@@ -117,21 +120,24 @@ export async function installPresetAgents(
     }
 
     // 갱신 대상은 프리셋이 정의하는 것들뿐이다. 노출 여부·공개 범위·정렬처럼
-    // 운영자가 조정하는 값은 건드리지 않는다.
-    const { error: updateError } = await supabaseAdmin
-      .from('agents')
-      .update({
+    // 운영자가 조정하는 값은 건드리지 않는다. 판으로 남긴다.
+    const saved = await saveAgentSettings(
+      existing.id,
+      existing.version,
+      {
         description: preset.description,
         system_prompt: preset.systemPrompt,
         icon: preset.icon,
         color: preset.color,
         category: preset.category,
-        enabled_connectors: preset.connectors ?? [],
-      })
-      .eq('id', existing.id);
+        capabilities: presetCapabilities(preset),
+      },
+      null,
+      'preset_update'
+    );
 
-    if (updateError) {
-      console.warn('[install-presets] 비서 갱신 실패', preset.name, updateError.message);
+    if (!saved.ok) {
+      console.warn('[install-presets] 비서 갱신 실패', preset.name, saved.reason);
       skipped += 1;
     } else {
       updated += 1;
@@ -141,9 +147,17 @@ export async function installPresetAgents(
   return { installed, skipped, categories, updated, preserved };
 }
 
+/** 기본 비서의 능력. 사진 읽기는 모든 대화형 비서에 켠다. */
+export function presetCapabilities(preset: AgentPreset): CapabilitySettings {
+  return preset.connectors?.length
+    ? { image: {}, public_data: { connectors: preset.connectors } }
+    : { image: {} };
+}
+
 function buildRow(preset: AgentPreset, departmentId: string, order: number) {
   return {
     department_id: departmentId,
+    tier: 'official',
     name: preset.name,
     description: preset.description,
     system_prompt: preset.systemPrompt,
@@ -159,8 +173,7 @@ function buildRow(preset: AgentPreset, departmentId: string, order: number) {
     color: preset.color,
     display_order: order,
     agent_type: 'chat',
-    is_personal: false,
     owner_id: null,
-    enabled_connectors: preset.connectors ?? [],
+    capabilities: presetCapabilities(preset),
   };
 }

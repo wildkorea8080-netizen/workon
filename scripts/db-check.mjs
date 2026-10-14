@@ -31,6 +31,10 @@ const checks = [
   ['0020', '기관 브랜딩 컬럼',            () => db.from('organizations').select('slug, ai_notice, logo_url').limit(1)],
   ['0021', 'organizations.allowed_models', () => db.from('organizations').select('allowed_models').limit(1)],
   ['0021', 'model_policy_logs 테이블',   () => db.from('model_policy_logs').select('id').limit(1)],
+  ['0026', 'agents 단계·판 칸',          () => db.from('agents').select('tier, model_id, capabilities, version, deleted_at').limit(1)],
+  ['0026', 'agent_history 테이블',       () => db.from('agent_history').select('id, kind, version').limit(1)],
+  ['0026', 'agent_templates 테이블',     () => db.from('agent_templates').select('id, retired_at').limit(1)],
+  ['0026', 'messages.agent_version',     () => db.from('messages').select('agent_version').limit(1)],
 ];
 
 console.log('=== 컬럼 점검 ===');
@@ -193,6 +197,45 @@ console.log('\n=== 비서 카탈로그 ===');
     console.log(`${noIcon.length ? '참고' : 'OK  '}  아이콘 없음 ${noIcon.length}개${noIcon.length ? ` — ${noIcon.map((a) => a.name).join(', ')}` : ''}`);
     console.log(`${brokenLinks.length ? '주의' : 'OK  '}  링크형 ${links.length}개, 주소 없는 것 ${brokenLinks.length}개`);
     if (brokenLinks.length) ok = false;
+  }
+}
+
+// ── 비서 단계와 판 (0026) ───────────────────────────────────
+// 판 기록이 빠지면 되돌리기와 감사 대응("그때 어떤 지시문이었나")이 조용히
+// 불가능해진다. 트리거는 PostgREST로 못 보므로 증상을 본다.
+console.log('\n=== 비서 단계와 판 ===');
+{
+  const { data: agents, error } = await db
+    .from('agents')
+    .select('id, name, tier, is_personal, visibility, version, capabilities, model_id')
+    .is('deleted_at', null);
+  const { data: history, error: hError } = await db
+    .from('agent_history')
+    .select('agent_id, version')
+    .not('version', 'is', null);
+
+  if (error || hError) {
+    console.log(`      조회 실패: ${(error ?? hError).message.slice(0, 60)}`);
+    ok = false;
+  } else {
+    const versions = new Set(history.map((h) => `${h.agent_id}:${h.version}`));
+    const noCurrent = agents.filter((a) => !versions.has(`${a.id}:${a.version}`));
+    const mismatch = agents.filter((a) => (a.tier === 'personal') !== Boolean(a.is_personal));
+    const badDept = agents.filter((a) => a.tier === 'department' && a.visibility !== 'department');
+    const KNOWN_CAPS = ['doc_search', 'public_data', 'image'];
+    const badCaps = agents.filter((a) => Object.keys(a.capabilities ?? {}).some((k) => !KNOWN_CAPS.includes(k)));
+    const tally = agents.reduce((m, a) => ({ ...m, [a.tier]: (m[a.tier] ?? 0) + 1 }), {});
+
+    console.log(`OK    단계별 ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' / ')}`);
+    for (const [label, rows] of [
+      ['현재 판 기록 없음', noCurrent],
+      ['tier와 is_personal 불일치 (0027 전까지)', mismatch],
+      ['부서 비서인데 공개 범위가 부서가 아님', badDept],
+      ['모르는 능력 id', badCaps],
+    ]) {
+      if (rows.length) ok = false;
+      console.log(`${rows.length ? '주의' : 'OK  '}  ${label} ${rows.length}개${rows.length ? ` — ${rows.slice(0, 5).map((a) => a.name).join(', ')}` : ''}`);
+    }
   }
 }
 
