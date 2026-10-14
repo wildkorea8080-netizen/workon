@@ -8,6 +8,15 @@ import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
 
+/**
+ * 호출한 쪽이 소유하는 누적 사용량. 루프가 도중에 던져도 이미 쓴 토큰이
+ * 남도록 루프가 제자리에서 갱신한다 — 쓴 만큼 기록되지 않으면 조용한 과금 누락이다.
+ */
+export interface LoopProgress {
+  usage: LlmUsage;
+  capabilityUsage: LlmUsage[];
+}
+
 export interface LoopArgs {
   modelId: string;
   systemPrompt: string;
@@ -17,6 +26,7 @@ export interface LoopArgs {
   owners: Map<string, Capability>;
   ctx: TurnContext;
   maxRounds: number;
+  progress?: LoopProgress;
 }
 
 export interface LoopResult {
@@ -54,8 +64,9 @@ async function executeCall(
 
 export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<LoopResult> {
   const messages: LlmMessage[] = [...args.messages];
-  const usage: LlmUsage = { model: args.modelId, input_tokens: 0, output_tokens: 0 };
-  const capabilityUsage: LlmUsage[] = [];
+  const usage: LlmUsage = args.progress?.usage ?? { model: args.modelId, input_tokens: 0, output_tokens: 0 };
+  usage.model = args.modelId;
+  const capabilityUsage: LlmUsage[] = args.progress?.capabilityUsage ?? [];
   const links: ToolSource[] = [];
   const tools = args.tools.length > 0 ? args.tools : undefined;
   let text = '';
@@ -133,6 +144,27 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   return { text, usage, capabilityUsage, links: dedupeLinks(links) };
 }
 
+/** 이 턴의 사용량을 모델별로 한 행씩 기록한다. 토큰이 없으면 남기지 않는다 */
+async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Record<string, unknown>): Promise<void> {
+  for (const usage of mergeUsageByModel(usages)) {
+    if (usage.input_tokens + usage.output_tokens <= 0) continue;
+    await writeUsageLog({
+      departmentId: turn.ctx.departmentId,
+      userId: turn.ctx.userId,
+      action: 'chat_message',
+      resourceType: 'conversation',
+      resourceId: turn.conversationId,
+      details: buildUsageDetails(usage, {
+        agent_id: turn.ctx.agentId,
+        agent_version: turn.ctx.agentVersion,
+        chunks_retrieved: turn.chunks.length,
+        model_substituted: turn.modelSubstituted,
+        ...extra,
+      }),
+    });
+  }
+}
+
 /**
  * 한 턴을 흘려보낸다. 시작 뒤의 실패는 SSE error로 알린다.
  *
@@ -142,6 +174,10 @@ export async function streamTurn(turn: PreparedTurn, send: SendEvent): Promise<v
   // 대화 id와 출처를 먼저 보내 화면이 바로 반영하게 한다
   send({ event: 'meta', data: { conversation_id: turn.conversationId, chunks: turn.chunks } });
 
+  const progress: LoopProgress = {
+    usage: { model: turn.modelId, input_tokens: 0, output_tokens: 0 },
+    capabilityUsage: [],
+  };
   let result: LoopResult;
   try {
     result = await runToolLoop(
@@ -153,11 +189,14 @@ export async function streamTurn(turn: PreparedTurn, send: SendEvent): Promise<v
         owners: toolsFor(turn.capabilities, turn.ctx).owners,
         ctx: turn.ctx,
         maxRounds: MAX_TOOL_ROUNDS,
+        progress,
       },
       send
     );
   } catch (error) {
     console.error('[assistant] streaming error:', error);
+    // 이미 끝난 라운드와 능력이 쓴 토큰은 청구 대상이다. 던졌다고 지우면 기록이 빠진다.
+    await logChatUsage(turn, [progress.usage, ...progress.capabilityUsage], { aborted: true });
     send({ event: 'error', data: { message: error instanceof Error ? error.message : '응답 생성 중 오류가 발생했습니다.' } });
     return;
   }
@@ -180,21 +219,7 @@ export async function streamTurn(turn: PreparedTurn, send: SendEvent): Promise<v
   }
 
   // 모델이 다르면 단가가 다르므로 모델별로 한 행씩
-  for (const usage of mergeUsageByModel([result.usage, ...result.capabilityUsage])) {
-    await writeUsageLog({
-      departmentId: turn.ctx.departmentId,
-      userId: turn.ctx.userId,
-      action: 'chat_message',
-      resourceType: 'conversation',
-      resourceId: turn.conversationId,
-      details: buildUsageDetails(usage, {
-        agent_id: turn.ctx.agentId,
-        agent_version: turn.ctx.agentVersion,
-        chunks_retrieved: turn.chunks.length,
-        model_substituted: turn.modelSubstituted,
-      }),
-    });
-  }
+  await logChatUsage(turn, [result.usage, ...result.capabilityUsage], {});
 
   // 새 대화면 제목. 이 턴의 모델로 부른다 — 기본 모델이 기관 허용 목록에
   // 없을 수 있다. 쓴 토큰도 기록한다(예전에는 빠져 있었다).

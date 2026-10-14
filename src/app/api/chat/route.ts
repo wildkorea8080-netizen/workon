@@ -26,12 +26,28 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          await streamTurn(prepared.turn, (event) => controller.enqueue(encoder.encode(sse(event))));
+          // 연결이 끊기면 enqueue가 던진다. 삼켜야 저장·사용 기록까지 끝까지 간다.
+          const send = (event: TurnEvent) => {
+            try {
+              controller.enqueue(encoder.encode(sse(event)));
+            } catch {
+              // 클라이언트가 떠났다
+            }
+          };
+          await streamTurn(prepared.turn, send);
         } catch (error) {
           console.error('[chat] stream error:', error);
-          controller.enqueue(encoder.encode(sse({ event: 'error', data: { message: '응답 생성 중 오류가 발생했습니다.' } })));
+          try {
+            controller.enqueue(encoder.encode(sse({ event: 'error', data: { message: '응답 생성 중 오류가 발생했습니다.' } })));
+          } catch {
+            // 클라이언트가 떠났다
+          }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // 이미 닫혔다
+          }
         }
       },
     });

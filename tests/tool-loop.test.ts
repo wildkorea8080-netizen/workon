@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { setLlmAdapterForTests } from '@/lib/llm';
 import type { LlmAdapter, LlmRequest, LlmStreamEvent } from '@/lib/llm/types';
-import { runToolLoop, TOOL_LIMIT_NOTICE } from '@/lib/assistant/stream';
+import { runToolLoop, TOOL_LIMIT_NOTICE, type LoopProgress } from '@/lib/assistant/stream';
 import type { Capability, TurnContext } from '@/lib/capabilities/types';
 import type { TurnEvent } from '@/lib/assistant/types';
 
@@ -120,5 +120,37 @@ describe('도구 루프', () => {
     const adapter = scripted([[toolCall('t1'), done('tool_use')], [done('end_turn')]]);
     const { result } = await run(adapter, owners);
     expect(result.capabilityUsage).toEqual([{ model: 'claude-sonnet-4-6', input_tokens: 3, output_tokens: 4 }]);
+  });
+});
+
+describe('도구 루프 — 도중에 실패해도 쓴 토큰이 남는다', () => {
+  it('둘째 라운드가 던져도 첫 라운드 사용량이 progress에 남는다', async () => {
+    let call = 0;
+    setLlmAdapterForTests({
+      async *stream() {
+        call += 1;
+        if (call === 1) {
+          yield toolCall('t1');
+          yield done('tool_use', 10, 5);
+          return;
+        }
+        throw new Error('연결 오류');
+      },
+      async complete() {
+        throw new Error('쓰지 않음');
+      },
+    });
+    const progress: LoopProgress = {
+      usage: { model: 'claude-haiku-4-5', input_tokens: 0, output_tokens: 0 },
+      capabilityUsage: [],
+    };
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: 'r' }))]]);
+    await expect(
+      runToolLoop(
+        { modelId: 'claude-haiku-4-5', systemPrompt: 'S', messages: [{ role: 'user', content: 'q' }], tools, owners, ctx, maxRounds: 4, progress },
+        () => {}
+      )
+    ).rejects.toThrow('연결 오류');
+    expect(progress.usage).toEqual({ model: 'claude-haiku-4-5', input_tokens: 10, output_tokens: 5 });
   });
 });
