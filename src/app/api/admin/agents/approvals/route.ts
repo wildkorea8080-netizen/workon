@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getActorScope } from '@/lib/actor-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,12 +13,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const departmentId = session.user.departmentId;
-    if (!departmentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
+    const actor = await getActorScope(session);
+    if (!actor) {
+      return NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -27,14 +25,12 @@ export async function GET(request: NextRequest) {
       .from('agents')
       .select(`
         *,
-        owner:users!owner_id (
-          id,
-          email,
-          full_name
-        )
+        owner:users!owner_id ( id, email, full_name ),
+        requester:users!approval_requested_by ( id, email, full_name )
       `)
-      .eq('department_id', departmentId)
+      .in('department_id', actor.managedDepartmentIds)
       .eq('approval_status', status)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (error) {

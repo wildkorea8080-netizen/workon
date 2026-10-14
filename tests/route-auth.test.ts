@@ -50,6 +50,11 @@ const EMPLOYEE_ROUTES = new Set([
   '/agents',
   '/agents/[id]',
   '/agents/favorite',
+  '/agents/[id]/history',
+  '/agents/[id]/promote',
+  '/agents/[id]/revert',
+  '/agents/[id]/templates',
+  '/agents/[id]/templates/[templateId]',
   '/agents/personal',
   '/agents/personal/[id]',
   '/agents/personal/[id]/request-approval',
@@ -149,11 +154,13 @@ describe('API 라우트 권한', () => {
     }
   });
 
-  it('문서 삭제는 관리자만 할 수 있다', () => {
-    // 문서는 부서가 함께 쓰는 자산이다. 한 사람의 실수로 근거 자료가 사라지면
-    // 되돌릴 방법이 없다.
+  it('문서 삭제는 그 비서를 지울 수 있는 사람만', () => {
+    // 문서는 되돌리기 대상이 아니다. 예전에는 관리자만 지울 수 있었고, 부서
+    // 비서가 생기면서 '그 비서를 지울 수 있는 사람'으로 넓혔다 — 부서 비서는
+    // 처음 만든 사람과 관리자다. 직원 누구나로 넓어지면 안 된다.
     const del = handlers.find((h) => h.route === '/documents' && h.method === 'DELETE');
     expect(del, 'DELETE /documents').toBeDefined();
-    expect(ADMIN_CALL.test(del!.body)).toBe(true);
+    expect(del!.body).toContain('canDeleteAgent');
+    expect(del!.body).not.toContain('canEditAgent');
   });
 });

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerAuthSession, isAdminSession } from '@/lib/auth';
+import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
+import { getActorScope } from '@/lib/actor-scope';
+import { canDeleteAgent } from '@/lib/agent-permissions';
+import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -51,75 +54,66 @@ export async function DELETE(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '인증이 필요합니다.' } }, { status: 401 });
     }
 
-    // 문서는 관리자가 올려 부서가 함께 쓰는 자산이다. 직원이 지울 수 있으면
-    // 한 사람의 실수로 부서 전체가 근거 자료를 잃는다. 되돌릴 방법도 없다.
-    if (!isAdminSession(session)) {
-      return NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      );
-    }
-
-    const departmentId = session.user.departmentId;
-    if (!departmentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
+    const actor = await getActorScope(session);
+    if (!actor) {
+      return NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
     }
 
     const { documentId } = await request.json();
     if (!documentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: 'documentId가 필요합니다.' } },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: { message: 'documentId가 필요합니다.' } }, { status: 400 });
     }
 
-    // Verify the document belongs to this department before deleting
     const { data: doc } = await supabaseAdmin
       .from('documents')
-      .select('id, storage_path')
+      .select('id, storage_path, agent_id, department_id, file_name')
       .eq('id', documentId)
-      .eq('department_id', departmentId)
-      .single();
+      .maybeSingle();
 
     if (!doc) {
-      return NextResponse.json(
-        { ok: false, error: { message: '문서를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '문서를 찾을 수 없습니다.' } }, { status: 404 });
     }
 
-    // Delete storage file
-    if (doc.storage_path) {
-      await supabaseAdmin.storage.from('documents').remove([doc.storage_path]);
+    // 문서는 되돌리기 대상이 아니다(결정 3). 되돌릴 수 없는 것은 좁게 연다 —
+    // 그 비서를 지울 수 있는 사람만 문서도 지운다(결정 4의 원칙).
+    // 비서에 걸리지 않은 문서는 그 부서를 관리하는 관리자만.
+    let allowed = false;
+    if (doc.agent_id) {
+      const agent = await loadAgentAccess(doc.agent_id);
+      allowed = Boolean(agent) && canDeleteAgent(agent!, actor);
+    } else {
+      allowed = actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id);
+    }
+    if (!allowed) {
+      return NextResponse.json({ ok: false, error: { message: '이 문서를 지울 권한이 없습니다.' } }, { status: 403 });
     }
 
-    const { error } = await supabaseAdmin
-      .from('documents')
-      .delete()
-      .eq('id', documentId)
-      .eq('department_id', departmentId);
-
+    const { error } = await supabaseAdmin.from('documents').delete().eq('id', documentId);
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '문서 삭제 실패', details: error } },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '문서 삭제 실패', details: error } }, { status: 500 });
+    }
+
+    // 여러 비서에 한 번에 올린 문서는 저장소 파일 하나를 함께 쓴다.
+    // 다른 행이 남아 있으면 파일을 지우지 않는다.
+    if (doc.storage_path) {
+      const { count } = await supabaseAdmin
+        .from('documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('storage_path', doc.storage_path);
+      if ((count ?? 0) === 0) {
+        await supabaseAdmin.storage.from('documents').remove([doc.storage_path]);
+      }
+    }
+
+    if (doc.agent_id) {
+      await recordAgentEvent(doc.agent_id, 'document_removed', actor.userId, { file_name: doc.file_name });
     }
 
     return NextResponse.json({ ok: true, data: { deleted: true } });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: { message: '서버 오류가 발생했습니다.' } }, { status: 500 });
   }
 }

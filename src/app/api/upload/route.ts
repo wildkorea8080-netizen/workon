@@ -12,6 +12,9 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSecurityEvent } from '@/lib/filter';
 import type { ApiResponse } from '@/lib/db';
+import { getActorScope } from '@/lib/actor-scope';
+import { canEditAgent } from '@/lib/agent-permissions';
+import { loadAgentAccess, recordAgentEvent, enableAgentCapability } from '@/lib/agent-store';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 
@@ -59,20 +62,20 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  // 권한 체크는 첫 번째 agentId 기준
-  const agentId = agentIds[0];
-
-  // 관리자이거나, 본인 소유의 개인 비서인 경우에만 허용
-  if (session.user.role !== 'ADMIN') {
-    const { data: agent } = await supabaseAdmin
-      .from('agents')
-      .select('is_personal, owner_id')
-      .eq('id', agentId)
-      .maybeSingle();
-
-    if (!agent?.is_personal || agent.owner_id !== session.user.id) {
+  // 고른 비서 전부를 검사한다. 예전에는 첫 번째만 검사해, 내 비서를 앞에
+  // 두고 남의 비서를 뒤에 붙이면 권한 없이 문서가 붙었다.
+  const actor = await getActorScope(session);
+  if (!actor) {
+    return NextResponse.json<ApiResponse<null>>(
+      { ok: false, error: { message: '소속 부서가 지정되지 않았습니다.' } },
+      { status: 403 }
+    );
+  }
+  for (const id of agentIds) {
+    const target = await loadAgentAccess(id);
+    if (!target || !canEditAgent(target, actor)) {
       return NextResponse.json<ApiResponse<null>>(
-        { ok: false, error: { message: '권한이 없습니다.' } },
+        { ok: false, error: { message: '문서를 붙일 권한이 없는 비서가 포함돼 있습니다.' } },
         { status: 403 }
       );
     }
@@ -276,6 +279,13 @@ export async function POST(request: Request) {
       { ok: false, error: { message: `문서 레코드 저장 실패: ${insertError?.message ?? '알 수 없는 오류'}` } },
       { status: 500 }
     );
+  }
+
+  // 비서 타임라인에 남기고, 문서 찾기를 켠다. 지금은 문서만 올리면 바로
+  // 검색되므로 같은 동작을 지킨다 — 켜는 일도 판에 남는다.
+  for (const id of agentIds) {
+    await recordAgentEvent(id, 'document_added', session.user.id, { file_name: file.name });
+    await enableAgentCapability(id, 'doc_search', session.user.id);
   }
 
   // 스캔 판독에 쓴 토큰을 기록한다. model 없이 토큰만 남기면 나중에 모델을

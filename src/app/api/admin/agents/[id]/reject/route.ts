@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getActorScope } from '@/lib/actor-scope';
+import { canApproveOfficial } from '@/lib/agent-permissions';
+import { loadAgentAccess } from '@/lib/agent-store';
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -12,12 +15,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       );
     }
 
-    const departmentId = session.user.departmentId;
-    if (!departmentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
+    const actor = await getActorScope(session);
+    if (!actor) {
+      return NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
     }
 
     const body = await request.json();
@@ -30,32 +30,29 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       );
     }
 
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('agents')
-      .select('id, approval_status')
-      .eq('id', params.id)
-      .eq('department_id', departmentId)
-      .maybeSingle();
-
-    if (fetchError || !existing) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at) {
+      return NextResponse.json({ ok: false, error: { message: '비서를 찾을 수 없습니다.' } }, { status: 404 });
     }
 
-    if (existing.approval_status !== 'pending') {
+    // 반려도 승인과 같은 사람이 한다 — 부서 범위로 판정한다
+    if (!canApproveOfficial(agent, actor, 'department')) {
+      return NextResponse.json({ ok: false, error: { message: '이 부서의 비서를 반려할 권한이 없습니다.' } }, { status: 403 });
+    }
+
+    if (agent.approval_status !== 'pending') {
       return NextResponse.json(
         { ok: false, error: { message: '승인 대기 상태인 비서만 반려할 수 있습니다.' } },
         { status: 409 }
       );
     }
 
-    const { data: agent, error } = await supabaseAdmin
+    const { data: rejected, error } = await supabaseAdmin
       .from('agents')
       .update({
         approval_status: 'rejected',
         approval_note: note.trim(),
+        approval_version: null,
         updated_by: session.user.id,
       })
       .eq('id', params.id)
@@ -69,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       );
     }
 
-    return NextResponse.json({ ok: true, data: agent });
+    return NextResponse.json({ ok: true, data: rejected });
   } catch (error) {
     console.error('[admin reject POST]', error);
     return NextResponse.json(
