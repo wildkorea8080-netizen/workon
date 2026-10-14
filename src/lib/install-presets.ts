@@ -99,7 +99,7 @@ export async function installPresetAgents(
 
     const { data: existing } = await supabaseAdmin
       .from('agents')
-      .select('id, updated_by, version')
+      .select('id, updated_by, version, capabilities')
       .eq('organization_id', organizationId)
       .eq('name', preset.name)
       .eq('tier', 'official')
@@ -130,7 +130,7 @@ export async function installPresetAgents(
         icon: preset.icon,
         color: preset.color,
         category: preset.category,
-        capabilities: presetCapabilities(preset),
+        capabilities: mergePresetCapabilities(existing.capabilities, preset),
       },
       null,
       'preset_update'
@@ -152,6 +152,21 @@ export function presetCapabilities(preset: AgentPreset): CapabilitySettings {
   return preset.connectors?.length
     ? { image: {}, public_data: { connectors: preset.connectors } }
     : { image: {} };
+}
+
+/**
+ * 갱신할 때의 능력. 프리셋이 정하는 사진 읽기·공공데이터만 맞추고 나머지는 둔다.
+ * 0026이 문서가 붙은 기본 비서에 켜 둔 문서 찾기를 통째 교체로 지우면 안 된다.
+ */
+export function mergePresetCapabilities(existing: unknown, preset: AgentPreset): CapabilitySettings {
+  const base: Record<string, unknown> =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? { ...(existing as Record<string, unknown>) }
+      : {};
+  base.image = {};
+  if (preset.connectors?.length) base.public_data = { connectors: preset.connectors };
+  else delete base.public_data;
+  return base as CapabilitySettings;
 }
 
 function buildRow(preset: AgentPreset, departmentId: string, order: number) {

@@ -413,15 +413,18 @@ export default function AgentsManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (res.status === 409) {
-        setError('다른 분이 먼저 고쳤습니다. 목록을 새로고침한 뒤 다시 고쳐 주세요.');
-        // 낡은 판으로 다시 저장하면 같은 거절이 반복된다. 편집을 닫고 새 목록에서 다시 연다.
-        setEditingAgent(null);
-        await loadOfficialAgents();
-        return;
-      }
       const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message);
+      if (!result.ok) {
+        // 409는 판 충돌 말고도 온다(같은 이름 등). 사유가 판 충돌일 때만 편집을 닫는다.
+        if (result.error?.details?.reason === 'conflict') {
+          setError('다른 분이 먼저 고쳤습니다. 목록을 새로고침한 뒤 다시 고쳐 주세요.');
+          // 낡은 판으로 다시 저장하면 같은 거절이 반복된다. 편집을 닫고 새 목록에서 다시 연다.
+          setEditingAgent(null);
+          await loadOfficialAgents();
+          return;
+        }
+        throw new Error(result.error?.message);
+      }
       setAgents(prev => prev.map(a => a.id === editingAgent.id ? result.data : a));
       setEditingAgent(null);
     } catch (err) {
@@ -566,7 +569,8 @@ export default function AgentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setPendingAgents(prev => prev.filter(a => a.id !== approveModal.id));
       setPendingCount(n => Math.max(0, n - 1));
-      setAgents(prev => [result.data, ...prev]);
+      // 승인 응답은 {id, tier, visibility}뿐이라 행으로 쓸 수 없다. 목록을 다시 읽는다.
+      await loadOfficialAgents();
       setApproveModal(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : '승인 처리 실패');
