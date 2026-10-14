@@ -384,3 +384,8 @@ NODA가 운영 주소(`https://api.readlayer.kr`)와 MCP 도구 8개를 내놓�
 - 문서를 빼도 파싱 캐시가 남는다 → 정의서 10.2의 NODA 쪽 작업으로 남는다
 - `noda_read_file`은 보관하지 않으므로 S2·S3에서 바로 쓸 수 있다
 - 키는 `.env.local`에만 두고 `config.ts`를 거쳐 읽는다. 채팅·저장소·`.env.example`에 남기지 않는다
+- **붙이는 길은 HTTP API**(`docs/api.md`). NODA 연동 안내(`docs/integrations.md`)의 네 길 중 '제 코드에서 HTTP로'에 해당한다. MCP SDK를 들이지 않고 `fetch`로 부르는 이 저장소의 관례와 맞고, 결과의 꼴은 MCP 도구와 같다. 파일은 MCP의 base64(약 1.33배)보다 `/documents/upload`가 낫다
+- 동시 파싱이 차면 **503 + `Retry-After`** — 기다렸다 다시 부른다. 스캔 문서는 수십 초가 걸리므로 시간 제한은 5분. Vercel 함수 실행 시간 상한과 맞는지 S4에서 확인한다
+- 못 읽은 문서는 오류가 아니라 `access.readable=false`와 이유가 온다 — 화면에 그 이유를 보여 준다(설계 7.5)
+- OCR로 읽은 근거는 `extractors`에 `ocr`이 든다 — 지금 스캔 판독 안내처럼 "숫자·날짜는 원문 확인" 표시를 단다
+- 엔진이 잘못 읽은 값(제목·발신·수신·문서번호·목차·표)은 `POST /feedback`으로 알린다. 업무 판단 오류는 대상이 아니다
