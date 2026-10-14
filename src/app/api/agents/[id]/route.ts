@@ -47,20 +47,25 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     });
     if (split.error) return jsonError(split.error, 400);
 
-    // ── 운영 값 ──
-    if (Object.keys(split.operational).length > 0) {
+    // 검사는 전부 먼저 한다. 저장이 중간에 거절돼도 운영 값만 반영된 채
+    // 남으면 안 된다(예: 판 충돌 409인데 노출은 이미 켜진 상태).
+    const hasOperational = Object.keys(split.operational).length > 0;
+    if (hasOperational) {
       if (agent.tier !== 'official') {
         return jsonError('노출·공개 범위·유형은 공식 비서에서만 바꿀 수 있습니다.', 400);
       }
-      const { error } = await supabaseAdmin
-        .from('agents')
-        .update({ ...split.operational, updated_by: actor.userId })
-        .eq('id', params.id);
-      if (error) return jsonError('비서 설정 변경 중 오류가 발생했습니다.', 500);
+      // 기관 전체로 넓히는 일은 기관 전체를 관리하는 관리자만 (canEditAgent와 같은 기준)
+      if (
+        split.operational.visibility === 'organization' &&
+        agent.visibility !== 'organization' &&
+        !(actor.isAdmin && actor.managesWholeOrganization)
+      ) {
+        return jsonError('기관 전체 공개는 기관 전체를 관리하는 관리자만 정할 수 있습니다.', 403);
+      }
     }
 
-    // ── 판 설정 ──
     const changed = changedSettingKeys(currentRow, split.settings);
+    let baseVersion = 0;
     if (changed.length > 0) {
       const modelError = await validateModelForOrganization(split.settings.model_id, actor.organizationId);
       if (modelError) return jsonError(modelError, 400);
@@ -71,11 +76,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       // 나만의 비서는 고치는 사람이 본인뿐이라 판 번호를 생략할 수 있다.
       // 부서·공식 비서는 함께 고치므로 반드시 받는다.
       const rawBase = body.base_version;
-      let baseVersion: number;
       if (typeof rawBase === 'number') baseVersion = rawBase;
       else if (agent.tier === 'personal') baseVersion = agent.version;
       else return jsonError('base_version이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.', 400);
+    }
 
+    // ── 판 설정 (충돌할 수 있는 유일한 단계라 운영 값보다 먼저) ──
+    if (changed.length > 0) {
       const onlyChanged = Object.fromEntries(
         changed.map((key) => [key, split.settings[key as keyof typeof split.settings]])
       );
@@ -84,6 +91,15 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         const failure = saveFailureResponse(saved);
         return jsonError(failure.message, failure.status, failure.details);
       }
+    }
+
+    // ── 운영 값 ──
+    if (hasOperational) {
+      const { error } = await supabaseAdmin
+        .from('agents')
+        .update({ ...split.operational, updated_by: actor.userId })
+        .eq('id', params.id);
+      if (error) return jsonError('비서 설정 변경 중 오류가 발생했습니다.', 500);
     }
 
     const { data: agentRow } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();

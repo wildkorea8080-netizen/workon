@@ -208,23 +208,30 @@ export async function POST(request: NextRequest) {
     const actor = await getActorScope(session);
     if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
 
+    // 기본은 기관 전체 공개. 규정·매뉴얼 대부분이 전 직원 공통이다.
+    const visibility = split.operational.visibility === 'department' ? 'department' : 'organization';
+    // 기관 전체 공개 공식 비서는 기관 전체를 관리하는 관리자만 만든다.
+    // 부서 단위 관리자는 visibility를 'department'로 보내야 한다.
+    if (visibility === 'organization' && !(actor.isAdmin && actor.managesWholeOrganization)) {
+      return jsonError('기관 전체 공개는 기관 전체를 관리하는 관리자만 정할 수 있습니다.', 403);
+    }
+
     const modelError = await validateModelForOrganization(split.settings.model_id, actor.organizationId);
     if (modelError) return jsonError(modelError, 400);
 
     const { data: agent, error } = await supabaseAdmin
       .from('agents')
       .insert({
-        department_id: departmentId,
+        department_id: actor.departmentId,
         tier: 'official',
         ...split.settings,
         // 사진 읽기는 기본으로 켠다. 지금 모든 대화형 비서가 사진을 받는다.
         capabilities: split.settings.capabilities ?? { image: {} },
         created_by: session.user.id,
         updated_by: session.user.id,
-        // 기본은 기관 전체 공개. 규정·매뉴얼 대부분이 전 직원 공통이다.
-        visibility: split.operational.visibility === 'department' ? 'department' : 'organization',
         // 새 비서는 '노출 대기중'에서 시작한다(0019 기본값 false).
         ...split.operational,
+        visibility,
       })
       .select()
       .single();
@@ -244,7 +251,7 @@ export async function POST(request: NextRequest) {
 
     // 사용 로그 기록
     await supabaseAdmin.from('usage_logs').insert({
-      department_id: departmentId,
+      department_id: actor.departmentId,
       user_id: session!.user.id,
       action: 'create_agent',
       resource_type: 'agent',
