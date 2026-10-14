@@ -88,6 +88,7 @@ src/
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
+| `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·옛 칸 맞춤 (트랜잭션 + ROLLBACK) | 예 |
 
 `db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
 볼 수 없으므로, 예컨대 "부서에는 기관이 있는데 로그만 NULL"인 상태를 트리거
@@ -147,6 +148,7 @@ src/
 | 0015 | `department_ancestors` RPC + `search_document_chunks` 상위 부서 확장 |
 | 0016 | `agents`·`documents`에 `visibility` + `organization_id` (기관 전체 공개가 기본) |
 | 0017 | `contracts.billing_type` 연간 정액 계약 + `organization_spend_krw` RPC |
+| 0026 | 비서 단계(`tier`) · 판 기록(`agent_history`, `save_agent`) · 능력(`capabilities`) · 양식(`agent_templates`) · `messages.agent_version` |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -584,6 +586,23 @@ MAIL_FROM=
 
 **0016 마이그레이션은 기존 행을 `department`로 백필합니다.** 기본값을 그대로
 적용하면 부서 전용이던 자료가 갑자기 기관 전체에 공개되기 때문입니다.
+
+### 비서 단계와 판 (0026, S1)
+
+권한의 근거는 `agents.tier`(`personal`·`department`·`official`)와 `visibility`다.
+판정은 `src/lib/agent-permissions.ts` 한 곳에서만 한다 — 비서를 바꾸는 라우트는
+전부 이 모듈을 거치고 `tests/agent-route-permissions.test.ts`가 원본으로 확인한다.
+
+설정 저장은 **반드시 `saveAgentSettings`(`save_agent` RPC)로** 한다. 판 번호를
+올리고 판 사본을 `agent_history`에 남긴다. `agents`를 직접 update하면 판이
+남지 않아 되돌리기와 감사 대응이 조용히 깨진다. 직접 update해도 되는 것은
+운영 값(`is_published`·`display_order`·`visibility`·`is_active`·`agent_type`·`link_url`)뿐이다.
+
+비서 **지우기는 숨김**(`deleted_at`)이다. 대화와 판 기록이 비서를 가리키기 때문이다.
+목록 쿼리에 `.is('deleted_at', null)`을 빠뜨리지 말 것.
+
+`is_personal`·`enabled_connectors`는 0027에서 사라진다. 그때까지 트리거가 새 칸과 맞춘다.
+새 코드는 이 두 칸을 읽거나 쓰지 않는다.
 
 ### 비서 카탈로그 — 표시와 권한을 섞지 말 것
 
