@@ -21,6 +21,7 @@
 | 빈 값 | 「안 정함」은 `NULL`. 빈 배열·빈 문자열을 저장하지 않는다 | `allowed_models`·`allowed_ips` |
 | 실패 방향 | 권한·범위는 **닫는다**, 과금 집계는 **연다** | CLAUDE.md |
 | 테스트 | 동작보다 **「조용히 틀리지 않는가」**. 순수 함수 + 소스 전수 검사 | 이 프로젝트의 버그 전부가 조용한 종류 |
+| 임베딩 | **Voyage에 새 의존을 만들지 않는다.** 임베딩·검색이 필요한 새 기능은 NODA(`/context`·`/search`)를 쓰거나 B1 뒤로 미룬다 | 2026-10-14 결정 |
 | 마이그레이션 | 코드보다 **먼저** 적용. 새 컬럼을 select 하는 화면이 깨진다 | 0013·0023·0024 |
 
 ---
@@ -33,7 +34,8 @@
 
 **「AI에 쓰이기 전」의 뜻을 정확히 둔다**: 승인 전 문서는 **검색에 안 걸리고, 파싱·임베딩도 하지 않는다.**
 지금 파싱은 Voyage(미국)로 본문을 보내므로, 결재 전에 파싱하면 "승인 전에 이미 나갔다"가 된다.
-NODA가 붙어도 같은 자리다 — 승인 → NODA 업로드.
+Voyage는 B1에서 걷어낸다(사용 안 함 결정). 그 뒤로는 NODA 업로드가 이 자리다 — 승인 → NODA 업로드.
+**그래서 승인 라우트는 `ingestDocument()` 하나만 부르게 짓는다.** B1이 그 함수 안만 바꾸면 결재 코드는 손대지 않는다.
 
 ### 역할
 | 역할 | 할 수 있는 것 |
@@ -74,7 +76,8 @@ RPC에 넣는 이유: 애플리케이션 코드가 빠뜨려도 새지 않는다
   기관 upload_approval_required = false → 지금과 같다 (파싱·임베딩·approved)
   = true  → Storage 저장만 · approval_status='pending' · metadata={} · 결재자에게 알림
 승인 (POST /api/admin/documents/[id]/approve)
-  → processDocumentFile() 실행(파싱·임베딩) → metadata·summary 갱신 → 'approved' · approved_by/at
+  → ingestDocument(doc) 실행 → 'approved' · approved_by/at
+     (B1 전: 지금의 processDocumentFile — 파싱·임베딩 / B1 뒤: NODA /documents/upload + ACL 재생성)
   → 처리 실패 시 'pending' 유지 + approval_note에 까닭 (조용히 approved로 두지 않는다)
 반려 (POST /api/admin/documents/[id]/reject { note })
   → 'rejected' · note 필수(5자 이상 — 질문 열람 사유와 같은 규칙) · Storage 파일은 보관(감사)
@@ -106,7 +109,8 @@ RPC에 넣는 이유: 애플리케이션 코드가 빠뜨려도 새지 않는다
 
 ### 테스트 (`tests/document-approval.test.ts`)
 - 0026 SQL에 두 RPC 모두 `approval_status = 'approved'` 줄이 있다 (소스)
-- `/api/upload`가 플래그를 읽고 `pending`일 때 `processDocumentFile`을 **부르지 않는다** (소스: 분기 안에 호출이 없음)
+- `/api/upload`가 플래그를 읽고 `pending`일 때 `ingestDocument`를 **부르지 않는다** (소스: 분기 안에 호출이 없음)
+- 승인 라우트가 `ingestDocument` 말고 처리 함수(`processDocumentFile`·`getEmbeddings`·NODA 클라이언트)를 직접 부르지 않는다 — B1 교체 지점을 하나로 지킨다
 - approve·reject 라우트에 `isAdminSession` + `getManagedDepartmentIds` (`route-auth`가 자동으로도 봄)
 - reject의 `note` 5자 미만 거부
 - 결재자 결정 함수(`resolveApprovers`)는 순수 함수로 두고 ①②③ 순서를 고정
@@ -300,4 +304,4 @@ A5 ──────── 언제든
 B2·B3 ───── NODA B1 뒤
 ```
 
-마이그레이션 번호: 0026(결재 + guide_url) · 0027(라우팅) · 0028(워크플로우). 각각 **코드보다 먼저** 적용.
+마이그레이션 번호: 0026(결재 + guide_url) · 0027(라우팅) · 0028(워크플로우) · 0029(NODA 연결, B1). 각각 **코드보다 먼저** 적용.

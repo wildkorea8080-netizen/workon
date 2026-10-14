@@ -77,7 +77,7 @@ NODA `docs/rag.md`의 세 길:
 
 | 길 | 뜻 | 판단 |
 |---|---|---|
-| ① `/chunk` → 우리 pgvector·Voyage | 파싱만 바꿈. 검색·격리는 우리 것 그대로 | 안전하지만 `/verify`·`/view`를 못 씀(보관함이 없으면 근거 대조 불가) |
+| ① `/chunk` → 우리 pgvector | 파싱만 바꿈. 검색·격리는 우리 것 그대로 | `/verify`·`/view`를 못 씀. 게다가 **Voyage를 안 쓰기로 해** 임베딩을 따로 구해야 하므로 더 불리 |
 | **② `/documents/upload` → `/context` → `/verify`** | NODA가 보관·검색·검증 | **채택.** 1절의 둘을 바로 얻고 2절의 흐름이 됨 |
 | ③ `/answer llm:true` | NODA 게이트웨이가 LLM까지 | 제외. LLM·모델 정책·한도·감사는 WORKON의 것 |
 
@@ -128,9 +128,12 @@ WORKON 쪽 설계:
 | `src/lib/noda-acl.ts` (신규) | — | 기관의 문서·비서 연결에서 `ACL.json`을 **순수 함수**로 생성. 깨진 ACL=전부 잠금이라 생성기를 테스트로 고정 |
 | `SourceCitation` | 문서명·청크 | 문서명·**쪽**·OCR 배지·`/view` 링크(PDF·그림일 때) |
 
-**기존 Voyage·pgvector 경로는 Phase 1 동안 남긴다** — `organizations.rag_engine`
-(`'native'` 기본 → `'noda'`)로 기관별 전환. 두 경로를 같은 질문으로 맞대어 본 뒤 뗀다.
-한 번에 바꾸면 틀어진 것이 어느 쪽 때문인지 알 수 없다.
+**Voyage AI는 쓰지 않는다** (2026-10-14 결정). 이중 운용 없이 **Phase 1에서 Voyage 경로를 걷어낸다.**
+임베딩·검색은 NODA(국내 `e5-small`)가 전담하고, 해외 하위 처리자가 Anthropic 하나로 줄어든다.
+
+- 전환 전까지 운영의 Voyage 코드는 그대로 돈다 — 지금 업로드가 전부 Voyage를 타므로 먼저 떼면 멈춘다. 새 작업은 얹지 않는다
+- 기존 문서는 Storage 원본을 NODA로 재적재한다(`scripts/migrate-to-noda.mjs` — 문서마다 업로드 → ACL 재생성 → `noda_doc_id` 기록). 끝나면 `metadata.chunks[].embedding`·`documents.embedding`을 정리
+- 「틀어진 게 어느 쪽 때문인지」는 맞대어 돌리는 대신 **Phase 0의 절대 기준**(분리 구간·쪽 정확도·`/verify`)으로 가린다
 
 ### 3.3 `/verify`를 어떻게 보여주나 — 이것이 Alli와 같아지는 자리
 
@@ -153,14 +156,17 @@ WORKON 쪽 설계:
 1. WORKON용 키 발급 — NODA `NODA_API_KEYS`에 `{"workon": "…"}`. `/usage`가 서비스별로 센다
 2. 시험 문서 10~20건 — `D:\coding\DOC`에 **실제 농식품부·농어촌공사 공문·PDF·HWP**가 있다.
    넣기 전에 NODA `tools/intake_scan.py`로 개인정보를 거른다(NODA `pilot.md`가 W341에서 비싸게 배운 것)
-3. 같은 질문 30건을 **두 경로**에 — 현재 Voyage(관련 0.41~0.49 / 무관 0.02~0.11)와 NODA `/context`.
-   보는 것: 관련/무관 분리 · **쪽 번호가 맞는가** · `truncated` 빈도 · p95 지연
+3. 같은 질문 30건을 NODA `/context`에 — **절대 기준으로** 잰다(Voyage와 맞대어 돌리지 않는다).
+   보는 것: 관련/무관 분리 · **쪽 번호가 맞는가** · `truncated` 빈도 · p95 지연.
+   8월 voyage-3 실측(관련 0.41~0.49 / 무관 0.02~0.11)은 참고 기준선으로만 둔다 — 점수 척도가 달라 숫자를 바로 견줄 수 없다
 4. `/verify` 재현 — 「2,000톤」 케이스를 그대로 넣어 `unsupported`에 '톤'이 잡히는지
 5. 3.1의 범위 좁히기 방법 결정 (`doc_ids` 필터 추가 여부)
 6. 업로드 지연 실측 — 스캔 10쪽이 몇 초인지. **Vercel 함수 시간 제한**과 맞댄다(5절)
-7. **비교 전에 `GET /health`로 뜻 벡터가 실제로 켜졌는지 본다.** NODA는 벡터가 기본 켜짐이지만
+7. **재기 전에 뜻 벡터가 실제로 켜졌는지 본다.** NODA는 벡터가 기본 켜짐이지만
    모델·토크나이저 환경변수 **셋을 다 줘야** 켜지고, 하나라도 빠지면 낱말 검색으로 돌면서
-   켜진 것처럼 보인다(NODA CLAUDE.md GD). 이걸 안 보면 Voyage와 맞댄 수치가 전부 헛것이다
+   켜진 것처럼 보인다(NODA CLAUDE.md GD). **Voyage를 빼면 이것이 유일한 뜻 검색**이라 더 중요해졌다.
+   그런데 **지금 `/health`에는 벡터 상태 칸이 없다**(2026-10-14 실측 — `ok·llm·tenants·endpoints·formats·max_upload·auth·consumers·limits`뿐).
+   NODA가 칸을 더하거나, 그 전에는 `/search` 결과의 `found_by`(`words`/뜻)로 확인한다
 8. `ACL.json` + `principal=agent-…`로 비서 범위가 실제로 닫히는지 — 다른 비서의 문서가 **한 조각도** 안 나오는지
 
 산출: `docs/NODA_PHASE0_RESULTS.md` — 수치만. 통과 기준: 분리 구간이 현재보다 나쁘지 않고
@@ -173,7 +179,9 @@ WORKON 쪽 설계:
 
 ### Phase 1 — NODA 연결 (2주)
 
-- `noda.ts` 클라이언트 + 0026 마이그레이션 + `rag_engine` 플래그
+- `noda.ts` 클라이언트 + 0029 마이그레이션 (0026~0028은 Track A가 쓴다)
+- **Voyage 경로 제거** — `embeddings.ts`·`rag.ts`·`document-processor.ts`의 임베딩·`/api/qna` 질의 임베딩·`config.ts` 필수 키
+- **기존 문서 재적재** — `scripts/migrate-to-noda.mjs`, 재실행해도 안전하게(이미 `noda_doc_id`가 있으면 건너뜀)
 - `/api/upload` → NODA. **비동기**로: 202 + 상태 폴링(또는 Vercel `maxDuration` 상향). 스캔은 수십 초라 동기로 두면 끊긴다
 - `/api/chat`·`/api/qna` → `/context`. 세 분기(찾음 / 문서 있는데 못 찾음 / 문서 없음)는 그대로 — `truncated`·`skipped`를 두 번째 분기의 근거로 쓴다
 - `/verify` → SSE `verify` 이벤트 → `source_references.verify` 저장
@@ -265,7 +273,7 @@ REA 설치는 터미널에서 에이전트 선택 대기 중이다. Claude Code�
 | 1 | ②길 채택 | **확정.** ADR-0047 그대로, `/verify`가 짝 |
 | 2 | 테넌트 = 기관 | **확정.** 테넌트 폴더 전체로 색인 |
 | 3 | 범위 = `principal` + `ACL.json` (`doc_ids` 아님) | **확정.** `doc_ids`는 ACL로 안 되는 사례가 실제로 나올 때 |
-| 4 | 기존 Voyage·pgvector 이중 운용 | **확정** (NODA와 무관한 WORKON 결정). 비교 전 `/health` 벡터 확인 필수 |
+| 4 | **Voyage AI 사용 안 함** — 이중 운용 없음, Phase 1에서 제거 | **확정** (2026-10-14, 사용자). 뜻 벡터 상태 확인 필수(`/health`에 칸 추가 요청) |
 | 5 | 업로드 비동기화 방식 | Phase 0 실측 뒤. 수십 초면 202+폴링 |
 | 6 | REA 분석 범위 | **설치형 앱만**, 코드 복제 없음. **대상 앱 약관의 역공학 금지 조항을 먼저 본다** |
 | 7 | NODA 호스팅 주체·CSAP | KISA 확인 뒤. 공공 납품 전 확정 |
