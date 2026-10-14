@@ -43,50 +43,31 @@ describe('배치 삽입 — 행마다 키가 같아야 한다', () => {
   });
 });
 
-describe('/api/chat의 메시지 삽입', () => {
+describe('대화 실행기의 메시지 삽입', () => {
   it('두 행이 같은 키를 갖는다', async () => {
-    // 소스를 읽어 형태를 확인한다. DB 없이 회귀를 막는 가장 싼 방법이다.
-    const { readFileSync } = await import('fs');
-    const src = readFileSync('src/app/api/chat/route.ts', 'utf8');
-
-    const start = src.indexOf(".from('messages').insert([");
-    expect(start, 'messages insert를 찾지 못했다').toBeGreaterThan(-1);
-
-    const block = src.slice(start, src.indexOf(']);', start));
-    const userRow = block.slice(0, block.indexOf("role: 'assistant'"));
-
-    // 사용자 행에도 source_references가 있어야 한다
-    expect(userRow).toContain('source_references');
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], agentVersion: 1,
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    expect(rows[0]).toHaveProperty('source_references');
   });
 
-  it('저장 실패를 사용자에게 알린다', async () => {
+  it('저장 실패를 화면에 알린다', async () => {
     const { readFileSync } = await import('fs');
-    const src = readFileSync('src/app/api/chat/route.ts', 'utf8');
-
-    const start = src.indexOf('if (msgError)');
+    const src = readFileSync('src/lib/assistant/stream.ts', 'utf8');
+    const start = src.indexOf('if (saveError)');
     expect(start).toBeGreaterThan(-1);
-
-    // console.error만 찍고 넘어가면 사용자는 대화가 사라진 이유를 알 수 없다
-    const block = src.slice(start, start + 500);
-    expect(block).toContain("send('error'");
+    expect(src.slice(start, start + 300)).toContain("event: 'error'");
   });
-});
 
-describe('자료 인용 규칙', () => {
   it('참고 자료를 붙일 때 인용 규칙도 함께 넣는다', async () => {
     // 프리셋마다 적지 않고 여기 한 곳에 두는 이유: 이 실패는 특정 비서의
-    // 문제가 아니라 문서를 근거로 답하는 모든 경로에서 생긴다. 직원이 만든
-    // 개인 비서에도 똑같이 필요하다.
-    const { readFileSync } = await import('fs');
-    const src = readFileSync('src/app/api/chat/route.ts', 'utf8');
-
-    const start = src.indexOf('if (contextText) {');
-    expect(start).toBeGreaterThan(-1);
-
-    const block = src.slice(start, src.indexOf('} else if (hasDocuments)', start));
-    expect(block).toContain('참고 자료:');
-    expect(block).toContain('자료 인용 규칙');
-    // 단위를 임의로 붙이지 말라는 지침이 핵심이다
-    expect(block).toContain('단위');
+    // 문제가 아니라 문서를 근거로 답하는 모든 경로에서 생긴다.
+    const { docSearchAddendum } = await import('@/lib/capabilities/doc-search');
+    const text = docSearchAddendum([{ documentId: 'd', chunkIndex: 0, text: 't', similarity: 0.5 }], true)!;
+    expect(text).toContain('참고 자료:');
+    expect(text).toContain('자료 인용 규칙');
+    expect(text).toContain('단위');
   });
 });

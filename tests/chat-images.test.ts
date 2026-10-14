@@ -9,6 +9,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_TOTAL_IMAGE_BYTES,
 } from '../src/lib/chat-images';
+import { buildUserContent, storedUserContent } from '../src/lib/assistant/prompt';
 
 /**
  * 첨부 이미지 검사.
@@ -105,30 +106,26 @@ describe('이력 표시', () => {
   });
 });
 
-describe('/api/chat 연결', () => {
-  const src = readFileSync('src/app/api/chat/route.ts', 'utf8');
+describe('대화 실행기 연결', () => {
+  const prepare = readFileSync('src/lib/assistant/prepare.ts', 'utf8');
 
   it('서버가 검사를 다시 한다', () => {
     // 화면 검사는 표시일 뿐이다. API를 직접 부르는 경로가 언제나 있다.
-    expect(src).toContain('validateChatImages(images)');
+    expect(prepare).toContain('validateChatImages(images)');
+  });
+
+  it('사진 읽기가 꺼진 비서는 사진을 거절한다', () => {
+    expect(prepare).toContain('acceptsImages');
   });
 
   it('이미지를 텍스트보다 앞에 둔다', () => {
-    // Anthropic 권장. 모델이 무엇을 보고 답할지 먼저 잡는다.
-    const start = src.indexOf('const userContent');
-    expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, src.indexOf('const claudeMessages', start));
-    expect(block.indexOf("type: 'image'")).toBeLessThan(block.indexOf("type: 'text'"));
+    const content = buildUserContent('질문', [{ media_type: 'image/png', data: 'AAAA' } as never]);
+    expect((content as { type: string }[]).map((b) => b.type)).toEqual(['image', 'text']);
   });
 
   it('이미지 바이트를 DB에 저장하지 않는다', () => {
-    // 이력에 실어 되돌려 보내면 매 턴 이미지 토큰이 다시 청구되고,
-    // 개인정보 보관 대상이 하나 는다.
-    const start = src.indexOf(".from('messages').insert([");
-    expect(start).toBeGreaterThan(-1);
-    const block = src.slice(start, src.indexOf(']);', start));
-    expect(block).toContain('imageAttachmentMarker');
-    expect(block).not.toContain('attachedImages.map');
+    expect(storedUserContent('질문', 1)).not.toContain('AAAA');
+    expect(storedUserContent('질문', 1)).toContain('1장');
   });
 });
 
