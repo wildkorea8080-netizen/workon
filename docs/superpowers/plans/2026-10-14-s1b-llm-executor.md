@@ -24,6 +24,11 @@
 - 외부 API는 SDK 없이 `fetch`로 부른다. 환경변수는 `config.ts` 경유
 - 커밋 메시지 끝: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 
+## S1-a에서 넘어온 것 (2026-10-15)
+
+- **`doc_search` 재동기화.** 0026 적용부터 S1-a 배포 사이에 옛 업로드 코드로 문서를 받은 비서는 `doc_search`가 켜지지 않았다. S1-b는 이 능력으로 검색을 거르므로, 배포 **전에** 마이그레이션 하나로 메운다: 문서가 있는데 `capabilities`에 `doc_search`가 없는 비서마다 `PERFORM enable_agent_capability(id, 'doc_search', NULL)`. 번호는 0027을 쓰고, S1-c의 옛 칸 정리는 0028로 미룬다
+- S1-a 최종 리뷰의 남은 경미 사항은 `.superpowers/sdd/2026-10-14-s1a-agent-data-permissions/progress.md`(브랜치 정리 전 사본: S1-a 최종 보고)에 있다
+
 ## 설계와 달라지는 점
 
 - **`ToolOutcome.files`는 S2에서 더한다.** S1의 능력 셋은 파일을 만들지 않는다. 지금 넣으면 아무도 채우지 않는 칸이 된다.
