@@ -143,7 +143,8 @@ console.log('\n=== 과금 기록 규약 (details.cost_krw) ===');
   const CONVENTION_FROM = '2026-08-01';
   // 토큰을 쓰는 활동만 본다. create_agent 같은 것은 cost_krw가 없는 게 정상이라
   // 함께 세면 거짓 경보가 나고, 그러면 진짜 누락이 묻힌다.
-  const TOKEN_ACTIONS = ['chat_message', 'qna_search', 'generate_report', 'document_ocr'];
+  // qna_search·generate_report는 S1-b에서 걷어낸 경로다. 과거 로그를 함께 보려고 남긴다.
+  const TOKEN_ACTIONS = ['chat_message', 'conversation_title', 'prompt_enhance', 'qna_search', 'generate_report', 'document_ocr'];
 
   const { data, error } = await db
     .from('usage_logs')

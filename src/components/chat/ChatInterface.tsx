@@ -72,9 +72,8 @@ export default function ChatInterface({
   onChangeAgent,
 }: ChatInterfaceProps) {
   const branding = useBranding();
-  // 기관이 허용한 모델(0021). 하나뿐이면 고를 것이 없으므로 화면에 내지 않는다.
+  // 기관이 허용한 모델(0021). 비서의 모델을 보여주는 데만 쓴다.
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -97,8 +96,6 @@ export default function ChatInterface({
         if (!r.ok) return;
         const list: ModelOption[] = r.data ?? [];
         setModels(list);
-        // 기본값은 목록의 첫 번째. 서버가 정책 순서대로 준다.
-        setSelectedModel((prev) => prev ?? list[0]?.id ?? null);
       })
       .catch(() => {});
   }, []);
@@ -241,8 +238,6 @@ export default function ChatInterface({
           message: userMsg.content || '이 이미지를 설명해주세요.',
           conversation_id: conversationId,
           images: images.length > 0 ? images : undefined,
-          // 허용되지 않은 값이면 서버가 정책에 맞는 모델로 바꿔 처리한다
-          model: selectedModel ?? undefined,
         }),
       });
 
@@ -615,24 +610,12 @@ export default function ChatInterface({
           </button>
         </div>
         <div className="flex items-center justify-center gap-3 mt-2 flex-wrap">
-          {/* 모델 선택 — 기관이 허용한 것이 둘 이상일 때만 낸다.
-              하나뿐인데 드롭다운을 보여주면 고를 수 있다는 오해만 준다. */}
-          {models.length > 1 && (
-            <label className="flex items-center gap-1.5 text-xs text-slate-400">
-              <span>모델</span>
-              <select
-                value={selectedModel ?? ''}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                title={models.find((m) => m.id === selectedModel)?.note}
-                className="px-2 py-1 border border-slate-200 rounded-lg bg-white text-slate-600 text-xs focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id} title={m.note}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {/* 비서의 모델(결정 2). 고를 수 없고 보여주기만 한다. 서버와 같은 규칙으로
+              정한다 — 기관 허용 목록에 없으면 목록의 첫 번째(기본 모델)로 돈다. */}
+          {models.length > 0 && selectedAgent && (
+            <span className="text-xs text-slate-400" title={(models.find((m) => m.id === selectedAgent.model_id) ?? models[0]).note}>
+              모델 {(models.find((m) => m.id === selectedAgent.model_id) ?? models[0]).label}
+            </span>
           )}
           <p className="text-xs text-slate-400">Enter로 전송 · Shift+Enter로 줄바꿈</p>
         </div>

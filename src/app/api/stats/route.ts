@@ -13,7 +13,7 @@ export async function GET(_request: NextRequest) {
     }
 
     // 부서 전체 집계는 관리자 화면(/admin/stats)이 쓴다. 직원용은
-    // /api/my/stats 와 /api/employee/stats 가 따로 있다.
+    // /api/my/stats 가 따로 있다.
     if (!isAdminSession(session)) {
       return NextResponse.json(
         { ok: false, error: { message: '관리자 권한이 필요합니다.' } },

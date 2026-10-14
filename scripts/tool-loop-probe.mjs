@@ -3,7 +3,7 @@
  *
  *   npm run tool:probe
  *
- * /api/chat 라우트 전체가 아니라 그 안의 루프 로직(streamClaudeAPI +
+ * /api/chat 라우트 전체가 아니라 그 안의 루프 로직(streamChat +
  * executeTool 왕복)만 떼어 확인합니다. DB·인증 없이 돌릴 수 있습니다.
  * ANTHROPIC_API_KEY가 필요합니다.
  */
@@ -32,7 +32,7 @@ for (const key of [
 const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
 if (!hasApiKey) process.env.ANTHROPIC_API_KEY = 'offline-parser-test';
 
-const { streamClaudeAPI } = await import('../src/lib/claude.ts');
+const { streamChat } = await import('../src/lib/llm/index.ts');
 const { availableTools, executeTool } = await import('../src/lib/connectors/index.ts');
 
 /**
@@ -76,7 +76,7 @@ async function runParserSelfTest() {
     const toolCalls = [];
     let done = null;
 
-    for await (const event of streamClaudeAPI([{ role: 'user', content: 'x' }], undefined, 100, tools)) {
+    for await (const event of streamChat({ model: MODEL, maxTokens: 100, messages: [{ role: 'user', content: 'x' }], tools })) {
       if (event.type === 'text') text += event.text;
       else if (event.type === 'tool_use') toolCalls.push(event);
       else done = event;
@@ -106,11 +106,14 @@ async function runParserSelfTest() {
 
 const MAX_ROUNDS = 4;
 
+// 도구는 MCP 형식 그대로 넘긴다. 업체 형식으로의 변환은 AI 연결부의 몫이다.
 const tools = availableTools().map((t) => ({
   name: t.name,
   description: t.description,
-  input_schema: t.inputSchema,
+  inputSchema: t.inputSchema,
 }));
+
+const MODEL = 'claude-sonnet-4-6';
 
 const question =
   process.argv[2] ??
@@ -144,7 +147,7 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
   let roundText = '';
   let stopReason = null;
 
-  for await (const event of streamClaudeAPI(messages, systemPrompt, 4096, tools)) {
+  for await (const event of streamChat({ model: MODEL, system: systemPrompt, maxTokens: 4096, messages, tools })) {
     if (event.type === 'text') {
       roundText += event.text;
       answer += event.text;
