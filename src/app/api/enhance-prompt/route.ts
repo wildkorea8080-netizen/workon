@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { callClaudeAPI } from '@/lib/claude';
+import { complete } from '@/lib/llm';
+import { getActorScope } from '@/lib/actor-scope';
+import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
+import { resolveModelForDepartment } from '@/lib/model-policy';
+import { buildUsageDetails, writeUsageLog } from '@/lib/assistant/persist';
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,6 +14,16 @@ export async function POST(request: NextRequest) {
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
       );
+    }
+
+    // 요술봉도 토큰을 쓴다. 예전에는 한도도 기록도 없어 예산 판정에서 빠졌다.
+    const actor = await getActorScope(session);
+    if (!actor) {
+      return NextResponse.json({ ok: false, error: { message: '소속 부서가 지정되지 않았습니다.' } }, { status: 403 });
+    }
+    const limitStatus = await checkTokenLimit(actor.departmentId, actor.userId);
+    if (!limitStatus.allowed) {
+      return NextResponse.json({ ok: false, error: { message: limitMessage(limitStatus) } }, { status: 429 });
     }
 
     const body = await request.json();
@@ -49,16 +63,22 @@ export async function POST(request: NextRequest) {
 
 원본: ${prompt.trim()}`;
 
-    const result = await callClaudeAPI(
-      [{ role: 'user', content: userMessage }],
-      undefined,
-      512
-    );
-
-    return NextResponse.json({
-      ok: true,
-      data: { enhancedPrompt: result.content.trim() },
+    const result = await complete({
+      model: await resolveModelForDepartment(actor.departmentId),
+      maxTokens: 512,
+      messages: [{ role: 'user', content: userMessage }],
     });
+
+    await writeUsageLog({
+      departmentId: actor.departmentId,
+      userId: actor.userId,
+      action: 'prompt_enhance',
+      resourceType: 'prompt',
+      resourceId: null,
+      details: buildUsageDetails(result.usage, { type }),
+    });
+
+    return NextResponse.json({ ok: true, data: { enhancedPrompt: result.text.trim() } });
   } catch (error) {
     console.error('[enhance-prompt] 오류:', error);
     return NextResponse.json(
