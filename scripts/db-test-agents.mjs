@@ -10,6 +10,7 @@
  * DATABASE_URL이 필요하다 (db:migrate와 같다).
  */
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 
 if (existsSync('.env.local')) {
   for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
@@ -232,6 +233,84 @@ try {
   );
   check('단계 변경은 기록되고 판 번호는 없다',
     tierChange.r.ok === true && tierRow?.version === null && tierRow?.detail?.to === 'department');
+
+  // ── 0027: 문서 있는 비서의 doc_search 재동기화 ──
+  // 마이그레이션 파일의 DO 블록을 그대로 읽어 실행한다 — 시험과 본문이 갈라지지 않게.
+  // (이 트랜잭션은 ROLLBACK되므로 실제 비서가 켜져도 남지 않는다.)
+  const sql0027 = readFileSync(join('supabase', 'migrations', '0027_resync_doc_search.sql'), 'utf8');
+  const doBlock = sql0027.match(/DO \$\$[\s\S]*?\$\$;/)?.[0];
+  check('0027 DO 블록을 파일에서 찾는다', !!doBlock);
+
+  // updated_by는 users만 가리키면 되므로 부서와 무관하게 아무 직원이나 쓴다(검사가 약해지지 않게)
+  const { rows: [owner] } = await client.query('SELECT id FROM users LIMIT 1');
+  if (!owner) console.log('참고  직원이 없어 updated_by를 NULL로 둠 (updated_by 검사가 약해짐)');
+  const addDoc = (agentId) => client.query(
+    `INSERT INTO documents (department_id, agent_id, storage_path, file_name)
+     VALUES ($1, $2, 'x', 'x.pdf')`, [dept.id, agentId]
+  );
+
+  // 1) 문서가 있고 doc_search가 없고 켜진 적 없는 비서 → 켜진다
+  const { rows: [resync] } = await client.query(
+    `INSERT INTO agents (department_id, name, tier, capabilities, updated_by)
+     VALUES ($1, $2, 'official', '{"image":{}}', $3) RETURNING id, version, updated_by`,
+    [dept.id, `${tag}-resync`, owner?.id ?? null]
+  );
+  await addDoc(resync.id);
+
+  // 2) 판 기록에 켜진 적이 있고 지금은 꺼진 비서 → 그대로 꺼져 있다
+  const { rows: [turnedOff] } = await client.query(
+    `INSERT INTO agents (department_id, name, tier, capabilities)
+     VALUES ($1, $2, 'official', '{"doc_search":{}}') RETURNING id, version`,
+    [dept.id, `${tag}-off`]
+  );
+  await client.query(
+    `SELECT save_agent($1, $2, '{"capabilities":{}}', NULL, 'settings')`, [turnedOff.id, turnedOff.version]
+  );
+  await addDoc(turnedOff.id);
+  const { rows: [offBefore] } = await client.query(
+    `SELECT version, capabilities FROM agents WHERE id = $1`, [turnedOff.id]
+  );
+
+  // 3) 지운 비서 → 건드리지 않는다
+  const { rows: [gone] } = await client.query(
+    `INSERT INTO agents (department_id, name, tier, capabilities)
+     VALUES ($1, $2, 'official', '{"image":{}}') RETURNING id, version`,
+    [dept.id, `${tag}-gone`]
+  );
+  await addDoc(gone.id);
+  await client.query(`UPDATE agents SET deleted_at = now() WHERE id = $1`, [gone.id]);
+
+  if (doBlock) await client.query(doBlock);
+
+  const { rows: [r1] } = await client.query(
+    `SELECT version, updated_by, capabilities FROM agents WHERE id = $1`, [resync.id]
+  );
+  check('0027: 켜진 적 없는 비서는 doc_search가 켜지고 판이 1 오른다',
+    'doc_search' in r1.capabilities && r1.version === resync.version + 1,
+    `version ${resync.version} → ${r1.version}`);
+  const { rows: [autoRow] } = await client.query(
+    `SELECT detail->>'reason' AS reason FROM agent_history WHERE agent_id = $1 AND version = $2`,
+    [resync.id, r1.version]
+  );
+  check('0027: 판 기록에 auto_enable이 남는다', autoRow?.reason === 'auto_enable');
+  check('0027: updated_by를 바꾸지 않는다', r1.updated_by === resync.updated_by);
+
+  const { rows: [r2] } = await client.query(
+    `SELECT version, capabilities FROM agents WHERE id = $1`, [turnedOff.id]
+  );
+  check('0027: 일부러 끈 비서는 되살리지 않는다',
+    !('doc_search' in r2.capabilities) && r2.version === offBefore.version);
+
+  const { rows: [r3] } = await client.query(
+    `SELECT version, capabilities FROM agents WHERE id = $1`, [gone.id]
+  );
+  check('0027: 지운 비서는 건드리지 않는다',
+    !('doc_search' in r3.capabilities) && r3.version === gone.version);
+
+  // 멱등: 다시 돌려도 판이 더 오르지 않는다
+  if (doBlock) await client.query(doBlock);
+  const { rows: [r1b] } = await client.query(`SELECT version FROM agents WHERE id = $1`, [resync.id]);
+  check('0027: 다시 돌려도 판이 더 오르지 않는다', r1b.version === r1.version);
 } catch (err) {
   failures += 1;
   console.error('FAIL  예기치 못한 오류:', err.message);

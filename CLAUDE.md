@@ -149,6 +149,7 @@ src/
 | 0016 | `agents`·`documents`에 `visibility` + `organization_id` (기관 전체 공개가 기본) |
 | 0017 | `contracts.billing_type` 연간 정액 계약 + `organization_spend_krw` RPC |
 | 0026 | 비서 단계(`tier`) · 판 기록(`agent_history`, `save_agent`) · 능력(`capabilities`) · 양식(`agent_templates`) · `messages.agent_version` |
+| 0027 | 문서가 있는데 `doc_search`가 꺼진 비서를 다시 켬 (S1-b 코드보다 먼저 적용). 판 기록에 켜진 적 있는 비서는 사람이 끈 것이라 건드리지 않음 |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -601,7 +602,7 @@ MAIL_FROM=
 비서 **지우기는 숨김**(`deleted_at`)이다. 대화와 판 기록이 비서를 가리키기 때문이다.
 목록 쿼리에 `.is('deleted_at', null)`을 빠뜨리지 말 것.
 
-`is_personal`·`enabled_connectors`는 0027에서 사라진다. 그때까지 트리거가 새 칸과 맞춘다.
+`is_personal`·`enabled_connectors`는 0028에서 사라진다. 그때까지 트리거가 새 칸과 맞춘다.
 새 코드는 이 두 칸을 읽거나 쓰지 않는다.
 
 ### 비서 카탈로그 — 표시와 권한을 섞지 말 것
