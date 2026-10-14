@@ -1,5 +1,6 @@
-import { ANTHROPIC_API_KEY } from '@/lib/config';
-import { CLAUDE_MODEL, type ClaudeUsage } from '@/lib/claude';
+import { DEFAULT_MODEL_ID as CLAUDE_MODEL } from '@/lib/models';
+import { complete } from '@/lib/llm';
+import type { LlmUsage } from '@/lib/llm/types';
 
 /**
  * 스캔 PDF 텍스트 추출.
@@ -16,8 +17,6 @@ import { CLAUDE_MODEL, type ClaudeUsage } from '@/lib/claude';
  * 의존이라 별도 OCR 업체나 멀티모달 임베딩 업체를 늘리지 않고 해결된다.
  * 공공기관 보안성 검토에서 문서 본문이 나가는 곳이 하나 늘고 마는 차이가 크다.
  */
-
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
 /** Anthropic document 블록의 상한. 넘으면 요청 자체가 거부된다. */
 export const MAX_OCR_PAGES = 100;
@@ -54,7 +53,7 @@ const EXTRACTION_PROMPT = `이 PDF의 모든 페이지에서 텍스트를 그대
 
 export interface OcrResult {
   text: string;
-  usage: ClaudeUsage;
+  usage: LlmUsage;
   pageCount: number;
 }
 
@@ -80,63 +79,32 @@ export async function extractTextFromScannedPdf(
     );
   }
 
-  const response = await fetch(CLAUDE_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
+  let result;
+  try {
+    result = await complete({
       model: CLAUDE_MODEL,
       // 페이지가 많으면 출력도 길어진다. 부족하면 뒷부분이 잘린다.
-      max_tokens: 16000,
+      maxTokens: 16000,
       messages: [
         {
           role: 'user',
           content: [
             {
               type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: fileBuffer.toString('base64'),
-              },
+              source: { type: 'base64', media_type: 'application/pdf', data: fileBuffer.toString('base64') },
             },
             { type: 'text', text: EXTRACTION_PROMPT },
           ],
         },
       ],
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    throw new Error(
-      `스캔 문서 판독에 실패했습니다: ${response.status} ${
-        (detail as any)?.error?.message ?? ''
-      }`.trim()
-    );
+    });
+  } catch (error) {
+    throw new Error(`스캔 문서 판독에 실패했습니다: ${error instanceof Error ? error.message : ''}`.trim());
   }
 
-  const data = await response.json();
-  const text = (data.content ?? [])
-    .filter((block: { type: string }) => block.type === 'text')
-    .map((block: { text: string }) => block.text)
-    .join('\n')
-    .trim();
-
-  if (!text) {
+  if (!result.text) {
     throw new Error('스캔 문서에서 글자를 찾지 못했습니다. 스캔 품질을 확인해주세요.');
   }
 
-  return {
-    text,
-    pageCount,
-    usage: {
-      input_tokens: data.usage?.input_tokens ?? 0,
-      output_tokens: data.usage?.output_tokens ?? 0,
-      model: data.model ?? CLAUDE_MODEL,
-    },
-  };
+  return { text: result.text, pageCount, usage: result.usage };
 }

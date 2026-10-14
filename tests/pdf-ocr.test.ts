@@ -55,3 +55,13 @@ describe('RAG 임계값', () => {
     expect(MATCH_COUNT).toBeLessThanOrEqual(20);
   });
 });
+
+describe('스캔 판독은 AI 연결부를 거친다', () => {
+  it('Anthropic을 직접 부르지 않는다', async () => {
+    const { readFileSync } = await import('fs');
+    const src = readFileSync('src/lib/pdf-ocr.ts', 'utf8');
+    expect(src).not.toContain('api.anthropic.com');
+    expect(src).toContain("from '@/lib/llm'");
+    expect(src).not.toContain("from '@/lib/claude'");
+  });
+});
