@@ -106,9 +106,24 @@ export function splitAgentBody(
   return result;
 }
 
+/**
+ * 객체 키를 정렬해 직렬화한다. jsonb는 키 순서를 바꿔 돌려주므로 순서에 기대면
+ * 같은 값도 바뀐 것으로 보인다. 배열 순서는 그대로 둔다(커넥터 순서는 실제 변경).
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  const body = Object.keys(record)
+    .sort()
+    .filter((k) => record[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(record[k])}`);
+  return `{${body.join(',')}}`;
+}
+
 /** 같은 값을 다시 보낸 저장으로 빈 판이 쌓이지 않게 한다. */
 export function changedSettingKeys(current: Record<string, unknown>, patch: AgentSettingsPatch): string[] {
   return Object.entries(patch)
-    .filter(([key, value]) => JSON.stringify(value ?? null) !== JSON.stringify(current[key] ?? null))
+    .filter(([key, value]) => stableStringify(value ?? null) !== stableStringify(current[key] ?? null))
     .map(([key]) => key);
 }

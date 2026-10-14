@@ -62,6 +62,23 @@ describe('바뀐 칸 찾기', () => {
     expect(changedSettingKeys({ name: 'A', description: null }, { name: 'B', description: null })).toEqual(['name']);
   });
 
+  it('jsonb의 키 순서가 달라도 같은 능력은 바뀐 것이 아니다', () => {
+    // jsonb는 키를 자기 순서로 돌려준다. 순서 차이를 바뀜으로 보면 빈 판이 쌓인다.
+    expect(
+      changedSettingKeys({ capabilities: { image: {}, doc_search: {} } }, { capabilities: { doc_search: {}, image: {} } })
+    ).toEqual([]);
+  });
+
+  it('커넥터 순서가 달라지면 바뀐 것이다', () => {
+    // 배열 순서는 실제 변경이다. 키 정렬이 배열까지 건드리면 이 테스트가 깨진다.
+    expect(
+      changedSettingKeys(
+        { capabilities: { public_data: { connectors: ['law', 'kosis'] } } },
+        { capabilities: { public_data: { connectors: ['kosis', 'law'] } } }
+      )
+    ).toEqual(['capabilities']);
+  });
+
   it('판 사본 칸은 11개다', () => {
     expect(SNAPSHOT_KEYS).toHaveLength(11);
   });
