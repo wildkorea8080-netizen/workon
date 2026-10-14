@@ -75,25 +75,27 @@ describe('월 경계는 KST', () => {
   });
 });
 
-describe('토큰을 쓰는 라우트는 모두 한도를 확인한다', () => {
+describe('토큰을 쓰는 경로는 모두 한도를 확인한다', () => {
   /**
-   * `/api/qna`와 `/api/report`가 usage_logs에 토큰을 기록하면서 한도는
-   * 확인하지 않고 있었다. 예산을 소진한 기관도 그 두 경로로는 계속 쓸 수
-   * 있었다 — 차단이 동작한다고 믿는데 구멍이 남아 있던 자리다.
+   * 예전에 `/api/qna`와 `/api/report`가 usage_logs에 토큰을 기록하면서
+   * 한도는 확인하지 않았다. 예산을 소진한 기관도 그 경로로는 계속 쓸 수 있었다.
+   *
+   * 이제 모델은 AI 연결부(@/lib/llm)로만 부른다. 연결부를 쓰는 라우트와
+   * 대화 실행기를 본다.
    */
-  const files = execSync('find src/app/api -name "route.ts"', { encoding: 'utf8' })
+  const routeFiles = execSync('find src/app/api -name "route.ts"', { encoding: 'utf8' })
     .trim()
     .split('\n')
     .filter(Boolean);
 
-  const spenders = files.filter((f) => {
+  const spenders = routeFiles.filter((f) => {
     const src = readFileSync(f, 'utf8');
-    // 모델을 부르고 그 사용량을 기록하는 라우트
-    return src.includes('usage_logs') && /callClaudeAPI|streamClaudeAPI/.test(src);
+    return src.includes("from '@/lib/llm'") && src.includes('usage');
   });
 
   it('대상 라우트를 실제로 찾는다', () => {
-    expect(spenders.length).toBeGreaterThan(2);
+    // 요술봉(enhance-prompt)
+    expect(spenders.length).toBeGreaterThan(0);
   });
 
   it('전부 checkTokenLimit을 거친다', () => {
@@ -102,16 +104,19 @@ describe('토큰을 쓰는 라우트는 모두 한도를 확인한다', () => {
   });
 
   it('사용자를 함께 넘긴다', () => {
-    // 두 번째 인자를 빠뜨리면 개인 한도가 조용히 적용되지 않는다.
-    // 관리자는 한도를 걸었다고 믿는데 아무도 안 걸린다.
-    const bad = spenders.filter((f) => {
+    const sources = [...spenders, 'src/lib/assistant/prepare.ts'];
+    const bad = sources.filter((f) => {
       const src = readFileSync(f, 'utf8');
       const at = src.indexOf('checkTokenLimit(');
-      if (at === -1) return false;
-      const call = src.slice(at, src.indexOf(')', at));
-      return !call.includes(',');
+      if (at === -1) return true;
+      return !src.slice(at, src.indexOf(')', at)).includes(',');
     });
     expect(bad, 'checkTokenLimit에 사용자를 안 넘김').toEqual([]);
+  });
+
+  it('대화는 실행기를 거친다', () => {
+    // 실행기 밖에서 대화를 처리하면 한도·정책·과금 규약을 다시 지켜야 한다
+    expect(readFileSync('src/app/api/chat/route.ts', 'utf8')).toContain('prepareTurn(');
   });
 });
 

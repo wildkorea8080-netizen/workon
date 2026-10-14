@@ -65,3 +65,21 @@ describe('스캔 판독은 AI 연결부를 거친다', () => {
     expect(src).not.toContain("from '@/lib/claude'");
   });
 });
+
+describe('스캔 판독은 기관의 모델 정책을 따른다', () => {
+  it('업로드 라우트가 정책으로 모델을 정해 판독에 넘긴다', async () => {
+    const { readFileSync } = await import('fs');
+    const route = readFileSync('src/app/api/upload/route.ts', 'utf8');
+    expect(route).toContain('resolveModelForDepartment(');
+    expect(route).toContain('{ ocrModel }');
+  });
+
+  it('판독 함수는 모델을 인자로 받아 연결부에 넘긴다', async () => {
+    const { readFileSync } = await import('fs');
+    const src = readFileSync('src/lib/pdf-ocr.ts', 'utf8');
+    expect(src).toContain('modelId: string = CLAUDE_MODEL');
+    expect(src).toContain('model: modelId,');
+    const proc = readFileSync('src/lib/document-processor.ts', 'utf8');
+    expect(proc).toContain('extractTextFromScannedPdf(fileBuffer, pageCount, ocrModel)');
+  });
+});
