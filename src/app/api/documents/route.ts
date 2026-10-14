@@ -5,6 +5,7 @@ import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 import { getActorScope } from '@/lib/actor-scope';
 import { canDeleteAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
+import { removeStorageFileIfUnused } from '@/lib/document-files';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -97,16 +98,8 @@ export async function DELETE(request: NextRequest) {
     }
 
     // 여러 비서에 한 번에 올린 문서는 저장소 파일 하나를 함께 쓴다.
-    // 다른 행이 남아 있으면 파일을 지우지 않는다.
-    if (doc.storage_path) {
-      const { count } = await supabaseAdmin
-        .from('documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('storage_path', doc.storage_path);
-      if ((count ?? 0) === 0) {
-        await supabaseAdmin.storage.from('documents').remove([doc.storage_path]);
-      }
-    }
+    // 다른 행이 남아 있거나 세지 못하면 파일을 지우지 않는다.
+    if (doc.storage_path) await removeStorageFileIfUnused(doc.storage_path);
 
     if (doc.agent_id) {
       await recordAgentEvent(doc.agent_id, 'document_removed', actor.userId, { file_name: doc.file_name });

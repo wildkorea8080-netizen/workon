@@ -6,6 +6,7 @@ import {
   type AgentVisibility,
 } from '@/lib/agent-permissions';
 import type { AgentSettingsPatch } from '@/lib/agent-patch';
+import { removeStorageFileIfUnused } from '@/lib/document-files';
 
 /**
  * 비서 저장소 — 판 무결성이 걸린 쓰기는 전부 여기를 거친다.
@@ -141,8 +142,55 @@ export async function softDeleteAgent(agentId: string, actorId: string): Promise
   }
   // 일치하는 행이 없으면(이미 지움·동시 지움·없는 id) 성공으로 보고하지 않고 기록도 남기지 않는다.
   if (!data || data.length === 0) return false;
-  await recordAgentEvent(agentId, 'deleted', actorId);
+  let documentsRemoved = 0;
+  try {
+    documentsRemoved = await removeAgentDocuments(agentId);
+  } catch (err) {
+    console.error('[agent-store] 지운 비서의 문서 정리 실패', agentId, err);
+  }
+  await recordAgentEvent(agentId, 'deleted', actorId, { documents_removed: documentsRemoved });
   return true;
+}
+
+/**
+ * 지운 비서의 참고 문서를 치운다. 비서는 숨김이라 행이 남지만 문서는 다르다 —
+ * documents 행은 visibilityFilter로 문서 목록과 Q&A 검색(search_document_chunks)에
+ * 그대로 잡혀, 지운 비서에 올렸던 자료가 계속 보인다.
+ *
+ * 실패해도 비서 지우기는 되돌리지 않는다(이미 숨겼다). 로그만 남긴다.
+ * 돌려주는 값은 실제로 지운 행 수다.
+ */
+async function removeAgentDocuments(agentId: string): Promise<number> {
+  const { data: docs, error } = await supabaseAdmin
+    .from('documents')
+    .select('id, storage_path')
+    .eq('agent_id', agentId);
+  if (error) {
+    console.error('[agent-store] 지운 비서의 문서 조회 실패', agentId, error.message);
+    return 0;
+  }
+  const rows = (docs ?? []) as { id: string; storage_path: string | null }[];
+  if (rows.length === 0) return 0;
+
+  const { error: deleteError } = await supabaseAdmin
+    .from('documents')
+    .delete()
+    .in('id', rows.map((d) => d.id));
+  if (deleteError) {
+    console.error('[agent-store] 지운 비서의 문서 삭제 실패', agentId, deleteError.message);
+    return 0;
+  }
+
+  // 같은 파일을 다른 비서의 문서가 함께 쓰고 있으면 도우미가 남겨 둔다
+  const paths = [...new Set(rows.map((d) => d.storage_path).filter((p): p is string => Boolean(p)))];
+  for (const path of paths) {
+    try {
+      await removeStorageFileIfUnused(path);
+    } catch (err) {
+      console.error('[agent-store] 지운 비서의 문서 파일 정리 실패', agentId, path, err);
+    }
+  }
+  return rows.length;
 }
 
 export async function enableAgentCapability(
