@@ -129,15 +129,18 @@ export async function recordAgentEvent(
  * 판 기록과 messages.agent_version이 가리킬 대상도 사라진다.
  */
 export async function softDeleteAgent(agentId: string, actorId: string): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('agents')
     .update({ deleted_at: new Date().toISOString(), is_active: false, updated_by: actorId })
     .eq('id', agentId)
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .select('id');
   if (error) {
     console.error('[agent-store] 지우기 실패', agentId, error.message);
     return false;
   }
+  // 일치하는 행이 없으면(이미 지움·동시 지움·없는 id) 성공으로 보고하지 않고 기록도 남기지 않는다.
+  if (!data || data.length === 0) return false;
   await recordAgentEvent(agentId, 'deleted', actorId);
   return true;
 }
