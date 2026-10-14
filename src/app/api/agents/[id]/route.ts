@@ -1,184 +1,117 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { connectorCatalog } from '@/lib/connectors';
-import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
+import { getActorScope } from '@/lib/actor-scope';
+import { canEditAgent, canDeleteAgent } from '@/lib/agent-permissions';
+import { loadAgentAccess, saveAgentSettings, saveFailureResponse, softDeleteAgent } from '@/lib/agent-store';
+import { splitAgentBody, changedSettingKeys, SNAPSHOT_KEYS } from '@/lib/agent-patch';
+import type { AgentType } from '@/lib/agent-catalog';
+import {
+  jsonError,
+  knownIds,
+  validateModelForOrganization,
+  checkCapabilityScope,
+} from '@/lib/agent-route-helpers';
 
+/**
+ * 비서 고치기 — 세 단계 공통.
+ *
+ * 판 설정은 save_agent로(판이 남는다), 운영 값(노출·정렬·공개 범위·사용
+ * 여부·유형)은 직접 바꾼다. 운영 값은 공식 비서에만 있다 — 나만의 비서는
+ * 본인만 보고, 부서 비서는 공개 범위가 '부서'로 고정이다.
+ */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
-    if (session.user.role !== 'ADMIN') {
-      return NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      );
-    }
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
 
-    const departmentId = session.user.departmentId;
-    if (!departmentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
-    }
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
+    if (!canEditAgent(agent, actor)) return jsonError('이 비서를 고칠 권한이 없습니다.', 403);
 
-    const body = await request.json();
-    const { name, description, system_prompt, config, is_active, enabled_connectors, visibility } = body;
+    const body = (await request.json()) as Record<string, unknown>;
 
-    const CATALOG_KEYS = [
-      'icon', 'category', 'is_published', 'display_order', 'agent_type', 'link_url',
-      // 0025. 이 목록에 넣어야 "업데이트할 필드가 없습니다" 검사도 함께 통과한다.
-      'usage_guide', 'starter_prompts',
-    ];
-    const touchesCatalog = CATALOG_KEYS.some((key) => body[key] !== undefined);
-
-    if (
-      !name &&
-      !description &&
-      system_prompt === undefined &&
-      config === undefined &&
-      is_active === undefined &&
-      enabled_connectors === undefined &&
-      visibility === undefined &&
-      !touchesCatalog
-    ) {
-      return NextResponse.json(
-        { ok: false, error: { message: '업데이트할 필드가 없습니다.' } },
-        { status: 400 }
-      );
-    }
-
-    // 링크형 검증은 현재 유형을 알아야 한다. 링크형 비서의 이름만 바꾸는
-    // 요청에는 agent_type이 실려 오지 않으므로, 주소를 지우려는 시도인지
-    // 손대지 않은 것인지 구분하려면 지금 값이 필요하다.
     const { data: current } = await supabaseAdmin
       .from('agents')
-      .select('agent_type')
+      .select(`agent_type, ${SNAPSHOT_KEYS.filter((k) => k !== 'template_ids').join(', ')}`)
       .eq('id', params.id)
-      .eq('department_id', departmentId)
-      .maybeSingle();
-
-    if (!current) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
-
-    const { payload: catalog, error: catalogError } = parseCatalogFields(
-      body,
-      (current.agent_type as AgentType) ?? 'chat'
-    );
-    if (catalogError) {
-      return NextResponse.json({ ok: false, error: { message: catalogError } }, { status: 400 });
-    }
-
-    const updatePayload: Record<string, unknown> = {};
-    if (name !== undefined) updatePayload.name = typeof name === 'string' ? name.trim() : name;
-    if (description !== undefined) updatePayload.description = typeof description === 'string' ? description.trim() : description;
-    if (system_prompt !== undefined) updatePayload.system_prompt = typeof system_prompt === 'string' ? system_prompt.trim() : system_prompt;
-    if (config !== undefined) updatePayload.config = config;
-
-    if (is_active !== undefined) updatePayload.is_active = is_active;
-
-    if (enabled_connectors !== undefined) {
-      // 존재하지 않는 커넥터 id가 저장되면 조용히 무시될 뿐이지만,
-      // 설정 화면이 실제와 어긋나 보이므로 여기서 걸러낸다.
-      const known = new Set(connectorCatalog().map((c) => c.id));
-      updatePayload.enabled_connectors = Array.isArray(enabled_connectors)
-        ? enabled_connectors.filter((id: unknown) => typeof id === 'string' && known.has(id))
-        : [];
-    }
-
-    if (visibility !== undefined) {
-      if (!['organization', 'department'].includes(visibility)) {
-        return NextResponse.json(
-          { ok: false, error: { message: "공개 범위는 'organization' 또는 'department'만 가능합니다." } },
-          { status: 400 }
-        );
-      }
-      updatePayload.visibility = visibility;
-    }
-
-    Object.assign(updatePayload, catalog);
-    updatePayload.updated_by = session.user.id;
-
-    const { data: agent, error } = await supabaseAdmin
-      .from('agents')
-      .update(updatePayload)
-      .eq('id', params.id)
-      .eq('department_id', departmentId)
-      .select()
       .single();
+    const currentRow = (current ?? {}) as unknown as Record<string, unknown>;
 
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '에이전트 업데이트 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
+    const split = splitAgentBody(body, {
+      currentType: ((currentRow.agent_type as AgentType) ?? 'chat'),
+      ...knownIds(),
+    });
+    if (split.error) return jsonError(split.error, 400);
+
+    // ── 운영 값 ──
+    if (Object.keys(split.operational).length > 0) {
+      if (agent.tier !== 'official') {
+        return jsonError('노출·공개 범위·유형은 공식 비서에서만 바꿀 수 있습니다.', 400);
+      }
+      const { error } = await supabaseAdmin
+        .from('agents')
+        .update({ ...split.operational, updated_by: actor.userId })
+        .eq('id', params.id);
+      if (error) return jsonError('비서 설정 변경 중 오류가 발생했습니다.', 500);
     }
 
-    return NextResponse.json({ ok: true, data: agent });
+    // ── 판 설정 ──
+    const changed = changedSettingKeys(currentRow, split.settings);
+    if (changed.length > 0) {
+      const modelError = await validateModelForOrganization(split.settings.model_id, actor.organizationId);
+      if (modelError) return jsonError(modelError, 400);
+
+      const scopeError = await checkCapabilityScope(agent.tier, split.settings.capabilities, actor.departmentId);
+      if (scopeError) return jsonError(scopeError, 403);
+
+      // 나만의 비서는 고치는 사람이 본인뿐이라 판 번호를 생략할 수 있다.
+      // 부서·공식 비서는 함께 고치므로 반드시 받는다.
+      const rawBase = body.base_version;
+      let baseVersion: number;
+      if (typeof rawBase === 'number') baseVersion = rawBase;
+      else if (agent.tier === 'personal') baseVersion = agent.version;
+      else return jsonError('base_version이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.', 400);
+
+      const onlyChanged = Object.fromEntries(
+        changed.map((key) => [key, split.settings[key as keyof typeof split.settings]])
+      );
+      const saved = await saveAgentSettings(params.id, baseVersion, onlyChanged, actor.userId, 'settings');
+      if (!saved.ok) {
+        const failure = saveFailureResponse(saved);
+        return jsonError(failure.message, failure.status, failure.details);
+      }
+    }
+
+    const { data: agentRow } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    return NextResponse.json({ ok: true, data: agentRow });
   } catch (error) {
-    console.error('Agent update error:', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.', details: error instanceof Error ? error.message : String(error) } },
-      { status: 500 }
-    );
+    console.error('[agents PATCH]', error);
+    return jsonError('서버 오류가 발생했습니다.', 500);
   }
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
-    if (session.user.role !== 'ADMIN') {
-      return NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      );
-    }
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
 
-    const departmentId = session.user.departmentId;
-    if (!departmentId) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
-    }
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
+    if (!canDeleteAgent(agent, actor)) return jsonError('이 비서를 지울 권한이 없습니다.', 403);
 
-    const { error } = await supabaseAdmin
-      .from('agents')
-      .delete()
-      .eq('id', params.id)
-      .eq('department_id', departmentId);
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '에이전트 삭제 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
-    }
+    const done = await softDeleteAgent(params.id, actor.userId);
+    if (!done) return jsonError('비서 삭제 중 오류가 발생했습니다.', 500);
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('Agent delete error:', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    console.error('[agents DELETE]', error);
+    return jsonError('서버 오류가 발생했습니다.', 500);
   }
 }

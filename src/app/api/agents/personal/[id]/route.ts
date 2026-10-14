@@ -1,121 +1,74 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getActorScope } from '@/lib/actor-scope';
+import { canEditAgent, canDeleteAgent } from '@/lib/agent-permissions';
+import { loadAgentAccess, saveAgentSettings, saveFailureResponse, softDeleteAgent } from '@/lib/agent-store';
+import { splitAgentBody } from '@/lib/agent-patch';
+import { jsonError, knownIds, validateModelForOrganization, checkCapabilityScope } from '@/lib/agent-route-helpers';
 
+/** 옛 주소. 판정과 저장은 /api/agents/[id]와 같은 모듈을 거친다. */
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
+    if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
+
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at || agent.tier !== 'personal') return jsonError('비서를 찾을 수 없습니다.', 404);
+    if (!canEditAgent(agent, actor)) return jsonError('본인의 비서만 수정할 수 있습니다.', 403);
+
+    const { systemPrompt, base_version, ...rest } = (await request.json()) as Record<string, unknown>;
+    const split = splitAgentBody(
+      { ...rest, ...(systemPrompt !== undefined ? { system_prompt: systemPrompt } : {}) },
+      { currentType: 'chat', ...knownIds() }
+    );
+    if (split.error) return jsonError(split.error, 400);
+    if (Object.keys(split.operational).length > 0) {
+      return jsonError('노출·공개 범위·유형은 공식 비서에서만 바꿀 수 있습니다.', 400);
     }
 
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('agents')
-      .select('id, owner_id')
-      .eq('id', params.id)
-      .eq('is_personal', true)
-      .maybeSingle();
+    const modelError = await validateModelForOrganization(split.settings.model_id, actor.organizationId);
+    if (modelError) return jsonError(modelError, 400);
+    const scopeError = await checkCapabilityScope('personal', split.settings.capabilities, actor.departmentId);
+    if (scopeError) return jsonError(scopeError, 403);
 
-    if (fetchError || !existing) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
+    const saved = await saveAgentSettings(
+      params.id,
+      typeof base_version === 'number' ? base_version : agent.version,
+      split.settings,
+      actor.userId,
+      'settings'
+    );
+    if (!saved.ok) {
+      const failure = saveFailureResponse(saved);
+      return jsonError(failure.message, failure.status, failure.details);
     }
-
-    if (existing.owner_id !== session.user.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '본인의 비서만 수정할 수 있습니다.' } },
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-    const { name, description, systemPrompt, icon, color } = body;
-
-    const updatePayload: Record<string, unknown> = { updated_by: session.user.id };
-    if (name !== undefined) updatePayload.name = typeof name === 'string' ? name.trim() : name;
-    if (description !== undefined) updatePayload.description = description;
-    if (systemPrompt !== undefined) updatePayload.system_prompt = systemPrompt;
-    if (icon !== undefined) updatePayload.icon = icon;
-    if (color !== undefined) updatePayload.color = color;
-
-    const { data: agent, error } = await supabaseAdmin
-      .from('agents')
-      .update(updatePayload)
-      .eq('id', params.id)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서 수정 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true, data: agent });
+    return NextResponse.json({ ok: true, data: { version: saved.version } });
   } catch (error) {
     console.error('[personal agent PUT]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return jsonError('서버 오류가 발생했습니다.', 500);
   }
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
-    const { data: existing, error: fetchError } = await supabaseAdmin
-      .from('agents')
-      .select('id, owner_id')
-      .eq('id', params.id)
-      .eq('is_personal', true)
-      .maybeSingle();
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
 
-    if (fetchError || !existing) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at || agent.tier !== 'personal') return jsonError('비서를 찾을 수 없습니다.', 404);
+    if (!canDeleteAgent(agent, actor)) return jsonError('본인의 비서만 삭제할 수 있습니다.', 403);
 
-    if (existing.owner_id !== session.user.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '본인의 비서만 삭제할 수 있습니다.' } },
-        { status: 403 }
-      );
-    }
-
-    // 연결된 documents 삭제 후 agent 삭제 (FK cascade 없는 경우 대비)
-    await supabaseAdmin.from('documents').delete().eq('agent_id', params.id);
-
-    const { error } = await supabaseAdmin.from('agents').delete().eq('id', params.id);
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '비서 삭제 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
-    }
-
+    const done = await softDeleteAgent(params.id, actor.userId);
+    if (!done) return jsonError('비서 삭제 중 오류가 발생했습니다.', 500);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[personal agent DELETE]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return jsonError('서버 오류가 발생했습니다.', 500);
   }
 }

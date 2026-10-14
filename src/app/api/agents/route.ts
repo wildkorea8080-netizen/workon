@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
-import { parseCatalogFields } from '@/lib/agent-catalog';
+import { splitAgentBody } from '@/lib/agent-patch';
+import { getActorScope } from '@/lib/actor-scope';
+import { jsonError, knownIds, validateModelForOrganization } from '@/lib/agent-route-helpers';
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
@@ -71,6 +74,7 @@ export async function GET(request: NextRequest) {
         .select('*')
         .or(visibleFilter)
         .in('id', favoriteIds)
+        .is('deleted_at', null)
         .eq('is_active', true)
         .order('display_order', { ascending: true })
         .order('name', { ascending: true });
@@ -84,14 +88,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
     }
 
-    // 내 비서 탭
+    // 내 비서 탭 — 나만의 비서. 부서를 옮겨도 내 것이므로 부서로 거르지 않는다.
     if (personalOnly) {
       const { data: agents, error } = await supabaseAdmin
         .from('agents')
         .select('*')
-        .eq('department_id', departmentId)
-        .eq('is_personal', true)
+        .eq('tier', 'personal')
         .eq('owner_id', session.user.id)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -103,18 +107,45 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
     }
 
-    // 카테고리 / 전체 비서
+    // 관리 화면 — 관리 범위의 공식·부서 비서. 꺼 둔 것도 보인다(다시 켜려면 보여야 한다).
+    if (manageMode) {
+      const actor = await getActorScope(session);
+      if (!actor?.organizationId) return jsonError('소속 기관을 찾을 수 없습니다.', 403);
+      const managed = actor.managedDepartmentIds.join(',');
+
+      let manageQuery = supabaseAdmin
+        .from('agents')
+        .select('*')
+        .eq('organization_id', actor.organizationId)
+        .neq('tier', 'personal')
+        .is('deleted_at', null)
+        // 기관 전체 공식 비서 + 관리 범위 부서에 걸린 비서(부서로 좁힌 공식 · 부서 비서)
+        .or(`and(tier.eq.official,visibility.eq.organization),department_id.in.(${managed})`);
+
+      if (category && category !== '전체') manageQuery = manageQuery.eq('category', category);
+
+      const { data: agents, error } = await manageQuery
+        .order('display_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) return jsonError('에이전트 조회 중 오류가 발생했습니다.', 500);
+      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+    }
+
+    // 카테고리 / 전체 비서 — 공식 비서 + 내 부서 계통의 부서 비서.
+    // 부서 비서는 visibility='department'라 visibilityFilter가 내 부서 계통만 남긴다.
+    const departmentOnly = searchParams.get('department') === 'true';
     let query = supabaseAdmin
       .from('agents')
       .select('*')
       .or(visibleFilter)
       .eq('is_active', true)
-      .eq('is_personal', false);
+      .is('deleted_at', null);
 
-    // 노출 대기중(is_published=false)은 관리자가 공개 전에 직접 써 보는 상태다.
-    if (!manageMode) {
-      query = query.eq('is_published', true);
-    }
+    query = departmentOnly ? query.eq('tier', 'department') : query.neq('tier', 'personal');
+
+    // 노출 대기중은 공식 비서에만 있다. 부서 비서는 승인 없이 바로 쓴다(결정 4).
+    // (관리 화면은 위에서 따로 돌려줬다)
+    query = query.or('tier.eq.department,is_published.eq.true');
 
     if (category && category !== '전체') {
       query = query.eq('category', category);
@@ -168,40 +199,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { name, description, system_prompt, config, enabled_connectors, visibility } = body;
+    const body = (await request.json()) as Record<string, unknown>;
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json(
-        { ok: false, error: { message: '에이전트 이름은 필수입니다.' } },
-        { status: 400 }
-      );
-    }
+    const split = splitAgentBody(body, { currentType: 'chat', ...knownIds() });
+    if (split.error) return jsonError(split.error, 400);
+    if (!split.settings.name) return jsonError('에이전트 이름은 필수입니다.', 400);
 
-    // 아이콘·카테고리·유형·정렬은 생성과 수정이 같은 규칙을 써야 한다.
-    const { payload: catalog, error: catalogError } = parseCatalogFields(body);
-    if (catalogError) {
-      return NextResponse.json({ ok: false, error: { message: catalogError } }, { status: 400 });
-    }
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
 
-    // 에이전트 생성
+    const modelError = await validateModelForOrganization(split.settings.model_id, actor.organizationId);
+    if (modelError) return jsonError(modelError, 400);
+
     const { data: agent, error } = await supabaseAdmin
       .from('agents')
       .insert({
         department_id: departmentId,
-        name: name.trim(),
-        description: description?.trim(),
-        system_prompt: system_prompt?.trim(),
-        config: config || {},
-        created_by: session!.user.id,
-        updated_by: session!.user.id,
-        enabled_connectors: Array.isArray(enabled_connectors) ? enabled_connectors : [],
-        // 기본은 기관 전체 공개. 규정·매뉴얼 대부분이 전 직원 공통이라
-        // 아무 설정 없이 만들어도 전 직원이 쓸 수 있어야 한다.
-        visibility: visibility === 'department' ? 'department' : 'organization',
-        // 새 비서는 '노출 대기중'에서 시작한다(0019가 기본값을 false로 둔다).
-        // 관리자가 직접 써 보고 [메인 노출]을 눌러야 직원에게 보인다.
-        ...catalog,
+        tier: 'official',
+        ...split.settings,
+        // 사진 읽기는 기본으로 켠다. 지금 모든 대화형 비서가 사진을 받는다.
+        capabilities: split.settings.capabilities ?? { image: {} },
+        created_by: session.user.id,
+        updated_by: session.user.id,
+        // 기본은 기관 전체 공개. 규정·매뉴얼 대부분이 전 직원 공통이다.
+        visibility: split.operational.visibility === 'department' ? 'department' : 'organization',
+        // 새 비서는 '노출 대기중'에서 시작한다(0019 기본값 false).
+        ...split.operational,
       })
       .select()
       .single();

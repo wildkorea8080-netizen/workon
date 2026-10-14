@@ -19,8 +19,11 @@ describe('사용 방법·시작 예시 파싱', () => {
     // 라우트마다 따로 파싱하면 "만들 때는 들어갔는데 고치면 사라진다"가 된다
     const post = readFileSync('src/app/api/agents/route.ts', 'utf8');
     const patch = readFileSync('src/app/api/agents/[id]/route.ts', 'utf8');
-    expect(post).toContain('parseCatalogFields');
-    expect(patch).toContain('parseCatalogFields');
+    // 두 라우트 모두 splitAgentBody를 거치고, 그 안에서 parseCatalogFields를 한 번 부른다
+    const split = readFileSync('src/lib/agent-patch.ts', 'utf8');
+    expect(post).toContain('splitAgentBody');
+    expect(patch).toContain('splitAgentBody');
+    expect(split).toContain('parseCatalogFields');
     // PATCH가 자기만의 파싱을 다시 두지 않았는지
     expect(patch).not.toContain('MAX_STARTERS');
   });
