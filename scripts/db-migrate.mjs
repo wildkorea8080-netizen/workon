@@ -5,6 +5,9 @@
  *   npm run db:migrate -- 0019             -- 번호로 하나만
  *   npm run db:migrate -- --dry            -- 무엇이 적용될지만 보기
  *
+ * 0028(옛 칸 정리)은 번호 없이 돌릴 때 건너뛰고 안내만 한다. 코드 배포를
+ * 확인한 뒤 `npm run db:migrate -- 0028`로 따로 적용한다(migrate-select.mjs).
+ *
  * SQL Editor에 붙여넣는 방식은 파일이 길면 일부만 복사되거나, 편집기에
  * 선택 영역이 남아 있으면 그 부분만 실행된다. 실제로 0013~0017과 0019가
  * 그렇게 누락됐고 매번 "적용했다"고 믿은 채 다음 단계로 넘어갔다.
@@ -15,6 +18,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { selectPending, manualOnlyNotice } from './migrate-select.mjs';
 
 if (existsSync('.env.local')) {
   for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
@@ -187,14 +191,13 @@ if (appliedSet.size === 0 && !only) {
   process.exit(1);
 }
 
-const pending = files.filter((f) => {
-  const version = f.slice(0, 4);
-  if (only) return version === only;
-  return !appliedSet.has(version);
-});
+// 번호 없이 돌릴 때 수동 전용(0028)은 빼고 따로 알린다. 번호로 지정하면 적용한다.
+const { pending, skippedManual } = selectPending(files, appliedSet, only);
+const manualNotice = manualOnlyNotice(skippedManual);
 
 if (pending.length === 0) {
   console.log(only ? `${only} 파일을 찾지 못했습니다.` : '적용할 마이그레이션이 없습니다.');
+  if (manualNotice) console.log(`\n${manualNotice}`);
   await client.end();
   process.exit(only ? 1 : 0);
 }
@@ -204,6 +207,8 @@ for (const f of pending) {
   const version = f.slice(0, 4);
   console.log(`  ${appliedSet.has(version) ? '재적용' : '신규  '}  ${f}`);
 }
+
+if (manualNotice) console.log(`\n${manualNotice}`);
 
 if (dryRun) {
   console.log('\n--dry 이므로 실행하지 않았습니다.');
