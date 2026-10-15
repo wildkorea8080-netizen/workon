@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
+import { execSync } from 'child_process';
 
 /**
  * 이용통계의 모델·활동별 내역.
@@ -75,5 +76,31 @@ describe('화면', () => {
   it('모델별과 활동별을 함께 낸다', () => {
     expect(ui).toContain('모델별');
     expect(ui).toContain('활동별');
+  });
+});
+
+describe('활동 이름표', () => {
+  /** 토큰을 쓰는(원가를 기록하는) 파일에서 usage_logs에 남기는 활동 코드 */
+  function tokenActionCodes(): string[] {
+    const files = execSync('git ls-files src', { encoding: 'utf8' })
+      .split('\n')
+      .filter((f) => /\.(ts|tsx)$/.test(f));
+    const codes = new Set<string>();
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      if (!/estimateCostKrw|writeUsageLog|buildUsageDetails/.test(text)) continue;
+      for (const m of text.matchAll(/action: '([a-z_]+)'/g)) codes.add(m[1]);
+    }
+    return [...codes];
+  }
+
+  it('토큰을 쓰는 활동은 감사·이용통계 화면에 한국어 이름이 있다', () => {
+    // 이름표에 없으면 화면에 'conversation_title' 같은 코드가 그대로 나간다
+    const codes = tokenActionCodes();
+    expect(codes).toContain('conversation_title');
+    for (const file of [ROUTE, 'src/app/api/admin/audit-logs/route.ts']) {
+      const text = readFileSync(file, 'utf8');
+      for (const code of codes) expect(text, `${file}: ${code}`).toMatch(new RegExp(`(^|\\s)${code}: '`, 'm'));
+    }
   });
 });
