@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "hwp:probe": "tsx scripts/hwp-probe.mjs",
+    "hwpx:probe": "tsx scripts/hwpx-probe.mjs",
     "connector:probe": "tsx scripts/connector-probe.mjs",
     "tool:probe": "tsx scripts/tool-loop-probe.mjs",
     "test": "vitest run",

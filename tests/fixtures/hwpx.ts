@@ -1,0 +1,44 @@
+import JSZip from 'jszip';
+
+/**
+ * 시험용 HWPX. 한글이 저장하는 파일의 뼈대(mimetype · version · header ·
+ * section · 미리보기)를 흉내 낸다. 한글 호환은 확인 지점 A에서 진짜 파일로 본다.
+ */
+export const NS =
+  'xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section"';
+
+export const HEADER =
+  '<?xml version="1.0" encoding="UTF-8"?><hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" version="1.4"><hh:refList><hh:fontfaces itemCnt="0"/></hh:refList></hh:head>';
+
+const LINESEG =
+  '<hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray>';
+
+/** 문단 하나. 배열이면 조각(run)마다 하나씩 — 한글이 서식을 바꿀 때 쪼개는 모양 */
+export function para(text: string | string[], paraPr = '3'): string {
+  const runs = (Array.isArray(text) ? text : [text])
+    .map((t, i) => `<hp:run charPrIDRef="${i}"><hp:t>${t}</hp:t></hp:run>`)
+    .join('');
+  return `<hp:p id="1" paraPrIDRef="${paraPr}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${runs}${LINESEG}</hp:p>`;
+}
+
+/** 표 하나를 품은 바깥 문단. 칸마다 문단 하나 */
+export function table(rows: string[][]): string {
+  const trs = rows
+    .map((r) => `<hp:tr>${r.map((c) => `<hp:tc><hp:subList>${para(c, '7')}</hp:subList></hp:tc>`).join('')}</hp:tr>`)
+    .join('');
+  return `<hp:p id="2" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="${rows.length}" colCnt="${rows[0].length}">${trs}</hp:tbl></hp:run></hp:p>`;
+}
+
+export async function buildHwpx(body: string, opts: { prvText?: string } = {}): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE' });
+  zip.file('version.xml', '<?xml version="1.0" encoding="UTF-8"?><hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" major="5" minor="1"/>');
+  zip.file('Contents/header.xml', HEADER);
+  zip.file('Contents/section0.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><hs:sec ${NS}>${body}</hs:sec>`);
+  zip.file('Preview/PrvText.txt', opts.prvText ?? '미리보기 {{제목}}');
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+export async function sectionXml(bytes: Buffer): Promise<string> {
+  return (await JSZip.loadAsync(bytes)).file('Contents/section0.xml')!.async('string');
+}
