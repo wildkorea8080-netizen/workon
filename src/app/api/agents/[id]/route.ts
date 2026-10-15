@@ -28,7 +28,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
     if (!canEditAgent(agent, actor)) return jsonError('이 비서를 볼 권한이 없습니다.', 403);
 
-    const { data } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    const { data, error } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    if (error || !data) return jsonError('비서를 찾을 수 없습니다.', 404);
     return NextResponse.json({ ok: true, data });
   } catch (error) {
     console.error('[agents GET]', error);
