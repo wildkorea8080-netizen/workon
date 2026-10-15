@@ -64,6 +64,7 @@ const EMPLOYEE_ROUTES = new Set([
   '/conversations/[id]',
   '/conversations/[id]/share',
   '/documents',
+  '/files/[id]',
   '/enhance-prompt',
   '/my/stats',
   '/notices',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { deleteConversationFiles } from '@/lib/generated-files';
 
 export async function GET(
   request: NextRequest,
@@ -138,6 +139,9 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    // 대화가 만든 파일을 저장소에서 먼저 지운다. DB 연쇄 삭제는 저장소를 지우지 않는다(설계 5.4)
+    await deleteConversationFiles(conversationId);
 
     // 메시지 먼저 삭제 (cascade 미설정 대비)
     await supabaseAdmin.from('messages').delete().eq('conversation_id', conversationId);
