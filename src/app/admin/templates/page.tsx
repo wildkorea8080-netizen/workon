@@ -17,8 +17,8 @@ export default async function AdminTemplatesPage() {
   return (
     <section className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">AI 프롬프트 & 템플릿</h1>
-        <p className="text-slate-600 mt-2">에이전트별 시스템 프롬프트와 보고서 템플릿을 관리합니다.</p>
+        <h1 className="text-2xl font-semibold text-slate-900">옛 보고서 템플릿</h1>
+        <p className="text-slate-600 mt-2">보고서 생성 기능은 비서로 옮겨졌습니다. 남은 템플릿 내용을 읽기 전용으로 보여 주며, 복사해 비서 지시문에 옮길 수 있습니다.</p>
       </div>
       <PromptTemplateManager />
     </section>

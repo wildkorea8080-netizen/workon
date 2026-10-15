@@ -124,8 +124,8 @@ export default async function AdminDashboardPage() {
               </svg>
             </div>
             <div>
-              <h3 className="text-lg font-medium text-slate-900">AI 프롬프트 & 템플릿</h3>
-              <p className="text-sm text-slate-600 mt-1">에이전트 프롬프트 및 보고서 템플릿 관리</p>
+              <h3 className="text-lg font-medium text-slate-900">옛 보고서 템플릿</h3>
+              <p className="text-sm text-slate-600 mt-1">보고서 생성 종료 후 남은 템플릿 내용 (읽기 전용)</p>
             </div>
           </div>
         </Link>

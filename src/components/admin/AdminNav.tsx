@@ -61,7 +61,7 @@ const NAV_ITEMS = [
   },
   {
     href: '/admin/templates',
-    label: 'AI 프롬프트',
+    label: '옛 보고서 템플릿',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
