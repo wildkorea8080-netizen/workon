@@ -11,7 +11,7 @@ const PERMISSION_CALL = /can(Edit|Delete|Use)Agent|canPromoteToDepartment|canReq
 
 /** [파일, 확인할 핸들러] */
 const MUTATING: [string, string[]][] = [
-  ['src/app/api/agents/[id]/route.ts', ['PATCH', 'DELETE']],
+  ['src/app/api/agents/[id]/route.ts', ['GET', 'PATCH', 'DELETE']],
   ['src/app/api/agents/personal/[id]/route.ts', ['PUT', 'DELETE']],
   ['src/app/api/agents/personal/[id]/request-approval/route.ts', ['POST']],
   ['src/app/api/agents/[id]/promote/route.ts', ['POST']],

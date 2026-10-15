@@ -14,6 +14,29 @@ import {
 } from '@/lib/agent-route-helpers';
 
 /**
+ * 편집 창이 최신 판을 다시 읽는다. 고칠 수 있는 사람만 — 지시문 전문이 들어 있다.
+ */
+export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const session = await getServerAuthSession();
+    if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
+
+    const actor = await getActorScope(session);
+    if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+
+    const agent = await loadAgentAccess(params.id);
+    if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
+    if (!canEditAgent(agent, actor)) return jsonError('이 비서를 볼 권한이 없습니다.', 403);
+
+    const { data } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    return NextResponse.json({ ok: true, data });
+  } catch (error) {
+    console.error('[agents GET]', error);
+    return jsonError('서버 오류가 발생했습니다.', 500);
+  }
+}
+
+/**
  * 비서 고치기 — 세 단계 공통.
  *
  * 판 설정은 save_agent로(판이 남는다), 운영 값(노출·정렬·공개 범위·사용
