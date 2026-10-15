@@ -38,7 +38,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 94개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 93개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
 │   ├── my/stats/         # 내 사용현황
@@ -84,7 +84,7 @@ src/
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 293개) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 330개) | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
@@ -97,7 +97,7 @@ src/
 
 ---
 
-## API 구조 (94개 라우트)
+## API 구조 (93개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -105,7 +105,7 @@ src/
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
-| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/reports/*` (화면 없음 — S1-c 정리 대상), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
+| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
 | 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
@@ -481,7 +481,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 293개).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 330개).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
