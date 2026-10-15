@@ -33,6 +33,9 @@ interface AgentCardProps {
   onFavoriteToggle: (agentId: string) => void;
   onSelect: (agent: Agent) => void;
   onApprovalRequested?: (agentId: string) => void;
+  myDepartmentId?: string | null;
+  onEdit?: (agent: Agent) => void;
+  onPromoted?: () => void;
 }
 
 export default function AgentCard({
@@ -41,6 +44,9 @@ export default function AgentCard({
   onFavoriteToggle,
   onSelect,
   onApprovalRequested,
+  myDepartmentId,
+  onEdit,
+  onPromoted,
 }: AgentCardProps) {
   const c = pickColor(agent.name);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -85,6 +91,9 @@ export default function AgentCard({
         <div>
           <p className="text-sm font-semibold text-slate-900 leading-tight pr-6 flex items-center gap-1">
             {agent.name}
+            {agent.tier === 'department' && (
+              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700">부서</span>
+            )}
             {agent.agent_type === 'link' && (
               <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                 aria-label="새 창으로 열림">
@@ -106,8 +115,29 @@ export default function AgentCard({
         )}
 
         {/* 내 비서 승인 상태 영역 */}
-        {agent.is_personal && (
+        {agent.tier !== 'official' && (
           <div onClick={e => e.stopPropagation()}>
+            <div className="flex gap-1.5 mt-1">
+              {(agent.tier === 'personal' || agent.department_id === myDepartmentId) && onEdit && (
+                <button onClick={() => onEdit(agent)}
+                  className="flex-1 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                  편집
+                </button>
+              )}
+              {agent.tier === 'personal' && (
+                <button
+                  onClick={async () => {
+                    if (!confirm('부서 비서로 올리면 부서원 누구나 함께 고치고 씁니다. 다시 나만의 비서로 되돌릴 수 없습니다. 올릴까요?')) return;
+                    const res = await fetch(`/api/agents/${agent.id}/promote`, { method: 'POST' });
+                    const r = await res.json();
+                    if (!r.ok) alert(r.error?.message ?? '부서 비서로 올리지 못했습니다.');
+                    else onPromoted?.();
+                  }}
+                  className="flex-1 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">
+                  부서 비서로
+                </button>
+              )}
+            </div>
             {!agent.approval_status && (
               <button
                 onClick={() => setShowApprovalModal(true)}
@@ -142,7 +172,7 @@ export default function AgentCard({
         )}
 
         {/* 호버 CTA (승인 버튼 없을 때만) */}
-        {!agent.is_personal && (
+        {agent.tier === 'official' && (
           <div className="absolute inset-x-0 bottom-0 flex items-center justify-center py-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white/90 to-transparent rounded-b-xl pointer-events-none">
             <span className="text-xs font-semibold text-brand-600">대화 시작 →</span>
           </div>
@@ -205,7 +235,7 @@ function RequestApprovalModal({
         <h3 className="text-base font-bold text-slate-900 mb-2">공식 비서 등록 신청</h3>
         <p className="text-sm text-slate-500 mb-4">
           <span className="font-semibold text-slate-700">{agent.name}</span>을(를) 관리자에게 공식 등록 신청하시겠습니까?
-          승인 시 부서 전체가 사용할 수 있는 공식 비서로 전환됩니다.
+          승인되면 공식 비서가 되어 관리자가 관리합니다. 공개 범위는 관리자가 정합니다.
         </p>
 
         <div className="mb-4">

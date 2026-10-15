@@ -26,7 +26,7 @@ export async function GET(
         agent_id,
         created_at,
         updated_at,
-        agent:agents(id, name, description, icon, color, system_prompt, is_personal, category),
+        agent:agents(id, name, description, icon, color, system_prompt, tier, category, capabilities, model_id),
         messages(
           id,
           role,

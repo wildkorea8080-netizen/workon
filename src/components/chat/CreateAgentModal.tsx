@@ -29,7 +29,7 @@ type ConnectorOption = {
 
 interface CreateAgentModalProps {
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (tier: 'personal' | 'department') => void;
 }
 
 export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModalProps) {
@@ -44,6 +44,9 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
   const [selectedConnectors, setSelectedConnectors] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [tier, setTier] = useState<'personal' | 'department'>('personal');
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  const [modelId, setModelId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +57,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
         if (r.ok) setConnectors((r.data ?? []).filter((c: ConnectorOption) => c.allowedForPersonal));
       })
       .catch(() => {});
+    fetch('/api/models').then(r => r.json()).then(r => { if (r.ok) setModels(r.data ?? []); }).catch(() => {});
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,6 +107,8 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
           name: name.trim(),
           icon,
           category,
+          tier,
+          model_id: modelId || null,
           systemPrompt: systemPrompt.trim() || undefined,
           capabilities: {
             image: {},
@@ -124,7 +130,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
         }
       }
 
-      onCreated();
+      onCreated(tier);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : '비서 생성에 실패했습니다.');
@@ -156,6 +162,22 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
           {/* 섹션 1: 기본 정보 */}
           <section>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">기본 정보</p>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">어디에 만들까요</label>
+              <div className="flex gap-2">
+                {([
+                  ['personal', '나만의 비서', '나만 씁니다'],
+                  ['department', '부서 비서', '우리 부서와 하위 부서가 함께 쓰고, 부서원 누구나 고칩니다'],
+                ] as const).map(([key, text, hint]) => (
+                  <button key={key} type="button" onClick={() => setTier(key)}
+                    className={`flex-1 px-3 py-2 rounded-xl border text-left ${tier === key ? 'border-[#003087] bg-blue-50 text-[#003087]' : 'border-slate-200 text-slate-500'}`}>
+                    <span className="block text-xs font-semibold">{text}</span>
+                    <span className="block text-[11px] opacity-70">{hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* 아이콘 그리드 */}
             <div className="mb-4">
@@ -203,6 +225,17 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+
+            {models.length > 1 && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-slate-700 mb-1">모델</label>
+                <select value={modelId} onChange={e => setModelId(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+                  <option value="">기관 기본 모델</option>
+                  {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </div>
+            )}
           </section>
 
           {/* 섹션 2: 역할 설정 */}

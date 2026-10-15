@@ -12,6 +12,7 @@ import {
 } from '@/lib/chat-images';
 import { fileToChatImage } from '@/lib/image-resize';
 import { connectorShortLabel } from '@/lib/connector-labels';
+import { connectorIdsOf } from '@/lib/agent-form';
 import { acceptsChatImages } from '@/lib/capabilities/settings';
 
 interface ToolLink {
@@ -87,8 +88,8 @@ export default function ChatInterface({
   const [preparingImages, setPreparingImages] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // 사진 읽기가 꺼진 비서는 서버가 사진을 거절한다. 버튼을 두면 보낸 뒤에야 실패를 안다.
-  // 지난 대화를 열면 비서 정보가 대화 조회의 join으로 와 capabilities가 없다 —
-  // 모를 때는 버튼을 두고 서버 판정에 맡긴다(표시일 뿐, 실제 제한은 서버).
+  // 지난 대화를 열 때도 대화 조회의 join이 capabilities·model_id를 함께 준다.
+  // 그래도 모를 때는 버튼을 두고 서버 판정에 맡긴다(표시일 뿐, 실제 제한은 서버).
   const canAttachImages =
     selectedAgent.capabilities === undefined || acceptsChatImages(selectedAgent.capabilities);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -378,7 +379,7 @@ export default function ChatInterface({
 
   const bg = pickBg(selectedAgent.name);
   // 이 비서가 쓸 수 있는 외부 도구. 이름은 connector-labels.ts 한 곳에서 온다.
-  const connectorNames = (selectedAgent.enabled_connectors ?? []).map(connectorShortLabel);
+  const connectorNames = connectorIdsOf(selectedAgent.capabilities).map(connectorShortLabel);
 
   return (
     <div className="flex flex-col h-full">

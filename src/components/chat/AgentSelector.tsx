@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
 import type { Agent } from '@/lib/db';
 import AgentCard from './AgentCard';
 import CreateAgentModal from './CreateAgentModal';
+import AgentEditorModal from '@/components/agents/AgentEditorModal';
 
 const TABS = [
   { key: 'all',      label: '전체' },
@@ -12,6 +14,7 @@ const TABS = [
   { key: '업무',     label: '업무' },
   { key: '문서',     label: '문서' },
   { key: '번역',     label: '번역' },
+  { key: 'dept',     label: '부서 비서' },
   { key: 'personal', label: '내 비서' },
 ] as const;
 
@@ -29,6 +32,8 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const { data: session } = useSession();
 
   const fetchAgents = useCallback(async (tab: TabKey) => {
     setLoading(true);
@@ -36,6 +41,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
     try {
       let url = '/api/agents';
       if (tab === 'fav') url = '/api/agents?favorites=true';
+      else if (tab === 'dept') url = '/api/agents?department=true';
       else if (tab === 'personal') url = '/api/agents?personal=true';
       else if (tab !== 'all') url = `/api/agents?category=${encodeURIComponent(tab)}`;
 
@@ -81,7 +87,13 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
     {showCreateModal && (
       <CreateAgentModal
         onClose={() => setShowCreateModal(false)}
-        onCreated={() => { setShowCreateModal(false); fetchAgents('personal'); setActiveTab('personal'); }}
+        onCreated={(tier) => {
+          setShowCreateModal(false);
+          const next: TabKey = tier === 'department' ? 'dept' : 'personal';
+          setActiveTab(next);
+          // 이미 그 탭이면 activeTab이 안 바뀌어 effect가 돌지 않는다
+          fetchAgents(next);
+        }}
       />
     )}
     <div className="flex flex-col border-b border-slate-100 bg-white">
@@ -122,6 +134,9 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
                 onFavoriteToggle={handleFavoriteToggle}
                 onSelect={a => onAgentSelect(selectedAgent?.id === a.id ? null : a)}
                 onApprovalRequested={() => fetchAgents(activeTab)}
+                myDepartmentId={session?.user?.departmentId ?? null}
+                onEdit={(a) => setEditingId(a.id)}
+                onPromoted={() => fetchAgents(activeTab)}
               />
             ))}
 
@@ -149,6 +164,9 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
         )}
       </div>
     </div>
+    {editingId && (
+      <AgentEditorModal agentId={editingId} onClose={() => setEditingId(null)} onSaved={() => fetchAgents(activeTab)} />
+    )}
     </>
   );
 }
