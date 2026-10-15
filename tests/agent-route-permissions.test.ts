@@ -23,6 +23,7 @@ const MUTATING: [string, string[]][] = [
   ['src/app/api/admin/agents/[id]/reject/route.ts', ['POST']],
   ['src/app/api/upload/route.ts', ['POST']],
   ['src/app/api/documents/route.ts', ['DELETE']],
+  ['src/app/api/documents/assign/route.ts', ['POST']],
 ];
 
 function handlerBody(src: string, method: string): string | null {
