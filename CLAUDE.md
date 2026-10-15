@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-08-19  
+**최종 업데이트**: 2026-10-15  
 **분석 기준**: 코드베이스 전수 확인
 (`next build` + `tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증)
 
@@ -9,7 +9,7 @@
 ## 프로젝트 요약
 
 WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.  
-내부 문서를 업로드·임베딩하고, AI 에이전트로 RAG 기반 Q&A를 제공하며, 템플릿으로 보고서를 생성합니다.
+내부 문서를 업로드·임베딩하고, AI 비서로 RAG 기반 대화를 제공하며, 보고서 템플릿을 관리합니다.
 
 ---
 
@@ -21,7 +21,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | Auth | NextAuth.js 4 (Credentials) — Supabase Auth도 signup에서 일부 사용 |
 | DB | Supabase PostgreSQL + pgvector (임베딩 저장) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
-| AI/LLM | Claude API — 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
+| AI/LLM | Claude API — AI 연결부 `src/lib/llm/` (어댑터: `anthropic.ts`), 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
 | 임베딩 | Voyage AI (`voyage-3`) |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
@@ -29,7 +29,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
-> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`claude.ts`, `embeddings.ts`, `mailer.ts`).
+> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`llm/anthropic.ts`, `embeddings.ts`, `mailer.ts`).
 
 ---
 
@@ -38,22 +38,23 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 91개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 94개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
-│   ├── employee/         # 직원 서브페이지 (reports/history/qna)
 │   ├── my/stats/         # 내 사용현황
 │   ├── shared/[token]/   # 대화 공개 공유 페이지 (비인증)
 │   ├── login/ signin/ signup/ register/  # 인증 페이지
 │   ├── maintenance/      # 점검 모드 안내
 │   └── page.tsx          # 직원 메인 (비서 선택 + 채팅)
 ├── components/
-│   ├── admin/   chat/   super/   employee/   report/   layout/
+│   ├── admin/   chat/   super/   layout/
 ├── lib/
 │   ├── auth.ts           # getServerAuthSession, isAdminSession
 │   ├── nextAuthOptions.ts # NextAuth 설정
 │   ├── super-auth.ts     # 슈퍼관리자 JWT (NextAuth와 별개)
-│   ├── claude.ts         # Claude API — callClaudeAPI + streamClaudeAPI
+│   ├── llm/              # AI 연결부 — types.ts · anthropic.ts(어댑터) · index.ts(streamChat·complete)
+│   ├── assistant/        # 대화 실행기 — prepare.ts · stream.ts · prompt.ts · history.ts · persist.ts
+│   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image
 │   ├── config.ts         # 환경 변수 (직접 process.env 접근 금지)
 │   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
@@ -83,7 +84,7 @@ src/
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수 회귀 59개 | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 293개) | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
@@ -96,7 +97,7 @@ src/
 
 ---
 
-## API 구조 (91개 라우트)
+## API 구조 (94개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -104,7 +105,7 @@ src/
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
-| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/employee/stats`, `/api/qna`, `/api/reports/*`, `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
+| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/reports/*` (화면 없음 — S1-c 정리 대상), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
 | 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
@@ -280,13 +281,18 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 '노출 대기중'에서 시작하는 것과 다릅니다 — 큐레이션한 세트라 바로 쓸 수 있어야 합니다.
 
 ### 채팅 시 (`/api/chat`) — SSE 스트리밍
+
+`/api/chat`은 얇다. 일은 대화 실행기(`src/lib/assistant/`)가 한다.
+
 ```
-질문 → 기관 상태·월 토큰 한도 확인 (usage-limit.ts, 초과 시 429)
-→ 직전 대화 이력 최대 20개 조회 (멀티턴 문맥)
-→ getEmbeddings → search_agent_chunks RPC (threshold 0.25, top-5)
-→ Claude 스트리밍 호출 → SSE로 즉시 전달
-→ 스트림 종료 후 messages + usage_logs 저장
+질문 → prepareTurn: 권한(canUseAgent) → 한도 → 비서 조회 → 능력 결정(기관 범위)
+     → 사진·금지어 → 대화·이력 20개 → 모델(비서 모델 ∩ 기관 허용) → 능력 prepare(문서 찾기)
+→ streamTurn: 도구 루프(켜진 능력의 도구만) → 메시지 저장(판 번호) → 사용 기록(모델별) → 제목
 ```
+
+문서 찾기(`search_agent_chunks` RPC, threshold 0.25, top-5)는 `doc_search` 능력의
+`prepare` 단계가 합니다. 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`
+셋이고, 비서에 켜진 능력의 도구와 프롬프트 조각만 대화에 들어옵니다.
 
 **응답 형식**: `/api/chat`은 JSON이 아니라 `text/event-stream`을 반환합니다.
 
@@ -338,10 +344,10 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 없습니다. 표시까지 지우지 않는 이유는, 나중에 대화를 봤을 때 답변의 근거가
 무엇이었는지 알 수 없게 되기 때문입니다.
 
-### Q&A 시 (`/api/qna`)
-```
-질문 → getEmbeddings → supabase.rpc('search_document_chunks') → Claude 응답 생성
-```
+### 부서 전체 검색
+
+`/api/qna`와 함께 S1-b에서 걷어냈다. 부서 전체 검색은 S4(NODA)에서 다시 정한다.
+(`search_document_chunks` RPC는 DB에 남아 있다.)
 
 **유사도 임계값은 실측으로 정합니다.** 한때 0.72였는데 그 값으로는 **어떤 문서도
 통과한 적이 없었습니다.** voyage-3의 한국어 유사도 분포를 실측한 결과
@@ -359,7 +365,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 **검색 결과가 없으면 모델에게 그 사실을 알려야 합니다.** 예전에는 빈 결과일 때
 프롬프트에 아무것도 넣지 않아서, 모델이 문서가 있다는 것조차 모른 채 일반
 지식으로 그럴듯하게 답했습니다. 공공기관에서는 근거 없는 답이 근거 있는 답처럼
-보이는 것이 가장 위험합니다. `/api/chat`은 세 경우를 구분합니다:
+보이는 것이 가장 위험합니다. `doc_search` 능력(`prompt.ts`가 조립)이 세 경우를 구분합니다:
 
 | 상황 | 프롬프트 |
 |---|---|
@@ -381,21 +387,18 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 **단위가 없다는 사실을 매번 밝히게 됩니다**(0/4 → 4/4). 담당자가 단위를 따로
 확인해야 한다는 것을 알게 되는 것이 실질 효과입니다.
 
-**RAG가 두 갈래인 이유**: `/api/chat`은 에이전트에 연결된 문서만(`search_agent_chunks`),
-`/api/qna`는 부서 전체 문서(`search_document_chunks`)를 검색합니다. 의도된 분리입니다.
-
 **표 처리**: HWP 문서의 표는 마크다운 표로 복원해 인덱싱합니다.
 셀을 순서대로 이어붙이면 열 머리글과 값의 대응이 끊겨 "A사의 B항목?" 같은
 질문에 엉뚱한 열을 답하게 됩니다. 상세 구조는 `hwp.ts`의 `renderTable` 참조.
 
-**툴 실행 루프**: 스트리밍 중 `stop_reason='tool_use'`가 오면 툴을 실행하고
+**툴 실행 루프**(`src/lib/assistant/stream.ts`의 `runToolLoop`): 스트리밍 중 `stop_reason='tool_use'`가 오면 툴을 실행하고
 `tool_result`를 붙여 다시 호출합니다. 라운드 상한(`MAX_TOOL_ROUNDS`)에 걸리면
 **도구 정의는 유지한 채 `tool_choice='none'`으로 한 번 더 호출해 답변을
 마무리**합니다. `tools`를 빼면 이력의 `tool_use`/`tool_result` 블록 때문에 Anthropic이 **400으로 거부**합니다. 그냥 루프를 끝내면 마지막 툴 결과를 모델에 돌려주지 못해
 사용자가 도입부만 받고 답을 못 받습니다. 이때 `tools`를 통째로 빼면 이력의
 `tool_use` 블록 때문에 빈 응답이 오므로 반드시 `tool_choice`를 쓰세요. `tool_use`의 인자는 `input_json_delta`로
 잘게 쪼개져 오므로 블록 인덱스별로 모았다가 `content_block_stop`에서 파싱합니다
-(`claude.ts`). 토큰 사용량은 라운드별로 누적합니다.
+(`src/lib/llm/anthropic.ts`). 토큰 사용량은 라운드별로, **실제 쓴 모델별로** 누적합니다.
 
 **Supabase 배치 삽입 주의**: PostgREST는 여러 행을 한 번에 넣을 때 모든 행의
 컬럼을 **합집합**으로 맞추고, 그 컬럼이 없는 행에는 **명시적 NULL**을 넣습니다.
@@ -475,7 +478,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수 회귀 테스트 95개가 돕니다 (`tests/`).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 293개).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -490,6 +493,11 @@ MAIL_FROM=
    | `route-auth.test.ts` | **모든 API 핸들러의 인증·관리자 검사 누락** |
    | `pptx.test.ts` | 런 분할·슬라이드 번호·표 중복, 실제 zip으로 검증 |
    | `chat-images.test.ts` | 첨부 상한·base64 검사, **요청 본문 상한과의 관계** |
+   | `llm-anthropic.test.ts` | MCP 도구 → Anthropic 형식 변환, 쪼개진 `input_json_delta` 조립, 스트림 중 오류 전달 |
+   | `llm-boundary.test.ts` | **Anthropic 호출이 `src/lib/llm/` 밖에 없는지**, 예외 목록의 이유, 옛 `claude.ts` 부재 |
+   | `capabilities.test.ts` | 능력 목록·도구 이름 중복, 기관 범위로 거른 능력, 문서 찾기 3경우(자료·근거 없음·문서 없음) |
+   | `assistant-parts.test.ts` | 시스템 프롬프트 조립, 사진 순서·저장 표시, 이력 다듬기, 메시지 저장 행 키 일치·판 번호, 모델별 사용량 |
+   | `tool-loop.test.ts` | 도구 루프 라운드 누적, 상한 시 `tool_choice=none` 마무리, 꺼낸 적 없는 도구 거부, 도중 실패 시 쓴 토큰 보존 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
@@ -539,8 +547,9 @@ MAIL_FROM=
 
 ### 🟡 알려진 불일치
 
-- **RAG 구현 2종 공존**: `/api/chat`은 `search_agent_chunks`(에이전트 단위),
-  `/api/qna`는 `search_document_chunks`(부서 전체). 의도된 분리지만 통합 검토 필요.
+- **부서 전체 검색 없음**: `/api/qna`(`search_document_chunks`)를 S1-b에서 걷어냈다.
+  부서 전체 검색은 S4(NODA)에서 다시 정한다. 지금 RAG는 `/api/chat`의
+  에이전트 단위 검색(`search_agent_chunks`) 하나다.
 - **과금 파이프라인 부분 구현**: `usage_logs`에 토큰·모델·원가(USD/원)가
   기록되고 예산 소진 판정도 동작합니다. 다만 `billing_logs` 월 집계와
   청구서 생성은 미구현입니다.
@@ -759,8 +768,14 @@ details: {
 
 모델 id에 **날짜 접미사를 붙이지 마세요** (`claude-sonnet-4-6-20251114` 같은 형태는 없습니다).
 
-다른 프로바이더(OpenAI·Google)를 붙이려면 `src/lib/llm/` 어댑터 계층이
-먼저 필요합니다. 커넥터가 MCP 표준 형식으로 툴을 정의하는 이유가 이것입니다.
+**모델은 비서마다 정한다(`agents.model_id`, S1).** 대화 화면에서 고르지 않는다.
+대화 화면 하단에는 비서의 모델이 표시만 된다.
+비서의 모델이 기관 허용 목록 밖이면 목록의 첫 번째로 돈다(`resolveModel`).
+모델 호출은 `src/lib/llm/`의 `streamChat`·`complete`로만 한다 — `tests/llm-boundary.test.ts`가 본다.
+
+다른 프로바이더(OpenAI·Google)는 `src/lib/llm/`에 어댑터 하나를 더하면 붙는다
+(`index.ts`가 모델 레지스트리의 provider로 어댑터를 고른다). 커넥터가 MCP 표준
+형식으로 툴을 정의하는 이유가 이것입니다.
 
 환율은 `config.ts`의 `USD_KRW_RATE` (기본 1350, `USD_KRW_RATE` 환경변수로 조정).
 
@@ -795,7 +810,8 @@ details: {
 
 **토큰을 쓰는 라우트는 `resolveModelForDepartment()`를 거쳐야 합니다.**
 각자 기관을 조회해 정책을 적용하면 한 곳만 빠뜨려도 그 경로가 정책 밖으로
-샙니다. 현재 `/api/chat`·`/api/qna`·`/api/report`가 이 함수를 씁니다.
+샙니다. 현재 `/api/enhance-prompt`·`/api/upload`(스캔 판독)가 `resolveModelForDepartment()`를 쓰고,
+`/api/chat`은 대화 실행기(`assistant/prepare.ts`)가 비서 모델과 기관 허용 목록으로 `resolveModel()`을 부릅니다.
 
 화면에서 거르는 것은 표시일 뿐이고 실제 제한은 서버에서 겁니다
 (개인 비서 커넥터 범위와 같은 원칙).
@@ -939,9 +955,10 @@ details: {
 - 시간은 **KST 기준**으로 표기합니다 — 감사 자료는 한국 시간으로 제출합니다
 - 활동 코드는 한국어로 변환합니다 (`chat_message` → `AI 대화`)
 
-**직원 질문 원문은 기본적으로 가립니다.** `/api/qna`가 `details.query`에
-질문을 저장하는데(`/api/chat`은 저장하지 않습니다), 그걸 감사 화면에 그대로
-띄우면 상시 근로자 감시가 됩니다. 감사 CSV는 정보공개 청구로 기관 밖에
+**직원 질문 원문은 기본적으로 가립니다.** `/api/qna`가 있던 때 쌓인 옛 로그에
+`details.query`로 질문이 들어 있습니다(`/api/qna`는 걷어냈고 지금은 어느 라우트도
+새로 쓰지 않으며, `/api/chat`도 저장하지 않습니다). 그래도 과거 기간을 조회하면
+나오므로, 그걸 감사 화면에 그대로 띄우면 상시 근로자 감시가 됩니다. 감사 CSV는 정보공개 청구로 기관 밖에
 나갈 수도 있습니다.
 
 | | 동작 |
