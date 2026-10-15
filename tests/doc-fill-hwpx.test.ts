@@ -210,6 +210,25 @@ describe('여분 줄이 만드는 배치 변화', () => {
   });
 });
 
+describe('첫 쪽 미리보기 그림', () => {
+  const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  it('낡은 미리보기 그림은 빈 그림으로 바꾼다 — 채우기 전 글이 탐색기에 남지 않게', async () => {
+    const old = Buffer.from('옛 첫 쪽 그림 {{제목}}');
+    const bytes = await buildHwpx(para('{{제목}}'), { prvImage: old });
+    const zip = await JSZip.loadAsync((await fillHwpx(bytes, values({ 제목: '새 제목' }))).bytes);
+    const image = Buffer.from(await zip.file('Preview/PrvImage.png')!.async('uint8array'));
+    expect(image.equals(old)).toBe(false);
+    expect(image.subarray(0, 8).equals(SIGNATURE)).toBe(true);
+    expect(Object.keys(zip.files).filter((n) => n.endsWith('/'))).toEqual([]);
+  });
+
+  it('원래 없던 미리보기 그림은 만들지 않는다', async () => {
+    const zip = await JSZip.loadAsync((await fillHwpx(await buildHwpx(para('{{제목}}')), values({ 제목: 'x' }))).bytes);
+    expect(zip.file('Preview/PrvImage.png')).toBeNull();
+  });
+});
+
 describe('XML 안전', () => {
   it('XML 1.0에서 금지된 문자는 넣지 않는다 — 파일이 다시 읽힌다', async () => {
     const bytes = await buildHwpx(para('{{비고}}'));

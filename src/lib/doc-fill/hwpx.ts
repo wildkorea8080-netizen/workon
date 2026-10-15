@@ -285,7 +285,20 @@ function previewOf(paras: Para[]): string[] {
     .map((p) => p.text);
 }
 
+/**
+ * 흰 바탕의 작은 PNG(8x8). 첫 쪽을 다시 그릴 수 없으므로, 채우기 전 글이 찍힌
+ * 낡은 미리보기 그림(Preview/PrvImage.png) 자리에 대신 넣는다. 탐색기·한글 열기
+ * 창이 이 그림을 보여 주는데, 그대로 두면 {{항목}}이 보여 채우기가 실패한 것처럼 보인다.
+ * 이 그림은 이름으로만 참조되고 매니페스트에는 없다.
+ */
+const BLANK_PREVIEW_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAD0lEQVR4nGP4jwMwDC0JALoev0Ewkwr8AAAAAElFTkSuQmCC',
+  'base64'
+);
+
 async function rewritePreview(zip: JSZip, text: string): Promise<void> {
+  // 원래 있던 경우에만 바꾼다. 압축 방식은 호출한 쪽이 항목별로 다시 맞춘다
+  if (zip.file('Preview/PrvImage.png')) zip.file('Preview/PrvImage.png', BLANK_PREVIEW_PNG, { createFolders: false });
   const file = zip.file('Preview/PrvText.txt');
   if (!file) return;
   const original = await file.async('uint8array');
