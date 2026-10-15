@@ -10,6 +10,7 @@ import {
   MAX_TOTAL_IMAGE_BYTES,
 } from '../src/lib/chat-images';
 import { buildUserContent, storedUserContent } from '../src/lib/assistant/prompt';
+import { buildMessageRows } from '../src/lib/assistant/persist';
 
 /**
  * 첨부 이미지 검사.
@@ -124,8 +125,17 @@ describe('대화 실행기 연결', () => {
   });
 
   it('이미지 바이트를 DB에 저장하지 않는다', () => {
-    expect(storedUserContent('질문', 1)).not.toContain('AAAA');
-    expect(storedUserContent('질문', 1)).toContain('1장');
+    // 사진이 있는 턴의 메시지 행을 그대로 만들어 본다. 실행기가 실제로 DB에
+    // 넣는 행은 tests/stream-turn.test.ts가 가짜 DB로 확인한다.
+    const data = Buffer.from('사진 바이트는 남기면 안 된다').toString('base64');
+    const images = [{ media_type: 'image/png', data }] as never;
+    expect(JSON.stringify(buildUserContent('질문', images))).toContain(data); // 모델에는 간다
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: storedUserContent('질문', 1),
+      assistantText: '답', chunks: [], links: [], agentVersion: 1,
+    });
+    expect(JSON.stringify(rows)).not.toContain(data);
+    expect(rows[0].content).toContain('1장');
   });
 });
 

@@ -170,7 +170,18 @@ async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Recor
  *
  * 순서: meta → 도구 루프(delta·tool_*) → 메시지 저장 → 사용 기록 → 제목 → done
  */
-export async function streamTurn(turn: PreparedTurn, send: SendEvent): Promise<void> {
+export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promise<void> {
+  // 보내기 실패(연결 끊김)가 저장·사용 기록을 건너뛰게 하면 안 된다. 답변을
+  // 받지 못한 사용자도 새로고침하면 대화를 볼 수 있어야 하고, 쓴 토큰은 청구된다.
+  // 라우트도 enqueue 실패를 삼키지만 실행기가 그 약속에 기대지 않는다.
+  const send: SendEvent = (event) => {
+    try {
+      rawSend(event);
+    } catch {
+      // 클라이언트가 떠났다
+    }
+  };
+
   // 대화 id와 출처를 먼저 보내 화면이 바로 반영하게 한다
   send({ event: 'meta', data: { conversation_id: turn.conversationId, chunks: turn.chunks } });
 
@@ -249,8 +260,10 @@ export async function streamTurn(turn: PreparedTurn, send: SendEvent): Promise<v
         await supabaseAdmin.from('conversations').update({ title: autoTitle }).eq('id', turn.conversationId);
         title = autoTitle;
       }
-    } catch {
-      // 제목 생성 실패는 대화에 영향이 없다
+    } catch (error) {
+      // 제목 생성 실패는 대화에 영향이 없다. 다만 이유는 남긴다 — 모르면 제목이
+      // 계속 '대화 with ...'로 남는 원인을 찾을 수 없다.
+      console.warn('[assistant] 제목 생성 실패', error);
     }
   }
 
