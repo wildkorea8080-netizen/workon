@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TEMPLATE_EXTENSIONS, MAX_TEMPLATES } from '@/lib/template-files';
+import { requestJson } from '@/lib/request-json';
 
 type TemplateItem = { id: string; name: string; file_name: string; size_bytes: number; created_at: string };
 
@@ -25,8 +26,7 @@ export default function TemplatesPanel({
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/agents/${agentId}/templates`);
-    const r = await res.json();
+    const { r } = await requestJson(`/api/agents/${agentId}/templates`);
     if (r.ok) setItems(r.data.items);
     else setError(r.error?.message ?? '양식을 불러오지 못했습니다.');
   }, [agentId]);
@@ -48,12 +48,11 @@ export default function TemplatesPanel({
       fd.append('file', file);
       fd.append('name', name.trim());
       fd.append('base_version', String(version));
-      const res = await fetch(`/api/agents/${agentId}/templates`, { method: 'POST', body: fd });
-      const r = await res.json();
+      const { status, r } = await requestJson(`/api/agents/${agentId}/templates`, { method: 'POST', body: fd });
       if (!r.ok) {
         setError(r.error?.message ?? '양식을 올리지 못했습니다.');
         // 판이 어긋났으면 부모가 판을 새로 읽어야 다음 시도가 통한다
-        if (res.status === 409 && r.error?.details?.reason === 'conflict') onChanged();
+        if (status === 409 && r.error?.details?.reason === 'conflict') onChanged();
         return;
       }
       setName('');
@@ -69,11 +68,12 @@ export default function TemplatesPanel({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/templates/${item.id}?base_version=${version}`, { method: 'DELETE' });
-      const r = await res.json();
+      const { status, r } = await requestJson(`/api/agents/${agentId}/templates/${item.id}?base_version=${version}`, {
+        method: 'DELETE',
+      });
       if (!r.ok) {
         setError(r.error?.message ?? '양식을 빼지 못했습니다.');
-        if (res.status === 409 && r.error?.details?.reason === 'conflict') onChanged();
+        if (status === 409 && r.error?.details?.reason === 'conflict') onChanged();
       } else {
         onChanged();
       }

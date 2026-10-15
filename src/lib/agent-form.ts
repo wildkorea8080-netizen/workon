@@ -156,3 +156,22 @@ export function connectorChoices(
   if (tier === 'official') return all;
   return all.filter((c) => c.allowedForPersonal || current.includes(c.id));
 }
+
+/**
+ * 켜져 있지만 기관이 쓰지 않는 연결인가. connectorChoices가 '이미 켜 둔 것'이라
+ * 남겨 둔 연결이 여기에 걸린다. 이 연결이 켜져 있으면 서버가 저장을 403으로
+ * 거절하므로, 화면이 끄라고 알려야 한다.
+ */
+export function isConnectorOutOfScope(
+  choice: ConnectorChoice,
+  tier: 'personal' | 'department' | 'official'
+): boolean {
+  if (tier === 'official') return false;
+  return !choice.allowedForPersonal;
+}
+
+/** 서버에서 마지막으로 읽은 설정(JSON)과 지금 화면 값이 다른가. 기준이 없으면 '수정 없음' */
+export function isSettingsDirty(value: AgentSettingsValue, baseline: string | null): boolean {
+  if (baseline === null) return false;
+  return JSON.stringify(value) !== baseline;
+}

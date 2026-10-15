@@ -6,10 +6,13 @@ import {
   settingsFromAgent,
   settingsToBody,
   connectorChoices,
+  isConnectorOutOfScope,
+  isSettingsDirty,
   TIER_LABELS,
   type AgentSettingsValue,
   type ConnectorChoice,
 } from '@/lib/agent-form';
+import { requestJson } from '@/lib/request-json';
 import TemplatesPanel from './TemplatesPanel';
 import HistoryPanel from './HistoryPanel';
 
@@ -50,19 +53,23 @@ export default function AgentEditorModal({
   const [notice, setNotice] = useState<string | null>(null);
   /** 서버에서 마지막으로 읽은 설정의 모습. 판만 오르고 설정이 그대로인지 가릴 때 쓴다 */
   const baselineRef = useRef<string | null>(null);
+  /** 마우스를 배경에서 눌렀는가. 끌어서 창 밖에서 놓은 것을 배경 클릭으로 세지 않는다 */
+  const pressedOnBackdrop = useRef(false);
 
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/agents/${agentId}`);
-    const r = await res.json();
+  /** 최신 판을 불러와 화면을 덮는다. 읽은 행을 돌려준다(되돌리기 뒤 목록 갱신에 쓴다) */
+  const load = useCallback(async (): Promise<Agent | null> => {
+    const { r } = await requestJson(`/api/agents/${agentId}`);
     if (!r.ok || !r.data) {
       setError(r.error?.message ?? '비서를 불러오지 못했습니다.');
-      return;
+      return null;
     }
     const next = settingsFromAgent(r.data);
     baselineRef.current = JSON.stringify(next);
     setAgent(r.data);
     setValue(next);
     setConflict(false);
+    setError(null);
+    return r.data as Agent;
   }, [agentId]);
 
   /**
@@ -71,8 +78,7 @@ export default function AgentEditorModal({
    * 판 번호만 올리면 그 사람의 변경을 모른 채 다음 저장이 덮어쓴다.
    */
   const refreshAgent = useCallback(async () => {
-    const res = await fetch(`/api/agents/${agentId}`);
-    const r = await res.json();
+    const { r } = await requestJson(`/api/agents/${agentId}`);
     if (!r.ok || !r.data) {
       setError(r.error?.message ?? '비서를 불러오지 못했습니다.');
       return;
@@ -96,6 +102,12 @@ export default function AgentEditorModal({
       .catch(() => {});
   }, [load]);
 
+  /** 되돌린 뒤 다시 읽고, 관리 목록·직원 카드도 새 행으로 갱신한다 */
+  const reloadAfterRevert = async () => {
+    const row = await load();
+    if (row) onSaved?.(row);
+  };
+
   const patch = (p: Partial<AgentSettingsValue>) => setValue((v) => (v ? { ...v, ...p } : v));
 
   const save = async () => {
@@ -108,7 +120,7 @@ export default function AgentEditorModal({
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch(`/api/agents/${agent.id}`, {
+      const { status, r } = await requestJson(`/api/agents/${agent.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -116,8 +128,7 @@ export default function AgentEditorModal({
           base_version: agent.version,
         }),
       });
-      const r = await res.json();
-      if (res.status === 409 && r.error?.details?.reason === 'conflict') {
+      if (status === 409 && r.error?.details?.reason === 'conflict') {
         setConflict(true);
         return;
       }
@@ -139,13 +150,13 @@ export default function AgentEditorModal({
   const enhance = async () => {
     if (!value?.system_prompt.trim()) return;
     setEnhancing(true);
+    setError(null);
     try {
-      const res = await fetch('/api/enhance-prompt', {
+      const { r } = await requestJson('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: value.system_prompt, type: 'agent' }),
       });
-      const r = await res.json();
       if (r.ok) patch({ system_prompt: r.data.enhancedPrompt });
       else setError(r.error?.message ?? '지시문을 다듬지 못했습니다.');
     } finally {
@@ -162,16 +173,34 @@ export default function AgentEditorModal({
    */
   const catalogIds = new Set(connectors.map((c) => c.id));
   const staleIds = value && connectors.length > 0 ? value.connectors.filter((id) => !catalogIds.has(id)) : [];
+  /** 허용 목록을 읽었는데 비서의 모델이 거기 없다 — 서버가 저장을 400으로 거절한다 */
+  const modelNotAllowed = !!value && !!value.model_id && models.length > 0 && !models.some((m) => m.id === value.model_id);
   const toggleConnector = (id: string, on: boolean) =>
     setValue((v) =>
       v ? { ...v, connectors: on ? [...v.connectors, id] : v.connectors.filter((x) => x !== id) } : v
     );
 
+  /**
+   * 저장 안 한 설정 수정이 있으면 묻고 닫는다. 배경·× ·닫기 단추가 모두 이 길을 거친다.
+   * 마지막으로 읽은/저장한 설정과 지금 값을 비교한다(baselineRef).
+   */
+  const requestClose = () => {
+    if (value && isSettingsDirty(value, baselineRef.current) && !confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) return;
+    onClose();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4"
+      onMouseDown={(e) => {
+        pressedOnBackdrop.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        // 창 안에서 글자를 끌어 선택하다 밖에서 놓으면 click이 배경에서 일어난다.
+        // 누른 곳도 배경이었을 때만 닫는다.
+        const closes = pressedOnBackdrop.current && e.target === e.currentTarget;
+        pressedOnBackdrop.current = false;
+        if (closes) requestClose();
       }}
     >
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -187,7 +216,7 @@ export default function AgentEditorModal({
                 </p>
               )}
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="닫기">
+            <button onClick={requestClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="닫기">
               ×
             </button>
           </div>
@@ -201,7 +230,10 @@ export default function AgentEditorModal({
             ).map(([key, text]) => (
               <button
                 key={key}
-                onClick={() => setTab(key)}
+                onClick={() => {
+                  setTab(key);
+                  setNotice(null);
+                }}
                 className={`pb-2 border-b-2 ${tab === key ? 'border-[#003087] text-[#003087] font-semibold' : 'border-transparent text-slate-500'}`}
               >
                 {text}
@@ -214,18 +246,22 @@ export default function AgentEditorModal({
           {conflict && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 space-y-2">
               <p>다른 분이 먼저 고쳤습니다. 최신 내용을 불러오면 지금 고친 내용은 사라집니다. 필요하면 복사해 두세요.</p>
-              <button onClick={load} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-semibold">
+              <button onClick={() => void load()} className="px-3 py-1 bg-amber-600 text-white rounded-lg font-semibold">
                 최신 내용 불러오기
               </button>
             </div>
           )}
 
+          {/* 탭과 무관하게 보이는 자리 — 양식·기록 탭에서 난 오류도 여기서 읽는다 */}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          {notice && <p className="text-xs text-green-600">{notice}</p>}
+
           {!agent || !value ? (
-            <p className="text-sm text-slate-400">{error ?? '불러오는 중...'}</p>
+            error ? null : <p className="text-sm text-slate-400">불러오는 중...</p>
           ) : tab === 'templates' ? (
             <TemplatesPanel agentId={agent.id} version={agent.version} onChanged={refreshAgent} />
           ) : tab === 'history' ? (
-            <HistoryPanel agentId={agent.id} version={agent.version} onReverted={load} onStale={refreshAgent} />
+            <HistoryPanel agentId={agent.id} version={agent.version} onReverted={reloadAfterRevert} onStale={refreshAgent} />
           ) : (
             <>
               <div className="grid grid-cols-[84px_1fr] gap-3">
@@ -290,15 +326,18 @@ export default function AgentEditorModal({
                     <label className={label}>모델</label>
                     <select value={value.model_id} onChange={(e) => patch({ model_id: e.target.value })} className={`${input} bg-white`}>
                       <option value="">기관 기본 모델</option>
+                      {modelNotAllowed && (
+                        <option value={value.model_id}>{`${value.model_id} (허용되지 않음 — 바꿔 주세요)`}</option>
+                      )}
                       {models.map((m) => (
                         <option key={m.id} value={m.id} title={m.note}>
                           {m.label}
                         </option>
                       ))}
                     </select>
-                    {value.model_id && models.length > 0 && !models.some((m) => m.id === value.model_id) && (
+                    {modelNotAllowed && (
                       <p className="mt-1 text-[11px] text-amber-600">
-                        기관 허용 목록에 없는 모델이라 지금은 기본 모델로 동작합니다.
+                        기관 허용 목록에 없는 모델입니다. 다른 모델을 고르거나 &lsquo;기관 기본 모델&rsquo;로 바꿔야 저장됩니다.
                       </p>
                     )}
                   </div>
@@ -335,7 +374,11 @@ export default function AgentEditorModal({
                               onChange={(e) => toggleConnector(c.id, e.target.checked)}
                               className="w-4 h-4 rounded border-slate-300 text-[#003087]"
                             />
-                            <span className="text-xs text-slate-700">{c.label}</span>
+                            {agent && value.connectors.includes(c.id) && isConnectorOutOfScope(c, agent.tier) ? (
+                              <span className="text-xs text-amber-700">{`${c.label} (기관에서 쓰지 않음 — 꺼 주세요)`}</span>
+                            ) : (
+                              <span className="text-xs text-slate-700">{c.label}</span>
+                            )}
                           </label>
                         ))}
                         {staleIds.map((id) => (
@@ -376,9 +419,6 @@ export default function AgentEditorModal({
                 </>
               )}
 
-              {error && <p className="text-xs text-red-500">{error}</p>}
-              {notice && <p className="text-xs text-green-600">{notice}</p>}
-
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={save}
@@ -387,7 +427,7 @@ export default function AgentEditorModal({
                 >
                   {saving ? '저장 중...' : '저장'}
                 </button>
-                <button onClick={onClose} className="px-4 py-2 border border-slate-200 rounded-xl text-sm text-slate-600">
+                <button onClick={requestClose} className="px-4 py-2 border border-slate-200 rounded-xl text-sm text-slate-600">
                   닫기
                 </button>
               </div>

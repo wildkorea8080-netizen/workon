@@ -6,6 +6,8 @@ import {
   canRevertTo,
   connectorChoices,
   connectorIdsOf,
+  isConnectorOutOfScope,
+  isSettingsDirty,
 } from '@/lib/agent-form';
 
 const agent = {
@@ -88,5 +90,40 @@ describe('연결 선택지', () => {
   it('나만의·부서 비서는 기관이 쓰는 것만, 이미 켜 둔 것은 끌 수 있게 남긴다', () => {
     expect(connectorChoices(all, 'department', []).map((c) => c.id)).toEqual(['law']);
     expect(connectorChoices(all, 'personal', ['kosis']).map((c) => c.id)).toEqual(['law', 'kosis']);
+  });
+});
+
+describe('기관이 안 쓰는 연결', () => {
+  const law = { id: 'law', label: '법령', allowedForPersonal: true };
+  const kosis = { id: 'kosis', label: '통계', allowedForPersonal: false };
+
+  it('나만의·부서 비서에서 기관이 안 쓰는 연결은 범위 밖이다', () => {
+    expect(isConnectorOutOfScope(kosis, 'personal')).toBe(true);
+    expect(isConnectorOutOfScope(kosis, 'department')).toBe(true);
+    expect(isConnectorOutOfScope(law, 'personal')).toBe(false);
+  });
+
+  it('공식 비서는 어느 연결도 범위 밖이 아니다', () => {
+    expect(isConnectorOutOfScope(kosis, 'official')).toBe(false);
+  });
+
+  it('allowedForPersonal이 없으면(옛 응답) 범위 밖으로 본다', () => {
+    expect(isConnectorOutOfScope({ id: 'x', label: 'x' }, 'personal')).toBe(true);
+  });
+});
+
+describe('저장 안 한 수정', () => {
+  const base = settingsFromAgent(agent as never);
+
+  it('기준과 같으면 수정 없음', () => {
+    expect(isSettingsDirty(base, JSON.stringify(base))).toBe(false);
+  });
+
+  it('값이 하나라도 다르면 수정 있음', () => {
+    expect(isSettingsDirty({ ...base, name: '다른 이름' }, JSON.stringify(base))).toBe(true);
+  });
+
+  it('기준이 없으면(아직 못 읽음) 수정 없음', () => {
+    expect(isSettingsDirty(base, null)).toBe(false);
   });
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { describeHistoryItem, canRevertTo } from '@/lib/agent-form';
+import { requestJson } from '@/lib/request-json';
 
 type HistoryItem = {
   id: string;
@@ -30,8 +31,7 @@ export default function HistoryPanel({
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/agents/${agentId}/history`);
-    const r = await res.json();
+    const { r } = await requestJson(`/api/agents/${agentId}/history`);
     if (r.ok) setItems(r.data.items);
     else setError(r.error?.message ?? '변경 기록을 불러오지 못했습니다.');
   }, [agentId]);
@@ -50,15 +50,14 @@ export default function HistoryPanel({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/${agentId}/revert`, {
+      const { status, r } = await requestJson(`/api/agents/${agentId}/revert`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: target, base_version: version }),
       });
-      const r = await res.json();
       if (!r.ok) {
         setError(r.error?.message ?? '되돌리지 못했습니다.');
-        if (res.status === 409 && r.error?.details?.reason === 'conflict') onStale?.();
+        if (status === 409 && r.error?.details?.reason === 'conflict') onStale?.();
       } else {
         onReverted();
       }
