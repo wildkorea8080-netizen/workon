@@ -136,7 +136,12 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
                 onApprovalRequested={() => fetchAgents(activeTab)}
                 myDepartmentId={session?.user?.departmentId ?? null}
                 onEdit={(a) => setEditingId(a.id)}
-                onPromoted={() => fetchAgents(activeTab)}
+                onPromoted={() => {
+                  // 올린 비서는 '부서 비서' 탭에 있다. 만들기 뒤 이동과 같은 방식으로
+                  // 옮기고, 이미 그 탭이면 effect가 안 도므로 직접 다시 읽는다.
+                  setActiveTab('dept');
+                  fetchAgents('dept');
+                }}
               />
             ))}
 

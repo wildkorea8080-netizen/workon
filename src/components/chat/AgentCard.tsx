@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Agent } from '@/lib/db';
+import { requestJson } from '@/lib/request-json';
 
 const AVATAR_COLORS = [
   { bg: 'bg-[#003087]',   light: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-[#003087]'  },
@@ -50,6 +51,11 @@ export default function AgentCard({
 }: AgentCardProps) {
   const c = pickColor(agent.name);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  /**
+   * 내가 고칠 수 있는 비서인가 — 나만의 비서이거나 내 부서의 부서 비서. [편집]과
+   * [공식 등록 신청]이 같은 조건을 쓴다. 신청은 서버가 소유자·부서원만 받는다.
+   */
+  const canManage = agent.tier === 'personal' || agent.department_id === myDepartmentId;
 
   return (
     <>
@@ -118,7 +124,7 @@ export default function AgentCard({
         {agent.tier !== 'official' && (
           <div onClick={e => e.stopPropagation()}>
             <div className="flex gap-1.5 mt-1">
-              {(agent.tier === 'personal' || agent.department_id === myDepartmentId) && onEdit && (
+              {canManage && onEdit && (
                 <button onClick={() => onEdit(agent)}
                   className="flex-1 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
                   편집
@@ -128,8 +134,7 @@ export default function AgentCard({
                 <button
                   onClick={async () => {
                     if (!confirm('부서 비서로 올리면 부서원 누구나 함께 고치고 씁니다. 다시 나만의 비서로 되돌릴 수 없습니다. 올릴까요?')) return;
-                    const res = await fetch(`/api/agents/${agent.id}/promote`, { method: 'POST' });
-                    const r = await res.json();
+                    const { r } = await requestJson(`/api/agents/${agent.id}/promote`, { method: 'POST' });
                     if (!r.ok) alert(r.error?.message ?? '부서 비서로 올리지 못했습니다.');
                     else onPromoted?.();
                   }}
@@ -138,7 +143,7 @@ export default function AgentCard({
                 </button>
               )}
             </div>
-            {!agent.approval_status && (
+            {canManage && !agent.approval_status && (
               <button
                 onClick={() => setShowApprovalModal(true)}
                 className="w-full mt-1 py-1.5 text-xs font-semibold text-brand-600 border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors"
