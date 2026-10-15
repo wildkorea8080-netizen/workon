@@ -182,6 +182,34 @@ describe('여분 줄 문단', () => {
   });
 });
 
+describe('여분 줄이 만드는 배치 변화', () => {
+  it('이어 붙인 문단은 쪽 나눔·단 나눔을 끈다 — 원래 문단은 그대로', async () => {
+    const body =
+      '<hp:p id="1" paraPrIDRef="3" styleIDRef="0" pageBreak="1" columnBreak="1"><hp:run charPrIDRef="0"><hp:t>{{본문}}</hp:t></hp:run></hp:p>';
+    const xml = await sectionXml((await fillHwpx(await buildHwpx(body), values({ 본문: 'a\nb\nc' }))).bytes);
+    const paras = xml.match(/<hp:p [^>]*>/g)!;
+    expect(paras).toHaveLength(3);
+    expect(paras[0]).toContain('pageBreak="1"');
+    expect(paras[0]).toContain('columnBreak="1"');
+    for (const tag of paras.slice(1)) {
+      expect(tag).toContain('pageBreak="0"');
+      expect(tag).toContain('columnBreak="0"');
+      expect(tag).toContain('paraPrIDRef="3"');
+    }
+  });
+
+  it('표 칸에 여분 줄이 생기면 표를 품은 바깥 문단의 줄 배치 캐시도 지운다 — 다른 문단 것은 둔다', async () => {
+    const seg = '<hp:linesegarray><hp:lineseg textpos="0" vertsize="9000"/></hp:linesegarray>';
+    const outer = table([['칸', '{{칸값}}']]).replace('</hp:run></hp:p>', `</hp:run>${seg}</hp:p>`);
+    const bytes = await buildHwpx(outer + para('그대로', '8'));
+    expect(await sectionXml(bytes)).toContain(`</hp:tbl></hp:run>${seg}</hp:p>`);
+    const xml = await sectionXml((await fillHwpx(bytes, values({ 칸값: 'x\ny' }))).bytes);
+    expect(xml).toMatch(/<\/hp:tbl><\/hp:run><\/hp:p>/);
+    expect(xml).not.toContain('vertsize="9000"');
+    expect(xml.match(/<hp:p [^>]*paraPrIDRef="8"[\s\S]*?<\/hp:p>/)![0]).toContain('linesegarray');
+  });
+});
+
 describe('XML 안전', () => {
   it('XML 1.0에서 금지된 문자는 넣지 않는다 — 파일이 다시 읽힌다', async () => {
     const bytes = await buildHwpx(para('{{비고}}'));

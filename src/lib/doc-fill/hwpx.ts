@@ -37,6 +37,8 @@ interface Para {
   /** 이 문단 자신의 줄 배치 캐시 구간 */
   lineSegs: { start: number; end: number }[];
   hasChild: boolean;
+  /** 이 문단을 품은 바깥 문단들의 시작 위치(바깥 → 안쪽 순) */
+  ancestors: number[];
 }
 
 interface Edit {
@@ -143,6 +145,7 @@ function scanParagraphs(xml: string, prefix: string): Para[] {
         text: '',
         lineSegs: [],
         hasChild: false,
+        ancestors: stack.map((f) => f.start),
         lsStart: 0,
       });
     } else if (tag.kind === 'close') {
@@ -156,6 +159,7 @@ function scanParagraphs(xml: string, prefix: string): Para[] {
           text: top.pieces.map((p) => p.text).join(''),
           lineSegs: top.lineSegs,
           hasChild: top.hasChild,
+          ancestors: top.ancestors,
         });
       }
     } else if (stack.length > 0) {
@@ -196,13 +200,20 @@ const textXml = (s: string) => escapeXml(stripInvalidXmlChars(s));
 
 /** 여분 줄 문단. 원래 문단의 여는 태그(서식 참조)와 표시가 있던 조각의 글자 서식만 쓴다 */
 function freshParagraph(openTag: string, charPr: string | null, line: string, prefix: string): string {
+  // 쪽·단 나눔은 첫 문단에서만. 이어 붙인 줄마다 새 쪽·새 단이 되면 안 된다
+  const tag = openTag.replace(/(\s(?:pageBreak|columnBreak)\s*=\s*)(?:"[^"]*"|'[^']*')/g, '$1"0"');
   const attr = charPr === null ? '' : ` charPrIDRef="${charPr.replace(/"/g, '&quot;')}"`;
-  return `${openTag}<${prefix}:run${attr}><${prefix}:t>${textXml(line)}</${prefix}:t></${prefix}:run></${prefix}:p>`;
+  return `${tag}<${prefix}:run${attr}><${prefix}:t>${textXml(line)}</${prefix}:t></${prefix}:run></${prefix}:p>`;
 }
 
-function planParagraph(para: Para, values: Map<string, string>, prefix: string, filled: Set<string>): Edit[] {
+function planParagraph(
+  para: Para,
+  values: Map<string, string>,
+  prefix: string,
+  filled: Set<string>
+): { edits: Edit[]; grows: boolean } {
   const markers = findMarkers(para.text).filter((m) => values.has(m.label));
-  if (markers.length === 0) return [];
+  if (markers.length === 0) return { edits: [], grows: false };
 
   const offsets = pieceOffsets(para);
   const texts = para.pieces.map((p) => p.text);
@@ -242,7 +253,19 @@ function planParagraph(para: Para, values: Map<string, string>, prefix: string, 
   // 여분 줄은 이 문단이 닫힌 바로 뒤(중첩 문단이면 그 칸 안)에 새 문단으로 잇는다
   const extras = extraByMarker.flat().join('');
   if (extras) edits.push({ start: para.end, end: para.end, text: extras });
-  return edits;
+  return { edits, grows: extras !== '' };
+}
+
+/** 같은 줄 배치 캐시를 두 번 지우려 하면 구간이 어긋난다 — 같은 구간의 중복 삭제를 하나로 */
+function dedupeDeletes(edits: Edit[]): Edit[] {
+  const seen = new Set<string>();
+  return edits.filter((e) => {
+    if (e.text !== '' || e.end === e.start) return true;
+    const key = `${e.start}-${e.end}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function applyEdits(xml: string, edits: Edit[]): string {
@@ -304,8 +327,19 @@ export async function fillHwpx(
     const paras = scanParagraphs(xml, prefix);
     for (const label of labelsInOrder(paras)) if (!order.includes(label)) order.push(label);
 
-    const edits = paras.flatMap((para) => planParagraph(para, values, prefix, filled));
-    const out = applyEdits(xml, edits);
+    const byStart = new Map(paras.map((p) => [p.start, p]));
+    const edits: Edit[] = [];
+    for (const para of paras) {
+      const plan = planParagraph(para, values, prefix, filled);
+      edits.push(...plan.edits);
+      // 표 칸 같은 안쪽 문단이 늘어나면 표가 커진다. 그것을 품은 문단의 옛 줄 배치(표 높이 포함)는 낡는다
+      if (plan.grows) {
+        for (const start of para.ancestors) {
+          for (const seg of byStart.get(start)?.lineSegs ?? []) edits.push({ start: seg.start, end: seg.end, text: '' });
+        }
+      }
+    }
+    const out = applyEdits(xml, dedupeDeletes(edits));
     if (out !== xml) zip.file(name, out, { createFolders: false });
     previewLines.push(...previewOf(scanParagraphs(out, prefix)));
   }
