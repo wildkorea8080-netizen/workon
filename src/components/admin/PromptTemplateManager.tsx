@@ -15,6 +15,7 @@ export default function PromptTemplateManager() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [failedId, setFailedId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/templates')
@@ -24,9 +25,16 @@ export default function PromptTemplateManager() {
   }, []);
 
   const copy = async (t: Template) => {
-    await navigator.clipboard.writeText(t.content);
-    setCopiedId(t.id);
-    setTimeout(() => setCopiedId(null), 1500);
+    // plain-http 사내망에서는 navigator.clipboard가 없거나 writeText가 거부된다.
+    // 실패를 카드 안에 알리고, 직접 선택해 복사할 수 있도록 내용은 그대로 둔다.
+    setFailedId(null);
+    try {
+      await navigator.clipboard.writeText(t.content);
+      setCopiedId(t.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      setFailedId(t.id);
+    }
   };
 
   return (
@@ -52,6 +60,9 @@ export default function PromptTemplateManager() {
               {copiedId === t.id ? '복사됨' : '내용 복사'}
             </button>
           </div>
+          {failedId === t.id && (
+            <p className="mt-2 text-xs text-red-500">복사하지 못했습니다. 아래 내용을 직접 선택해 복사하세요.</p>
+          )}
           <pre className="mt-3 p-3 bg-slate-50 rounded-lg text-xs text-slate-600 whitespace-pre-wrap font-sans border border-slate-100 max-h-48 overflow-y-auto">
             {t.content}
           </pre>

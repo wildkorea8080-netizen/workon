@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerAuthSession } from '@/lib/auth';
+import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 export async function GET(_request: NextRequest) {
   try {
@@ -8,6 +8,13 @@ export async function GET(_request: NextRequest) {
       return NextResponse.json(
         { ok: false, error: { message: '인증이 필요합니다.' } },
         { status: 401 }
+      );
+    }
+
+    if (!isAdminSession(session)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
+        { status: 403 }
       );
     }
 

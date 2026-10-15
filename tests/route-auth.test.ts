@@ -68,7 +68,6 @@ const EMPLOYEE_ROUTES = new Set([
   '/my/stats',
   '/notices',
   '/notices/[id]/read',
-  '/templates',
   '/super/impersonate/end',
   '/upload',
 ]);
@@ -129,7 +128,7 @@ describe('API 라우트 권한', () => {
     // /admin, /super 아래는 전부 관리자 전용이다. 그 밖에도 관리 기능이
     // 있는 경로를 함께 본다 — 예전에 forbidden-words에서 사고가 났다.
     const ADMIN_PATH =
-      /^\/(admin|super)|^\/(users|departments|forbidden-words|security-logs|stats|rag-test)/;
+      /^\/(admin|super)|^\/(users|departments|forbidden-words|security-logs|stats|rag-test|templates)/;
 
     const violations = handlers
       .filter((h) => ADMIN_PATH.test(h.route))
