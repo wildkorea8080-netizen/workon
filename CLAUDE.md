@@ -89,7 +89,7 @@ src/
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
-| `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·옛 칸 맞춤 (트랜잭션 + ROLLBACK) | 예 |
+| `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
 `db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
 볼 수 없으므로, 예컨대 "부서에는 기관이 있는데 로그만 NULL"인 상태를 트리거
@@ -106,7 +106,7 @@ src/
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/reports/*` (화면 없음 — S1-c 정리 대상), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
-| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `/api/templates/*`, `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
+| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
 
@@ -129,7 +129,7 @@ src/
 - `documents` — 문서 메타데이터 + JSONB 청크+임베딩 + `embedding vector(1024)`
 - `conversations` — 대화 세션
 - `messages` — 채팅 메시지
-- `report_templates` — 보고서 템플릿
+- `report_templates` — 보고서 템플릿 (옛 것. 읽기 전용으로 남아 있고 관리자만 본다. 새 양식은 `agent_templates`)
 - `forbidden_words` — 부서별 금지어
 - `usage_logs` — 사용 로그
 
@@ -151,6 +151,7 @@ src/
 | 0017 | `contracts.billing_type` 연간 정액 계약 + `organization_spend_krw` RPC |
 | 0026 | 비서 단계(`tier`) · 판 기록(`agent_history`, `save_agent`) · 능력(`capabilities`) · 양식(`agent_templates`) · `messages.agent_version` |
 | 0027 | 문서가 있는데 `doc_search`가 꺼진 비서를 다시 켬 (S1-b 코드보다 먼저 적용). 판 기록에 켜진 적 있는 비서는 사람이 끈 것이라 건드리지 않음 |
+| 0028 | 옛 칸(`agents.is_personal`·`enabled_connectors`)과 맞춤 트리거·함수 제거, `v_organization_summary`를 `tier <> 'personal' AND deleted_at IS NULL`로 재작성, 승인 판 도장은 `trg_agents_stamp_approval_version`으로 따로 남김. **코드 배포 확인 뒤 적용** |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -158,9 +159,11 @@ src/
 조회하면 타 기관의 동명 부서('총무과')가 잡혀 크로스 테넌트 접근이 생깁니다.
 하위 부서 전체가 필요하면 `department_descendants(uuid)` RPC를 쓰세요.
 
-**0013에 대한 주의**: `/api/chat`이 `agents.enabled_connectors`를 select 하므로
-**코드 배포 전에 반드시 이 마이그레이션을 적용**해야 합니다. 컬럼이 없으면
-에이전트 조회가 실패해 채팅 전체가 동작하지 않습니다.
+**0013에 대한 주의**: 그때는 `/api/chat`이 `agents.enabled_connectors`를 select 해서
+코드 배포 전에 마이그레이션을 적용해야 했습니다. 지금은 반대입니다 — 코드가 이 칸을
+읽지 않고(커넥터는 `capabilities.public_data.connectors`), 칸은 **0028이 지웁니다.
+그래서 0028은 S1-c 코드 배포가 확인된 뒤에 적용합니다.** 옛 코드가 도는 중에 적용하면
+그 코드가 지워진 칸을 찾다 비서 조회가 멈춥니다.
 
 **0012에 대한 주의**: `usage_logs.organization_id`는 애플리케이션 코드가 아니라
 BEFORE INSERT 트리거가 `department_id`로부터 유도합니다.
@@ -611,10 +614,16 @@ MAIL_FROM=
 비서 **지우기는 숨김**(`deleted_at`)이다. 대화와 판 기록이 비서를 가리키기 때문이다.
 목록 쿼리에 `.is('deleted_at', null)`을 빠뜨리지 말 것.
 
-`is_personal`·`enabled_connectors`는 0028에서 사라진다. 그때까지 트리거가 새 칸과 맞춘다.
-새 코드는 이 두 칸을 읽거나 쓰지 않는다.
+`is_personal`·`enabled_connectors`는 0028에서 제거된다(코드 배포 확인 뒤 적용). 적용 전까지는
+0026의 트리거가 새 칸(`tier`·`capabilities`)과 맞춘다. 새 코드는 이 두 칸을 읽거나 쓰지 않는다.
+맞춤 트리거가 겸하던 승인 판 도장(대기로 바뀌는 순간의 판을 `approval_version`에 찍음)은
+`trg_agents_stamp_approval_version`으로 따로 남는다 — 비면 승인이 판 확인을 건너뛴다.
 
 ### 비서 카탈로그 — 표시와 권한을 섞지 말 것
+
+편집 화면은 `AgentEditorModal`(`src/components/agents/`) 하나다. 판 설정(이름·지시문·모델·능력·양식)은
+여기서만 바꾸고(설정·양식·변경 기록 탭), 운영 값(유형·연결 주소·공개 범위 등)은 관리 화면의
+[운영]에서 바꾼다. [운영]은 공식 비서에만 있고 판을 남기지 않는다.
 
 비서에는 성격이 다른 축이 넷 있습니다. 섞으면 어느 쪽이 이기는지를 매번
 판단해야 하므로 분리해서 씁니다 (마이그레이션 0019).
@@ -663,12 +672,14 @@ MAIL_FROM=
 커넥터를 쓸지는 관리자가 정한다는 설계를 개인 비서에서도 지킵니다.
 직원은 **기관이 이미 쓰고 있는 커넥터**만 자기 비서에 켤 수 있습니다.
 판정은 "내가 볼 수 있는 공식 비서 중 하나라도 그 커넥터를 켜 두었는가"
-(`getPersonalConnectorIds`, `src/lib/connector-scope.ts`).
+(`getCapabilityScope` — 공식 비서의 `capabilities.public_data.connectors`를 모음, `src/lib/connector-scope.ts`.
+`getPersonalConnectorIds`는 그 결과를 id 목록으로 돌려주는 얇은 껍데기).
+나만의 비서뿐 아니라 부서 비서에도 같은 범위가 적용됩니다.
 
 별도의 기관 단위 허용 목록을 두지 않은 이유는 관리자가 같은 결정을 두 곳에서
 반복하게 되고, 둘이 어긋나면 어느 쪽이 맞는지 알 수 없기 때문입니다.
 조회 실패 시에는 **아무것도 못 켜는 쪽으로 닫습니다** — 실패가 권한을 넓히면 안 됩니다.
-화면 필터는 표시일 뿐이고 실제 제한은 `POST /api/agents/personal`에서 겁니다.
+화면 필터는 표시일 뿐이고 실제 제한은 서버에서 겁니다 (`agent-route-helpers.ts`가 `scopeViolations`로 저장 전에 검사).
 
 ### 부서 계층 공유
 
@@ -862,9 +873,9 @@ details: {
 `/api/chat`에 툴 실행 루프가 있어 모델이 필요하다고 판단하면 호출합니다
 (최대 `MAX_TOOL_ROUNDS`=4 왕복).
 
-**도구는 에이전트별로 켜야 합니다.** `agents.enabled_connectors`(text[])에 든
-커넥터의 툴만 노출됩니다. 기본값은 빈 배열 = 도구 미사용이며, 기관 관리자가
-비서 수정 화면에서 켭니다. 툴 단위가 아니라 커넥터 단위인 이유는 관리자가
+**도구는 에이전트별로 켜야 합니다.** `agents.capabilities.public_data.connectors`(커넥터 id 배열)에 든
+커넥터의 툴만 노출됩니다. `public_data` 능력이 없으면 도구 미사용이며, 기관 관리자가
+비서 [설정] 화면의 능력 칸에서 켭니다(켤 때마다 판이 남습니다). 옛 `enabled_connectors` 칸은 0028에서 제거됩니다. 툴 단위가 아니라 커넥터 단위인 이유는 관리자가
 "국가법령정보를 쓸지"를 결정하지 "law_search를 쓸지"를 결정하지 않기 때문입니다.
 
 만들 때 지킬 것:
