@@ -362,6 +362,8 @@ export default function ChatInterface({
               setIsLoading(false);
               setMessages(prev => [...prev, {
                 id: assistantId, role: 'assistant', content: streamed,
+                links: collectedLinks.length ? [...collectedLinks] : undefined,
+                files: collectedFiles.length ? [...collectedFiles] : undefined,
                 error: payload.message || '오류가 발생했습니다.',
               }]);
               bubbleShown = true;
@@ -371,6 +373,9 @@ export default function ChatInterface({
           }
         }
       }
+
+      // 글 없이 파일·링크만 있는 스트림은 delta가 없어 말풍선이 안 떴다 — 그러면 받은 파일을 볼 수 없다
+      if (!bubbleShown && (collectedFiles.length > 0 || collectedLinks.length > 0)) showBubble();
     } catch {
       setMessages(prev => {
         const exists = prev.some(m => m.id === assistantId);
