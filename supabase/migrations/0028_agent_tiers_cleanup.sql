@@ -8,6 +8,11 @@
 -- 지우는 것: agents.is_personal · agents.enabled_connectors, 그리고 0026이
 -- 둘을 tier·capabilities와 맞추려고 둔 트리거·함수.
 --
+-- 남기는 것: 0026의 맞춤 트리거에는 옛 칸과 무관한 일이 하나 섞여 있었다 —
+-- 대기(approval_status='pending')로 들어오는 순간의 판을 approval_version에
+-- 찍는 것. 비면 승인이 판 확인을 건너뛰므로, 이 도장은 자기 트리거
+-- (trg_agents_stamp_approval_version)로 옮겨 그대로 둔다.
+--
 -- 실DB에서 읽기 전용으로 확인한 두 칸의 의존 객체(2026-10-15):
 --   - 뷰 v_organization_summary (0006) — is_personal을 쓴다. 칸을 지우기 전에
 --     다시 만들어야 DROP COLUMN이 의존성 오류로 막히지 않는다
@@ -83,7 +88,31 @@ DROP TRIGGER IF EXISTS trg_agents_sync_legacy ON agents;
 DROP FUNCTION IF EXISTS agents_sync_legacy_columns();
 DROP FUNCTION IF EXISTS agent_capability_connectors(jsonb);
 
--- ── 3. 옛 칸 ─────────────────────────────────────────────────
+-- ── 3. 승인 판 도장 — 맞춤 트리거에서 떼어 따로 남긴다 ────────
+-- 0026 agents_sync_legacy_columns의 '승인 신청 ↔ 승인 판 번호' 부분 그대로.
+CREATE OR REPLACE FUNCTION agents_stamp_approval_version()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  -- 승인 신청 ↔ 승인 판 번호
+  -- 옛 신청 코드는 approval_status='pending'만 바꾼다. 판 번호가 비면 승인이
+  -- 판 확인을 건너뛰므로, 대기로 들어오는 순간의 판을 신청 판으로 잡는다.
+  IF NEW.approval_status = 'pending' AND NEW.approval_version IS NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      NEW.approval_version := NEW.version;
+    ELSIF OLD.approval_status IS DISTINCT FROM 'pending' THEN
+      NEW.approval_version := NEW.version;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_agents_stamp_approval_version ON agents;
+CREATE TRIGGER trg_agents_stamp_approval_version
+  BEFORE INSERT OR UPDATE ON agents
+  FOR EACH ROW EXECUTE FUNCTION agents_stamp_approval_version();
+
+-- ── 4. 옛 칸 ─────────────────────────────────────────────────
 -- 0005의 owner 인덱스는 남는다. is_personal을 쓰던 인덱스는 없다.
 ALTER TABLE agents
   DROP COLUMN IF EXISTS is_personal,
@@ -94,3 +123,8 @@ SELECT column_name
   FROM information_schema.columns
  WHERE table_name = 'agents' AND column_name IN ('is_personal', 'enabled_connectors');
 -- 0행이어야 한다
+
+SELECT tgname
+  FROM pg_trigger
+ WHERE tgrelid = 'agents'::regclass AND tgname = 'trg_agents_stamp_approval_version';
+-- 1행이어야 한다

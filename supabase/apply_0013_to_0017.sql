@@ -15,6 +15,10 @@
 --    전부 'department'로 되돌아갑니다.
 --    → 최초 적용에만 이 파일을 쓰고, 이후에는 개별 마이그레이션을 쓰세요.
 --
+-- ⛔ 0028 적용 뒤에는 실행하지 마세요. 0028이 지운 agents.enabled_connectors를
+--    다시 만들고, 0016 백필이 지워진 agents.is_personal을 찾다 실패합니다.
+--    이 파일은 0013~0017을 처음 따라잡을 때만 쓰는 일회용입니다.
+--
 -- 실행 후 확인:
 --   터미널에서  npm run db:check
 --   또는 supabase/verify_migrations.sql 의 점검 쿼리

@@ -23,11 +23,18 @@ WITH checks AS (
 
   -- ── 0013: 에이전트별 커넥터 ─────────────────────────────────
   UNION ALL
-  SELECT 3, '0013', 'agents.enabled_connectors 컬럼',
+  -- 0026이 capabilities로 대신하고 0028이 enabled_connectors를 지운다.
+  -- 0028 뒤에 칸이 없는 것은 정상이다 — 0013을 다시 실행하지 말 것(칸이 되살아난다).
+  SELECT 3, '0013', 'agents 커넥터 설정 (0028 이후 capabilities)',
          CASE WHEN EXISTS (
            SELECT 1 FROM information_schema.columns
            WHERE table_name = 'agents' AND column_name = 'enabled_connectors'
-         ) THEN 'OK' ELSE '없음' END
+         ) THEN 'OK'
+         WHEN EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_name = 'agents' AND column_name = 'capabilities'
+         ) THEN 'OK (0026 capabilities로 대체)'
+         ELSE '없음' END
 
   -- ── 0014: 부서 계층 ─────────────────────────────────────────
   UNION ALL
