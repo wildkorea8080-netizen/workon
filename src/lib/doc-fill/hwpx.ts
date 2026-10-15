@@ -220,9 +220,9 @@ function planParagraph(
   values: Map<string, string>,
   prefix: string,
   filled: Set<string>
-): { edits: Edit[]; grows: boolean } {
+): { edits: Edit[] } {
   const markers = findMarkers(para.text).filter((m) => values.has(m.label));
-  if (markers.length === 0) return { edits: [], grows: false };
+  if (markers.length === 0) return { edits: [] };
 
   const offsets = pieceOffsets(para);
   const texts = para.pieces.map((p) => p.text);
@@ -235,7 +235,9 @@ function planParagraph(
       .get(m.label)!
       .replace(/\r\n?/g, '\n')
       .split('\n')
-      .map(stripInvalidXmlChars);
+      .map(stripInvalidXmlChars)
+      // OWPML은 탭을 <hp:tab/>으로 쓴다. 글 속의 날 탭은 한글에서 이상하게 보일 수 있어 공백으로
+      .map((line) => line.replace(/\t/g, ' '));
     let home = offsets.length - 1;
     while (home > 0 && offsets[home] > m.start) home--;
     extraByMarker.unshift(
@@ -262,7 +264,7 @@ function planParagraph(
   // 여분 줄은 이 문단이 닫힌 바로 뒤(중첩 문단이면 그 칸 안)에 새 문단으로 잇는다
   const extras = extraByMarker.flat().join('');
   if (extras) edits.push({ start: para.end, end: para.end, text: extras });
-  return { edits, grows: extras !== '' };
+  return { edits };
 }
 
 /** 같은 줄 배치 캐시를 두 번 지우려 하면 구간이 어긋난다 — 같은 구간의 중복 삭제를 하나로 */
@@ -359,8 +361,9 @@ export async function fillHwpx(
     for (const para of paras) {
       const plan = planParagraph(para, values, prefix, filled);
       edits.push(...plan.edits);
-      // 표 칸 같은 안쪽 문단이 늘어나면 표가 커진다. 그것을 품은 문단의 옛 줄 배치(표 높이 포함)는 낡는다
-      if (plan.grows) {
+      // 표 칸 같은 안쪽 문단의 글이 바뀌면 표가 커질 수 있다 — 줄이 안 늘어도 칸 안에서
+      // 줄바꿈되기 때문이다. 그것을 품은 문단의 옛 줄 배치(표 높이 포함)는 낡는다
+      if (plan.edits.length > 0) {
         for (const start of para.ancestors) {
           for (const seg of byStart.get(start)?.lineSegs ?? []) edits.push({ start: seg.start, end: seg.end, text: '' });
         }

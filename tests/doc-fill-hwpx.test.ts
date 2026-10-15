@@ -45,7 +45,7 @@ describe('채우기', () => {
     expect(result.unfilled).toEqual([]);
   });
 
-  it('줄바꿈마다 문단을 복제한다 — 서식 참조가 같고 줄 배치 캐시는 지운다', async () => {
+  it('줄바꿈마다 새 문단으로 잇는다 — 서식 참조가 같고 줄 배치 캐시는 지운다', async () => {
     const bytes = await buildHwpx(para('{{본문}}', '5') + para('그대로', '8'));
     const xml = await sectionXml((await fillHwpx(bytes, values({ 본문: '첫째\n둘째\r\n셋째' }))).bytes);
     const filled = xml.match(/<hp:p [^>]*paraPrIDRef="5"[\s\S]*?<\/hp:p>/g) ?? [];
@@ -207,6 +207,36 @@ describe('여분 줄이 만드는 배치 변화', () => {
     expect(xml).toMatch(/<\/hp:tbl><\/hp:run><\/hp:p>/);
     expect(xml).not.toContain('vertsize="9000"');
     expect(xml.match(/<hp:p [^>]*paraPrIDRef="8"[\s\S]*?<\/hp:p>/)![0]).toContain('linesegarray');
+  });
+});
+
+describe('글이 바뀌기만 해도 바깥 줄 배치가 낡는다', () => {
+  it('표 칸을 한 줄 글로 채워도 표를 품은 바깥 문단의 줄 배치 캐시를 지운다 — 손대지 않은 문단은 둔다', async () => {
+    // 칸 안에서 줄바꿈되면 줄이 안 늘어도 표가 커질 수 있다
+    const seg = '<hp:linesegarray><hp:lineseg textpos="0" vertsize="9000"/></hp:linesegarray>';
+    const outer = table([['칸', '{{칸값}}']]).replace('</hp:run></hp:p>', `</hp:run>${seg}</hp:p>`);
+    const bytes = await buildHwpx(outer + para('그대로', '8'));
+    const xml = await sectionXml((await fillHwpx(bytes, values({ 칸값: '긴 글 한 줄' }))).bytes);
+    expect(xml).not.toContain('vertsize="9000"');
+    expect(xml.match(/<hp:p [^>]*paraPrIDRef="8"[\s\S]*?<\/hp:p>/)![0]).toContain('linesegarray');
+  });
+
+  it('표시가 없는 표는 바깥 문단의 줄 배치 캐시를 그대로 둔다', async () => {
+    const seg = '<hp:linesegarray><hp:lineseg textpos="0" vertsize="9000"/></hp:linesegarray>';
+    const outer = table([['칸', '{{칸값}}']]).replace('</hp:run></hp:p>', `</hp:run>${seg}</hp:p>`);
+    const bytes = await buildHwpx(outer + para('{{제목}}', '8'));
+    const xml = await sectionXml((await fillHwpx(bytes, values({ 제목: 'x' }))).bytes);
+    expect(xml).toContain('vertsize="9000"');
+  });
+});
+
+describe('탭 문자', () => {
+  it('값의 탭은 공백 하나로 바꾼다 — 날 탭은 한글에서 이상하게 보인다', async () => {
+    const bytes = await buildHwpx(para('{{본문}}'));
+    const xml = await sectionXml((await fillHwpx(bytes, values({ 본문: '가\t나\n다\t라' }))).bytes);
+    expect(xml).not.toContain('\t');
+    const texts = [...xml.matchAll(/<hp:t>([^<]*)<\/hp:t>/g)].map((m) => m[1]);
+    expect(texts).toEqual(['가 나', '다 라']);
   });
 });
 
