@@ -29,13 +29,15 @@ export function table(rows: string[][]): string {
   return `<hp:p id="2" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="${rows.length}" colCnt="${rows[0].length}">${trs}</hp:tbl></hp:run></hp:p>`;
 }
 
-export async function buildHwpx(body: string, opts: { prvText?: string } = {}): Promise<Buffer> {
+export async function buildHwpx(body: string, opts: { prvText?: string; binData?: Buffer } = {}): Promise<Buffer> {
   const zip = new JSZip();
-  zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE' });
-  zip.file('version.xml', '<?xml version="1.0" encoding="UTF-8"?><hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" major="5" minor="1"/>');
-  zip.file('Contents/header.xml', HEADER);
-  zip.file('Contents/section0.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><hs:sec ${NS}>${body}</hs:sec>`);
-  zip.file('Preview/PrvText.txt', opts.prvText ?? '미리보기 {{제목}}');
+  zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE', createFolders: false });
+  zip.file('version.xml', '<?xml version="1.0" encoding="UTF-8"?><hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" major="5" minor="1"/>', { createFolders: false });
+  zip.file('Contents/header.xml', HEADER, { createFolders: false });
+  zip.file('Contents/section0.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><hs:sec ${NS}>${body}</hs:sec>`, { createFolders: false });
+  zip.file('Preview/PrvText.txt', opts.prvText ?? '미리보기 {{제목}}', { createFolders: false });
+  // 그림 같은 이미 압축된 항목은 한글이 무압축으로 저장한다
+  if (opts.binData) zip.file('BinData/image1.png', opts.binData, { compression: 'STORE', createFolders: false });
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 

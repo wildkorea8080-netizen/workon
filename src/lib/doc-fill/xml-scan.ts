@@ -37,8 +37,21 @@ const ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"'
 export function unescapeXml(s: string): string {
   return s.replace(/&(lt|gt|amp|quot|apos|#\d+|#x[0-9a-fA-F]+);/g, (_, e: string) => {
     if (e in ENTITIES) return ENTITIES[e];
-    return String.fromCodePoint(e.startsWith('#x') ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
+    const code = e.startsWith('#x') ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+    // 유니코드 범위 밖의 숫자 참조는 던지지 않고 대체 문자로 읽는다
+    return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : '�';
   });
+}
+
+/**
+ * XML 1.0에서 쓸 수 없는 글자(제어 문자 · 짝 없는 서로게이트 · U+FFFE/FFFF)를 뺀다.
+ * 탭과 줄바꿈은 둔다. 한 글자라도 남으면 한글이 파일을 열지 못한다.
+ */
+export function stripInvalidXmlChars(s: string): string {
+  return s.replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    ''
+  );
 }
 
 /** 글자 내용(요소 사이)용. 따옴표는 속성 값이 아니므로 그대로 둔다 */
