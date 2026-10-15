@@ -162,8 +162,10 @@ export const anthropicAdapter: LlmAdapter = {
     return {
       text,
       usage: {
-        // 실제로 쓴 모델을 남긴다
-        model: data.model ?? req.model,
+        // 요청한 모델을 남긴다(스트리밍 경로와 같다). 정책을 통과한 레지스트리 id라
+        // 단가가 맞는다. 응답의 모델 id가 레지스트리에 없으면 단가 조회가 기본
+        // 모델로 떨어져 조용히 과소 청구된다.
+        model: req.model,
         input_tokens: data.usage?.input_tokens ?? 0,
         output_tokens: data.usage?.output_tokens ?? 0,
       },

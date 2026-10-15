@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { toAnthropicBody, parseAnthropicStream } from '@/lib/llm/anthropic';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { toAnthropicBody, parseAnthropicStream, anthropicAdapter } from '@/lib/llm/anthropic';
 import type { LlmStreamEvent } from '@/lib/llm/types';
 
 function sseStream(events: unknown[]): ReadableStream<Uint8Array> {
@@ -89,5 +89,34 @@ describe('Anthropic 스트림 해석', () => {
     await expect(
       collect(parseAnthropicStream(sseStream([{ type: 'error', error: { message: 'overloaded' } }]), 'm'))
     ).rejects.toThrow('overloaded');
+  });
+});
+
+describe('Anthropic 비스트리밍 호출', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('사용량의 모델은 요청한 모델이다 (응답 id로 바꾸지 않는다)', async () => {
+    // 응답 모델 id(날짜 접미사 등)가 레지스트리에 없으면 단가 조회가 기본 모델로
+    // 떨어져 과소 청구된다. 요청한 모델은 정책을 통과한 레지스트리 id다.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            model: 'claude-opus-5-20990101',
+            content: [{ type: 'text', text: '제목' }],
+            usage: { input_tokens: 7, output_tokens: 3 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    );
+    const result = await anthropicAdapter.complete({
+      model: 'claude-opus-5',
+      maxTokens: 40,
+      messages: [{ role: 'user', content: '질문' }],
+    });
+    expect(result.text).toBe('제목');
+    expect(result.usage).toEqual({ model: 'claude-opus-5', input_tokens: 7, output_tokens: 3 });
   });
 });
