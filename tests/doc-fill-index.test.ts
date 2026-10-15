@@ -62,3 +62,24 @@ describe('양식 채우기', () => {
     expect(r).toEqual({ ok: false, reason: expect.stringContaining('제목') });
   });
 });
+
+describe('항목이 깨진 파일', () => {
+  // 본문의 압축 데이터 앞부분을 망가뜨린다. zip 목록은 멀쩡해 열리지만 항목을 풀 때 실패한다
+  async function corruptedSection(): Promise<Buffer> {
+    const bytes = Buffer.from(await buildHwpx(para('{{제목}}')));
+    const name = Buffer.from('Contents/section0.xml');
+    const header = bytes.indexOf(name) - 30;
+    expect(header).toBeGreaterThanOrEqual(0);
+    const data = header + 30 + bytes.readUInt16LE(header + 26) + bytes.readUInt16LE(header + 28);
+    bytes.fill(0xff, data + 2, data + 10);
+    return bytes;
+  }
+
+  it('읽기와 채우기 모두 던지지 않고 이유를 돌려준다', async () => {
+    const bytes = await corruptedSection();
+    const read = await readTemplate(bytes, 'c.hwpx');
+    expect(read).toEqual({ ok: false, reason: expect.stringContaining('손상') });
+    const fill = await fillTemplate(bytes, 'c.hwpx', [{ slot_id: 's1', text: 'x' }]);
+    expect(fill).toEqual({ ok: false, reason: expect.stringContaining('손상') });
+  });
+});

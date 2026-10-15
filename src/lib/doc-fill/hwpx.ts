@@ -80,6 +80,15 @@ async function openHwpx(bytes: Buffer): Promise<{ zip: JSZip; sections: string[]
   return { zip, sections, methods: entryMethods(zip) };
 }
 
+/** 항목 읽기. 항목 하나가 깨져 있으면(CRC·압축 오류) 라이브러리 오류 대신 이유를 돌려준다 */
+async function readEntry(zip: JSZip, name: string): Promise<string> {
+  try {
+    return await zip.files[name].async('string');
+  } catch {
+    throw new DocFillError('한글(HWPX) 파일의 본문을 읽을 수 없습니다. 파일이 손상됐을 수 있습니다.');
+  }
+}
+
 const CHAR_PR = /\scharPrIDRef\s*=\s*(?:"([^"]*)"|'([^']*)')/;
 
 /** 모든 문단과 그 자신의 글 조각. 시작 위치 순 */
@@ -301,7 +310,12 @@ async function rewritePreview(zip: JSZip, text: string): Promise<void> {
   if (zip.file('Preview/PrvImage.png')) zip.file('Preview/PrvImage.png', BLANK_PREVIEW_PNG, { createFolders: false });
   const file = zip.file('Preview/PrvText.txt');
   if (!file) return;
-  const original = await file.async('uint8array');
+  let original: Uint8Array;
+  try {
+    original = await file.async('uint8array');
+  } catch {
+    throw new DocFillError('한글(HWPX) 파일의 본문을 읽을 수 없습니다. 파일이 손상됐을 수 있습니다.');
+  }
   const preview = text.slice(0, 2000);
   // 파일 탐색기 미리보기에 자리 표시가 보이면 안 된다. 원래 인코딩을 따른다
   if (original[0] === 0xff && original[1] === 0xfe) {
@@ -317,7 +331,7 @@ export async function readHwpxMarkers(bytes: Buffer): Promise<string[]> {
   const { zip, sections } = await openHwpx(bytes);
   const labels: string[] = [];
   for (const name of sections) {
-    const xml = await zip.files[name].async('string');
+    const xml = await readEntry(zip, name);
     for (const label of labelsInOrder(scanParagraphs(xml, paragraphPrefix(xml)))) {
       if (!labels.includes(label)) labels.push(label);
     }
@@ -335,7 +349,7 @@ export async function fillHwpx(
   const previewLines: string[] = [];
 
   for (const name of sections) {
-    const xml = await zip.files[name].async('string');
+    const xml = await readEntry(zip, name);
     const prefix = paragraphPrefix(xml);
     const paras = scanParagraphs(xml, prefix);
     for (const label of labelsInOrder(paras)) if (!order.includes(label)) order.push(label);
@@ -361,7 +375,7 @@ export async function fillHwpx(
 
   // 형식 규칙: mimetype은 zip 맨 앞에 압축 없이. 같은 이름으로 다시 넣으면 자리는 그대로다
   const mimetype = zip.file('mimetype');
-  if (mimetype) zip.file('mimetype', await mimetype.async('uint8array'), { compression: 'STORE', createFolders: false });
+  if (mimetype) zip.file('mimetype', await mimetype.async('uint8array').catch(() => { throw new DocFillError('한글(HWPX) 파일의 본문을 읽을 수 없습니다. 파일이 손상됐을 수 있습니다.'); }), { compression: 'STORE', createFolders: false });
   methods.set('mimetype', 'STORE');
 
   // 항목마다 원래 압축 방식을 따른다 — 그림이 무압축이었으면 무압축으로
@@ -369,7 +383,12 @@ export async function fillHwpx(
     if (!file.dir) file.options.compression = methods.get(name) ?? 'DEFLATE';
   }
 
-  const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  let out: Buffer;
+  try {
+    out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  } catch {
+    throw new DocFillError('한글(HWPX) 파일을 다시 묶을 수 없습니다. 파일이 손상됐을 수 있습니다.');
+  }
   return {
     bytes: out,
     filled: order.filter((l) => filled.has(l)),
