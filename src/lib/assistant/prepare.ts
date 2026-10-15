@@ -137,6 +137,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     agentVersion: agent.version,
     capabilities: capabilitySettings,
     message,
+    conversationId,
   };
 
   const prepared: PrepareResult[] = await Promise.all(

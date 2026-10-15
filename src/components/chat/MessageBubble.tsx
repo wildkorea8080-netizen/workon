@@ -10,10 +10,17 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
 import type { RetrievedChunk } from '@/lib/db';
+import { formatFileSize } from '@/lib/file-size';
 
 interface ToolLink {
   title: string;
   url: string;
+}
+
+interface GeneratedFile {
+  id: string;
+  file_name: string;
+  size_bytes: number;
 }
 
 interface MessageBubbleProps {
@@ -24,10 +31,12 @@ interface MessageBubbleProps {
   sources?: RetrievedChunk[];
   /** 외부 도구(국가법령정보 등)가 돌려준 출처 링크 */
   links?: ToolLink[];
+  /** 비서가 만든 파일 — 내려받기 카드 */
+  files?: GeneratedFile[];
   error?: string;
 }
 
-export default function MessageBubble({ role, content, imagePreviews, sources, links, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, imagePreviews, sources, links, files, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -146,6 +155,27 @@ export default function MessageBubble({ role, content, imagePreviews, sources, l
         {sources && sources.length > 0 && (
           <div className="mt-2 w-full">
             <SourceCitation sources={sources} />
+          </div>
+        )}
+
+        {/* 비서가 만든 파일 — 주인만 내려받는다(/api/files가 확인) */}
+        {files && files.length > 0 && (
+          <div className="mt-2 w-full space-y-1.5">
+            {files.map((file) => (
+              <a
+                key={file.id}
+                href={`/api/files/${file.id}`}
+                className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors"
+              >
+                <span className="w-9 h-9 rounded-lg bg-[#003087]/10 text-[#003087] text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                  HWP
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-slate-800 truncate">{file.file_name}</span>
+                  <span className="block text-[11px] text-slate-400">{formatFileSize(file.size_bytes)} · 내려받기</span>
+                </span>
+              </a>
+            ))}
           </div>
         )}
 

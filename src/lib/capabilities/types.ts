@@ -19,6 +19,8 @@ export interface TurnContext {
   capabilities: CapabilitySettings;
   /** 이번 질문. prepare가 검색어로 쓴다 */
   message: string;
+  /** 이번 대화. 만든 파일을 대화에 묶는다(설계 3.4). prepareTurn이 도구 루프 전에 정한다 */
+  conversationId: string;
 }
 
 export interface PrepareResult {
@@ -42,6 +44,8 @@ export interface ToolOutcome {
   sources?: { links?: ToolSource[] };
   /** 능력 안에서 AI를 불렀을 때. 실행기가 과금 규약대로 기록한다 */
   usage?: LlmUsage[];
+  /** 도구가 만든 파일 — 화면 내려받기 카드와 메시지 저장으로 간다 */
+  files?: GeneratedFileRef[];
 }
 
 export interface Capability {

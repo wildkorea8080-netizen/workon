@@ -29,7 +29,7 @@ const done = (stopReason: string, input = 10, output = 5): LlmStreamEvent => ({
 const toolCall = (id: string): LlmStreamEvent => ({ type: 'tool_use', id, name: 'law_search', input: { q: '여비' } });
 
 const ctx: TurnContext = {
-  organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 1, capabilities: {}, message: 'q',
+  organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 1, capabilities: {}, message: 'q', conversationId: 'c',
 };
 
 function lawCapability(execute: Capability['execute']): Capability {
@@ -81,6 +81,15 @@ describe('도구 루프', () => {
     expect(events.map((e) => e.event)).toEqual(['tool_start', 'tool_end', 'delta']);
   });
 
+  it('도구가 만든 파일을 tool_end와 결과에 싣는다', async () => {
+    const file = { id: 'f1', file_name: '회의록.hwpx', size_bytes: 1234 };
+    const adapter = scripted([[toolCall('t1'), done('tool_use')], [{ type: 'text', text: '만들었습니다' }, done('end_turn')]]);
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: 'ok', files: [file] }))]]);
+    const { result, events } = await run(adapter, owners);
+    expect(events).toContainEqual({ event: 'tool_end', data: { name: 'law_search', ok: true, sources: [], files: [file] } });
+    expect(result.files).toEqual([file]);
+  });
+
   it('도구가 던져도 대화는 이어지고 이유가 남는다', async () => {
     const owners = new Map([['law_search', lawCapability(async () => { throw new Error('법제처 응답 없음'); })]]);
     const adapter = scripted([[toolCall('t1'), done('tool_use')], [{ type: 'text', text: '조회에 실패했습니다' }, done('end_turn')]]);
@@ -89,7 +98,7 @@ describe('도구 루프', () => {
     expect(result.is_error).toBe(true);
     expect(result.content).toContain('법제처 응답 없음');
     expect(events.find((e) => e.event === 'tool_end')).toEqual({
-      event: 'tool_end', data: { name: 'law_search', ok: false, sources: [] },
+      event: 'tool_end', data: { name: 'law_search', ok: false, sources: [], files: [] },
     });
   });
 

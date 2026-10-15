@@ -1,6 +1,6 @@
 // src/lib/assistant/types.ts
 import type { LlmMessage, LlmTool, LlmUsage } from '@/lib/llm/types';
-import type { Capability, TurnContext } from '@/lib/capabilities/types';
+import type { Capability, TurnContext, GeneratedFileRef } from '@/lib/capabilities/types';
 import type { ToolSource } from '@/lib/connectors';
 import type { RetrievedChunk } from '@/lib/db';
 
@@ -10,12 +10,12 @@ export const HISTORY_MESSAGE_LIMIT = 20;
 export const MAX_TOOL_ROUNDS = 4;
 export const MAX_OUTPUT_TOKENS = 4096;
 
-/** SSE 이벤트. 이름과 페이로드는 S1 이전과 같다 — ChatInterface가 그대로 읽는다 */
+/** SSE 이벤트. 이름과 기존 페이로드는 S1 이전과 같다. S2-a에서 tool_end에 files만 더했다 — ChatInterface가 읽는다 */
 export type TurnEvent =
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'tool_start'; data: { name: string; input: Record<string, unknown> } }
-  | { event: 'tool_end'; data: { name: string; ok: boolean; sources: ToolSource[] } }
+  | { event: 'tool_end'; data: { name: string; ok: boolean; sources: ToolSource[]; files: GeneratedFileRef[] } }
   | { event: 'tool_limit'; data: { rounds: number } }
   | { event: 'error'; data: { message: string } }
   | { event: 'done'; data: { usage: LlmUsage; title: string | null } };

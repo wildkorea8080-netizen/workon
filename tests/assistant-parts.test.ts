@@ -59,6 +59,7 @@ describe('메시지 저장 행', () => {
     conversationId: 'c', userId: 'u', userContent: '질문', assistantText: '답',
     chunks: [{ documentId: 'd', documentTitle: 't', chunkIndex: 0, text: '본문', similarity: 0.4 }],
     links: [{ title: '법', url: 'https://a' }],
+    files: [{ id: 'f', file_name: 'a.hwpx', size_bytes: 1 }],
     agentVersion: 7,
   });
 
@@ -67,6 +68,11 @@ describe('메시지 저장 행', () => {
     // 대화가 한 건도 저장되지 않았다.
     const keys = rows.map((r) => Object.keys(r).sort().join(','));
     expect(keys[0]).toBe(keys[1]);
+  });
+
+  it('파일 링크를 답변 행에 남긴다', () => {
+    expect((rows[1].source_references as { files: unknown[] }).files).toEqual([{ id: 'f', file_name: 'a.hwpx', size_bytes: 1 }]);
+    expect(rows[0].source_references).toEqual({});
   });
 
   it('답한 판 번호를 남긴다', () => {

@@ -29,6 +29,8 @@ interface Message {
   sources?: RetrievedChunk[];
   /** 외부 도구가 돌려준 출처 링크 */
   links?: ToolLink[];
+  /** 비서가 만든 파일 */
+  files?: { id: string; file_name: string; size_bytes: number }[];
   error?: string;
 }
 
@@ -36,6 +38,9 @@ interface Message {
 const TOOL_LABELS: Record<string, string> = {
   law_search: '국가법령정보에서 법령을 찾는 중',
   law_get_articles: '법령 조문을 읽는 중',
+  list_templates: '쓸 수 있는 양식을 찾는 중',
+  read_template: '양식의 항목을 읽는 중',
+  fill_template: '한글 파일을 만드는 중',
 };
 
 function toolLabel(name: string) {
@@ -142,13 +147,18 @@ export default function ChatInterface({
               id: string;
               role: 'user' | 'assistant';
               content: string;
-              source_references?: { chunks?: RetrievedChunk[]; links?: ToolLink[] };
+              source_references?: {
+                chunks?: RetrievedChunk[];
+                links?: ToolLink[];
+                files?: { id: string; file_name: string; size_bytes: number }[];
+              };
             }) => ({
               id: m.id,
               role: m.role,
               content: m.content,
               sources: m.source_references?.chunks,
               links: m.source_references?.links,
+              files: m.source_references?.files,
             })
           )
         );
@@ -274,6 +284,7 @@ export default function ChatInterface({
       let streamed = '';
       let pendingSources: RetrievedChunk[] | undefined;
       const collectedLinks: ToolLink[] = [];
+      const collectedFiles: { id: string; file_name: string; size_bytes: number }[] = [];
       let bubbleShown = false;
 
       // 첫 텍스트가 도착하는 순간 말풍선을 만든다.
@@ -289,6 +300,7 @@ export default function ChatInterface({
             content: streamed,
             sources: pendingSources,
             links: collectedLinks.length ? [...collectedLinks] : undefined,
+            files: collectedFiles.length ? [...collectedFiles] : undefined,
           },
         ]);
       };
@@ -338,6 +350,12 @@ export default function ChatInterface({
             }
             if (bubbleShown && collectedLinks.length) {
               patchAssistant({ links: [...collectedLinks] });
+            }
+            for (const file of payload.files ?? []) {
+              if (!collectedFiles.some((f) => f.id === file.id)) collectedFiles.push(file);
+            }
+            if (bubbleShown && collectedFiles.length) {
+              patchAssistant({ files: [...collectedFiles] });
             }
           } else if (name === 'error') {
             if (!bubbleShown) {
@@ -486,6 +504,7 @@ export default function ChatInterface({
               imagePreviews={msg.imagePreviews}
               sources={msg.sources}
               links={msg.links}
+              files={msg.files}
               error={msg.error}
             />
           ))

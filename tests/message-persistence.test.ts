@@ -47,7 +47,7 @@ describe('대화 실행기의 메시지 삽입', () => {
   it('두 행이 같은 키를 갖는다', async () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({
-      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], agentVersion: 1,
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], agentVersion: 1,
     });
     expect(hasUniformKeys(rows)).toBe(true);
     expect(rows[0]).toHaveProperty('source_references');

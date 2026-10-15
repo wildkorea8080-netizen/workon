@@ -49,7 +49,7 @@ const IMAGE_DATA = 'SU1BR0VCWVRFU19TSE9VTERfTk9UX0JFX1NUT1JFRA==';
 function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
   return {
     ctx: {
-      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문',
+      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문', conversationId: 'c1',
     },
     modelId: MODEL,
     modelSubstituted: false,
@@ -101,6 +101,38 @@ afterEach(() => {
 });
 
 describe('streamTurn — 성공', () => {
+  it('만든 파일을 답변 행의 source_references.files에 남긴다', async () => {
+    const file = { id: 'f1', file_name: '회의록.hwpx', size_bytes: 10 };
+    const tool = { name: 'fill_template', description: '', inputSchema: { type: 'object' as const, properties: {} } };
+    const cap = {
+      id: 'document', label: '', description: '', isAvailable: () => true,
+      tools: () => [tool],
+      execute: async () => ({ ok: true, text: 'ok', files: [file] }),
+    } as never;
+    let round = 0;
+    setLlmAdapterForTests(
+      adapter({
+        stream: async function* () {
+          round += 1;
+          if (round === 1) {
+            yield { type: 'tool_use', id: 't1', name: 'fill_template', input: {} };
+            yield { type: 'done', stopReason: 'tool_use', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          } else {
+            yield { type: 'text', text: '만들었습니다' };
+            yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          }
+        },
+      })
+    );
+    const events = await run(turn({ capabilities: [cap], tools: [tool] }));
+    const rows = inserted('messages');
+    expect((rows[1].source_references as { files: unknown[] }).files).toEqual([file]);
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(events.find((e) => e.event === 'tool_end')).toEqual({
+      event: 'tool_end', data: { name: 'fill_template', ok: true, sources: [], files: [file] },
+    });
+  });
+
   it('메시지 두 행을 같은 키 집합으로, 판 번호와 함께 저장한다', async () => {
     setLlmAdapterForTests(adapter());
     await run(turn());

@@ -7,7 +7,7 @@ import type { TurnContext } from '@/lib/capabilities/types';
 import type { RetrievedChunk } from '@/lib/db';
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
-  organizationId: 'org', departmentId: 'dept', userId: 'u', agentId: 'a', agentVersion: 1,
+  organizationId: 'org', departmentId: 'dept', userId: 'u', agentId: 'a', agentVersion: 1, conversationId: 'c',
   capabilities: {}, message: '여비 규정', ...over,
 });
 

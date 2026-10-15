@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 import type { LlmUsage } from '@/lib/llm/types';
 import type { ToolSource } from '@/lib/connectors';
+import type { GeneratedFileRef } from '@/lib/capabilities/types';
 import type { RetrievedChunk } from '@/lib/db';
 
 export interface MessageRowInput {
@@ -12,6 +13,7 @@ export interface MessageRowInput {
   assistantText: string;
   chunks: RetrievedChunk[];
   links: ToolSource[];
+  files: GeneratedFileRef[];
   agentVersion: number;
 }
 
@@ -50,6 +52,7 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           similarity: c.similarity,
         })),
         links: dedupeLinks(input.links),
+        files: input.files,
       },
       agent_version: input.agentVersion,
     },

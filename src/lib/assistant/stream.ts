@@ -3,7 +3,7 @@ import { streamChat, complete } from '@/lib/llm';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { toolsFor } from '@/lib/capabilities';
 import type { LlmContentBlock, LlmMessage, LlmTool, LlmUsage } from '@/lib/llm/types';
-import type { Capability, TurnContext, ToolOutcome } from '@/lib/capabilities/types';
+import type { Capability, TurnContext, ToolOutcome, GeneratedFileRef } from '@/lib/capabilities/types';
 import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
@@ -36,6 +36,7 @@ export interface LoopResult {
   /** 능력 안에서 쓴 AI 사용량 */
   capabilityUsage: LlmUsage[];
   links: ToolSource[];
+  files: GeneratedFileRef[];
 }
 
 export const TOOL_LIMIT_NOTICE =
@@ -68,6 +69,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   usage.model = args.modelId;
   const capabilityUsage: LlmUsage[] = args.progress?.capabilityUsage ?? [];
   const links: ToolSource[] = [];
+  const files: GeneratedFileRef[] = [];
   const tools = args.tools.length > 0 ? args.tools : undefined;
   let text = '';
 
@@ -109,9 +111,11 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       send({ event: 'tool_start', data: { name: call.name, input: call.input } });
       const outcome = await executeCall(args.owners, call, args.ctx);
       const callLinks = outcome.sources?.links ?? [];
+      const callFiles = outcome.files ?? [];
       links.push(...callLinks);
+      files.push(...callFiles);
       if (outcome.usage) capabilityUsage.push(...outcome.usage);
-      send({ event: 'tool_end', data: { name: call.name, ok: outcome.ok, sources: callLinks } });
+      send({ event: 'tool_end', data: { name: call.name, ok: outcome.ok, sources: callLinks, files: callFiles } });
       resultBlocks.push({ type: 'tool_result', tool_use_id: call.id, content: outcome.text, is_error: !outcome.ok });
     }
     messages.push({ role: 'user', content: resultBlocks });
@@ -141,7 +145,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
     }
   }
 
-  return { text, usage, capabilityUsage, links: dedupeLinks(links) };
+  return { text, usage, capabilityUsage, links: dedupeLinks(links), files };
 }
 
 /** 이 턴의 사용량을 모델별로 한 행씩 기록한다. 토큰이 없으면 남기지 않는다 */
@@ -220,6 +224,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
       assistantText: result.text,
       chunks: turn.chunks,
       links: result.links,
+      files: result.files,
       agentVersion: turn.ctx.agentVersion,
     })
   );
