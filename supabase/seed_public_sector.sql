@@ -51,7 +51,7 @@ BEGIN
   -- ── 1. 음슴체 변환 비서 ─────────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '음슴체 변환 비서',
@@ -59,14 +59,14 @@ BEGIN
     '입력된 문장을 공문서 음슴체로 변환해줘.
 모든 어미를 ~함, ~임, ~됨, ~있음, ~없음, ~필요함 형태로 바꿔줘.
 경어는 제거하고 간결하게. 다른 설명 없이 변환된 텍스트만 출력해줘.',
-    '{}'::jsonb, true, '공공기관', '📝', '#4A90D9', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '📝', '#4A90D9', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 2. 공문 초안 작성 비서 ──────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '공문 초안 작성 비서',
@@ -76,14 +76,14 @@ BEGIN
 공문서 형식으로 작성합니다.
 형식: 수신 / 참조 / 제목 / 내용(□○- 계층구조) / 붙임
 경어체(~합니다, ~하였습니다)를 사용하세요.',
-    '{}'::jsonb, true, '공공기관', '📨', '#2E86AB', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '📨', '#2E86AB', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 3. 보고서 초안 작성 비서 ────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '보고서 초안 작성 비서',
@@ -92,14 +92,14 @@ BEGIN
 제목과 핵심내용을 알려주면 두괄식 보고서를 작성합니다.
 구조: 현황 → 문제점 → 개선방안 → 조치계획
 □○- 계층구조와 ~함/~임 음슴체를 사용하세요.',
-    '{}'::jsonb, true, '공공기관', '📊', '#A23B72', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '📊', '#A23B72', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 4. 개조식 내용정리 비서 ─────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '개조식 내용정리 비서',
@@ -107,14 +107,14 @@ BEGIN
     '입력된 텍스트나 회의 내용을 개조식으로 정리합니다.
 형식: □ 대제목 ○ 중제목 - 세부내용
 핵심만 간결하게, 불필요한 내용은 제거하세요.',
-    '{}'::jsonb, true, '공공기관', '📋', '#F18F01', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '📋', '#F18F01', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 5. 회의록 정리 비서 ─────────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '회의록 정리 비서',
@@ -126,14 +126,14 @@ BEGIN
 □ 액션아이템 (담당자 | 기한)
 □ 차기 회의 예정
 음슴체(~함, ~임)를 사용하세요.',
-    '{}'::jsonb, true, '공공기관', '🗒️', '#44BBA4', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '🗒️', '#44BBA4', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 6. 민원인 답변 작성 비서 ────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '민원인 답변 작성 비서',
@@ -142,14 +142,14 @@ BEGIN
 정중하고 명확한 민원 답변서를 작성합니다.
 공손한 경어체, 핵심을 먼저, 근거 법령 언급,
 처리 결과와 향후 안내 포함.',
-    '{}'::jsonb, true, '공공기관', '💬', '#E84855', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '💬', '#E84855', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 7. 정책 홍보문 작성 비서 ────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '정책 홍보문 작성 비서',
@@ -158,14 +158,14 @@ BEGIN
 일반 국민이 이해하기 쉬운 홍보 문구를 작성합니다.
 핵심 혜택 먼저, 쉬운 용어, 육하원칙 적용,
 SNS/보도자료/현수막 등 용도별로 작성해줘.',
-    '{}'::jsonb, true, '공공기관', '📢', '#FF6B6B', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '📢', '#FF6B6B', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
   -- ── 8. 연설문 작성 비서 ─────────────────────────────────────
   INSERT INTO agents (
     department_id, name, description, system_prompt,
-    config, is_active, category, icon, color, tier, owner_id
+    config, capabilities, is_active, category, icon, color, tier, owner_id
   ) VALUES (
     v_dept_id,
     '연설문 작성 비서',
@@ -174,7 +174,7 @@ SNS/보도자료/현수막 등 용도별로 작성해줘.',
 기관장/담당자용 연설문 초안을 작성합니다.
 격식체, 3~5분 분량(A4 1.5장),
 도입-본론-결론 구조, 기관의 비전과 연결.',
-    '{}'::jsonb, true, '공공기관', '🎤', '#6B4226', 'official', null
+    '{}'::jsonb, '{"image":{}}'::jsonb, true, '공공기관', '🎤', '#6B4226', 'official', null
   )
   ON CONFLICT (department_id, name) WHERE tier <> 'personal' AND deleted_at IS NULL DO NOTHING;
 
