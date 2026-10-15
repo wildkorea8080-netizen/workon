@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { Agent } from '@/lib/db';
+import AgentEditorModal from '@/components/agents/AgentEditorModal';
+import { TIER_LABELS, connectorIdsOf } from '@/lib/agent-form';
 
 type Tab = 'official' | 'pending' | 'rejected';
 
 interface AgentWithOwner extends Agent {
   owner?: { id: string; email: string; full_name?: string | null } | null;
+  requester?: { id: string; email: string; full_name?: string | null } | null;
 }
 
 type Visibility = 'organization' | 'department';
@@ -60,7 +63,7 @@ function toFormData(agent: Agent): AgentFormData {
     system_prompt: agent.system_prompt ?? '',
     usage_guide: agent.usage_guide ?? '',
     starter_prompts: (agent.starter_prompts ?? []).join('\n'),
-    enabled_connectors: agent.enabled_connectors ?? [],
+    enabled_connectors: connectorIdsOf(agent.capabilities),
     visibility: (agent.visibility ?? 'organization') as Visibility,
     icon: agent.icon ?? '',
     category: agent.category ?? '',
@@ -86,6 +89,96 @@ function toRequestBody(form: AgentFormData) {
     category: category.trim() || null,
     link_url: form.agent_type === 'link' ? link_url.trim() : null,
   };
+}
+
+/** 운영 값 — 판 사본에 들어가지 않는다(설계 2.4). 수정은 판 없이 바로 저장된다. */
+function OperationalFields({
+  form,
+  idPrefix,
+  onChange,
+}: {
+  form: Pick<AgentFormData, 'agent_type' | 'link_url' | 'visibility'>;
+  idPrefix: string;
+  onChange: (patch: Partial<AgentFormData>) => void;
+}) {
+  const input =
+    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400';
+  const label = 'block text-xs font-medium text-slate-500 mb-1';
+
+  return (
+    <>
+      <div>
+        <label className={label}>비서 유형</label>
+        <div className="flex gap-2">
+          {(
+            [
+              { key: 'chat', text: '대화형', hint: 'AI가 답변합니다' },
+              { key: 'link', text: '링크형', hint: '외부 시스템으로 연결합니다' },
+            ] as const
+          ).map(({ key, text, hint }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onChange({ agent_type: key })}
+              className={`flex-1 px-3 py-2 rounded-xl border text-left transition-colors ${
+                form.agent_type === key
+                  ? 'border-[#003087] bg-blue-50 text-[#003087]'
+                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              <span className="block text-xs font-semibold">{text}</span>
+              <span className="block text-[11px] opacity-70">{hint}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {form.agent_type === 'link' ? (
+        <div>
+          <label className={label}>연결할 주소</label>
+          <input
+            type="url"
+            placeholder="https://gw.example.go.kr"
+            value={form.link_url}
+            onChange={e => onChange({ link_url: e.target.value })}
+            className={input}
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            클릭하면 새 탭으로 열립니다. 그룹웨어·업무포털 등 기관이 이미 쓰는 시스템을 비서 목록에 함께 둘 수 있습니다.
+          </p>
+        </div>
+      ) : (
+        <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+          <div>
+            <p className="text-xs font-semibold text-slate-700">공개 범위</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              규정·매뉴얼처럼 전 직원이 보는 자료는 기관 전체로 두세요.
+            </p>
+          </div>
+          {(
+            [
+              ['organization', '기관 전체', '이 기관의 모든 직원이 사용합니다'],
+              ['department', '내 부서로 제한', '내 부서와 하위 부서만 사용합니다 (인사·감사 등)'],
+            ] as [Visibility, string, string][]
+          ).map(([value, text, hint]) => (
+            <label key={value} className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="radio"
+                name={`visibility-${idPrefix}`}
+                checked={form.visibility === value}
+                onChange={() => onChange({ visibility: value })}
+                className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-medium text-slate-800">{text}</span>
+                <span className="block text-[11px] text-slate-400">{hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 /**
@@ -146,47 +239,9 @@ function CatalogFields({
         </div>
       </div>
 
-      <div>
-        <label className={label}>비서 유형</label>
-        <div className="flex gap-2">
-          {(
-            [
-              { key: 'chat', text: '대화형', hint: 'AI가 답변합니다' },
-              { key: 'link', text: '링크형', hint: '외부 시스템으로 연결합니다' },
-            ] as const
-          ).map(({ key, text, hint }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onChange({ agent_type: key })}
-              className={`flex-1 px-3 py-2 rounded-xl border text-left transition-colors ${
-                form.agent_type === key
-                  ? 'border-[#003087] bg-blue-50 text-[#003087]'
-                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <span className="block text-xs font-semibold">{text}</span>
-              <span className="block text-[11px] opacity-70">{hint}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <OperationalFields form={form} idPrefix={idPrefix} onChange={onChange} />
 
-      {form.agent_type === 'link' ? (
-        <div>
-          <label className={label}>연결할 주소</label>
-          <input
-            type="url"
-            placeholder="https://gw.example.go.kr"
-            value={form.link_url}
-            onChange={e => onChange({ link_url: e.target.value })}
-            className={input}
-          />
-          <p className="mt-1 text-[11px] text-slate-400">
-            클릭하면 새 탭으로 열립니다. 그룹웨어·업무포털 등 기관이 이미 쓰는 시스템을 비서 목록에 함께 둘 수 있습니다.
-          </p>
-        </div>
-      ) : (
+      {form.agent_type === 'chat' && (
         <>
           {/* 사용 방법 · 대화 시작 가이드 (0025)
               직원이 비서를 열었을 때 무엇을 넣어야 하는지 모르는 것이 도입
@@ -220,35 +275,6 @@ function CatalogFields({
             <p className="mt-1 text-[11px] text-slate-400">
               직원이 눌러서 바로 시작할 수 있습니다. 빈 화면 앞에서 첫 문장을 못 쓰는 경우가 많습니다.
             </p>
-          </div>
-
-          <div className="border border-slate-200 rounded-xl p-3 space-y-2">
-            <div>
-              <p className="text-xs font-semibold text-slate-700">공개 범위</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                규정·매뉴얼처럼 전 직원이 보는 자료는 기관 전체로 두세요.
-              </p>
-            </div>
-            {(
-              [
-                ['organization', '기관 전체', '이 기관의 모든 직원이 사용합니다'],
-                ['department', '내 부서로 제한', '내 부서와 하위 부서만 사용합니다 (인사·감사 등)'],
-              ] as [Visibility, string, string][]
-            ).map(([value, text, hint]) => (
-              <label key={value} className="flex items-start gap-2.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name={`visibility-${idPrefix}`}
-                  checked={form.visibility === value}
-                  onChange={() => onChange({ visibility: value })}
-                  className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
-                />
-                <span className="min-w-0">
-                  <span className="block text-xs font-medium text-slate-800">{text}</span>
-                  <span className="block text-[11px] text-slate-400">{hint}</span>
-                </span>
-              </label>
-            ))}
           </div>
 
           {connectors.length > 0 && (
@@ -310,6 +336,8 @@ export default function AgentsManager() {
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [settingsAgentId, setSettingsAgentId] = useState<string | null>(null);
+  const [tierFilter, setTierFilter] = useState<'all' | 'official' | 'department'>('all');
 
   // 승인/반려 모달 상태
   const [approveModal, setApproveModal] = useState<AgentWithOwner | null>(null);
@@ -398,33 +426,18 @@ export default function AgentsManager() {
     setSubmitting(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = {
-        ...toRequestBody(editFormData),
-        base_version: editFormData.version,
-      };
-      // 운영 칸(유형·주소·공개 범위)은 공식 비서만 고칠 수 있다. 서버가 거절한다.
-      if (editingAgent.tier !== 'official') {
-        delete body.agent_type;
-        delete body.link_url;
-        delete body.visibility;
-      }
+      // 운영 값(유형·주소·공개 범위)만 보낸다. 판이 없으므로 base_version도 없다.
       const res = await fetch(`/api/agents/${editingAgent.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          agent_type: editFormData.agent_type,
+          link_url: editFormData.agent_type === 'link' ? editFormData.link_url.trim() : null,
+          visibility: editFormData.visibility,
+        }),
       });
       const result = await res.json();
-      if (!result.ok) {
-        // 409는 판 충돌 말고도 온다(같은 이름 등). 사유가 판 충돌일 때만 편집을 닫는다.
-        if (result.error?.details?.reason === 'conflict') {
-          setError('다른 분이 먼저 고쳤습니다. 목록을 새로고침한 뒤 다시 고쳐 주세요.');
-          // 낡은 판으로 다시 저장하면 같은 거절이 반복된다. 편집을 닫고 새 목록에서 다시 연다.
-          setEditingAgent(null);
-          await loadOfficialAgents();
-          return;
-        }
-        throw new Error(result.error?.message);
-      }
+      if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => prev.map(a => a.id === editingAgent.id ? result.data : a));
       setEditingAgent(null);
     } catch (err) {
@@ -776,26 +789,25 @@ export default function AgentsManager() {
             </div>
           )}
 
+          <div className="flex gap-2 mb-3">
+            {([['all', '전체'], ['official', '공식 비서'], ['department', '부서 비서']] as const).map(([key, text]) => (
+              <button key={key} onClick={() => setTierFilter(key)}
+                className={`px-3 py-1 text-xs rounded-full border ${tierFilter === key ? 'bg-[#003087] text-white border-[#003087]' : 'border-slate-200 text-slate-500'}`}>
+                {text}
+              </button>
+            ))}
+          </div>
+
           <div className="space-y-2">
-            {agents.map(agent => (
+            {agents.filter(a => tierFilter === 'all' || a.tier === tierFilter).map(agent => (
               <div key={agent.id} className="bg-white border border-slate-100 rounded-xl overflow-hidden">
                 {editingAgent?.id === agent.id ? (
                   <div className="p-5">
                     <form onSubmit={handleUpdateAgent} className="space-y-3">
-                      <input type="text" required value={editFormData.name}
-                        onChange={e => setEditFormData(p => ({ ...p, name: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-                      <input type="text" value={editFormData.description}
-                        onChange={e => setEditFormData(p => ({ ...p, description: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-                      {editFormData.agent_type === 'chat' && (
-                        <textarea rows={5} value={editFormData.system_prompt}
-                          onChange={e => setEditFormData(p => ({ ...p, system_prompt: e.target.value }))}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
-                      )}
-
-                      <CatalogFields form={editFormData} categories={categories} connectors={connectors}
-                        idPrefix={agent.id}
+                      <p className="text-xs text-slate-500">
+                        유형·연결 주소·공개 범위를 바꿉니다. 이름·지시문·모델·능력은 [설정]에서 바꾸고, 바꿀 때마다 판이 남습니다.
+                      </p>
+                      <OperationalFields form={editFormData} idPrefix={agent.id}
                         onChange={patch => setEditFormData(p => ({ ...p, ...patch }))} />
 
                       <div className="flex gap-2">
@@ -816,6 +828,11 @@ export default function AgentsManager() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
                         {agent.name}
+                        {agent.tier === 'department' && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700">
+                            {TIER_LABELS.department}
+                          </span>
+                        )}
                         {agent.category && (
                           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-slate-100 text-slate-500">
                             {agent.category}
@@ -835,23 +852,31 @@ export default function AgentsManager() {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {/* 노출 스위치 — 활성/비활성과는 다른 축이다.
                           is_active는 '쓸 수 있는가', is_published는 '목록에 내보내는가' */}
-                      <button onClick={() => handleTogglePublish(agent)} disabled={publishingId === agent.id}
-                        title={agent.is_published ? '누르면 숨겨집니다' : '누르면 직원에게 보입니다'}
-                        className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors disabled:opacity-50 ${
-                          agent.is_published
-                            ? 'bg-[#003087] text-white hover:bg-[#002070]'
-                            : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                        }`}>
-                        {publishingId === agent.id ? '...' : agent.is_published ? '노출 중' : '노출 대기중'}
-                      </button>
-                      <button onClick={() => handleToggleActive(agent)}
-                        className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
-                          agent.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                        }`}>
-                        {agent.is_active ? '활성' : '비활성'}
-                      </button>
-                      <button onClick={() => { setEditingAgent(agent); setEditFormData(toFormData(agent)); }}
-                        className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">수정</button>
+                      {agent.tier === 'official' && (
+                        <button onClick={() => handleTogglePublish(agent)} disabled={publishingId === agent.id}
+                          title={agent.is_published ? '누르면 숨겨집니다' : '누르면 직원에게 보입니다'}
+                          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors disabled:opacity-50 ${
+                            agent.is_published
+                              ? 'bg-[#003087] text-white hover:bg-[#002070]'
+                              : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          }`}>
+                          {publishingId === agent.id ? '...' : agent.is_published ? '노출 중' : '노출 대기중'}
+                        </button>
+                      )}
+                      {agent.tier === 'official' && (
+                        <button onClick={() => handleToggleActive(agent)}
+                          className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${
+                            agent.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}>
+                          {agent.is_active ? '활성' : '비활성'}
+                        </button>
+                      )}
+                      <button onClick={() => setSettingsAgentId(agent.id)}
+                        className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">설정</button>
+                      {agent.tier === 'official' && (
+                        <button onClick={() => { setEditingAgent(agent); setEditFormData(toFormData(agent)); }}
+                          className="px-3 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">운영</button>
+                      )}
                       <button onClick={() => handleDeleteAgent(agent)} disabled={deletingId === agent.id}
                         className="px-3 py-1 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50 disabled:opacity-50">
                         {deletingId === agent.id ? '삭제 중' : '삭제'}
@@ -976,6 +1001,15 @@ export default function AgentsManager() {
           </div>
         </div>
       )}
+
+      {settingsAgentId && (
+        <AgentEditorModal
+          agentId={settingsAgentId}
+          categories={categories.map(c => c.name)}
+          onClose={() => setSettingsAgentId(null)}
+          onSaved={updated => setAgents(prev => prev.map(a => (a.id === updated.id ? updated : a)))}
+        />
+      )}
     </div>
   );
 }
@@ -1011,7 +1045,12 @@ function ApprovalCard({
             </div>
             {agent.description && <p className="text-xs text-slate-500 mt-0.5">{agent.description}</p>}
             <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
-              <span>신청자: <span className="text-slate-600 font-medium">{agent.owner?.full_name || agent.owner?.email || '알 수 없음'}</span></span>
+              <span>
+                {TIER_LABELS[agent.tier]} · 신청자:{' '}
+                <span className="text-slate-600 font-medium">
+                  {agent.requester?.full_name || agent.requester?.email || agent.owner?.full_name || agent.owner?.email || '알 수 없음'}
+                </span>
+              </span>
               <span>신청일: {new Date(agent.created_at).toLocaleDateString('ko-KR')}</span>
             </div>
           </div>
