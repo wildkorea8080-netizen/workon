@@ -20,7 +20,7 @@ type AgentFormData = {
   name: string;
   description: string;
   system_prompt: string;
-  enabled_connectors: string[];
+  connectors: string[];
   visibility: Visibility;
   icon: string;
   category: string;
@@ -40,7 +40,7 @@ const EMPTY_FORM: AgentFormData = {
   name: '',
   description: '',
   system_prompt: '',
-  enabled_connectors: [],
+  connectors: [],
   visibility: 'organization',
   icon: '',
   category: '',
@@ -63,7 +63,7 @@ function toFormData(agent: Agent): AgentFormData {
     system_prompt: agent.system_prompt ?? '',
     usage_guide: agent.usage_guide ?? '',
     starter_prompts: (agent.starter_prompts ?? []).join('\n'),
-    enabled_connectors: connectorIdsOf(agent.capabilities),
+    connectors: connectorIdsOf(agent.capabilities),
     visibility: (agent.visibility ?? 'organization') as Visibility,
     icon: agent.icon ?? '',
     category: agent.category ?? '',
@@ -76,14 +76,14 @@ function toFormData(agent: Agent): AgentFormData {
 
 /** 서버로 보낼 형태로 정리. 링크형이 아니면 주소를 아예 빼서 제약과 어긋나지 않게 한다. */
 function toRequestBody(form: AgentFormData) {
-  const { link_url, category, icon, enabled_connectors, version: _version, capabilities, ...rest } = form;
+  const { link_url, category, icon, connectors, version: _version, capabilities, ...rest } = form;
   // 공공데이터 연결은 능력 설정의 일부다. 다른 능력(문서 찾기·사진)은 그대로 둔다.
   const { public_data: _old, ...others } = capabilities;
   return {
     ...rest,
     capabilities:
-      enabled_connectors.length > 0
-        ? { ...others, public_data: { connectors: enabled_connectors } }
+      connectors.length > 0
+        ? { ...others, public_data: { connectors } }
         : others,
     icon: icon.trim() || null,
     category: category.trim() || null,
@@ -289,12 +289,12 @@ function CatalogFields({
                 <label key={connector.id} className="flex items-start gap-2.5 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={form.enabled_connectors.includes(connector.id)}
+                    checked={form.connectors.includes(connector.id)}
                     onChange={e =>
                       onChange({
-                        enabled_connectors: e.target.checked
-                          ? [...form.enabled_connectors, connector.id]
-                          : form.enabled_connectors.filter(id => id !== connector.id),
+                        connectors: e.target.checked
+                          ? [...form.connectors, connector.id]
+                          : form.connectors.filter(id => id !== connector.id),
                       })
                     }
                     className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"

@@ -38,9 +38,12 @@ describe('요청 본문 나누기', () => {
     expect(r.settings.capabilities).toEqual({ image: {}, public_data: { connectors: ['law'] } });
   });
 
-  it('옛 enabled_connectors는 받지 않는다', () => {
-    // 옛 화면이 남아 있으면 조용히 무시되지 않고 드러나야 한다
-    expect(splitAgentBody({ enabled_connectors: ['law'] }, opts).error).toContain('capabilities');
+  it('모르는 칸은 저장하지 않는다', () => {
+    // 0028이 지운 옛 커넥터 칸 등. 화면에 남은 값이 칸으로 새어 들어가지 않는다.
+    const r = splitAgentBody({ unknown_column: ['law'] }, opts);
+    expect(r.error).toBeUndefined();
+    expect(r.settings).toEqual({});
+    expect(r.operational).toEqual({});
   });
 
   it('template_ids는 본문으로 받지 않는다', () => {

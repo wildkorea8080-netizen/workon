@@ -127,34 +127,6 @@ try {
   );
   check('양식 10개는 받는다', ten.r.ok === true);
 
-  // ── 옛 코드 호환 트리거 ──
-  const { rows: [legacy] } = await client.query(
-    `INSERT INTO agents (department_id, name, is_personal, enabled_connectors)
-     VALUES ($1, $2, true, '{law}') RETURNING tier, capabilities`,
-    [dept.id, `${tag}-legacy`]
-  );
-  check('옛 코드가 만든 나만의 비서도 단계가 찬다', legacy.tier === 'personal');
-  check('옛 코드의 커넥터가 능력으로 옮겨진다',
-    JSON.stringify(legacy.capabilities.public_data) === '{"connectors":["law"]}' && 'image' in legacy.capabilities);
-
-  const { rows: [approved] } = await client.query(
-    `UPDATE agents SET is_personal = false WHERE name = $1 RETURNING tier`, [`${tag}-legacy`]
-  );
-  check('옛 승인 코드가 is_personal만 바꿔도 단계가 따라간다', approved.tier === 'official');
-
-  const { rows: [conn] } = await client.query(
-    `UPDATE agents SET capabilities = '{"public_data":{"connectors":["kosis"]}}' WHERE id = $1
-     RETURNING enabled_connectors`, [created.id]
-  );
-  check('새 능력이 옛 커넥터 칸으로 따라간다', JSON.stringify(conn.enabled_connectors) === '["kosis"]');
-
-  // S1-b 전까지 옛 화면·코드는 enabled_connectors만 쓴다. 반대 방향도 따라가야 한다.
-  const { rows: [legacyConn] } = await client.query(
-    `UPDATE agents SET enabled_connectors = '{law}' WHERE id = $1 RETURNING capabilities`, [created.id]
-  );
-  check('옛 커넥터 칸을 바꾸면 능력이 따라간다',
-    JSON.stringify(legacyConn.capabilities?.public_data?.connectors) === '["law"]');
-
   // ── 자동 켜기 (문서 업로드) ──
   // 올린 사람을 넘겨도 updated_by는 그대로여야 한다. 바뀌면 기본 비서 갱신(--update)이
   // 이 비서를 '관리자가 고친 것'으로 보고 건너뛴다.

@@ -50,9 +50,6 @@ export function splitAgentBody(
   const result: SplitResult = { settings: {}, operational: {} };
   const fail = (error: string): SplitResult => ({ ...result, error });
 
-  if (body.enabled_connectors !== undefined) {
-    return fail('enabled_connectors는 더 이상 받지 않습니다. capabilities.public_data로 보내 주세요.');
-  }
   if (body.template_ids !== undefined) {
     return fail('양식은 양식 관리에서 바꿔 주세요.');
   }

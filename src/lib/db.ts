@@ -37,12 +37,9 @@ export type Agent = {
   category?: string;
   icon?: string;
   color?: string;
-  is_personal: boolean;
   owner_id?: string | null;
   approval_status?: string | null;
   approval_note?: string | null;
-  /** 이 에이전트가 쓸 외부 도구 커넥터 id 목록. 빈 배열이면 도구 미사용. */
-  enabled_connectors?: string[];
   /** 누가 볼 수 있는가(권한). category와 달리 표시가 아니라 접근을 정한다. */
   visibility?: 'organization' | 'department';
   organization_id?: string | null;
@@ -57,7 +54,7 @@ export type Agent = {
   /** chat=대화형, link=외부 링크 연결형(새 탭) */
   agent_type?: 'chat' | 'link';
   link_url?: string | null;
-  /** 단계 — 권한의 근거 (0026). is_personal은 0027에서 사라진다 */
+  /** 단계 — 권한의 근거 (0026) */
   tier: 'personal' | 'department' | 'official';
   /** 이 비서의 모델. null이면 기관 기본 모델 (0026) */
   model_id?: string | null;

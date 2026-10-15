@@ -21,7 +21,6 @@ const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABA
 // 컬럼/함수 존재 여부는 실제 조회를 시도해 판정한다 (information_schema는 REST로 못 봄)
 const checks = [
   ['0012', 'usage_logs.organization_id', () => db.from('usage_logs').select('organization_id').limit(1)],
-  ['0013', 'agents.enabled_connectors',  () => db.from('agents').select('enabled_connectors').limit(1)],
   ['0014', 'departments.parent_id',      () => db.from('departments').select('parent_id').limit(1)],
   ['0016', 'agents.visibility',          () => db.from('agents').select('visibility, organization_id').limit(1)],
   ['0016', 'documents.visibility',       () => db.from('documents').select('visibility, organization_id').limit(1)],
@@ -180,13 +179,14 @@ console.log('\n=== 비서 카탈로그 ===');
 {
   const { data, error } = await db
     .from('agents')
-    .select('name, icon, category, is_published, agent_type, link_url, is_personal');
+    .select('name, icon, category, is_published, agent_type, link_url, tier')
+    .is('deleted_at', null);
 
   if (error) {
     console.log(`      조회 실패: ${error.message.slice(0, 60)}`);
     ok = false;
   } else {
-    const official = data.filter((a) => !a.is_personal);
+    const official = data.filter((a) => a.tier !== 'personal');
     const hidden = official.filter((a) => !a.is_published);
     const noIcon = official.filter((a) => !a.icon);
     const links = official.filter((a) => a.agent_type === 'link');
@@ -208,7 +208,7 @@ console.log('\n=== 비서 단계와 판 ===');
 {
   const { data: agents, error } = await db
     .from('agents')
-    .select('id, name, tier, is_personal, visibility, version, capabilities, model_id')
+    .select('id, name, tier, visibility, version, capabilities, model_id')
     .is('deleted_at', null);
   const { data: history, error: hError } = await db
     .from('agent_history')
@@ -221,7 +221,6 @@ console.log('\n=== 비서 단계와 판 ===');
   } else {
     const versions = new Set(history.map((h) => `${h.agent_id}:${h.version}`));
     const noCurrent = agents.filter((a) => !versions.has(`${a.id}:${a.version}`));
-    const mismatch = agents.filter((a) => (a.tier === 'personal') !== Boolean(a.is_personal));
     const badDept = agents.filter((a) => a.tier === 'department' && a.visibility !== 'department');
     const KNOWN_CAPS = ['doc_search', 'public_data', 'image'];
     const badCaps = agents.filter((a) => Object.keys(a.capabilities ?? {}).some((k) => !KNOWN_CAPS.includes(k)));
@@ -230,7 +229,6 @@ console.log('\n=== 비서 단계와 판 ===');
     console.log(`OK    단계별 ${Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' / ')}`);
     for (const [label, rows] of [
       ['현재 판 기록 없음', noCurrent],
-      ['tier와 is_personal 불일치 (0027 전까지)', mismatch],
       ['부서 비서인데 공개 범위가 부서가 아님', badDept],
       ['모르는 능력 id', badCaps],
     ]) {
