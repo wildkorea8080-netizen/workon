@@ -14,7 +14,13 @@ import type { GeneratedFileRef } from '@/lib/capabilities/types';
 
 const MAX_TITLE = 80;
 
+/** 확장자는 코드가 정하는 값이지 사용자 입력이 아니다. 경로·이름에 섞이지 않게 막는다 */
+function assertExtension(extension: string): void {
+  if (!/^[a-z0-9]{1,8}$/.test(extension)) throw new Error('잘못된 확장자');
+}
+
 export function safeFileName(title: string, extension: string): string {
+  assertExtension(extension);
   const cleaned = title
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -25,6 +31,7 @@ export function safeFileName(title: string, extension: string): string {
 }
 
 export function generatedStoragePath(orgId: string, conversationId: string, fileId: string, extension: string): string {
+  assertExtension(extension);
   return `generated/${orgId}/${conversationId}/${fileId}.${extension}`;
 }
 
@@ -68,8 +75,22 @@ export async function saveGeneratedFile(input: SaveGeneratedFileInput): Promise<
     storage_path: storagePath,
   });
   if (insertError) {
-    // 기록 없는 파일은 아무도 내려받거나 지울 수 없다. 올린 것을 되돌린다
-    await bucket.remove([storagePath]);
+    // 기록 없는 파일은 아무도 내려받거나 지울 수 없다. 올린 것을 되돌린다.
+    // 되돌리기가 실패해도(던지든 오류를 돌려주든) 던지는 것은 원래의 기록 오류다
+    try {
+      const { error: removeError } = await bucket.remove([storagePath]);
+      if (removeError) throw new Error(removeError.message);
+    } catch (rollbackError) {
+      await logSystem({
+        level: 'error',
+        category: 'database',
+        message: '생성 파일 기록 실패 뒤 저장소 되돌리기도 실패 — 고아 파일을 손으로 지워야 함',
+        details: {
+          storagePath,
+          error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        },
+      });
+    }
     throw new Error(`파일 기록을 남기지 못했습니다: ${insertError.message}`);
   }
 
@@ -98,14 +119,18 @@ export async function findOwnedFile(
  * 함수는 응답 본문도 4.5MB로 제한된다(설계 5.3).
  */
 export async function signedDownloadUrl(storagePath: string, fileName: string): Promise<string | null> {
+  // download 옵션을 SDK에 넘기지 않는다. storage-js는 그 값을 URLSearchParams로 한 번
+  // 인코딩한 뒤 URL 전체에 encodeURI를 또 씌워, 한글 이름이 '%25EC…'로 이중 인코딩된다
+  // (받은 파일 이름이 퍼센트 코드 그대로가 된다). 직접 한 번만 붙인다.
   const { data, error } = await supabaseAdmin.storage
     .from(SUPABASE_DOCUMENTS_BUCKET)
-    .createSignedUrl(storagePath, 60, { download: fileName });
+    .createSignedUrl(storagePath, 60);
   if (error || !data?.signedUrl) {
     console.error('[generated-files] 서명 주소 오류:', error);
     return null;
   }
-  return data.signedUrl;
+  const url = data.signedUrl;
+  return `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(fileName)}`;
 }
 
 /**
@@ -113,6 +138,20 @@ export async function signedDownloadUrl(storagePath: string, fileName: string): 
  * 실패해도 던지지 않는다 — 대화 삭제를 막지 않되, 남은 경로를 남겨 손으로 지울 수 있게 한다.
  */
 export async function deleteConversationFiles(conversationId: string): Promise<void> {
+  try {
+    await removeConversationFiles(conversationId);
+  } catch (e) {
+    // 네트워크 예외 등. 대화 삭제를 막지 않는다
+    await logSystem({
+      level: 'error',
+      category: 'database',
+      message: '생성 파일 정리 중 예외 — 대화 삭제 뒤 저장소에 파일이 남을 수 있음',
+      details: { conversationId, error: e instanceof Error ? e.message : String(e) },
+    });
+  }
+}
+
+async function removeConversationFiles(conversationId: string): Promise<void> {
   const { data, error } = await supabaseAdmin
     .from('generated_files')
     .select('storage_path')

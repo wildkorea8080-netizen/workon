@@ -10,6 +10,8 @@ const state = {
   removeError: null as null | { message: string },
   selectRows: [] as { storage_path: string }[],
   owned: null as null | { storage_path: string; file_name: string },
+  removeThrows: false,
+  selectThrows: false,
 };
 
 vi.mock('@/lib/supabaseAdmin', () => {
@@ -35,6 +37,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
           },
           select(...args: unknown[]) {
             calls.push({ table, op: 'select', args });
+            if (state.selectThrows) throw new Error('network down');
             return chain(table, () =>
               state.owned !== null || table !== 'generated_files'
                 ? { data: state.owned, error: null }
@@ -52,10 +55,12 @@ vi.mock('@/lib/supabaseAdmin', () => {
             },
             remove(paths: string[]) {
               calls.push({ op: 'remove', args: [bucket, paths] });
+              if (state.removeThrows) return Promise.reject(new Error('network down'));
               return Promise.resolve({ error: state.removeError });
             },
-            createSignedUrl(path: string, ttl: number, opts: unknown) {
-              calls.push({ op: 'sign', args: [path, ttl, opts] });
+            createSignedUrl(path: string, ttl: number, ...rest: unknown[]) {
+              // 넘기지 않은 인자는 기록하지 않는다 — download 옵션 유무를 구분하기 위해
+              calls.push({ op: 'sign', args: [path, ttl, ...rest] });
               return Promise.resolve({ data: { signedUrl: `https://signed/${path}` }, error: null });
             },
           };
@@ -86,7 +91,7 @@ const input = {
 beforeEach(() => {
   calls.length = 0;
   logged.length = 0;
-  Object.assign(state, { uploadError: null, insertError: null, removeError: null, selectRows: [], owned: null });
+  Object.assign(state, { uploadError: null, insertError: null, removeError: null, selectRows: [], owned: null, removeThrows: false, selectThrows: false });
 });
 
 describe('파일 이름', () => {
@@ -98,6 +103,14 @@ describe('파일 이름', () => {
 
   it('저장소 경로에는 한글 이름을 넣지 않는다', () => {
     expect(generatedStoragePath('org', 'c1', 'f1', 'hwpx')).toBe('generated/org/c1/f1.hwpx');
+  });
+
+  it('확장자는 소문자·숫자 1~8자만 받는다', () => {
+    for (const bad of ['', '../x', 'HWPX', 'hw px', 'a'.repeat(9), 'hwpx/']) {
+      expect(() => safeFileName('문서', bad)).toThrow('잘못된 확장자');
+      expect(() => generatedStoragePath('org', 'c1', 'f1', bad)).toThrow('잘못된 확장자');
+    }
+    expect(safeFileName('문서', 'docx')).toBe('문서.docx');
   });
 });
 
@@ -122,6 +135,20 @@ describe('저장', () => {
     expect(calls.some((c) => c.op === 'remove')).toBe(true);
   });
 
+  it('되돌리기까지 실패해도 원래의 기록 오류를 던지고 고아 경로를 로그에 남긴다', async () => {
+    state.insertError = { message: 'boom' };
+    state.removeError = { message: 'denied' };
+    await expect(saveGeneratedFile(input)).rejects.toThrow('기록');
+    const path = calls.find((c) => c.op === 'upload')!.args[1] as string;
+    expect(JSON.stringify(logged)).toContain(path);
+
+    logged.length = 0;
+    state.removeError = null;
+    state.removeThrows = true;
+    await expect(saveGeneratedFile(input)).rejects.toThrow('기록');
+    expect(logged.length).toBe(1);
+  });
+
   it('올리기가 실패하면 기록하지 않고 던진다', async () => {
     state.uploadError = { message: 'full' };
     await expect(saveGeneratedFile(input)).rejects.toThrow('저장');
@@ -139,8 +166,17 @@ describe('조회·내려받기', () => {
   });
 
   it('서명 주소는 60초, 원래 이름으로 받게 한다', async () => {
-    expect(await signedDownloadUrl('generated/x.hwpx', '회의록.hwpx')).toBe('https://signed/generated/x.hwpx');
-    expect(calls.find((c) => c.op === 'sign')!.args).toEqual(['generated/x.hwpx', 60, { download: '회의록.hwpx' }]);
+    const url = await signedDownloadUrl('generated/x.hwpx', '회의록.hwpx');
+    // SDK의 download 옵션은 한글을 이중 인코딩하므로 넘기지 않고 직접 한 번만 붙인다
+    expect(calls.find((c) => c.op === 'sign')!.args).toEqual(['generated/x.hwpx', 60]);
+    expect(url).toBe('https://signed/generated/x.hwpx?download=%ED%9A%8C%EC%9D%98%EB%A1%9D.hwpx');
+    expect(url!.endsWith(`download=${encodeURIComponent('회의록.hwpx')}`)).toBe(true);
+    expect(url).not.toContain('%25');
+  });
+
+  it('서명 주소에 이미 질의가 있으면 &로 잇는다', async () => {
+    const url = await signedDownloadUrl('generated/x.hwpx?token=t', 'a.hwpx');
+    expect(url).toBe('https://signed/generated/x.hwpx?token=t&download=a.hwpx');
   });
 });
 
@@ -157,6 +193,19 @@ describe('대화 삭제 때', () => {
     state.removeError = { message: 'denied' };
     await expect(deleteConversationFiles('c1')).resolves.toBeUndefined();
     expect(JSON.stringify(logged)).toContain('generated/a.hwpx');
+  });
+
+  it('저장소·조회가 예외를 던져도 던지지 않고 로그를 남긴다', async () => {
+    state.selectRows = [{ storage_path: 'generated/a.hwpx' }];
+    state.removeThrows = true;
+    await expect(deleteConversationFiles('c1')).resolves.toBeUndefined();
+    expect(logged.length).toBe(1);
+
+    logged.length = 0;
+    state.removeThrows = false;
+    state.selectThrows = true;
+    await expect(deleteConversationFiles('c1')).resolves.toBeUndefined();
+    expect(logged.length).toBe(1);
   });
 
   it('대화 삭제 라우트가 대화를 지우기 전에 부른다', () => {
