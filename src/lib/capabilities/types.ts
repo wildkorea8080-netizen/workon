@@ -28,6 +28,13 @@ export interface PrepareResult {
   chunks?: RetrievedChunk[];
 }
 
+/** 도구가 만든 파일. 화면(tool_end)과 메시지 저장(source_references.files)으로 간다 */
+export interface GeneratedFileRef {
+  id: string;
+  file_name: string;
+  size_bytes: number;
+}
+
 export interface ToolOutcome {
   ok: boolean;
   /** AI에게 돌려줄 글. 실패면 사람이 읽을 수 있는 이유 */

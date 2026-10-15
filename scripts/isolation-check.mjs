@@ -123,7 +123,7 @@ for (const [table, labelCol] of [
 // organization_id가 NULL이면 visibilityFilter의 기관 조건에 걸리지 않아
 // 아무에게도 안 보이거나, 반대로 부서 조건으로만 걸려 의도와 어긋난다.
 console.log('\n=== 3. 기관 미연결 행 ===');
-for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'conversations']) {
+for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'generated_files', 'conversations']) {
   const { count, error } = await db
     .from(table)
     .select('id', { count: 'exact', head: true })
@@ -195,6 +195,21 @@ console.log('\n=== 4-1. 부서 비서 기관 일치 ===');
     } else {
       pass(`부서 비서 ${deptAgents?.length ?? 0}개 — 주인 부서와 기관이 일치`);
     }
+  }
+}
+
+// ── 4-2. 생성 파일의 부서와 기관 ────────────────────────────
+console.log('\n=== 4-2. 생성 파일 기관 일치 ===');
+{
+  const { data: files, error } = await db.from('generated_files').select('id, department_id, organization_id');
+  if (error) {
+    // 0029 전이면 표가 없다. 확인 못 한 것은 위반으로 센다
+    fail('생성 파일 조회 실패', error.message);
+  } else {
+    const deptOrg = new Map(depts.map((d) => [d.id, d.organization_id]));
+    const crossed = (files ?? []).filter((f) => deptOrg.get(f.department_id) !== f.organization_id);
+    if (crossed.length > 0) fail(`생성 파일 ${files.length}개 중 기관 어긋남 ${crossed.length}개`);
+    else pass(`생성 파일 ${files?.length ?? 0}개 — 부서와 기관이 일치`);
   }
 }
 
