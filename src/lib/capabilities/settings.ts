@@ -61,6 +61,16 @@ export function normalizeCapabilities(
 }
 
 /**
+ * 대화 화면에서 사진 첨부 버튼을 낼지. 저장된 값을 그대로 받는다.
+ *
+ * 표시일 뿐이다 — 실제로 거절하는 곳은 서버(prepare.ts의 acceptsImages)다.
+ * 값이 깨져 있으면 내지 않는다. 서버도 깨진 설정이면 아무 능력도 켜지 않는다.
+ */
+export function acceptsChatImages(raw: unknown): boolean {
+  return isPlainObject(raw) && isPlainObject(raw.image);
+}
+
+/**
  * 나만의·부서 비서가 켤 수 있는 범위.
  *
  * '기관이 공식 비서에서 이미 쓰고 있는가'로 정한다(connector-scope.ts의

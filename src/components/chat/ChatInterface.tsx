@@ -12,6 +12,7 @@ import {
 } from '@/lib/chat-images';
 import { fileToChatImage } from '@/lib/image-resize';
 import { connectorShortLabel } from '@/lib/connector-labels';
+import { acceptsChatImages } from '@/lib/capabilities/settings';
 
 interface ToolLink {
   title: string;
@@ -85,6 +86,11 @@ export default function ChatInterface({
   const [imageError, setImageError] = useState<string | null>(null);
   const [preparingImages, setPreparingImages] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 사진 읽기가 꺼진 비서는 서버가 사진을 거절한다. 버튼을 두면 보낸 뒤에야 실패를 안다.
+  // 지난 대화를 열면 비서 정보가 대화 조회의 join으로 와 capabilities가 없다 —
+  // 모를 때는 버튼을 두고 서버 판정에 맡긴다(표시일 뿐, 실제 제한은 서버).
+  const canAttachImages =
+    selectedAgent.capabilities === undefined || acceptsChatImages(selectedAgent.capabilities);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
@@ -155,8 +161,18 @@ export default function ChatInterface({
     if (!conversationId) setMessages([]);
   }, [selectedAgent.id, conversationId]);
 
+  // 사진을 받지 않는 비서로 바뀌면 붙여 둔 사진을 놓는다(보내면 서버가 거절한다)
+  useEffect(() => {
+    if (canAttachImages) return;
+    setPendingImages(prev => {
+      prev.forEach(p => URL.revokeObjectURL(p.preview));
+      return prev.length > 0 ? [] : prev;
+    });
+  }, [canAttachImages]);
+
   const addFiles = async (files: FileList | File[]) => {
     setImageError(null);
+    if (!canAttachImages) return;
     const picked = Array.from(files);
     if (picked.length === 0) return;
 
@@ -548,39 +564,43 @@ export default function ChatInterface({
           </div>
         )}
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={IMAGE_ACCEPT_ATTRIBUTE}
-          multiple
-          className="hidden"
-          onChange={e => {
-            if (e.target.files) addFiles(e.target.files);
-            // 같은 파일을 다시 고를 수 있게 비운다
-            e.target.value = '';
-          }}
-        />
+        {canAttachImages && (
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={IMAGE_ACCEPT_ATTRIBUTE}
+            multiple
+            className="hidden"
+            onChange={e => {
+              if (e.target.files) addFiles(e.target.files);
+              // 같은 파일을 다시 고를 수 있게 비운다
+              e.target.value = '';
+            }}
+          />
+        )}
 
         <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#003087] focus-within:ring-2 focus-within:ring-[#003087]/10 transition-all">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading || preparingImages || pendingImages.length >= MAX_CHAT_IMAGES}
-            aria-label="이미지 첨부"
-            title={`이미지 첨부 (최대 ${MAX_CHAT_IMAGES}장)`}
-            className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-          >
-            {preparingImages ? (
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            )}
-          </button>
+          {canAttachImages && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || preparingImages || pendingImages.length >= MAX_CHAT_IMAGES}
+              aria-label="이미지 첨부"
+              title={`이미지 첨부 (최대 ${MAX_CHAT_IMAGES}장)`}
+              className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+            >
+              {preparingImages ? (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              )}
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={inputMessage}

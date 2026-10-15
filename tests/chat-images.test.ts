@@ -139,6 +139,27 @@ describe('대화 실행기 연결', () => {
   });
 });
 
+describe('사진 첨부 버튼 (화면 표시)', () => {
+  it('사진 읽기가 켜진 비서만 사진을 받는다', async () => {
+    const { acceptsChatImages } = await import('../src/lib/capabilities/settings');
+    expect(acceptsChatImages({ image: {} })).toBe(true);
+    expect(acceptsChatImages({ image: {}, doc_search: {} })).toBe(true);
+    expect(acceptsChatImages({ doc_search: {} })).toBe(false);
+    expect(acceptsChatImages({})).toBe(false);
+    expect(acceptsChatImages(null)).toBe(false);
+    expect(acceptsChatImages(undefined)).toBe(false);
+    expect(acceptsChatImages({ image: true })).toBe(false); // 깨진 값은 닫는다
+    expect(acceptsChatImages('image')).toBe(false);
+  });
+
+  it('꺼진 비서에서는 첨부 버튼을 내지 않는다', () => {
+    // 서버가 거절하므로(prepare.ts acceptsImages) 버튼을 두면 보낸 뒤에야 실패를 안다
+    const ui = readFileSync('src/components/chat/ChatInterface.tsx', 'utf8');
+    expect(ui).toMatch(/const canAttachImages =[\s\S]{0,120}acceptsChatImages\(selectedAgent\.capabilities\)/);
+    expect(ui).toMatch(/\{canAttachImages && \(\s*<input/);
+  });
+});
+
 describe('형식 목록은 한 곳에만', () => {
   it('클라이언트가 같은 목록을 쓴다', () => {
     // 업로드 파일 형식에서 목록이 흩어져 두 번 어긋난 적이 있다.
