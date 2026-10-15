@@ -1,5 +1,7 @@
 // tests/document-capability.test.ts
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { createDocument, DOCUMENT_ADDENDUM, type DocumentDeps } from '@/lib/capabilities/document';
 import type { TurnContext } from '@/lib/capabilities/types';
 import { buildHwpx, para } from './fixtures/hwpx';
@@ -15,6 +17,7 @@ async function deps(over: Partial<DocumentDeps> = {}) {
     listAgentTemplates: vi.fn(async () => [{ id: 'tpl-1', name: '우리 회의록', file_name: '회의록.hwpx', storage_path: 'templates/x.hwpx' }]),
     downloadAgentTemplate: vi.fn(async () => template),
     loadBuiltin: vi.fn(async () => template),
+    builtinReady: vi.fn(async () => true),
     saveFile: vi.fn(async (input) => ({ id: 'file-1', file_name: input.fileName, size_bytes: input.bytes.length })),
     logGenerated: vi.fn(async () => {}),
     ...over,
@@ -34,6 +37,13 @@ describe('문서 만들기 — 목록·읽기', () => {
     expect(list.map((t) => t.ref)).toEqual(['builtin:official_letter', 'builtin:report', 'builtin:minutes', 'tpl-1']);
     expect(list.find((t) => t.ref === 'tpl-1')).toMatchObject({ kind: 'agent', format: 'hwpx' });
     expect(d.listAgentTemplates).toHaveBeenCalledWith('agent-1');
+  });
+
+  it('파일이 있는 기본 양식만 목록에 둔다', async () => {
+    const d = await deps({ builtinReady: vi.fn(async (t) => t.ref === 'builtin:minutes') });
+    const list = JSON.parse((await run(d, 'list_templates', {})).text) as { ref: string; kind: string }[];
+    expect(list.filter((t) => t.kind === 'builtin').map((t) => t.ref)).toEqual(['builtin:minutes']);
+    expect(list.some((t) => t.ref === 'tpl-1')).toBe(true);
   });
 
   it('양식의 자리를 읽어 준다', async () => {
@@ -86,6 +96,8 @@ describe('문서 만들기 — 채우기', () => {
     expect(out.ok).toBe(false);
     expect(out.text).toContain('초안');
     expect(out.text).toContain('저장소 가득');
+    // 초안을 안 쓴 경로(바로 파일)도 있다 — 쓰지 않았다면 써 드릴 수 있다고 알리게 한다
+    expect(out.text).toContain('쓰지 않았다면');
     expect(d.logGenerated).not.toHaveBeenCalled();
   });
 
@@ -108,5 +120,20 @@ describe('문서 만들기 — 흐름 안내', () => {
     expect(result.systemAddendum).toBe(DOCUMENT_ADDENDUM);
     expect(DOCUMENT_ADDENDUM).toContain('목차');
     expect(DOCUMENT_ADDENDUM).toContain('지어내지');
+  });
+
+  it('앞 응답의 도구 결과가 남지 않으니 다시 확인하고 추측하지 않게 한다', () => {
+    expect(DOCUMENT_ADDENDUM).toContain('다시 확인');
+    expect(DOCUMENT_ADDENDUM).toContain('추측하지');
+    expect(DOCUMENT_ADDENDUM).toContain('(2의 목차 확인은 그대로 거칩니다)');
+  });
+});
+
+describe('문서 만들기 — 원본 검사', () => {
+  it('양식 목록은 비서 id와 폐기 여부로만 거른다 — 양식의 유일한 기관 경계', () => {
+    const src = readFileSync(path.join(process.cwd(), 'src/lib/capabilities/document.ts'), 'utf-8');
+    const block = src.slice(src.indexOf('async listAgentTemplates'), src.indexOf('async downloadAgentTemplate'));
+    expect(block).toContain(".eq('agent_id'");
+    expect(block).toContain(".is('retired_at', null)");
   });
 });

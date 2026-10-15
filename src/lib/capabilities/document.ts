@@ -1,8 +1,10 @@
 // src/lib/capabilities/document.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { access } from 'fs/promises';
+import path from 'path';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { readTemplate, fillTemplate } from '@/lib/doc-fill';
-import { BUILTIN_TEMPLATES, findBuiltinTemplate, loadBuiltinTemplate, type BuiltinTemplate } from '@/lib/builtin-templates';
+import { BUILTIN_TEMPLATES, BUILTIN_TEMPLATE_DIR, findBuiltinTemplate, loadBuiltinTemplate, type BuiltinTemplate } from '@/lib/builtin-templates';
 import { saveGeneratedFile, safeFileName, type SaveGeneratedFileInput } from '@/lib/generated-files';
 import { writeUsageLog } from '@/lib/assistant/persist';
 import type { Capability, GeneratedFileRef, ToolOutcome, TurnContext } from './types';
@@ -25,6 +27,8 @@ export interface DocumentDeps {
   listAgentTemplates(agentId: string): Promise<AgentTemplateRow[]>;
   downloadAgentTemplate(storagePath: string): Promise<Buffer>;
   loadBuiltin(t: BuiltinTemplate): Promise<Buffer | null>;
+  /** 기본 양식 파일이 있는가. 목록마다 파일을 읽지 않게 있는지만 본다 */
+  builtinReady(t: BuiltinTemplate): Promise<boolean>;
   saveFile(input: SaveGeneratedFileInput): Promise<GeneratedFileRef>;
   logGenerated(row: { departmentId: string; userId: string; conversationId: string; details: Record<string, unknown> }): Promise<void>;
 }
@@ -34,9 +38,10 @@ export const DOCUMENT_ADDENDUM = `[문서 만들기]
 1. 공문·보고서·회의록 같은 문서를 만들어 달라고 하면 list_templates로 쓸 양식을 고릅니다. 사용자가 양식을 말하지 않았고 후보가 여럿이면 어느 양식으로 할지 묻습니다.
 2. read_template으로 채울 항목을 읽어 목차로 보여 주고 이대로 쓸지 확인을 받습니다. 확인 전에는 파일을 만들지 않습니다.
 3. 확인되면 항목별 초안을 대화에 쓰고 끝에 "이대로 한글 파일로 만들까요?"라고 묻습니다.
-4. 만들어 달라고 하면 대화에 쓴 초안 그대로 fill_template을 부릅니다. 고쳐 달라는 말이 있었으면 고친 내용으로 부릅니다. 사용자가 처음부터 바로 파일로 달라고 했으면 3의 질문 없이 만들고, 대화에는 짧은 요약만 씁니다.
+4. 만들어 달라고 하면 대화에 쓴 초안 그대로 fill_template을 부릅니다. 고쳐 달라는 말이 있었으면 고친 내용으로 부릅니다. 사용자가 처음부터 바로 파일로 달라고 했으면 3의 질문 없이 만들고(2의 목차 확인은 그대로 거칩니다), 대화에는 짧은 요약만 씁니다.
 5. 일시·장소·참석자·문서번호·수신처처럼 받은 자료에 없는 사실은 지어내지 않습니다. 묻거나 빈칸으로 두고, 빈칸으로 둔 항목을 알려 줍니다.
-6. 도구가 실패하면 그 이유를 그대로 알리고, 대화에 쓴 초안은 복사해 쓸 수 있다고 덧붙입니다.`;
+6. 도구가 실패하면 그 이유를 그대로 알리고, 대화에 초안을 썼다면 그 글을 복사해 쓸 수 있다고, 쓰지 않았다면 초안을 대화에 써 드릴 수 있다고 덧붙입니다.
+7. 앞 응답의 도구 결과는 다음 응답에 남지 않습니다. 파일을 만들 때는 list_templates·read_template으로 ref와 자리 번호를 다시 확인한 뒤 fill_template을 부릅니다. 자리 번호를 추측하지 않습니다.`;
 
 const NOT_ALLOWED = '이 비서에서 쓸 수 없는 양식입니다. list_templates로 쓸 수 있는 양식을 다시 확인해 주세요.';
 
@@ -142,8 +147,10 @@ export function createDocument(deps: DocumentDeps): Capability {
     async execute(tool, input, ctx): Promise<ToolOutcome> {
       if (tool === 'list_templates') {
         const agentTemplates = await deps.listAgentTemplates(ctx.agentId);
+        // 파일이 없는 기본 양식을 목록에 두면 모델이 골랐다가 막힌다
+        const ready = await Promise.all(BUILTIN_TEMPLATES.map((t) => deps.builtinReady(t)));
         const list = [
-          ...BUILTIN_TEMPLATES.map((t) => ({ ref: t.ref, name: t.name, kind: 'builtin', format: 'hwpx' })),
+          ...BUILTIN_TEMPLATES.filter((_, i) => ready[i]).map((t) => ({ ref: t.ref, name: t.name, kind: 'builtin', format: 'hwpx' })),
           ...agentTemplates.map((t) => ({ ref: t.id, name: t.name, kind: 'agent', format: formatOf(t.file_name) })),
         ];
         return { ok: true, text: JSON.stringify(list) };
@@ -188,7 +195,7 @@ export function createDocument(deps: DocumentDeps): Capability {
           // 파일이 실패해도 초안 글은 대화에 남는다(서비스 정의서 7.5)
           return {
             ok: false,
-            text: `파일을 저장하지 못했습니다. 대화에 쓴 초안은 그대로 있으니 복사해 쓸 수 있다고 알려 주세요. (이유: ${error instanceof Error ? error.message : '알 수 없는 오류'})`,
+            text: `파일을 저장하지 못했습니다(이유: ${error instanceof Error ? error.message : '알 수 없는 오류'}). 대화에 초안을 썼다면 그 글을 복사해 쓸 수 있다고, 쓰지 않았다면 초안을 대화에 써 드릴 수 있다고 알려 주세요.`,
           };
         }
 
@@ -239,6 +246,14 @@ const defaultDeps: DocumentDeps = {
     return Buffer.from(await data.arrayBuffer());
   },
   loadBuiltin: (t) => loadBuiltinTemplate(t),
+  async builtinReady(t) {
+    try {
+      await access(path.join(BUILTIN_TEMPLATE_DIR, t.file));
+      return true;
+    } catch {
+      return false;
+    }
+  },
   saveFile: saveGeneratedFile,
   async logGenerated(row) {
     // 토큰을 쓰지 않는 기록이다 — 과금 규약(TOKEN_ACTIONS) 대상이 아니다(설계 5.5)
