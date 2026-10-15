@@ -38,7 +38,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 93개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 94개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
 │   ├── my/stats/         # 내 사용현황
@@ -54,7 +54,10 @@ src/
 │   ├── super-auth.ts     # 슈퍼관리자 JWT (NextAuth와 별개)
 │   ├── llm/              # AI 연결부 — types.ts · anthropic.ts(어댑터) · index.ts(streamChat·complete)
 │   ├── assistant/        # 대화 실행기 — prepare.ts · stream.ts · prompt.ts · history.ts · persist.ts
-│   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image
+│   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image · document
+│   ├── doc-fill/         # 양식 채우기 엔진(HWPX)
+│   ├── generated-files.ts # 생성 파일 보관
+│   ├── builtin-templates.ts # 기본 양식
 │   ├── config.ts         # 환경 변수 (직접 process.env 접근 금지)
 │   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
@@ -72,6 +75,8 @@ src/
 │   ├── supabase.ts       # 클라이언트 Supabase (anon key)
 │   └── supabaseAdmin.ts  # 서버 Supabase (service role key)
 └── middleware.ts         # NextAuth + 슈퍼관리자 + 점검 모드
+
+assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다)
 ```
 
 ---
@@ -84,7 +89,8 @@ src/
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 330개) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 415개) | 아니오 |
+| `npm run hwpx:probe -- 입력.hwpx 출력.hwpx` | 한글 호환 확인 — 출력 파일을 한글에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
@@ -97,7 +103,7 @@ src/
 
 ---
 
-## API 구조 (93개 라우트)
+## API 구조 (94개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -105,7 +111,7 @@ src/
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
-| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
+| 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
 | 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
@@ -152,6 +158,7 @@ src/
 | 0026 | 비서 단계(`tier`) · 판 기록(`agent_history`, `save_agent`) · 능력(`capabilities`) · 양식(`agent_templates`) · `messages.agent_version` |
 | 0027 | 문서가 있는데 `doc_search`가 꺼진 비서를 다시 켬 (S1-b 코드보다 먼저 적용). 판 기록에 켜진 적 있는 비서는 사람이 끈 것이라 건드리지 않음 |
 | 0028 | 옛 칸(`agents.is_personal`·`enabled_connectors`)과 맞춤 트리거·함수 제거, `v_organization_summary`를 `tier <> 'personal' AND deleted_at IS NULL`로 재작성, 승인 판 도장은 `trg_agents_stamp_approval_version`으로 따로 남김. **코드 배포 확인 뒤 적용** |
+| 0029 | 생성 파일(`generated_files`) — 비서가 만든 파일 기록 · 기관 채움 트리거. **코드 배포 전에 적용** |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -294,8 +301,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 ```
 
 문서 찾기(`search_agent_chunks` RPC, threshold 0.25, top-5)는 `doc_search` 능력의
-`prepare` 단계가 합니다. 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`
-셋이고, 비서에 켜진 능력의 도구와 프롬프트 조각만 대화에 들어옵니다.
+`prepare` 단계가 합니다. 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`·`document`
+넷이고, 비서에 켜진 능력의 도구와 프롬프트 조각만 대화에 들어옵니다.
 
 **응답 형식**: `/api/chat`은 JSON이 아니라 `text/event-stream`을 반환합니다.
 
@@ -305,12 +312,39 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 | `delta` | `{ text }` | 텍스트 조각마다 |
 | `error` | `{ message }` | 생성 중 오류 |
 | `tool_start` | `{ name, input }` | 도구 실행 직전 |
-| `tool_end` | `{ name, ok, sources }` | 도구 실행 완료 |
+| `tool_end` | `{ name, ok, sources, files }` | 도구 실행 완료 |
 | `tool_limit` | `{ rounds }` | 툴 라운드 상한 도달 |
 | `done` | `{ usage, title }` | 저장 완료 후 |
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
 클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).
+
+### 문서 만들기 (S2-a)
+
+능력 `document`를 켜면 비서가 `list_templates` · `read_template` · `fill_template`을 쓴다.
+흐름(양식 → 목차 확인 → 초안 → 파일)과 "모르는 사실은 지어내지 않는다"는 능력이
+시스템 프롬프트에 붙인다(`DOCUMENT_ADDENDUM`).
+
+- **엔진(`src/lib/doc-fill/`)은 DB·저장소를 모른다.** 바이트를 받아 바이트를 돌려준다. HWPX의 본문 XML
+  (`Contents/section*.xml`)만 문자열 단위로 고치고 나머지(서식 정의·그림)는 그대로 둔다. 파서로 읽어
+  다시 쓰면 한글이 까다롭게 군다. zip 항목은 원래 압축 방식(무압축 STORE 포함)을 유지한다
+- **S2-a는 `{{이름}}` 표시만 채운다.** DOCX·옛 HWP·표시 없는 양식은 이유와 함께 실패한다(S2-b에서 대체 경로)
+- 표 칸·머리말처럼 다른 문단에 중첩된 문단의 표시도 제자리에서 채운다. 여러 줄이면 첫 줄은 표시 자리에,
+  나머지는 **새 문단**으로 잇는다(원래 문단을 복제하면 구역 설정·표·그림 컨트롤이 함께 복제돼 파일이 깨진다).
+  새 문단은 표시의 문단·글자 서식을 이어받고 쪽·단 나눔은 넘기지 않는다
+- 넣는 글에서 XML 1.0에 쓸 수 없는 글자(제어 문자 등)는 뺀다. 낡은 미리보기 그림(`Preview/PrvImage.png`)은
+  채우기 전 글이 찍혀 있어 흰 그림으로 바꾼다
+- 표준 서식 = `assets/templates/`의 기본 양식 3종(공문 기안문·일반 보고서·회의록, 정의는 `builtin-templates.ts`).
+  **한글로 만든 진짜 HWPX**라야 한다(`assets/templates/README.md`). 파일이 없으면 능력이 "아직 준비되지 않았다"고 알린다.
+  기관 양식(`agent_templates`)은 비서에 올려 둔 것이 `list_templates`에 함께 나온다
+- 만든 파일은 `generated_files` + 저장소 `generated/{기관}/{대화}/{id}.hwpx`. **주인만** `/api/files/[id]`로 받는다
+  (60초 서명 주소로 302 — Vercel 함수 응답 4.5MB 상한 때문에 직접 보내지 않는다). 관리자도 못 받는다.
+  내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
+  이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
+- 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
+- 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드
+- 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님)
+- 한글 호환은 단위 테스트로 못 본다. `npm run hwpx:probe`로 만든 파일을 한글에서 직접 열어 본다
 
 ### 이미지 첨부 (`/api/chat`)
 
@@ -481,7 +515,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 330개).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 415개).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
