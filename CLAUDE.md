@@ -285,8 +285,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 `/api/chat`은 얇다. 일은 대화 실행기(`src/lib/assistant/`)가 한다.
 
 ```
-질문 → prepareTurn: 권한(canUseAgent) → 한도 → 비서 조회 → 능력 결정(기관 범위)
-     → 사진·금지어 → 대화·이력 20개 → 모델(비서 모델 ∩ 기관 허용) → 능력 prepare(문서 찾기)
+질문 → prepareTurn: 한도 → 비서 조회 → 권한(canUseAgent) → 능력 결정(기관 범위)
+     → 사진·금지어 → 대화·이력 20개 → 모델(비서 모델, 기관 허용 밖이면 대체) → 능력 prepare(문서 찾기)
 → streamTurn: 도구 루프(켜진 능력의 도구만) → 메시지 저장(판 번호) → 사용 기록(모델별) → 제목
 ```
 
