@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { setLlmAdapterForTests } from '@/lib/llm';
 import type { LlmAdapter, LlmRequest, LlmStreamEvent } from '@/lib/llm/types';
-import { runToolLoop, TOOL_LIMIT_NOTICE, type LoopProgress } from '@/lib/assistant/stream';
+import { runToolLoop, TOOL_LIMIT_NOTICE, TRUNCATED_TOOL_NOTICE, type LoopProgress } from '@/lib/assistant/stream';
 import type { Capability, TurnContext } from '@/lib/capabilities/types';
 import type { TurnEvent } from '@/lib/assistant/types';
 
@@ -122,6 +122,27 @@ describe('도구 루프', () => {
     expect(last.system).toContain(TOOL_LIMIT_NOTICE);
     expect(events.some((e) => e.event === 'tool_limit')).toBe(true);
     expect(result.text).toBe('마무리');
+  });
+
+  it('출력 상한으로 도구 호출이 잘리면 실행하지 않고 안내 문구를 남긴다', async () => {
+    // 잘린 tool_use는 입력이 {}로 오므로 실행하면 빈 입력으로 도구가 돈다
+    let executed = 0;
+    const owners = new Map([['law_search', lawCapability(async () => { executed += 1; return { ok: true, text: 'x' }; })]]);
+    const adapter = scripted([[{ type: 'text', text: '네' }, { type: 'tool_use', id: 't1', name: 'law_search', input: {} }, done('max_tokens')]]);
+    const { result, events } = await run(adapter, owners);
+    expect(executed).toBe(0);
+    expect(adapter.requests).toHaveLength(1);
+    expect(result.text).toBe(`네\n\n${TRUNCATED_TOOL_NOTICE}`);
+    expect(events).toContainEqual({ event: 'delta', data: { text: `\n\n${TRUNCATED_TOOL_NOTICE}` } });
+    expect(events.some((e) => e.event === 'tool_start' || e.event === 'tool_end')).toBe(false);
+  });
+
+  it('앞에 쓴 글이 없으면 안내 문구로 시작한다', async () => {
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: 'x' }))]]);
+    const adapter = scripted([[{ type: 'tool_use', id: 't1', name: 'law_search', input: {} }, done('max_tokens')]]);
+    const { result, events } = await run(adapter, owners);
+    expect(result.text).toBe(TRUNCATED_TOOL_NOTICE);
+    expect(events).toEqual([{ event: 'delta', data: { text: TRUNCATED_TOOL_NOTICE } }]);
   });
 
   it('능력이 쓴 AI 사용량을 따로 모은다', async () => {

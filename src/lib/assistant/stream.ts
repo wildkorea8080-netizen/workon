@@ -43,6 +43,10 @@ export const TOOL_LIMIT_NOTICE =
   '[중요] 도구 호출 한도에 도달해 더 이상 도구를 사용할 수 없습니다. 앞으로 무엇을 하겠다는 예고는 하지 마세요. ' +
   '지금까지 확보한 자료만으로 답변을 완성하되, 자료가 부족하면 무엇이 부족한지와 사용자가 무엇을 다시 물으면 되는지를 알려주세요.';
 
+export const TRUNCATED_TOOL_NOTICE =
+  '작성할 내용이 길어 한 번에 파일로 만들지 못했습니다. 항목 분량을 줄이거나 나눠서 만들어 달라고 말씀해 주세요. ' +
+  '대화에 쓴 초안이 있으면 그 글을 복사해 쓸 수 있습니다.';
+
 async function executeCall(
   owners: Map<string, Capability>,
   call: { name: string; input: Record<string, unknown> },
@@ -96,6 +100,17 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
         usage.output_tokens += event.usage.output_tokens;
         stopReason = event.stopReason;
       }
+    }
+
+    if (stopReason === 'max_tokens' && calls.length > 0) {
+      // 출력 상한에 걸려 마지막 tool_use 입력이 미완성이다(어댑터는 깨진 JSON을 {}로 준다).
+      // 실행하면 빈 입력으로 도구가 돌므로 부르지 않고, 사용자가 다음 행동을 알 수 있게
+      // 안내를 글에 남긴다 — delta로 보내므로 화면과 저장에 모두 남는다.
+      console.warn('[assistant] 출력 상한으로 도구 호출이 잘림 — 실행하지 않음', calls.map((c) => c.name));
+      const notice = text ? `\n\n${TRUNCATED_TOOL_NOTICE}` : TRUNCATED_TOOL_NOTICE;
+      text += notice;
+      send({ event: 'delta', data: { text: notice } });
+      break;
     }
 
     if (stopReason !== 'tool_use' || calls.length === 0) break;
