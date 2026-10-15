@@ -18,6 +18,7 @@ export interface AgentSettingsValue {
   model_id: string;
   doc_search: boolean;
   image: boolean;
+  document: boolean;
   connectors: string[];
 }
 
@@ -66,6 +67,7 @@ export function settingsFromAgent(
     model_id: agent.model_id ?? '',
     doc_search: 'doc_search' in caps,
     image: 'image' in caps,
+    document: 'document' in caps,
     connectors: connectorIdsOf(caps),
   };
 }
@@ -88,6 +90,7 @@ export function settingsToBody(value: AgentSettingsValue, opts: { isLink: boolea
     capabilities: {
       ...(value.doc_search ? { doc_search: {} } : {}),
       ...(value.image ? { image: {} } : {}),
+      ...(value.document ? { document: {} } : {}),
       ...(value.connectors.length > 0 ? { public_data: { connectors: value.connectors } } : {}),
     },
   };

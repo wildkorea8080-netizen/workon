@@ -6,12 +6,13 @@
  * 그 목록의 id가 여기 CAPABILITY_IDS와 같은지 테스트가 확인한다.
  */
 
-export const CAPABILITY_IDS = ['doc_search', 'public_data', 'image'] as const;
+export const CAPABILITY_IDS = ['doc_search', 'public_data', 'image', 'document'] as const;
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
 export interface CapabilitySettings {
   doc_search?: Record<string, never>;
   image?: Record<string, never>;
+  document?: Record<string, never>;
   public_data?: { connectors: string[] };
 }
 
@@ -53,7 +54,7 @@ export function normalizeCapabilities(
       if (unique.length > 0) value.public_data = { connectors: unique };
     } else {
       // 설정이 없는 능력. 딸려 온 값은 버린다.
-      value[id as 'doc_search' | 'image'] = {};
+      value[id as 'doc_search' | 'image' | 'document'] = {};
     }
   }
 

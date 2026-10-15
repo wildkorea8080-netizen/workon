@@ -59,6 +59,7 @@ const ACTION_LABELS: Record<string, string> = {
   generate_report: '보고서 생성',
   document_ocr: '스캔 문서 판독',
   conversation_title: '대화 제목 생성',
+  document_generated: '문서 파일 생성',
   prompt_enhance: '프롬프트 다듬기',
 };
 

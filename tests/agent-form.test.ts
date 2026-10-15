@@ -21,7 +21,7 @@ describe('설정 값', () => {
     expect(settingsFromAgent(agent as never)).toEqual({
       name: '공문 비서', description: '', icon: '📨', category: '공공기관', usage_guide: '',
       starter_prompts: '교육 안내\n자료 요청', system_prompt: '공문을 씁니다', model_id: '',
-      doc_search: false, image: true, connectors: ['law'],
+      doc_search: false, image: true, document: false, connectors: ['law'],
     });
   });
 
@@ -30,6 +30,11 @@ describe('설정 값', () => {
     expect(body.capabilities).toEqual({ doc_search: {}, image: {}, public_data: { connectors: ['law'] } });
     expect(body.model_id).toBeNull();
     expect(body.starter_prompts).toBe('교육 안내\n자료 요청');
+  });
+
+  it('문서 만들기를 능력으로 보낸다', () => {
+    const body = settingsToBody({ ...settingsFromAgent(agent as never), document: true }, { isLink: false });
+    expect(body.capabilities).toEqual({ image: {}, document: {}, public_data: { connectors: ['law'] } });
   });
 
   it('연결을 다 끄면 공공데이터 능력을 뺀다', () => {
