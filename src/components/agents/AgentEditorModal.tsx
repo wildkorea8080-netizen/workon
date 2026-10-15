@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Agent } from '@/lib/db';
 import {
   settingsFromAgent,
@@ -48,6 +48,8 @@ export default function AgentEditorModal({
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** 서버에서 마지막으로 읽은 설정의 모습. 판만 오르고 설정이 그대로인지 가릴 때 쓴다 */
+  const baselineRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/agents/${agentId}`);
@@ -56,9 +58,30 @@ export default function AgentEditorModal({
       setError(r.error?.message ?? '비서를 불러오지 못했습니다.');
       return;
     }
+    const next = settingsFromAgent(r.data);
+    baselineRef.current = JSON.stringify(next);
     setAgent(r.data);
-    setValue(settingsFromAgent(r.data));
+    setValue(next);
     setConflict(false);
+  }, [agentId]);
+
+  /**
+   * 양식·변경 기록처럼 판만 올리는 일 뒤에 쓴다. 고친 내용(value)은 건드리지 않는다.
+   * 그 사이 설정을 다른 사람이 바꿨다면 최신 판으로 덮지 않고 충돌로 안내한다 —
+   * 판 번호만 올리면 그 사람의 변경을 모른 채 다음 저장이 덮어쓴다.
+   */
+  const refreshAgent = useCallback(async () => {
+    const res = await fetch(`/api/agents/${agentId}`);
+    const r = await res.json();
+    if (!r.ok || !r.data) {
+      setError(r.error?.message ?? '비서를 불러오지 못했습니다.');
+      return;
+    }
+    if (JSON.stringify(settingsFromAgent(r.data)) !== baselineRef.current) {
+      setConflict(true);
+      return;
+    }
+    setAgent(r.data);
   }, [agentId]);
 
   useEffect(() => {
@@ -102,8 +125,10 @@ export default function AgentEditorModal({
         setError(r.error?.message ?? '저장하지 못했습니다.');
         return;
       }
+      const saved = settingsFromAgent(r.data);
+      baselineRef.current = JSON.stringify(saved);
       setAgent(r.data);
-      setValue(settingsFromAgent(r.data));
+      setValue(saved);
       setNotice(`판 ${r.data.version}로 저장했습니다.`);
       onSaved?.(r.data);
     } finally {
@@ -130,6 +155,17 @@ export default function AgentEditorModal({
 
   const isLink = agent?.agent_type === 'link';
   const choices = agent && value ? connectorChoices(connectors, agent.tier, value.connectors) : [];
+  /**
+   * 카탈로그에 없는데 아직 켜져 있는 연결. 목록에서 빠지면 체크를 끌 방법이 없어
+   * 저장이 계속 거절된다. 카탈로그를 못 읽었을 때(빈 목록)는 지우지 않는다 —
+   * 실패가 기능을 떼어 내면 안 된다.
+   */
+  const catalogIds = new Set(connectors.map((c) => c.id));
+  const staleIds = value && connectors.length > 0 ? value.connectors.filter((id) => !catalogIds.has(id)) : [];
+  const toggleConnector = (id: string, on: boolean) =>
+    setValue((v) =>
+      v ? { ...v, connectors: on ? [...v.connectors, id] : v.connectors.filter((x) => x !== id) } : v
+    );
 
   return (
     <div
@@ -187,9 +223,9 @@ export default function AgentEditorModal({
           {!agent || !value ? (
             <p className="text-sm text-slate-400">{error ?? '불러오는 중...'}</p>
           ) : tab === 'templates' ? (
-            <TemplatesPanel agentId={agent.id} version={agent.version} onChanged={load} />
+            <TemplatesPanel agentId={agent.id} version={agent.version} onChanged={refreshAgent} />
           ) : tab === 'history' ? (
-            <HistoryPanel agentId={agent.id} version={agent.version} onReverted={load} />
+            <HistoryPanel agentId={agent.id} version={agent.version} onReverted={load} onStale={refreshAgent} />
           ) : (
             <>
               <div className="grid grid-cols-[84px_1fr] gap-3">
@@ -288,7 +324,7 @@ export default function AgentEditorModal({
                         </span>
                       </label>
                     ))}
-                    {choices.length > 0 && (
+                    {(choices.length > 0 || staleIds.length > 0) && (
                       <div className="pt-2 border-t border-slate-100">
                         <p className="text-xs font-medium text-slate-800 mb-1">공공데이터 조회</p>
                         {choices.map((c) => (
@@ -296,16 +332,21 @@ export default function AgentEditorModal({
                             <input
                               type="checkbox"
                               checked={value.connectors.includes(c.id)}
-                              onChange={(e) =>
-                                patch({
-                                  connectors: e.target.checked
-                                    ? [...value.connectors, c.id]
-                                    : value.connectors.filter((id) => id !== c.id),
-                                })
-                              }
+                              onChange={(e) => toggleConnector(c.id, e.target.checked)}
                               className="w-4 h-4 rounded border-slate-300 text-[#003087]"
                             />
                             <span className="text-xs text-slate-700">{c.label}</span>
+                          </label>
+                        ))}
+                        {staleIds.map((id) => (
+                          <label key={id} className="flex items-center gap-2.5 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked
+                              onChange={(e) => toggleConnector(id, e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-300 text-[#003087]"
+                            />
+                            <span className="text-xs text-amber-700">{`${id} (사용할 수 없음 — 꺼 주세요)`}</span>
                           </label>
                         ))}
                       </div>

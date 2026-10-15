@@ -52,6 +52,8 @@ export default function TemplatesPanel({
       const r = await res.json();
       if (!r.ok) {
         setError(r.error?.message ?? '양식을 올리지 못했습니다.');
+        // 판이 어긋났으면 부모가 판을 새로 읽어야 다음 시도가 통한다
+        if (res.status === 409 && r.error?.details?.reason === 'conflict') onChanged();
         return;
       }
       setName('');
@@ -69,8 +71,12 @@ export default function TemplatesPanel({
     try {
       const res = await fetch(`/api/agents/${agentId}/templates/${item.id}?base_version=${version}`, { method: 'DELETE' });
       const r = await res.json();
-      if (!r.ok) setError(r.error?.message ?? '양식을 빼지 못했습니다.');
-      else onChanged();
+      if (!r.ok) {
+        setError(r.error?.message ?? '양식을 빼지 못했습니다.');
+        if (res.status === 409 && r.error?.details?.reason === 'conflict') onChanged();
+      } else {
+        onChanged();
+      }
     } finally {
       setBusy(false);
     }

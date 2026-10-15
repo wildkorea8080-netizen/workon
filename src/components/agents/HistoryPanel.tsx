@@ -17,10 +17,13 @@ export default function HistoryPanel({
   agentId,
   version,
   onReverted,
+  onStale,
 }: {
   agentId: string;
   version: number;
   onReverted: () => void;
+  /** 판이 어긋나 되돌리지 못했을 때 부모가 판을 새로 읽는다(설정 고친 내용은 유지) */
+  onStale?: () => void;
 }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -38,7 +41,12 @@ export default function HistoryPanel({
   }, [load, version]);
 
   const revert = async (target: number) => {
-    if (!confirm(`판 ${target}(으)로 되돌릴까요? 지금 내용은 기록에 남고, 되돌린 내용이 새 판이 됩니다.`)) return;
+    if (
+      !confirm(
+        `판 ${target}(으)로 되돌릴까요? 지금 내용은 기록에 남고, 되돌린 내용이 새 판이 됩니다. 설정 탭에서 저장하지 않은 고친 내용은 사라집니다.`
+      )
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -48,8 +56,12 @@ export default function HistoryPanel({
         body: JSON.stringify({ version: target, base_version: version }),
       });
       const r = await res.json();
-      if (!r.ok) setError(r.error?.message ?? '되돌리지 못했습니다.');
-      else onReverted();
+      if (!r.ok) {
+        setError(r.error?.message ?? '되돌리지 못했습니다.');
+        if (res.status === 409 && r.error?.details?.reason === 'conflict') onStale?.();
+      } else {
+        onReverted();
+      }
     } finally {
       setBusy(false);
     }
