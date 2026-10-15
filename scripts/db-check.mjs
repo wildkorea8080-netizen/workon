@@ -237,6 +237,52 @@ console.log('\n=== 비서 단계와 판 ===');
       if (rows.length) ok = false;
       console.log(`${rows.length ? '주의' : 'OK  '}  ${label} ${rows.length}개${rows.length ? ` — ${rows.slice(0, 5).map((a) => a.name).join(', ')}` : ''}`);
     }
+
+    // 문서가 있는데 문서 찾기(doc_search)가 꺼진 비서. S1-b 실행기는 doc_search가
+    // 켜진 비서만 문서를 찾으므로, 오류 없이 근거 없는 답을 한다(0027이 메운 것).
+    // 판 기록에 켜진 적이 있으면 사람이 일부러 끈 것이라 '참고'로 따로 센다.
+    // 1000행 상한에 잘리지 않도록 나눠 읽는다(조용히 적게 세면 점검이 거짓 OK가 된다).
+    const IN_CHUNK = 100;
+    const PAGE = 1000;
+    async function readAll(build) {
+      const out = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error: e } = await build().range(from, from + PAGE - 1);
+        if (e) throw e;
+        out.push(...data);
+        if (data.length < PAGE) return out;
+      }
+    }
+    try {
+      const candidates = agents.filter((a) => !Object.prototype.hasOwnProperty.call(a.capabilities ?? {}, 'doc_search'));
+      const withDocs = new Set();
+      const turnedOff = new Set();
+      for (let i = 0; i < candidates.length; i += IN_CHUNK) {
+        const ids = candidates.slice(i, i + IN_CHUNK).map((a) => a.id);
+        const docs = await readAll(() => db.from('documents').select('agent_id').in('agent_id', ids).order('id'));
+        for (const d of docs) withDocs.add(d.agent_id);
+      }
+      const docIds = [...withDocs];
+      for (let i = 0; i < docIds.length; i += IN_CHUNK) {
+        const ids = docIds.slice(i, i + IN_CHUNK);
+        const rows = await readAll(() =>
+          db.from('agent_history').select('id, agent_id, caps:snapshot->capabilities').in('agent_id', ids).not('snapshot', 'is', null).order('id')
+        );
+        for (const h of rows) {
+          if (h.caps && typeof h.caps === 'object' && Object.prototype.hasOwnProperty.call(h.caps, 'doc_search')) turnedOff.add(h.agent_id);
+        }
+      }
+      const missing = candidates.filter((a) => withDocs.has(a.id) && !turnedOff.has(a.id));
+      const deliberate = candidates.filter((a) => withDocs.has(a.id) && turnedOff.has(a.id));
+      if (missing.length) ok = false;
+      console.log(`${missing.length ? '주의' : 'OK  '}  문서가 있는데 doc_search가 꺼진 비서 ${missing.length}개${missing.length ? ` — ${missing.slice(0, 5).map((a) => a.name).join(', ')} (0027 적용 여부 확인)` : ''}`);
+      if (deliberate.length) {
+        console.log(`참고  그중 판 기록에 켜진 적 있음(일부러 끔) ${deliberate.length}개 — ${deliberate.slice(0, 5).map((a) => a.name).join(', ')}`);
+      }
+    } catch (e) {
+      console.log(`      문서 찾기 점검 조회 실패: ${String(e?.message ?? e).slice(0, 60)}`);
+      ok = false;
+    }
   }
 }
 
