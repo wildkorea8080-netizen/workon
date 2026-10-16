@@ -5,6 +5,7 @@ import { publicData } from './public-data';
 import { image } from './image';
 import { documentCapability } from './document';
 import {
+  CAPABILITY_IDS,
   normalizeCapabilities,
   clampToScope,
   type CapabilitySettings,
@@ -56,6 +57,13 @@ export function effectiveCapabilities(
   let input = stored;
   if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
     const copy = { ...(stored as Record<string, unknown>) };
+    // 모르는 능력은 건너뛴다. 나중 배포가 저장한 능력 때문에 이 배포의 다른 능력까지
+    // 꺼지면, 되돌리기 배포 때 조용히 권한이 빠진다. 저장(normalizeCapabilities)은 여전히 거절한다.
+    const ids = Object.keys(copy).filter((id) => !(CAPABILITY_IDS as readonly string[]).includes(id));
+    if (ids.length > 0) {
+      console.warn('[capabilities] 모르는 능력은 건너뜁니다:', ids);
+      for (const id of ids) delete copy[id];
+    }
     const pd = copy.public_data as { connectors?: unknown } | undefined;
     if (pd && Array.isArray(pd.connectors)) {
       copy.public_data = { connectors: pd.connectors.filter((c) => typeof c === 'string' && known.has(c)) };

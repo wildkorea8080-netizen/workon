@@ -1,6 +1,6 @@
 // tests/capabilities.test.ts
 import { describe, it, expect } from 'vitest';
-import { CAPABILITY_IDS } from '@/lib/capabilities/settings';
+import { CAPABILITY_IDS, normalizeCapabilities } from '@/lib/capabilities/settings';
 import { CAPABILITIES, activeCapabilities, toolsFor, effectiveCapabilities } from '@/lib/capabilities';
 import { createDocSearch, docSearchAddendum } from '@/lib/capabilities/doc-search';
 import type { TurnContext } from '@/lib/capabilities/types';
@@ -67,6 +67,24 @@ describe('대화할 때의 능력', () => {
     expect(
       effectiveCapabilities({ public_data: { connectors: ['law', 'g2b'] } }, { tier: 'official', scope, knownConnectorIds: known })
     ).toEqual({ public_data: { connectors: ['law'] } });
+  });
+
+  it('모르는 능력 id가 섞여도 나머지 능력은 켜진다 — 되돌리기 배포에서 다른 능력이 꺼지지 않게', () => {
+    const caps = effectiveCapabilities(
+      { doc_search: {}, file_read: {}, future_cap: { x: 1 } },
+      { tier: 'official', scope: { publicDataConnectors: new Set() }, knownConnectorIds: [] }
+    );
+    expect(caps).toEqual({ doc_search: {} });
+  });
+
+  it('깨진 값(배열)은 여전히 전부 끈다', () => {
+    expect(
+      effectiveCapabilities([1], { tier: 'official', scope: { publicDataConnectors: new Set() }, knownConnectorIds: [] })
+    ).toEqual({});
+  });
+
+  it('저장은 여전히 모르는 능력을 거절한다', () => {
+    expect(normalizeCapabilities({ future_cap: {} }, { knownConnectorIds: [] }).ok).toBe(false);
   });
 });
 
