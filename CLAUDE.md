@@ -89,7 +89,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 574개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 581개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -375,6 +375,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
   내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
   이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
 - 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
+- 사용자를 지우면(슈퍼관리자) DB 삭제 **전에** 경로를 모으고(`listUserFilePaths`) **성공한 뒤** 저장소를 지운다(`removeUserFiles`).
+  `conversations`·`usage_logs`의 `user_id`는 ON DELETE가 없어 사용자 삭제가 막힐 수 있는데, 먼저 지우면 기록만 남고 파일이 사라진다
 - 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드(배지는 확장자에 따라 `DOC`·`HWP`)
 - 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님). `details.mode`(`fill`·`fallback`)를 남긴다
 - 만든 파일 안내(`fill_template` 결과)는 확장자에 따라 '한글 파일' / 'Word(DOCX) 파일'이라 말한다
@@ -551,7 +553,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-16 기준 574개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-16 기준 581개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 

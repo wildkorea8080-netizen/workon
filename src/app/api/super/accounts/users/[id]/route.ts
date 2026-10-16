@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { listUserFilePaths, removeUserFiles } from '@/lib/generated-files';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,13 +64,19 @@ export async function DELETE(
     const { data: user } = await supabaseAdmin
       .from('users').select('email, full_name').eq('id', params.id).maybeSingle();
 
-    // 1) 관련 데이터 정리 (대화, 메시지는 CASCADE로 자동 삭제)
-    // conversations는 user_id ON DELETE SET NULL이므로 별도 삭제 불필요
+    // 1) 생성 파일 경로를 먼저 모은다 — generated_files는 사용자와 함께 연쇄 삭제되고,
+    //    DB 연쇄 삭제는 저장소 파일을 지우지 않는다. 지우는 것은 DB 삭제가 성공한 뒤다.
+    //    (conversations·messages·usage_logs의 user_id는 ON DELETE 없음 — 대화나 사용 기록이
+    //    있는 사용자는 아래 삭제가 외래 키에 막힐 수 있다. 그때 파일이 먼저 사라지면 안 된다)
+    const filePaths = await listUserFilePaths(params.id);
 
     // 2) users 테이블에서 삭제
     const { error: dbErr } = await supabaseAdmin
       .from('users').delete().eq('id', params.id);
     if (dbErr) throw dbErr;
+
+    // 2-1) 저장소 정리 (실패는 시스템 로그에 남기고 삭제는 계속)
+    await removeUserFiles(params.id, filePaths);
 
     // 3) Supabase Auth에서 삭제
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(params.id);
