@@ -11,12 +11,22 @@ import type { Cell, ExtractedTable, TableMerge } from './types';
  * 두 경로의 출력은 달라야 하므로 `spreadsheet.ts`는 건드리지 않는다.
  */
 
+/** 병합 좌표 키(행 * 폭 + 열). 엑셀 최대 열은 16,384. */
+const COL_STRIDE = 65536;
+/** 이 칸 수를 넘는 병합은 좌표로 풀지 않는다. */
+const WIDE_MERGE_CELLS = 100_000;
+
 /** 표 한 장이 되기 전의 격자. 좌표는 모두 0부터. */
 interface Grid {
   cells: Cell[][];
   merges: TableMerge[];
   /** 앞에 있던 한 칸짜리 제목 블록의 글. 이 표의 캡션 앞에 붙는다. */
   lead?: string;
+}
+
+/** 제목·단위 줄로 볼 수 있는 글(숫자나 숫자처럼 생긴 글은 아니다). */
+function isTitleText(c: Cell | undefined): boolean {
+  return typeof c === 'string' && !/^[+-]?[\d,]+(\.\d+)?%?$/.test(c.trim());
 }
 
 const isBlank = (c: Cell | undefined) => c == null || (typeof c === 'string' && c.trim() === '');
@@ -91,7 +101,8 @@ function splitBlocks(cells: Cell[][], merges: TableMerge[]): Grid[] {
   let pending: string[] = [];
   grids.forEach((g, i) => {
     const only = g.cells.length === 1 ? g.cells[0].filter((c) => !isBlank(c)) : [];
-    if (only.length === 1 && i < grids.length - 1) {
+    // 숫자 하나뿐인 블록은 제목이 아니라 값이다 — 캡션으로 삼으면 값이 글이 되어 계산에서 빠진다
+    if (only.length === 1 && isTitleText(only[0]) && i < grids.length - 1) {
       pending.push(String(only[0]).trim());
       return;
     }
@@ -192,8 +203,24 @@ export async function readXlsxTables(
       const m = parseRange(range);
       if (m) mergeRanges.push(m);
     }
+    // 주인이 아닌 칸의 좌표를 한 번만 모아 둔다. 칸마다 병합 전체를 훑으면 병합이 수천 개일 때 느리다.
+    // 열 전체 병합(D1:D1048576)처럼 넓은 병합은 좌표로 풀면 메모리가 터지므로 따로 두고 훑는다.
+    const copyKeys = new Set<number>();
+    const wideMerges: TableMerge[] = [];
+    for (const m of mergeRanges) {
+      if (m.rows * m.cols > WIDE_MERGE_CELLS) {
+        wideMerges.push(m);
+        continue;
+      }
+      for (let r = m.row; r < m.row + m.rows; r += 1) {
+        for (let c = m.col; c < m.col + m.cols; c += 1) {
+          if (r !== m.row || c !== m.col) copyKeys.add(r * COL_STRIDE + c);
+        }
+      }
+    }
     const isCopy = (r: number, c: number) =>
-      mergeRanges.some(
+      copyKeys.has(r * COL_STRIDE + c) ||
+      wideMerges.some(
         (m) =>
           r >= m.row && r < m.row + m.rows && c >= m.col && c < m.col + m.cols &&
           (r !== m.row || c !== m.col)

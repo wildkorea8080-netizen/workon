@@ -283,3 +283,38 @@ describe('1차 수정 — 조용히 틀리는 경우', () => {
     expect(tables).toHaveLength(2);
   });
 });
+
+describe('2차 수정', () => {
+  it('엑셀: 병합 2,000개·5,000행도 빠르게 읽고 병합 복사본을 비운다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('큰');
+      ws.addRow(['번호', '구분', '값']);
+      for (let i = 1; i <= 5000; i += 1) ws.addRow([i, i <= 4000 ? `g${i}` : null, i]);
+      for (let i = 0; i < 2000; i += 1) ws.mergeCells(2 + i * 2, 2, 3 + i * 2, 2);
+    });
+    const t0 = Date.now();
+    const { tables } = await readXlsxTables(bytes);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    const t = tables[0];
+    expect(t.merges).toHaveLength(2000);
+    expect(t.cells[1][1]).toBe('g1');
+    expect(t.cells[2][1]).toBeNull();
+    expect(t.cells[3][1]).toBe('g3');
+  }, 60000);
+
+  it('엑셀: 열 전체 병합도 읽기를 막지 않는다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('s');
+      ws.addRows([['a', 'b'], ['x', 1], ['y', 2]]);
+      ws.mergeCells('D1:D1048576');
+    });
+    const { tables } = await readXlsxTables(bytes);
+    expect(tables[0].cells).toHaveLength(3);
+  });
+
+  it('숫자 하나뿐인 블록은 캡션이 아니라 표로 남는다', () => {
+    const { tables } = readCsvTables(Buffer.from('100\n\n\n부서,예산\n총무과,1\n', 'utf8'));
+    expect(tables).toHaveLength(2);
+    expect(tables[1].caption).toBeUndefined();
+  });
+});
