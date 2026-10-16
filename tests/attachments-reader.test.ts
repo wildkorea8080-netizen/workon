@@ -246,6 +246,18 @@ describe('표 보기 — 세로 병합 글자 칸 (최종 수정)', () => {
     expect(tableAsMarkdown(t, { offset: 1 })).toContain('| 총무과 | 운영비 |');
   });
 
+  it('긴 세로 병합 글자 열도 뒤쪽 쪽(offset)에서 제대로 채운다', () => {
+    const body = Array.from({ length: 1000 }, (_, i) => [i === 0 ? '총무과' : null, `항목${i}`, i]);
+    const t = buildTable(1, '표 1', [['부서', '항목', '금액'], ...body, ['기획과', '항목x', 1]], [
+      { row: 1, col: 0, rows: 1000, cols: 1 },
+    ]);
+    const page = tableAsMarkdown(t, { offset: 990, limit: 20 });
+    expect(page).toContain('| 총무과 | 항목990 | 990 |');
+    expect(page).toContain('| 총무과 | 항목999 | 999 |');
+    expect(page).toContain('| 기획과 | 항목x | 1 |');
+    expect(page).not.toContain('항목989');
+  });
+
   it('머리글에서 내려온 세로 병합은 데이터 칸에 채우지 않는다', () => {
     const cells = [['구분', '값'], [null, 'a'], [null, 'b']];
     const t = buildTable(1, '표 1', cells, [{ row: 0, col: 0, rows: 3, cols: 1 }]);

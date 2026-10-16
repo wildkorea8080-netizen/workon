@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { readCsvTables, readXlsxTables } from '@/lib/attachments/tables-sheet';
 
 /**
@@ -313,14 +314,25 @@ describe('2차 수정', () => {
     expect(t.cells[3][1]).toBe('g3');
   }, 60000);
 
-  it('엑셀: 열 전체 병합도 읽기를 막지 않는다', async () => {
-    const bytes = await book((wb) => {
+  it('엑셀: 넓은 병합(좌표로 풀지 않는 쪽)도 읽기를 막지 않는다', async () => {
+    // exceljs로 병합을 만들면 칸 객체를 범위만큼 만들어 느리고 무겁다(열 전체 D1:D1048576은 1GB 넘게).
+    // 작은 통합 문서에 병합 기록만 끼워 넣는다. 100,001칸 — WIDE_MERGE_CELLS(100,000)를 넘어 넓은 병합 경로를 탄다
+    const plain = await book((wb) => {
       const ws = wb.addWorksheet('s');
-      ws.addRows([['a', 'b'], ['x', 1], ['y', 2]]);
-      ws.mergeCells('D1:D1048576');
+      ws.addRows([['a', 'b', 'c'], ['x', 1, 'p'], ['y', 2, 'q']]);
     });
+    const zip = await JSZip.loadAsync(plain);
+    const sheet = 'xl/worksheets/sheet1.xml';
+    const xml = await zip.file(sheet)!.async('string');
+    expect(xml).toContain('</sheetData>');
+    zip.file(sheet, xml.replace('</sheetData>', '</sheetData><mergeCells count="1"><mergeCell ref="C1:C100001"/></mergeCells>'));
+    const bytes = Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }));
+
     const { tables } = await readXlsxTables(bytes);
     expect(tables[0].cells).toHaveLength(3);
+    // 병합 주인이 아닌 칸(C2·C3)은 복사본으로 보고 읽지 않는다 — 넓은 병합 판정이 실제로 돌았다
+    expect(tables[0].cells.map((r) => r[2])).toEqual(['c', null, null]);
+    expect(tables[0].merges).toEqual([{ row: 0, col: 2, rows: 3, cols: 1 }]);
   });
 
   it('숫자 하나뿐인 블록은 캡션이 아니라 표로 남는다', () => {

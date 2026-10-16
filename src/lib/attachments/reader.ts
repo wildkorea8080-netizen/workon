@@ -60,14 +60,18 @@ function tablePreamble(table: ExtractedTable): string[] {
  * 보기 전용: 본문 안에서 시작한 세로 병합의 **글자** 칸을 아래 행에도 채운다 — 행 머리('총무과')가 비어 보이지 않게.
  * 숫자는 주인 칸에만 둔다(채우면 보고 더할 때 같은 값이 여러 번 더해진다). 저장된 칸(cells)은 바꾸지 않는다.
  * 머리글에서 내려온 병합은 채우지 않는다 — 열 이름이 데이터 칸에 찍힌다.
+ * 보이는 행(fromRow 이상 toRow 미만, 표 전체 기준)만 계산한다 — 20,000행 병합을 쪽마다 다 풀지 않게.
  */
-function verticalTextFill(table: ExtractedTable): Map<number, Map<number, string>> {
+function verticalTextFill(table: ExtractedTable, fromRow: number, toRow: number): Map<number, Map<number, string>> {
   const fill = new Map<number, Map<number, string>>();
   for (const m of table.merges) {
     if (m.rows < 2 || m.row <= table.header.to) continue;
+    const first = Math.max(m.row + 1, fromRow);
+    const last = Math.min(m.row + m.rows, toRow);
+    if (first >= last) continue;
     const owner = table.cells[m.row]?.[m.col];
     if (typeof owner !== 'string' || owner.trim() === '' || isNumericText(owner)) continue;
-    for (let r = m.row + 1; r < m.row + m.rows; r += 1) {
+    for (let r = first; r < last; r += 1) {
       let row = fill.get(r);
       if (!row) fill.set(r, (row = new Map()));
       row.set(m.col, owner);
@@ -96,7 +100,7 @@ function renderTable(
   const maxChars = opts.maxChars ?? Number.POSITIVE_INFINITY;
   const end = Math.min(bodyCount, offset + limit);
   const width = table.columns.length;
-  const fill = verticalTextFill(table);
+  const fill = verticalTextFill(table, bodyStart + offset, bodyStart + end);
 
   const line = (cells: string[]) => `| ${cells.join(' | ')} |`;
   const out = [

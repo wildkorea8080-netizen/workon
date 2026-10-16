@@ -25,6 +25,9 @@ export const MAX_TABLE_COLS = 200;
 /** 파일 하나에서 읽는 표 수 상한. 넘으면 앞의 것만 읽고 경고한다(읽은 내용 크기·개요를 파일이 정하지 않게) */
 export const MAX_TABLES_PER_FILE = 100;
 
+/** 표 캡션(표 위 글·제목 블록·hp:caption) 글자 상한. 표 보기·요약·개요에 매번 실리므로 파일이 크기를 정하지 않게 */
+export const MAX_CAPTION_CHARS = 500;
+
 /** 파일 하나에서 뽑는 본문 글자 상한. */
 export const MAX_EXTRACT_CHARS = 200_000;
 /** 모델이 한 번 읽을 때 돌려주는 분량. */

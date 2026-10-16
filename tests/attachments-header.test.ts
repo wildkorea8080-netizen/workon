@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTable, captionAbove, columnNames, detectHeader } from '@/lib/attachments/header';
 import {
+  MAX_CAPTION_CHARS,
   ATTACHMENT_ACCEPT,
   attachmentExtension,
   refusedFormatMessage,
@@ -176,5 +177,48 @@ describe('머리글이 첫 데이터 행을 삼키지 않는다 (최종 수정)'
     }
     // 글자 머리글은 그대로
     expect(detectHeader([['구분', '원가', '비율(%)'], ['가', 1, 2]], [])).toEqual({ from: 0, to: 0 });
+  });
+});
+
+describe('2단 머리글의 연도꼴·번호 (재검토 수정)', () => {
+  // '구분'은 세로 병합 2줄, '예산'은 가로 병합 2칸
+  const merges = [
+    { row: 0, col: 0, rows: 2, cols: 1 },
+    { row: 0, col: 1, rows: 1, cols: 2 },
+  ];
+  const under = (sub: (string | null)[]) => [['구분', '예산', null], sub, ['총무과', 100, 120]];
+
+  it("하위 머리글의 연도꼴은 값이 아니다 — '2025년 | 2026년(안)'", () => {
+    const cells = under([null, '2025년', '2026년(안)']);
+    const header = detectHeader(cells, merges);
+    expect(header).toEqual({ from: 0, to: 1 });
+    expect(columnNames(cells, merges, header)).toEqual(['구분', '예산 / 2025년', '예산 / 2026년(안)']);
+  });
+
+  it("연도꼴 하나와 글이 섞인 하위 머리글 — '2025 | 증감', '2026년 | 전년 대비'", () => {
+    expect(detectHeader(under([null, '2025', '증감']), merges)).toEqual({ from: 0, to: 1 });
+    expect(detectHeader(under([null, '2026년', '전년 대비']), merges)).toEqual({ from: 0, to: 1 });
+  });
+
+  it('홀로 있는 연도꼴은 바로 아래 칸이 (연도꼴 아닌) 숫자일 때 머리글 근거다', () => {
+    expect(detectHeader([['작성: 총무과', null], ['구분', '2025년'], ['총무과', 100]], [])).toEqual({ from: 1, to: 1 });
+    // 아래가 글이면 메타 줄
+    expect(detectHeader([['기준연도', 2025], ['부서', '예산'], ['총무과', 100]], [])).toEqual({ from: 1, to: 1 });
+  });
+
+  it("'(1) | (2) | (3)' 번호 하위 머리글은 회계식 음수가 아니라 이름이다", () => {
+    const cells = [['구분', '예산', null, null], [null, '(1)', '(2)', '(3)'], ['총무과', 1, 2, 3]];
+    const m = [{ row: 0, col: 0, rows: 2, cols: 1 }, { row: 0, col: 1, rows: 1, cols: 3 }];
+    expect(detectHeader(cells, m)).toEqual({ from: 0, to: 1 });
+  });
+});
+
+describe('캡션 상한 (재검토 수정)', () => {
+  it('buildTable이 캡션을 MAX_CAPTION_CHARS에서 자른다', () => {
+    expect(MAX_CAPTION_CHARS).toBe(500);
+    const t = buildTable(1, '표 1', [['부서', '예산'], ['총무과', 1]], [], '가'.repeat(2000));
+    expect(Array.from(t.caption!)).toHaveLength(MAX_CAPTION_CHARS + 1);
+    expect(t.caption!.endsWith('…')).toBe(true);
+    expect(buildTable(1, '표 1', [['a', 'b']], [], '짧은 캡션').caption).toBe('짧은 캡션');
   });
 });

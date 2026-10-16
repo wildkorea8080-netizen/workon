@@ -1,3 +1,4 @@
+import { MAX_CAPTION_CHARS } from './limits';
 import type { Cell, ExtractedTable, TableMerge } from './types';
 
 /**
@@ -40,31 +41,35 @@ function isYearLike(cell: Cell | undefined): boolean {
   return PERIOD_TEXT.test(t);
 }
 
-/**
- * 연도꼴은 한 줄에 2개 이상일 때만 머리글 근거다('구분 | 2024 | 2025'). 하나뿐이면 값이다 —
- * '기준연도 | 2025' 같은 메타 줄이 머리글로 잡히면 진짜 머리글이 데이터가 된다.
- */
-function yearsAreHeaders(row: Cell[] | undefined): boolean {
-  let count = 0;
-  for (const c of row ?? []) if (isYearLike(c) && (count += 1) >= 2) return true;
-  return false;
+/** 번호 매김 '(1)'·'(12)'은 회계식 음수가 아니라 항목 이름이다(머리글 판정에서만) */
+const NUMBERING = /^\(\d{1,2}\)$/;
+function isNumbering(cell: Cell | undefined): boolean {
+  return typeof cell === 'string' && NUMBERING.test(cell.trim());
 }
 
-/**
- * 머리글 후보 칸. 글자, 또는 (그 줄의 연도꼴이 둘 이상이면) 연도꼴 숫자.
- * 그 밖의 숫자(또는 숫자처럼 생긴 글)는 값이다.
- */
-function isHeaderLike(cell: Cell | undefined, years: boolean): boolean {
-  if (isEmpty(cell)) return false;
-  if (isYearLike(cell)) return years;
-  return typeof cell === 'string' && !isNumericText(cell);
-}
-
-/** 값 칸. 연도꼴은 그 줄이 연도 머리글 줄이면 세지 않는다. */
-function isNumericCell(cell: Cell | undefined, years: boolean): boolean {
-  if (isEmpty(cell)) return false;
-  if (isYearLike(cell)) return !years;
+/** 값 칸 — 숫자나 숫자 꼴 글. 연도꼴과 번호 매김은 값으로 치지 않는다(머리글일 수 있다) */
+function isPlainNumber(cell: Cell | undefined): boolean {
+  if (isEmpty(cell) || isYearLike(cell) || isNumbering(cell)) return false;
   return typeof cell === 'number' || isNumericText(String(cell));
+}
+
+function yearCount(row: Cell[] | undefined): number {
+  let count = 0;
+  for (const c of row ?? []) if (isYearLike(c)) count += 1;
+  return count;
+}
+
+/**
+ * 머리글 근거 칸. 글자·번호 매김은 근거다. 연도꼴은 한 줄에 2개 이상이면('구분 | 2024 | 2025') 근거이고,
+ * 하나뿐이면 **바로 아래 칸이 (연도꼴 아닌) 숫자일 때만** 근거다('구분 | 2025년' 위 '총무과 | 100').
+ * '기준연도 | 2025' 아래 '부서 | 예산'처럼 아래가 글이면 메타 줄이라 근거가 아니다.
+ */
+function isHeaderEvidence(cells: Cell[][], r: number, c: number, years: number): boolean {
+  const cell = cells[r][c];
+  if (isEmpty(cell)) return false;
+  if (isYearLike(cell)) return years >= 2 || isPlainNumber(cells[r + 1]?.[c]);
+  if (isNumbering(cell)) return true;
+  return typeof cell === 'string' && !isNumericText(cell);
 }
 
 /** 그 행에 걸친 가로 병합들. */
@@ -74,7 +79,7 @@ function horizontalMerges(row: number, merges: TableMerge[]): TableMerge[] {
 
 /**
  * 가로 병합 아래 줄이 하위 머리글인가. 아니면 그 줄은 데이터다.
- * - 숫자 칸이 있으면 데이터
+ * - 숫자 칸이 있으면 데이터. 연도꼴('2025년')·번호('(1)')는 숫자로 치지 않는다 — 하위 머리글에 흔하다
  * - 머리글 줄의 가로 병합 범위 밖에 글이 있고 그 칸이 머리글 줄에서 내려온 세로 병합에 덮이지 않았으면 데이터 —
  *   진짜 하위 머리글 줄은 항목 열('구분')이 비었거나 위에서 세로로 병합돼 있다
  * - 병합된 칸마다 그 아래에 글이 하나는 있어야 하위 머리글
@@ -82,8 +87,7 @@ function horizontalMerges(row: number, merges: TableMerge[]): TableMerge[] {
 function isSubHeaderRow(cells: Cell[][], row: number, merges: TableMerge[]): boolean {
   const below = cells[row + 1];
   if (!below) return false;
-  const years = yearsAreHeaders(below);
-  if (below.some((c) => isNumericCell(c, years))) return false;
+  if (below.some(isPlainNumber)) return false;
 
   const spans = horizontalMerges(row, merges);
   const coveredFromAbove = (c: number) =>
@@ -109,9 +113,16 @@ export function detectHeader(
   const last = cells.length - 1;
   let from = -1;
   for (let r = 0; r <= last; r += 1) {
-    const filled = cells[r].filter((c) => !isEmpty(c));
-    const years = yearsAreHeaders(cells[r]);
-    if (filled.length >= 2 && filled.filter((c) => isHeaderLike(c, years)).length * 2 > filled.length) {
+    const row = cells[r];
+    const years = yearCount(row);
+    let filled = 0;
+    let evidence = 0;
+    for (let c = 0; c < row.length; c += 1) {
+      if (isEmpty(row[c])) continue;
+      filled += 1;
+      if (isHeaderEvidence(cells, r, c, years)) evidence += 1;
+    }
+    if (filled >= 2 && evidence * 2 > filled) {
       from = r;
       break;
     }
@@ -182,6 +193,15 @@ export function captionAbove(lines: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * 캡션은 파일에서 온 글이고 표 보기·요약·개요에 매번 실린다 — 20만 자 한 칸이나 제목 블록 수천 개가 이어진 캡션이
+ * 그대로 실리면 크기를 파일이 정한다. 글자(코드 포인트) 단위로 잘라 '…'을 붙인다.
+ */
+function capCaption(caption: string): string {
+  const chars = Array.from(caption);
+  return chars.length > MAX_CAPTION_CHARS ? `${chars.slice(0, MAX_CAPTION_CHARS).join('')}…` : caption;
+}
+
 /** 표 한 장을 조립한다. 머리글·열 이름은 여기서 한 번만 정한다(엑셀·CSV·HWPX가 같이 쓴다). */
 export function buildTable(
   index: number,
@@ -200,7 +220,7 @@ export function buildTable(
     header,
     columns: columnNames(cells, merges, header),
   };
-  if (caption) table.caption = caption;
+  if (caption) table.caption = capCaption(caption);
   if (truncated) table.truncated = truncated;
   return table;
 }

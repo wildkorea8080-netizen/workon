@@ -11,6 +11,7 @@ vi.mock('@/lib/attachments/store', () => ({
   loadExtract: storeMock.load,
 }));
 
+import { readAttachment, summarize } from '@/lib/attachments/reader';
 import { createFileRead, fileRead, FILE_READ_GUIDE, type FileReadDeps } from '@/lib/capabilities/file-read';
 import { attachmentRequestError, toTurnAttachments } from '@/lib/assistant/attachments';
 import { CAPABILITIES } from '@/lib/capabilities';
@@ -23,6 +24,7 @@ import {
   OVERVIEW_TABLES_PER_FILE,
   OVERVIEW_WARNINGS_PER_FILE,
   OVERVIEW_TOTAL_CHARS,
+  MAX_CAPTION_CHARS,
 } from '@/lib/attachments/limits';
 import type { TurnAttachment, TurnContext } from '@/lib/capabilities/types';
 import type { AttachmentExtract, AttachmentSummary, ExtractedTable } from '@/lib/attachments/types';
@@ -336,6 +338,33 @@ describe('개요에 단위·잘림 (최종 수정)', () => {
     const lines = text.split('\n');
     expect(lines.filter((l) => l.includes('[첨부 목록 끝]'))).toEqual(['[첨부 목록 끝]']);
     expect(lines[lines.length - 1]).toBe('[첨부 목록 끝]');
+  });
+});
+
+describe('파일에서 온 캡션의 크기 (재검토 수정)', () => {
+  const tableView = async (csv: string) => {
+    const extract = await readAttachment(Buffer.from(csv, 'utf8'), 'a.csv');
+    const out = await createFileRead({ loadExtract: vi.fn(async () => extract) })
+      .execute!('read_attachment', { file: 'a1', table: 't1' }, ctx());
+    return { extract, out };
+  };
+
+  it('표 위 20만 자 한 칸 블록도 표 보기·요약을 키우지 않는다', async () => {
+    const { extract, out } = await tableView(`${'가'.repeat(200_000)}\n\n\n부서,예산\n총무과,100\n`);
+    expect(out.ok).toBe(true);
+    const oneRow = '| 총무과 | 100 |'.length + 1;
+    expect(out.text.length).toBeLessThanOrEqual(READ_TABLE_CHARS + oneRow);
+    expect(out.text).toContain('| 총무과 | 100 |');
+    const caption = summarize(extract).tables[0].caption!;
+    expect(Array.from(caption).length).toBeLessThanOrEqual(MAX_CAPTION_CHARS + 1);
+    expect(JSON.stringify(summarize(extract)).length).toBeLessThan(2000);
+  });
+
+  it('한 칸 블록 2,000개가 이어 붙은 캡션도 상한에서 자른다', async () => {
+    const blocks = Array.from({ length: 2000 }, (_, i) => `제목${i}`).join('\n\n\n');
+    const { extract } = await tableView(`${blocks}\n\n\n부서,예산\n총무과,100\n`);
+    expect(extract.tables).toHaveLength(1);
+    expect(Array.from(extract.tables[0].caption!).length).toBeLessThanOrEqual(MAX_CAPTION_CHARS + 1);
   });
 });
 
