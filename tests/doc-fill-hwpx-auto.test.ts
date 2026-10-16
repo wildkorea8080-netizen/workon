@@ -379,9 +379,9 @@ describe('최종 보강 — 개조식 글머리·행 머리·공백 값', () => 
     expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['2025 / 예산', '2025 / 비고', '2026 / 예산', '2026 / 비고']);
   });
 
-  it('값 칸은 이름이 되지 않는다 — 값이 든 행의 빈칸은 제 열 머리', async () => {
+  it('값 칸만으로 이름을 짓지 않는다 — 값이 든 행의 빈칸은 제 열 머리를 붙인다', async () => {
     const bytes = await buildHwpx(tableAt([['성명', '소속', '연락처'], ['홍길동', '총무과', '']], { addr: true }));
-    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['연락처']);
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['총무과 / 연락처']);
     // 항목·빈칸이 번갈아 놓인 서식은 그대로 왼쪽 항목명
     const kv = await buildHwpx(tableAt([['성명', '', '소속', ''], ['연락처', '', '직급', '']], { addr: true }));
     expect((await readHwpxAutoSlots(kv)).map((s) => s.label)).toEqual(['성명', '소속', '연락처', '직급']);
@@ -415,5 +415,37 @@ describe('XML 올바름', () => {
     const names = Object.keys(zip.files).filter((n) => n.endsWith('.xml'));
     expect(names).toContain('Contents/section0.xml');
     for (const n of names) expect([n, XMLValidator.validate(await zip.file(n)!.async('string'))]).toEqual([n, true]);
+  });
+});
+
+describe('재검토 보강 — 쓰인 글은 위 급 제목까지', () => {
+  it('하위 영역에 글이 있으면 위 급 제목 아래 빈 줄도 자리가 아니다', async () => {
+    const a = await buildHwpx(
+      para('Ⅰ. 개요') + emptyPara() + para('1. 추진 배경') + para('○ 디지털 전환 가속화') + emptyPara() + para('2. 추진 내용') + para('○ 민원 서비스 개선')
+    );
+    expect(await readHwpxAutoSlots(a)).toEqual([]);
+    const b = await buildHwpx(para('1. 추진 배경') + emptyPara() + para('가. 현황') + para('○ 이미 쓴 글') + emptyPara());
+    expect(await readHwpxAutoSlots(b)).toEqual([]);
+  });
+
+  it('글이 없는 갈래는 그대로 자리 — 읽기·채우기 번호가 같다', async () => {
+    const bytes = await buildHwpx(
+      para('Ⅰ. 개요') + emptyPara() + para('1. 배경') + para('○ ○○○') + para('Ⅱ. 계획') + para('1. 일정') + para('끝난 글') + para('Ⅲ. 기타') + emptyPara()
+    );
+    const slots = await readHwpxAutoSlots(bytes);
+    expect(slots.map((s) => `${s.id}:${s.label}`)).toEqual(['s1:Ⅰ. 개요', 's2:1. 배경', 's3:Ⅲ. 기타']);
+    const result = await fillHwpxAutoSlots(bytes, values({ s1: '값-s1', s2: '값-s2', s3: '값-s3' }));
+    expect(result.filled).toEqual(['s1', 's2', 's3']);
+    const xml = await sectionXml(result.bytes);
+    const pos = ['Ⅰ. 개요', '값-s1', '1. 배경', '값-s2', 'Ⅱ. 계획', 'Ⅲ. 기타', '값-s3'].map((t) => xml.indexOf(t));
+    expect(pos.every((p) => p > 0)).toBe(true);
+    expect([...pos].sort((x, y) => x - y)).toEqual(pos);
+  });
+
+  it('왼쪽이 값인 행의 빈칸은 왼쪽 칸 / 제 열 머리', async () => {
+    const alt = await buildHwpx(tableAt([['성명', '홍길동', '소속', '총무과'], ['직급', '주무관', '연락처', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(alt)).map((s) => s.label)).toEqual(['연락처 / 총무과']);
+    const data = await buildHwpx(tableAt([['성명', '소속', '연락처'], ['홍길동', '총무과', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(data)).map((s) => s.label)).toEqual(['총무과 / 연락처']);
   });
 });

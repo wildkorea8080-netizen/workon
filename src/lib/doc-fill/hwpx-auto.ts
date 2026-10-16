@@ -198,41 +198,48 @@ function locateSlots(xml: string, prefix: string): SectionScan {
   const out: Located[] = [];
 
   // ── section: 최상위 문단을 차례로. 자리 표시 글은 제목보다 먼저 본다(○○○은 제목이 아니다)
-  const chain: { level: number; label: string }[] = [];
+  interface Region {
+    level: number;
+    heading: Para;
+    label: string;
+    path: string[];
+    fills: Para[];
+    written: boolean;
+  }
+  /** 문서 순서의 모든 영역. 자리는 끝까지 훑은 뒤에 낸다 — 뒤에 오는 하위 영역의 글이 위 영역을 바꾼다 */
+  const regions: Region[] = [];
+  /** 지금 열린 제목 사슬(위 급 → 아래 급). 맨 끝이 글이 들어가는 영역 */
+  const chain: Region[] = [];
   /** 제목마다 그 시점의 제목 사슬(자기 포함) — 표 칸의 경로에 쓴다 */
   const chains: { start: number; labels: string[] }[] = [];
-  let open: { heading: Para; label: string; path: string[]; fills: Para[]; written: boolean } | null = null;
-  const close = () => {
-    // 이미 글이 쓰인 영역은 자리가 아니다 — 본문 위·아래의 빈 줄에 쓰면 기존 글과 섞인다
-    if (open && !open.written && open.fills.length > 0) {
-      const [target, ...rest] = open.fills;
-      out.push({
-        // 첫 문단이 비었어도 영역 안의 첫 자리 표시 글이 무엇을 쓸지 알려 준다
-        slot: { label: open.label, kind: 'section', path: open.path, hint: open.fills.map((p) => p.text.trim()).find(Boolean) ?? null },
-        pos: open.heading.start,
-        target,
-        rest,
-      });
-    }
-    open = null;
-  };
   for (const p of paras) {
     if (p.ancestors.length > 0) continue;
     const level = isPlaceholderText(p.text) ? null : numberedHeadingLevel(p.text);
     if (level !== null) {
-      close();
       // 같은 급 이상의 앞선 제목은 다른 갈래다 — 사슬에서 뺀다
       while (chain.length > 0 && chain[chain.length - 1].level >= level) chain.pop();
-      const label = p.text.trim();
-      open = { heading: p, label, path: chain.map((h) => h.label), fills: [], written: false };
-      chain.push({ level, label });
+      const region: Region = { level, heading: p, label: p.text.trim(), path: chain.map((h) => h.label), fills: [], written: false };
+      regions.push(region);
+      chain.push(region);
       chains.push({ start: p.start, labels: chain.map((h) => h.label) });
-    } else if (open) {
-      if (!isPlaceholderText(p.text)) open.written = true;
-      else if (fillable(p)) open.fills.push(p);
+    } else if (chain.length > 0) {
+      // 쓰인 글은 그것을 품은 위 급 제목들의 영역에도 든다 — 이미 쓴 문서의 'Ⅰ. 개요' 아래 빈 줄도 자리가 아니다
+      if (!isPlaceholderText(p.text)) for (const r of chain) r.written = true;
+      else if (fillable(p)) chain[chain.length - 1].fills.push(p);
     }
   }
-  close();
+  for (const r of regions) {
+    // 이미 글이 쓰인 영역은 자리가 아니다 — 본문 위·아래의 빈 줄에 쓰면 기존 글과 섞인다
+    if (r.written || r.fills.length === 0) continue;
+    const [target, ...rest] = r.fills;
+    out.push({
+      // 첫 문단이 비었어도 영역 안의 첫 자리 표시 글이 무엇을 쓸지 알려 준다
+      slot: { label: r.label, kind: 'section', path: r.path, hint: r.fills.map((f) => f.text.trim()).find(Boolean) ?? null },
+      pos: r.heading.start,
+      target,
+      rest,
+    });
+  }
 
   const pathAt = (start: number): string[] => {
     let found: string[] = [];
@@ -276,7 +283,7 @@ function locateSlots(xml: string, prefix: string): SectionScan {
         left !== undefined &&
         left.cell.col === 0 &&
         info.every((o) => o.cell.row !== row || o.cell.col === 0 || o.blank);
-      // 왼쪽 칸이 값인 행([홍길동|총무과|빈칸], 첫 행은 [성명|소속|연락처])에서는 제 열 머리가 이름이다.
+      // 왼쪽 칸이 값인 행([홍길동|총무과|빈칸], 첫 행은 [성명|소속|연락처])에서는 제 열 머리를 붙인다('총무과 / 연락처').
       // 왼쪽 칸이 0열이 아니고 그 열에도 열 머리가 있으며, 그 앞이 빈칸 없이 채워진 행일 때만 —
       // 항목·빈칸이 번갈아 놓인 서식([직급|빈칸|연락처|빈칸])의 '연락처'는 값이 아니라 항목명이다
       const valueLeft =
@@ -286,7 +293,8 @@ function locateSlots(xml: string, prefix: string): SectionScan {
         headerOf(left.cell.col) !== null &&
         info.every((o) => o.cell.row !== row || o.cell.col >= left.cell.col || !o.blank);
       let label: string;
-      if (valueLeft && header) label = header.label;
+      // 왼쪽 값을 버리지 않고 붙인다 — 열 머리를 값으로 잘못 본 경우에도 항목명이 남는다
+      if (valueLeft && left && header) label = `${left.label} / ${header.label}`;
       else if (left) label = matrixRow && header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
       else if (header) label = header.label;
       else continue;
