@@ -29,6 +29,42 @@ export function table(rows: string[][]): string {
   return `<hp:p id="2" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="${rows.length}" colCnt="${rows[0].length}">${trs}</hp:tbl></hp:run></hp:p>`;
 }
 
+/** 글 조각 없는 빈 문단. 한글은 빈 문단도 글자 서식만 든 빈 조각을 남긴다 */
+export function emptyPara(paraPr = '3'): string {
+  return `<hp:p id="1" paraPrIDRef="${paraPr}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="4"/>${LINESEG}</hp:p>`;
+}
+
+/** 구역 첫 문단 꼴: 구역 설정·단 설정 컨트롤만 들고 글은 없다 */
+export const SEC_PR_PARA =
+  `<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134"><hp:grid lineGrid="0" charGrid="0"/></hp:secPr><hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl></hp:run>${LINESEG}</hp:p>`;
+
+export function secPrPara(): string {
+  return SEC_PR_PARA;
+}
+
+/**
+ * 표 하나를 품은 바깥 문단(한글처럼 표 뒤에 줄 배치 캐시가 있다).
+ * 칸 값이 ''이면 빈 문단, 배열이면 칸 안 문단 여러 개. addr이면 한글처럼 칸 내용 뒤에 칸 주소를 단다
+ */
+export function tableAt(rows: (string | string[])[][], opts: { addr?: boolean } = {}): string {
+  const cellParas = (c: string | string[]) =>
+    (Array.isArray(c) ? c : [c]).map((t) => (t === '' ? emptyPara('7') : para(t, '7'))).join('');
+  const trs = rows
+    .map(
+      (r, ri) =>
+        `<hp:tr>${r
+          .map(
+            (c, ci) =>
+              `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="3"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER">${cellParas(c)}</hp:subList>${
+                opts.addr ? `<hp:cellAddr colAddr="${ci}" rowAddr="${ri}"/><hp:cellSpan colSpan="1" rowSpan="1"/>` : ''
+              }<hp:cellSz width="1000" height="282"/></hp:tc>`
+          )
+          .join('')}</hp:tr>`
+    )
+    .join('');
+  return `<hp:p id="2" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="${rows.length}" colCnt="${rows[0].length}">${trs}</hp:tbl><hp:t/></hp:run>${LINESEG}</hp:p>`;
+}
+
 export async function buildHwpx(body: string, opts: { prvText?: string; binData?: Buffer; prvImage?: Buffer } = {}): Promise<Buffer> {
   const zip = new JSZip();
   zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE', createFolders: false });
