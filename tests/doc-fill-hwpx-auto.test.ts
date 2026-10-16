@@ -129,6 +129,26 @@ describe('표 빈칸', () => {
     expect((await readHwpxAutoSlots(await buildHwpx(tableAt([['회의명', '']])))).map((s) => s.label)).toEqual(['회의명']);
   });
 
+  it('값이 든 첫 행은 열 머리가 아니다 — 항목·값이 번갈아 놓인 서식은 왼쪽 항목명만', async () => {
+    const bytes = await buildHwpx(tableAt([['성명', '홍길동', '소속', '총무과'], ['직급', '', '연락처', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['직급', '연락처']);
+  });
+
+  it('열 머리는 행 머리 + 빈 데이터 칸 꼴의 행에서만 붙인다', async () => {
+    const matrix = await buildHwpx(tableAt([['구분', '1분기', '2분기'], ['예산', '', '']]));
+    expect((await readHwpxAutoSlots(matrix)).map((s) => s.label)).toEqual(['예산 / 1분기', '예산 / 2분기']);
+    // 이미 값이 든 행이면 행 머리만
+    const partly = await buildHwpx(tableAt([['구분', '1분기', '2분기'], ['예산', '100', '']]));
+    expect((await readHwpxAutoSlots(partly)).map((s) => s.label)).toEqual(['예산']);
+  });
+
+  it('숫자뿐인 칸은 왼쪽 항목명이 아니다 — 연도 같은 숫자 열 머리는 쓴다', async () => {
+    const numbered = await buildHwpx(tableAt([['번호', '성명'], ['1', '']]));
+    expect((await readHwpxAutoSlots(numbered)).map((s) => s.label)).toEqual(['성명']);
+    const years = await buildHwpx(tableAt([['구분', '2025', '2026'], ['예산', '', '']]));
+    expect((await readHwpxAutoSlots(years)).map((s) => s.label)).toEqual(['예산 / 2025', '예산 / 2026']);
+  });
+
   it('표 안의 표 — 안쪽 칸은 안쪽 표의 항목명을 받고, 채우면 바깥 문단들의 줄 배치 캐시만 지운다', async () => {
     const inner = tableAt([['내부', '']]);
     const body = tableAt([['외부', 'NESTED']]).replace(para('NESTED', '7'), inner) + para('그대로');

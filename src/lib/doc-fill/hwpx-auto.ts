@@ -20,8 +20,8 @@ import {
  *
  * - section: 본문 최상위의 번호 제목 아래, 다음 최상위 제목 전까지의 빈 문단·자리 표시 문단.
  *   그 영역에 이미 글이 쓰인 문단이 하나라도 있으면 자리가 아니다
- * - cell: 표에서 비었거나 자리 표시만 든 칸. 이름은 왼쪽 항목명 칸(첫 행에 열 머리가 있으면
- *   '항목 / 열 머리'), 왼쪽이 없으면 첫 행의 열 머리
+ * - cell: 표에서 비었거나 자리 표시만 든 칸. 이름은 왼쪽 항목명 칸, 왼쪽이 없으면 첫 행의 열 머리.
+ *   행이 '행 머리(0열) + 빈 데이터 칸' 꼴이고 첫 행에 열 머리가 있으면 '행 머리 / 열 머리'
  *
  * 읽기와 채우기는 같은 바이트에서 같은 함수(locateSlots)로 자리를 다시 계산한다 —
  * 자리 id(s1..)가 둘 사이의 약속이라 결정적이어야 한다.
@@ -102,6 +102,9 @@ interface Table {
   topStart: number;
   cells: Cell[];
 }
+
+/** 숫자뿐인 글(100 · 1,200 · -3.5 · 12%). 행 안의 값이지 항목명이 아니다 */
+const NUMBER_ONLY = /^[+-]?\d[\d,.]*%?$/;
 
 const ATTR = (name: string) => new RegExp(`\\s${name}\\s*=\\s*(?:"(\\d+)"|'(\\d+)')`);
 const COL_ADDR = ATTR('colAddr');
@@ -259,11 +262,19 @@ function locateSlots(xml: string, prefix: string): SectionScan {
       const left = info
         .filter((o) => o.cell.row === row && o.cell.col < col)
         .sort((a, b) => b.cell.col - a.cell.col)
-        .find((o) => usable(o));
+        // 숫자뿐인 칸은 값이다 — [예산|100|빈칸]의 빈칸 이름은 '100'이 아니라 '예산'.
+        // 열 머리에는 이 거름을 걸지 않는다('2026' 같은 연도 열 머리가 흔하다)
+        .find((o) => usable(o) && !NUMBER_ONLY.test(o.label));
       // 위쪽은 첫 행(열 머리)에서만 — 바로 위 행의 칸은 대개 값이다('홍길동'이 항목명이 되면 안 된다)
       const header = row > 0 ? usable(info.find((o) => o.cell.row === 0 && o.cell.col === col)) : null;
+      // 열 머리는 '행 머리(0열) + 빈 데이터 칸' 꼴의 행에서만 붙인다. 항목·값이 번갈아 놓인
+      // 서식([성명|홍길동|소속|총무과])의 첫 행은 값이라 열 머리가 아니다
+      const matrixRow =
+        left !== undefined &&
+        left.cell.col === 0 &&
+        info.every((o) => o.cell.row !== row || o.cell.col === 0 || o.blank);
       let label: string;
-      if (left) label = header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
+      if (left) label = matrixRow && header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
       else if (header) label = header.label;
       else continue;
       const [target, ...rest] = me.paras;
