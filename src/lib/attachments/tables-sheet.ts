@@ -15,6 +15,8 @@ import type { Cell, ExtractedTable, TableMerge } from './types';
 interface Grid {
   cells: Cell[][];
   merges: TableMerge[];
+  /** 앞에 있던 한 칸짜리 제목 블록의 글. 이 표의 캡션 앞에 붙는다. */
+  lead?: string;
 }
 
 const isBlank = (c: Cell | undefined) => c == null || (typeof c === 'string' && c.trim() === '');
@@ -82,7 +84,22 @@ function splitBlocks(cells: Cell[][], merges: TableMerge[]): Grid[] {
     }
     grids.push({ cells: block, merges: shifted });
   }
-  return grids;
+
+  // 한 칸짜리 한 줄 블록('(단위: 천원)', 제목)은 표가 아니라 다음 표의 캡션이다.
+  // 맨 끝 블록은 이어받을 표가 없으니 표로 남긴다.
+  const out: Grid[] = [];
+  let pending: string[] = [];
+  grids.forEach((g, i) => {
+    const only = g.cells.length === 1 ? g.cells[0].filter((c) => !isBlank(c)) : [];
+    if (only.length === 1 && i < grids.length - 1) {
+      pending.push(String(only[0]).trim());
+      return;
+    }
+    if (pending.length > 0) g.lead = pending.join(' ');
+    pending = [];
+    out.push(g);
+  });
+  return out;
 }
 
 /** 칸 값을 숫자·글자·빈칸으로. 병합 복사본 정리는 호출자가 한다. */
@@ -93,10 +110,12 @@ function toCell(value: unknown): Cell {
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
   if (value instanceof Date) {
     // exceljs는 엑셀 날짜를 UTC 기준 Date로 준다 — 로컬 getter를 쓰면 서쪽 시간대에서 하루 밀린다
-    const y = value.getUTCFullYear();
-    const m = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(value.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const time = `${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}`;
+    // 시각만 있는 칸은 엑셀 기준일(1899-12-30)로 온다 — 날짜를 붙이면 없는 날짜가 생긴다
+    if (value.getUTCFullYear() === 1899) return time;
+    const day = `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}`;
+    return value.getUTCHours() === 0 && value.getUTCMinutes() === 0 ? day : `${day} ${time}`;
   }
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
@@ -126,11 +145,12 @@ function parseRange(range: string): TableMerge | null {
   return { row, col, rows: Number(m[4]) - row, cols: columnNumber(m[3]) - col };
 }
 
-/** 머리글 위의 줄들을 줄마다 한 줄 글로 이어 캡션 후보로. */
+/** 머리글 위의 줄들을 줄마다 한 줄 글로 이어 캡션 후보로. 앞의 제목 블록이 있으면 먼저 붙인다. */
 function captionFor(grid: Grid): string | undefined {
   const { from } = detectHeader(grid.cells, grid.merges);
   const lines = grid.cells.slice(0, from).map((row) => row.filter((c) => !isBlank(c)).join(' '));
-  return captionAbove(lines);
+  const own = captionAbove(lines);
+  return [grid.lead, own].filter(Boolean).join(' ') || undefined;
 }
 
 function truncationOf(
@@ -165,18 +185,41 @@ export async function readXlsxTables(
     }
     sheets.push(ws.name);
 
+    // 병합: exceljs는 병합된 칸마다 주인 값을 복사해 둔다 — 주인이 아닌 칸은 읽지 않는다.
+    // (읽은 뒤에 비우면 250열에 걸친 제목 병합이 열 수·잘림 경고를 부풀린다)
+    const mergeRanges: TableMerge[] = [];
+    for (const range of (ws.model as unknown as { merges?: string[] }).merges ?? []) {
+      const m = parseRange(range);
+      if (m) mergeRanges.push(m);
+    }
+    const isCopy = (r: number, c: number) =>
+      mergeRanges.some(
+        (m) =>
+          r >= m.row && r < m.row + m.rows && c >= m.col && c < m.col + m.cols &&
+          (r !== m.row || c !== m.col)
+      );
+
     const cells: Cell[][] = [];
     // 값이 있는 마지막 행·열(1부터). 상한을 넘어도 세어야 "N개 중 200개"를 말할 수 있다.
     let lastRow = 0;
     let lastCol = 0;
+    let uncachedFormulas = 0;
     ws.eachRow({ includeEmpty: false }, (row) => {
       const values = Array.isArray(row.values) ? row.values : [];
       const inRange = row.number <= MAX_TABLE_ROWS;
       const out: Cell[] = [];
       let any = false;
       for (let i = 1; i < values.length; i += 1) {
-        const cell = toCell(values[i]);
-        if (cell == null) continue;
+        const raw = values[i];
+        if (raw == null || isCopy(row.number - 1, i - 1)) continue;
+        const cell = toCell(raw);
+        if (cell == null) {
+          // 수식 칸인데 계산 결과가 저장돼 있지 않으면 비어 보일 뿐 값이 없는 게 아니다
+          if (typeof raw === 'object' && ('formula' in raw || 'sharedFormula' in raw)) {
+            if ((raw as { result?: unknown }).result === undefined) uncachedFormulas += 1;
+          }
+          continue;
+        }
         any = true;
         lastCol = Math.max(lastCol, i);
         if (inRange && i <= MAX_TABLE_COLS) {
@@ -190,6 +233,9 @@ export async function readXlsxTables(
         cells[row.number - 1] = out;
       }
     });
+    if (uncachedFormulas > 0) {
+      warnings.push(`${ws.name}: 수식 칸 ${uncachedFormulas}개는 계산 결과가 저장돼 있지 않아 비워 두었습니다`);
+    }
 
     const rowCap = Math.min(lastRow, MAX_TABLE_ROWS);
     const colCap = Math.min(lastCol, MAX_TABLE_COLS);
@@ -199,19 +245,12 @@ export async function readXlsxTables(
       while (cells[r].length < colCap) cells[r].push(null);
     }
 
-    // 병합: exceljs는 병합된 칸마다 주인 값을 복사해 둔다 — 주인 칸만 남긴다
+    // 병합 영역을 읽은 범위 안으로 줄인다
     const merges: TableMerge[] = [];
-    const ranges = (ws.model as unknown as { merges?: string[] }).merges ?? [];
-    for (const range of ranges) {
-      const m = parseRange(range);
-      if (!m || m.row >= rowCap || m.col >= colCap) continue;
+    for (const m of mergeRanges) {
+      if (m.row >= rowCap || m.col >= colCap) continue;
       const rows = Math.min(m.rows, rowCap - m.row);
       const cols = Math.min(m.cols, colCap - m.col);
-      for (let r = m.row; r < m.row + rows; r += 1) {
-        for (let c = m.col; c < m.col + cols; c += 1) {
-          if (r !== m.row || c !== m.col) cells[r][c] = null;
-        }
-      }
       if (rows > 1 || cols > 1) merges.push({ row: m.row, col: m.col, rows, cols });
     }
 

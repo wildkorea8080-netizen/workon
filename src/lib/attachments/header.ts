@@ -15,14 +15,50 @@ function isEmpty(cell: Cell | undefined): boolean {
   return cell == null || (typeof cell === 'string' && cell.trim() === '');
 }
 
-/** 글자 칸. 숫자(또는 숫자처럼 생긴 글)는 값이지 머리글이 아니다 — CSV는 숫자도 글자로 읽힌다. */
-function isTextCell(cell: Cell | undefined): boolean {
-  return typeof cell === 'string' && cell.trim() !== '' && !NUMERIC_TEXT.test(cell.trim());
+/** 연도·월·분기처럼 값이 아니라 머리글로 쓰이는 숫자: 1900~2100, '2024년', '3월', '1분기', '2025년도'. */
+const PERIOD_TEXT = /^\d+\s*(월|분기|년|년도)$/;
+function isYearLike(cell: Cell | undefined): boolean {
+  if (typeof cell === 'number') return Number.isInteger(cell) && cell >= 1900 && cell <= 2100;
+  if (typeof cell !== 'string') return false;
+  const t = cell.trim();
+  if (/^\d{4}$/.test(t)) return Number(t) >= 1900 && Number(t) <= 2100;
+  return PERIOD_TEXT.test(t);
 }
 
-/** 그 행에 걸친 가로 병합이 있는가. */
-function hasHorizontalMerge(row: number, merges: TableMerge[]): boolean {
-  return merges.some((m) => m.cols > 1 && row >= m.row && row < m.row + m.rows);
+/**
+ * 머리글 후보 칸. 글자, 또는 연도 꼴 숫자('구분, 2024, 2025'의 연도 열 머리글).
+ * 그 밖의 숫자(또는 숫자처럼 생긴 글)는 값이다 — CSV는 숫자도 글자로 읽힌다.
+ */
+function isHeaderLike(cell: Cell | undefined): boolean {
+  if (isEmpty(cell)) return false;
+  if (isYearLike(cell)) return true;
+  return typeof cell === 'string' && !NUMERIC_TEXT.test(cell.trim());
+}
+
+/** 값 칸. 연도 꼴은 머리글일 수 있으므로 세지 않는다. */
+function isNumericCell(cell: Cell | undefined): boolean {
+  if (isEmpty(cell) || isYearLike(cell)) return false;
+  return typeof cell === 'number' || NUMERIC_TEXT.test(String(cell).trim());
+}
+
+/** 그 행에 걸친 가로 병합들. */
+function horizontalMerges(row: number, merges: TableMerge[]): TableMerge[] {
+  return merges.filter((m) => m.cols > 1 && row >= m.row && row < m.row + m.rows);
+}
+
+/**
+ * 가로 병합 아래 줄이 하위 머리글인가. 아니면 그 줄은 데이터다.
+ * 숫자 칸이 있으면 데이터이고, 병합된 칸마다 그 아래에 글이 하나는 있어야 하위 머리글이다.
+ */
+function isSubHeaderRow(cells: Cell[][], row: number, merges: TableMerge[]): boolean {
+  const below = cells[row + 1];
+  if (!below || below.some(isNumericCell)) return false;
+  return horizontalMerges(row, merges).every((m) => {
+    // 세로로도 이어진 병합은 아래 줄을 이미 덮고 있다
+    if (row + 1 < m.row + m.rows) return true;
+    for (let c = m.col; c < m.col + m.cols; c += 1) if (!isEmpty(below[c])) return true;
+    return false;
+  });
 }
 
 export function detectHeader(
@@ -33,7 +69,7 @@ export function detectHeader(
   let from = -1;
   for (let r = 0; r <= last; r += 1) {
     const filled = cells[r].filter((c) => !isEmpty(c));
-    if (filled.length >= 2 && filled.filter(isTextCell).length * 2 > filled.length) {
+    if (filled.length >= 2 && filled.filter(isHeaderLike).length * 2 > filled.length) {
       from = r;
       break;
     }
@@ -41,9 +77,14 @@ export function detectHeader(
   // 머리글처럼 보이는 줄이 없으면 첫 줄을 쓴다
   if (from < 0) return { from: 0, to: 0 };
 
-  // 가로 병합이 있으면 그 아래 줄이 하위 머리글이다. 최대 3줄.
+  // 가로 병합이 있으면 그 아래 줄이 하위 머리글이다(위 조건을 만족할 때만). 최대 3줄.
   let to = from;
-  while (to - from + 1 < MAX_HEADER_ROWS && to < last && hasHorizontalMerge(to, merges)) {
+  while (
+    to - from + 1 < MAX_HEADER_ROWS &&
+    to < last &&
+    horizontalMerges(to, merges).length > 0 &&
+    isSubHeaderRow(cells, to, merges)
+  ) {
     to += 1;
   }
   return { from, to };

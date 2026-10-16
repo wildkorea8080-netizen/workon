@@ -110,3 +110,35 @@ describe('첨부 형식', () => {
     expect(refusedFormatMessage('a.docx')).toBeNull();
   });
 });
+
+describe('머리글 보정 (1차 수정)', () => {
+  it('연도 머리글을 머리글로 본다', () => {
+    const cells = [['구분', 2024, 2025], ['총무과', 100, 50], ['기획과', 50, 20]];
+    const header = detectHeader(cells, []);
+    expect(header).toEqual({ from: 0, to: 0 });
+    expect(columnNames(cells, [], header)).toEqual(['구분', '2024', '2025']);
+  });
+
+  it('연도·월·분기 꼴 글도 머리글 칸이다', () => {
+    expect(detectHeader([['구분', '2024년', '1분기'], ['가', 1, 2]], [])).toEqual({ from: 0, to: 0 });
+    expect(detectHeader([['구분', '3월', '2025년도'], ['가', 1, 2]], [])).toEqual({ from: 0, to: 0 });
+  });
+
+  it('가로 병합 아래 줄에 숫자가 있으면 그 줄은 데이터다', () => {
+    const cells = [['부서', '비고', null], ['총무과', 100, 200]];
+    const merges = [{ row: 0, col: 1, rows: 1, cols: 2 }];
+    expect(detectHeader(cells, merges)).toEqual({ from: 0, to: 0 });
+  });
+
+  it('병합 칸 아래가 비어 있으면 하위 머리글이 아니다', () => {
+    const cells = [['부서', '비고', null], ['총무과', null, null]];
+    const merges = [{ row: 0, col: 1, rows: 1, cols: 2 }];
+    expect(detectHeader(cells, merges)).toEqual({ from: 0, to: 0 });
+  });
+
+  it('하위 머리글 줄의 연도는 숫자로 세지 않는다', () => {
+    const cells = [['구분', '예산', null], [null, 2024, 2025], ['총무과', 100, 20]];
+    const merges = [{ row: 0, col: 1, rows: 1, cols: 2 }];
+    expect(detectHeader(cells, merges)).toEqual({ from: 0, to: 1 });
+  });
+});

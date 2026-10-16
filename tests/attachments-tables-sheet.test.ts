@@ -170,3 +170,116 @@ describe('CSV 표 읽기', () => {
     expect(readCsvTables(Buffer.from('', 'utf8')).tables).toEqual([]);
   });
 });
+
+describe('1차 수정 — 조용히 틀리는 경우', () => {
+  it('CSV: 연도 머리글', () => {
+    const { tables } = readCsvTables(Buffer.from('구분,2024,2025\n총무과,100,50\n기획과,50,20\n', 'utf8'));
+    expect(tables[0].header).toEqual({ from: 0, to: 0 });
+    expect(tables[0].columns).toEqual(['구분', '2024', '2025']);
+  });
+
+  it('CSV: 연도 머리글, 데이터 첫 칸들이 글자여도', () => {
+    const { tables } = readCsvTables(Buffer.from('구분,2024,2025\n총무과,본청,100\n기획과,본청,50\n', 'utf8'));
+    expect(tables[0].header).toEqual({ from: 0, to: 0 });
+  });
+
+  it('CSV: 제목 줄 아래 빈 줄 하나 뒤의 연도 머리글', () => {
+    const { tables } = readCsvTables(Buffer.from('2026 예산\n\n구분,2024,2025\n총무과,100,200\n', 'utf8'));
+    expect(tables).toHaveLength(1);
+    expect(tables[0].header).toEqual({ from: 2, to: 2 });
+    expect(tables[0].columns).toEqual(['구분', '2024', '2025']);
+    expect(tables[0].caption).toBe('2026 예산');
+  });
+
+  it('엑셀: 계산 결과가 저장되지 않은 수식은 비우고 경고한다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('합계');
+      ws.addRow(['항목', '값']);
+      ws.addRow(['a', 1]);
+      ws.addRow(['b', { formula: 'B2+1' } as unknown as ExcelJS.CellValue]);
+      ws.addRow(['c', { formula: 'B2+2' } as unknown as ExcelJS.CellValue]);
+    });
+    const { tables, warnings } = await readXlsxTables(bytes);
+    expect(tables[0].cells[2][1]).toBeNull();
+    expect(warnings).toContain('합계: 수식 칸 2개는 계산 결과가 저장돼 있지 않아 비워 두었습니다');
+  });
+
+  it('엑셀: 250열에 걸친 제목 병합은 잘림 경고를 만들지 않는다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('s');
+      ws.addRow(['2026 예산']);
+      ws.mergeCells(1, 1, 1, 250);
+      ws.addRow(['부서', '예산', '비고']);
+      ws.addRow(['총무과', 1, null]);
+    });
+    const { tables, warnings } = await readXlsxTables(bytes);
+    expect(warnings).toEqual([]);
+    expect(tables[0].truncated).toBeUndefined();
+    expect(tables[0].cells[0]).toHaveLength(3);
+  });
+
+  it('엑셀: 날짜에 시각이 있으면 시각까지, 시각만 있으면 HH:mm', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('s');
+      ws.addRow(['일자', '시각', '날짜']);
+      ws.addRow([
+        new Date(Date.UTC(2026, 2, 5, 14, 30)),
+        new Date(Date.UTC(1899, 11, 30, 9, 5)),
+        new Date(Date.UTC(2026, 2, 5)),
+      ]);
+    });
+    const { tables } = await readXlsxTables(bytes);
+    expect(tables[0].cells[1]).toEqual(['2026-03-05 14:30', '09:05', '2026-03-05']);
+  });
+
+  it('엑셀: 20,000행을 넘으면 잘라 읽고 경고한다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('긴');
+      ws.addRow(['번호', '값']);
+      for (let i = 1; i <= 20000; i += 1) ws.addRow([i, i * 2]);
+    });
+    const { tables, warnings } = await readXlsxTables(bytes);
+    expect(tables[0].cells).toHaveLength(20000);
+    expect(tables[0].truncated).toEqual({ rows: 20001 });
+    expect(warnings).toEqual(['긴 시트: 행 20001개 중 20000개만 읽었습니다']);
+  }, 60000);
+
+  it('CSV: 20,000행을 넘으면 잘라 읽고 경고한다', () => {
+    const lines = ['번호,값'];
+    for (let i = 1; i <= 20000; i += 1) lines.push(`${i},${i * 2}`);
+    const { tables, warnings } = readCsvTables(Buffer.from(lines.join('\n'), 'utf8'));
+    expect(tables[0].cells).toHaveLength(20000);
+    expect(tables[0].truncated).toEqual({ rows: 20001 });
+    expect(warnings).toEqual(['행 20001개 중 20000개만 읽었습니다']);
+  });
+
+  it('CSV: 한 칸짜리 한 줄 블록은 표가 아니라 다음 표의 캡션', () => {
+    const csv = '(단위: 천원)\n\n\n부서,예산\n총무과,100\n';
+    const { tables } = readCsvTables(Buffer.from(csv, 'utf8'));
+    expect(tables).toHaveLength(1);
+    expect(tables[0].id).toBe('t1');
+    expect(tables[0].caption).toBe('(단위: 천원)');
+    expect(tables[0].header).toEqual({ from: 0, to: 0 });
+  });
+
+  it('엑셀: 한 칸짜리 블록은 다음 표의 캡션, 이미 캡션이 있으면 잇는다', async () => {
+    const bytes = await book((wb) => {
+      const ws = wb.addWorksheet('s');
+      ws.addRow(['(단위: 천원)']);
+      ws.addRow([]);
+      ws.addRow([]);
+      ws.addRow(['예산 현황']);
+      ws.addRow(['부서', '예산']);
+      ws.addRow(['총무과', 100]);
+    });
+    const { tables } = await readXlsxTables(bytes);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].id).toBe('t1');
+    expect(tables[0].caption).toBe('(단위: 천원) 예산 현황');
+  });
+
+  it('마지막 블록이 한 칸짜리면 표로 남긴다', () => {
+    const { tables } = readCsvTables(Buffer.from('부서,예산\n가,1\n\n\n끝\n', 'utf8'));
+    expect(tables).toHaveLength(2);
+  });
+});
