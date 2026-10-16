@@ -9,7 +9,9 @@
 -- 원본과 읽은 내용(JSON)의 경로를 둘 다 적는다. 경로에는 파일 이름을 넣지 않는다.
 -- 처음엔 대화에 묶이지 않는다(conversation_id NULL). 첫 턴에서 그 대화로 묶는다.
 -- 대화를 지우면 행이 함께 지워진다. 저장소 객체는 대화 삭제 라우트가 먼저 지운다.
--- 묶이지 않은 채 24시간 지난 행은 그 사용자가 다음에 올릴 때 코드가 지운다.
+-- 확인 거부(시간·크기)·보내기 전 삭제는 행을 지우지 않고 failed로 남긴다 — 서명 업로드 주소가
+-- 2시간 살아 있어, 행을 지우면 그 사이 다시 올린 객체가 기록 없이 남는다.
+-- 묶이지 않은 채 24시간 지난 행은 그 사용자가 다음에 올릴 때 코드가 객체와 함께 지운다.
 -- 주인(user_id)만 쓴다 — 관리자도 남의 첨부를 보지 못한다. RLS가 없으므로 격리는 코드 조건에 달렸다.
 -- =============================================================
 
@@ -27,7 +29,9 @@ CREATE TABLE IF NOT EXISTS chat_attachments (
   status          text NOT NULL CHECK (status IN ('pending', 'ready', 'failed')),
   summary         jsonb,
   error           text,
-  created_at      timestamptz NOT NULL DEFAULT now()
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  -- 읽힌 첨부만 읽은 내용 경로가 있다. 코드가 두 칸을 한 변경에서 맞추는지 DB가 다시 본다
+  CONSTRAINT chat_attachments_ready_has_extract CHECK ((status = 'ready') = (extract_path IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_attachments_conversation ON chat_attachments(conversation_id);

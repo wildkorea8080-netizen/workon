@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
-import { confirmUpload, isConversationOwner, listConversationAttachments } from '@/lib/attachments/store';
+import { confirmUpload, isConversationOwner, listConversationAttachments, toClientRow } from '@/lib/attachments/store';
 
 export const dynamic = 'force-dynamic';
 // 확인 단계에서 파일을 내려받아 읽는다. 큰 XLSX는 시간이 든다
@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
     return jsonError('대화를 찾을 수 없습니다.', 404);
   }
 
-  const rows = await listConversationAttachments(session.user.id, conversationId);
+  // 저장소 경로는 화면에 보내지 않는다
+  const rows = (await listConversationAttachments(session.user.id, conversationId)).map(toClientRow);
   return NextResponse.json({ ok: true, data: rows });
 }

@@ -1,10 +1,13 @@
 // tests/attachments-store.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
+import { NextRequest } from 'next/server';
 
 /**
  * 첨부 저장소. supabaseAdmin은 메모리 표로 흉내 낸다 — 주인·대화·상태 조건이
  * 실제로 걸러 내는지를 봐야 하므로 호출 기록만으로는 부족하다.
+ * 0030의 CHECK((status='ready') = (extract_path IS NOT NULL))도 흉내 낸다 —
+ * 코드가 두 칸을 같은 변경에서 맞추는지 모든 테스트가 함께 본다.
  */
 
 type Row = Record<string, unknown>;
@@ -19,12 +22,16 @@ const state = {
   removeThrows: false,
   selectError: null as null | { message: string },
   uploadError: null as null | { message: string },
+  updateError: null as null | { message: string },
   infoSize: null as null | number,
   readThrows: false,
+  /** 확인 중 상태 변경 직전에 끼어드는 다른 요청 */
+  beforeUpdate: null as null | (() => void),
+  session: null as null | { user: { id: string } },
 };
 
-function matches(row: Row, filters: ((r: Row) => boolean)[]) {
-  return filters.every((f) => f(row));
+function violatesExtractCheck(r: Row): boolean {
+  return (r.status === 'ready') !== (r.extract_path != null);
 }
 
 function query(table: string) {
@@ -37,14 +44,21 @@ function query(table: string) {
 
   const run = () => {
     if (state.selectError && op === 'select') return { data: null, error: state.selectError, count: null };
+    if (op === 'update' && table === 'chat_attachments') {
+      const hook = state.beforeUpdate;
+      state.beforeUpdate = null;
+      hook?.();
+      if (state.updateError) return { data: null, error: state.updateError };
+    }
     const rows = db[table] ?? (db[table] = []);
-    const hit = rows.filter((r) => matches(r, filters));
+    const hit = rows.filter((r) => filters.every((f) => f(r)));
     if (op === 'update') {
+      if (table === 'chat_attachments' && hit.some((r) => violatesExtractCheck({ ...r, ...patch }))) {
+        return { data: null, error: { message: 'violates check constraint (23514)' } };
+      }
       for (const r of hit) Object.assign(r, patch);
     }
-    if (op === 'delete') {
-      db[table] = rows.filter((r) => !hit.includes(r));
-    }
+    if (op === 'delete') db[table] = rows.filter((r) => !hit.includes(r));
     let out = hit.map((r) => ({ ...r }));
     if (orderBy) {
       const { col, asc } = orderBy;
@@ -61,31 +75,13 @@ function query(table: string) {
       if (opts?.head) headCount = true;
       return q;
     },
-    update(p: Row) {
-      op = 'update';
-      patch = p;
-      return q;
-    },
-    delete() {
-      op = 'delete';
-      return q;
-    },
-    eq(col: string, v: unknown) {
-      filters.push((r) => r[col] === v);
-      return q;
-    },
-    is(col: string, v: unknown) {
-      filters.push((r) => (r[col] ?? null) === v);
-      return q;
-    },
-    in(col: string, vs: unknown[]) {
-      filters.push((r) => vs.includes(r[col]));
-      return q;
-    },
-    lt(col: string, v: string) {
-      filters.push((r) => String(r[col]) < v);
-      return q;
-    },
+    update(p: Row) { op = 'update'; patch = p; return q; },
+    delete() { op = 'delete'; return q; },
+    eq(col: string, v: unknown) { filters.push((r) => r[col] === v); return q; },
+    is(col: string, v: unknown) { filters.push((r) => (r[col] ?? null) === v); return q; },
+    in(col: string, vs: unknown[]) { filters.push((r) => vs.includes(r[col])); return q; },
+    lt(col: string, v: string) { filters.push((r) => String(r[col]) < v); return q; },
+    gte(col: string, v: string) { filters.push((r) => String(r[col]) >= v); return q; },
     order(col: string, opts?: { ascending?: boolean }) {
       orderBy = { col, asc: opts?.ascending !== false };
       return q;
@@ -108,7 +104,11 @@ vi.mock('@/lib/supabaseAdmin', () => ({
         ...query(table),
         insert(row: Row) {
           if (state.insertError) return Promise.resolve({ error: state.insertError });
-          (db[table] ?? (db[table] = [])).push({ created_at: new Date().toISOString(), conversation_id: null, ...row });
+          const full = { created_at: new Date().toISOString(), conversation_id: null, extract_path: null, ...row };
+          if (table === 'chat_attachments' && violatesExtractCheck(full)) {
+            return Promise.resolve({ error: { message: 'violates check constraint (23514)' } });
+          }
+          (db[table] ?? (db[table] = [])).push(full);
           return Promise.resolve({ error: null });
         },
       };
@@ -168,6 +168,11 @@ vi.mock('@/lib/attachments/reader', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/auth', () => ({
+  getServerAuthSession: () => Promise.resolve(state.session),
+  isAdminSession: () => false,
+}));
+
 import {
   attachmentPaths,
   createUpload,
@@ -180,7 +185,13 @@ import {
   deleteConversationAttachments,
   purgeOrphans,
 } from '@/lib/attachments/store';
-import { MAX_ATTACHMENT_BYTES, CONFIRM_WINDOW_MS, ORPHAN_TTL_MS } from '@/lib/attachments/limits';
+import {
+  MAX_ATTACHMENT_BYTES,
+  CONFIRM_WINDOW_MS,
+  ORPHAN_TTL_MS,
+  MAX_PENDING_ATTACHMENTS,
+} from '@/lib/attachments/limits';
+import { GET as listRoute } from '@/app/api/attachments/route';
 
 const actor = { userId: 'u1', departmentId: 'd1', organizationId: 'o1' };
 const CSV = Buffer.from('부서,예산\n총무과,100\n기획과,200\n', 'utf8');
@@ -195,7 +206,7 @@ beforeEach(() => {
   usage.length = 0;
   Object.assign(state, {
     insertError: null, signError: null, removeError: null, removeThrows: false, selectError: null,
-    uploadError: null, infoSize: null, readThrows: false,
+    uploadError: null, updateError: null, infoSize: null, readThrows: false, beforeUpdate: null, session: null,
   });
 });
 
@@ -205,15 +216,19 @@ let seq = 0;
 function seed(over: Partial<Row>): Row {
   seq += 1;
   const id = `00000000-0000-4000-8000-${String(seq).padStart(12, '0')}`;
+  const status = (over.status as string | undefined) ?? 'ready';
   const row: Row = {
     id, user_id: 'u1', department_id: 'd1', conversation_id: null, file_name: `f${seq}.csv`,
-    mime_type: 'text/csv', size_bytes: 10, status: 'ready', summary: null, error: null,
-    storage_path: `chat-uploads/o1/u1/${id}.csv`, extract_path: `chat-uploads/o1/u1/${id}.json`,
+    mime_type: 'text/csv', size_bytes: 10, status, summary: null, error: null,
+    storage_path: `chat-uploads/o1/u1/${id}.csv`,
+    extract_path: status === 'ready' ? `chat-uploads/o1/u1/${id}.json` : null,
     created_at: ago(1000), ...over,
   };
   db.chat_attachments.push(row);
   return row;
 }
+
+const sibling = (r: Row) => String(r.storage_path).replace(/\.[a-z0-9]+$/, '.json');
 
 async function uploaded(fileName: string, bytes: Buffer) {
   const res = await createUpload(actor, { fileName, size: bytes.length });
@@ -256,6 +271,23 @@ describe('업로드 주소 발급', () => {
     expect(db.chat_attachments).toEqual([]);
   });
 
+  it('파일 이름의 제어·방향·폭 없는 글자를 빼고 공백을 줄여 저장한다', async () => {
+    const res = await createUpload(actor, {
+      fileName: '  2026​  예산‮\t\u0007\u0085⁦표⁩‏﻿.csv ',
+      size: 10,
+    });
+    expect(res.ok).toBe(true);
+    expect(db.chat_attachments[0].file_name).toBe('2026 예산표.csv');
+
+    for (const bad of ['​‮\u0085', ' \u0000 ', '']) {
+      expect(await createUpload(actor, { fileName: bad, size: 10 })).toMatchObject({
+        ok: false, status: 400, message: '파일 이름이 올바르지 않습니다.',
+      });
+    }
+    // 방향 글자로 숨긴 진짜 확장자가 드러난다
+    expect(await createUpload(actor, { fileName: '보고서‮xcod.exe', size: 10 })).toMatchObject({ ok: false, status: 400 });
+  });
+
   it('pending 행을 먼저 넣고 같은 id 경로로 서명 주소를 준다', async () => {
     const res = await createUpload(actor, { fileName: '2026 예산.XLSX', size: 1234 });
     expect(res.ok).toBe(true);
@@ -265,16 +297,38 @@ describe('업로드 주소 발급', () => {
     const row = db.chat_attachments.find((r) => r.id === res.id)!;
     expect(row).toMatchObject({
       user_id: 'u1', department_id: 'd1', file_name: '2026 예산.XLSX', size_bytes: 1234,
-      status: 'pending', storage_path: res.path, conversation_id: null,
+      status: 'pending', storage_path: res.path, conversation_id: null, extract_path: null,
     });
     expect(row).not.toHaveProperty('organization_id'); // 트리거가 채운다
-    expect(row.extract_path ?? null).toBeNull();
   });
 
   it('서명 주소를 못 받으면 넣은 행을 지운다', async () => {
     state.signError = { message: 'boom' };
     const res = await createUpload(actor, { fileName: 'a.csv', size: 10 });
     expect(res).toMatchObject({ ok: false, status: 500 });
+    expect(db.chat_attachments).toEqual([]);
+  });
+
+  it('보내지 않은 첨부가 상한이면 429 — 상태와 무관하게 24시간 안의 미연결만 센다', async () => {
+    expect(MAX_PENDING_ATTACHMENTS).toBe(20);
+    const statuses = ['pending', 'ready', 'failed'];
+    for (let i = 0; i < MAX_PENDING_ATTACHMENTS - 1; i += 1) seed({ status: statuses[i % 3] });
+    seed({ conversation_id: 'c1' }); // 묶인 것은 세지 않는다
+    seed({ user_id: 'u2' }); // 남의 것은 세지 않는다
+    seed({ status: 'pending', created_at: ago(ORPHAN_TTL_MS + 1000) }); // 묵은 것은 먼저 정리된다
+    expect((await createUpload(actor, { fileName: 'a.csv', size: 10 })).ok).toBe(true);
+
+    const before = db.chat_attachments.length;
+    const res = await createUpload(actor, { fileName: 'b.csv', size: 10 });
+    expect(res).toEqual({
+      ok: false, status: 429, message: '보내지 않은 첨부가 너무 많습니다. 정리한 뒤 다시 올려 주세요.',
+    });
+    expect(db.chat_attachments.length).toBe(before);
+  });
+
+  it('상한을 세지 못하면 발급하지 않는다', async () => {
+    state.selectError = { message: 'down' };
+    expect(await createUpload(actor, { fileName: 'a.csv', size: 10 })).toMatchObject({ ok: false, status: 500 });
     expect(db.chat_attachments).toEqual([]);
   });
 });
@@ -287,13 +341,19 @@ describe('확인', () => {
     expect(isConfirmExpired('엉터리', now)).toBe(true);
   });
 
-  it('발급 후 10분 지난 확인은 거부하고 객체를 지운다', async () => {
+  it('발급 후 10분 지난 확인은 거부하고 객체를 지우되 기록은 failed로 남긴다', async () => {
     const up = await uploaded('a.csv', CSV);
     db.chat_attachments[0].created_at = ago(CONFIRM_WINDOW_MS + 1000);
     const res = await confirmUpload(actor, up.id);
     expect(res).toMatchObject({ ok: false, status: 410, message: '업로드 시간이 지났습니다. 다시 올려 주세요.' });
-    expect(removed.flat()).toContain(up.path);
-    expect(db.chat_attachments).toEqual([]);
+    expect(removed.flat()).toEqual(expect.arrayContaining([up.path, `chat-uploads/o1/u1/${up.id}.json`]));
+    expect(objects.has(up.path)).toBe(false);
+    // 서명 주소는 2시간 살아 있다. 행을 지우면 그 사이 다시 올린 객체가 기록 없이 남는다
+    expect(db.chat_attachments).toHaveLength(1);
+    expect(db.chat_attachments[0]).toMatchObject({ status: 'failed', conversation_id: null, extract_path: null });
+    expect(db.chat_attachments[0].error).toMatch(/업로드 시간이 지났습니다/);
+    // 다시 확인해도 살아나지 않는다
+    expect(await confirmUpload(actor, up.id)).toMatchObject({ ok: true, attachment: { status: 'failed' } });
   });
 
   it('실제 크기가 상한을 넘으면 거부하고 지운다', async () => {
@@ -307,7 +367,8 @@ describe('확인', () => {
     expect(res).toMatchObject({ ok: false, status: 413 });
     expect(removed.flat()).toContain(res0.path);
     expect(objects.has(res0.path)).toBe(false);
-    expect(db.chat_attachments).toEqual([]);
+    expect(db.chat_attachments[0]).toMatchObject({ status: 'failed', extract_path: null });
+    expect(db.chat_attachments[0].error).toMatch(/파일이 너무 큽니다/);
   });
 
   it('저장소 정보가 이미 상한을 넘으면 내려받지 않고 거부한다', async () => {
@@ -315,12 +376,22 @@ describe('확인', () => {
     state.infoSize = MAX_ATTACHMENT_BYTES + 1;
     const res = await confirmUpload(actor, up.id);
     expect(res).toMatchObject({ ok: false, status: 413 });
-    expect(db.chat_attachments).toEqual([]);
+    expect(objects.has(up.path)).toBe(false);
+    expect(db.chat_attachments[0].status).toBe('failed');
   });
 
-  it('읽기 성공: 읽은 내용 JSON을 같은 자리에 두고 ready·요약을 돌려준다', async () => {
+  it('거부되어 남은 기록도 보내지 않은 첨부 상한에 센다', async () => {
+    for (let i = 0; i < MAX_PENDING_ATTACHMENTS - 1; i += 1) seed({ status: 'pending' });
+    const up = await uploaded('a.csv', CSV);
+    db.chat_attachments.find((r) => r.id === up.id)!.created_at = ago(CONFIRM_WINDOW_MS + 1000);
+    await confirmUpload(actor, up.id);
+    expect(await createUpload(actor, { fileName: 'b.csv', size: 10 })).toMatchObject({ ok: false, status: 429 });
+  });
+
+  it('읽기 성공: 읽은 내용 JSON을 원본 옆에 두고 ready·요약을 돌려준다', async () => {
     const up = await uploaded('예산.csv', CSV);
-    const res = await confirmUpload(actor, up.id);
+    // 경로는 요청자 기관이 아니라 기록된 원본 경로에서 나온다
+    const res = await confirmUpload({ ...actor, organizationId: 'o-other' }, up.id);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const extractPath = `chat-uploads/o1/u1/${up.id}.json`;
@@ -332,8 +403,6 @@ describe('확인', () => {
     expect(extract.tables[0].columns).toEqual(['부서', '예산']);
     // 응답에 저장소 경로를 싣지 않는다
     expect(JSON.stringify(res.attachment)).not.toContain('chat-uploads');
-
-    expect(await loadExtract({ id: up.id, user_id: 'u1' }, 'o1')).toMatchObject({ kind: 'spreadsheet' });
   });
 
   it('읽기 실패는 failed + 이유, 원본 객체는 지운다', async () => {
@@ -345,7 +414,7 @@ describe('확인', () => {
     expect(res.attachment.error).toMatch(/읽지 못했습니다/);
     expect(res.attachment.summary).toBeNull();
     expect(objects.has(up.path)).toBe(false);
-    expect(db.chat_attachments[0].extract_path ?? null).toBeNull();
+    expect(db.chat_attachments[0].extract_path).toBeNull();
     expect(usage[0]).toMatchObject({ action: 'file_attached', details: { status: 'failed', tables: 0 } });
   });
 
@@ -363,6 +432,45 @@ describe('확인', () => {
     const res = await confirmUpload(actor, up.id);
     expect(res).toMatchObject({ ok: false, status: 500 });
     expect(db.chat_attachments[0].status).toBe('pending');
+  });
+
+  it('상태 기록이 실패하면 방금 올린 읽은 내용을 지운다', async () => {
+    const up = await uploaded('a.csv', CSV);
+    state.updateError = { message: 'db down' };
+    expect(await confirmUpload(actor, up.id)).toMatchObject({ ok: false, status: 500 });
+    expect(objects.has(`chat-uploads/o1/u1/${up.id}.json`)).toBe(false);
+    expect(db.chat_attachments[0].status).toBe('pending');
+  });
+
+  it('겹친 확인이 이미 ready로 기록했으면 실패한 쪽이 읽은 내용을 지우지 않는다', async () => {
+    const up = await uploaded('a.csv', CSV);
+    const extractPath = `chat-uploads/o1/u1/${up.id}.json`;
+    state.beforeUpdate = () => {
+      // 다른 확인이 먼저 끝냈다
+      Object.assign(db.chat_attachments[0], { status: 'ready', extract_path: extractPath });
+    };
+    state.updateError = { message: 'timeout' };
+    expect(await confirmUpload(actor, up.id)).toMatchObject({ ok: false, status: 500 });
+    expect(objects.has(extractPath)).toBe(true);
+  });
+
+  it('확인 도중 기록이 사라지면 방금 올린 읽은 내용을 지우고 404', async () => {
+    const up = await uploaded('a.csv', CSV);
+    state.beforeUpdate = () => { db.chat_attachments = []; };
+    expect(await confirmUpload(actor, up.id)).toMatchObject({ ok: false, status: 404 });
+    expect(objects.has(`chat-uploads/o1/u1/${up.id}.json`)).toBe(false);
+    expect(usage).toEqual([]);
+  });
+
+  it('확인 도중 지워진(failed) 첨부는 되살리지 않고 읽은 내용도 남기지 않는다', async () => {
+    const up = await uploaded('a.csv', CSV);
+    state.beforeUpdate = () => {
+      Object.assign(db.chat_attachments[0], { status: 'failed', error: '보내기 전에 지웠습니다.' });
+    };
+    const res = await confirmUpload(actor, up.id);
+    expect(res).toMatchObject({ ok: true, attachment: { status: 'failed' } });
+    expect(objects.has(`chat-uploads/o1/u1/${up.id}.json`)).toBe(false);
+    expect(usage).toEqual([]);
   });
 
   it('남의 첨부·없는 id·uuid 아닌 id는 404', async () => {
@@ -405,6 +513,21 @@ describe('확인', () => {
   });
 });
 
+describe('읽은 내용 불러오기', () => {
+  it('기록의 경로로 읽고, 읽은 내용이 없는 기록은 null', async () => {
+    const up = await uploaded('예산.csv', CSV);
+    await confirmUpload(actor, up.id);
+    db.conversations.push({ id: 'c0000000-0000-4000-8000-000000000009', user_id: 'u1' });
+    const bound = await bindAttachments('u1', 'c0000000-0000-4000-8000-000000000009', [up.id]);
+    if (!bound.ok) throw new Error(bound.message);
+    expect(await loadExtract(bound.rows[0])).toMatchObject({ kind: 'spreadsheet' });
+
+    const [listed] = await listConversationAttachments('u1', 'c0000000-0000-4000-8000-000000000009');
+    expect(await loadExtract(listed)).toMatchObject({ kind: 'spreadsheet' });
+    expect(await loadExtract({ ...listed, extract_path: null })).toBeNull();
+  });
+});
+
 describe('대화에 묶기', () => {
   const conv = 'c0000000-0000-4000-8000-000000000001';
   const other = 'c0000000-0000-4000-8000-000000000002';
@@ -438,6 +561,14 @@ describe('대화에 묶기', () => {
     expect(db.chat_attachments.find((r) => r.id === mine.id)!.conversation_id).toBeNull();
     expect(await bindAttachments('u1', conv, ['00000000-0000-4000-8000-ffffffffffff'])).toMatchObject({ ok: false });
     expect(await bindAttachments('u1', conv, ['not-a-uuid'])).toMatchObject({ ok: false });
+  });
+
+  it('보내기 전에 지운 첨부는 묶지도 목록에 올리지도 않는다', async () => {
+    const a = seed({});
+    expect(await deleteAttachment('u1', a.id as string)).toBe(true);
+    expect(await bindAttachments('u1', conv, [a.id as string])).toMatchObject({ ok: false });
+    a.conversation_id = conv; // 억지로 묶어도 목록에는 ready만 나온다 (seed는 표의 행 자체를 돌려준다)
+    expect(await listConversationAttachments('u1', conv)).toEqual([]);
   });
 
   it('남의 대화에는 묶지 않는다', async () => {
@@ -474,38 +605,93 @@ describe('목록·지우기', () => {
     seed({});
     const rows = await listConversationAttachments('u1', conv);
     expect(rows.map((r) => r.id)).toEqual([first.id, second.id]);
-    expect(JSON.stringify(rows)).not.toContain('chat-uploads');
   });
 
-  it('지우기는 묶이지 않은 자기 첨부만', async () => {
-    const free = seed({});
+  it('지우기는 묶이지 않은 자기 첨부만 — 객체는 지우고 기록은 failed로 남긴다', async () => {
+    const free = seed({ status: 'pending' });
     const bound = seed({ conversation_id: conv });
     const others = seed({ user_id: 'u2' });
     expect(await deleteAttachment('u1', bound.id as string)).toBe(false);
     expect(await deleteAttachment('u1', others.id as string)).toBe(false);
     expect(await deleteAttachment('u1', 'nope')).toBe(false);
     expect(await deleteAttachment('u1', free.id as string)).toBe(true);
-    expect(db.chat_attachments.map((r) => r.id)).toEqual([bound.id, others.id]);
-    expect(removed.flat()).toEqual([free.storage_path, free.extract_path]);
+    expect(db.chat_attachments.map((r) => r.id)).toEqual([free.id, bound.id, others.id]);
+    expect(db.chat_attachments[0]).toMatchObject({ status: 'failed', conversation_id: null, extract_path: null });
+    expect(db.chat_attachments[0].error).toMatch(/보내기 전에 지웠습니다/);
+    expect(db.chat_attachments[1].status).toBe('ready');
+    expect(removed.flat().sort()).toEqual([free.storage_path, sibling(free)].sort());
+  });
+});
+
+describe('목록 라우트', () => {
+  const conv = 'c0000000-0000-4000-8000-000000000001';
+  const req = (id: string) => new NextRequest(`http://localhost/api/attachments?conversation_id=${id}`);
+
+  it('로그인하지 않으면 401', async () => {
+    expect((await listRoute(req(conv))).status).toBe(401);
+  });
+
+  it('남의 대화·없는 대화·uuid 아닌 id는 404', async () => {
+    state.session = { user: { id: 'u1' } };
+    db.conversations.push({ id: conv, user_id: 'u2' });
+    seed({ conversation_id: conv, user_id: 'u2' });
+    for (const id of [conv, 'c0000000-0000-4000-8000-00000000ffff', 'x']) {
+      const res = await listRoute(req(id));
+      expect(res.status, id).toBe(404);
+      expect(await res.json()).toMatchObject({ ok: false });
+    }
+  });
+
+  it('내 대화면 ready 첨부를 저장소 경로 없이 준다', async () => {
+    state.session = { user: { id: 'u1' } };
+    db.conversations.push({ id: conv, user_id: 'u1' });
+    const a = seed({ conversation_id: conv });
+    const res = await listRoute(req(conv));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.map((r: { id: string }) => r.id)).toEqual([a.id]);
+    expect(JSON.stringify(body)).not.toContain('chat-uploads');
+    expect(body.data[0]).not.toHaveProperty('storage_path');
   });
 });
 
 describe('정리', () => {
-  it('24시간 지난 pending·미연결 첨부를 정리한다', async () => {
+  it('24시간 지난 pending·미연결 첨부의 원본·읽은 내용과 기록을 지운다', async () => {
     const now = Date.now();
-    const stalePending = seed({ status: 'pending', extract_path: null, created_at: ago(ORPHAN_TTL_MS + 1000) });
-    const staleReady = seed({ created_at: ago(ORPHAN_TTL_MS + 1000) });
+    const old = ago(ORPHAN_TTL_MS + 1000);
+    const stalePending = seed({ status: 'pending', created_at: old });
+    const staleReady = seed({ created_at: old });
+    const staleFailed = seed({ status: 'failed', created_at: old });
     const fresh = seed({ status: 'pending', created_at: ago(1000) });
-    const bound = seed({ conversation_id: 'c1', created_at: ago(ORPHAN_TTL_MS + 1000) });
-    const others = seed({ user_id: 'u2', created_at: ago(ORPHAN_TTL_MS + 1000) });
+    const bound = seed({ conversation_id: 'c1', created_at: old });
+    const others = seed({ user_id: 'u2', created_at: old });
+    for (const r of [stalePending, staleReady, staleFailed, bound]) {
+      objects.set(String(r.storage_path), Buffer.from('x'));
+      objects.set(sibling(r), Buffer.from('{}'));
+    }
 
     await purgeOrphans('u1', now);
     expect(db.chat_attachments.map((r) => r.id).sort()).toEqual([fresh.id, bound.id, others.id].sort());
-    const paths = removed.flat();
-    expect(paths).toEqual(expect.arrayContaining([stalePending.storage_path, staleReady.storage_path, staleReady.extract_path]));
-    expect(paths).not.toContain(null);
-    expect(paths).not.toContain(bound.storage_path);
-    expect(paths).not.toContain(others.storage_path);
+    for (const r of [stalePending, staleReady, staleFailed]) {
+      expect(objects.has(String(r.storage_path))).toBe(false);
+      expect(objects.has(sibling(r))).toBe(false); // pending·failed도 읽은 내용 자리까지
+    }
+    expect(objects.has(String(bound.storage_path))).toBe(true);
+    expect(removed.flat()).not.toContain(others.storage_path);
+  });
+
+  it('저장소 삭제가 실패하면 기록을 남겨 다음에 다시 지운다(묶을 수는 없다)', async () => {
+    const stale = seed({ created_at: ago(ORPHAN_TTL_MS + 1000) });
+    state.removeError = { message: 'denied' };
+    await purgeOrphans('u1', Date.now());
+    expect(db.chat_attachments).toHaveLength(1);
+    expect(db.chat_attachments[0]).toMatchObject({ status: 'failed', extract_path: null });
+    expect(JSON.stringify(logged)).toContain(String(stale.storage_path));
+
+    state.removeError = null;
+    await purgeOrphans('u1', Date.now());
+    expect(db.chat_attachments).toEqual([]);
   });
 
   it('발급할 때 정리를 함께 돈다', async () => {
@@ -524,12 +710,12 @@ describe('정리', () => {
 });
 
 describe('대화 삭제 때', () => {
-  it('그 대화의 원본·읽은 내용을 지운다', async () => {
+  it('그 대화의 원본·읽은 내용을 지운다(읽은 내용 자리가 비어 있어도)', async () => {
     const a = seed({ conversation_id: 'c1' });
-    const f = seed({ conversation_id: 'c1', status: 'failed', extract_path: null });
+    const f = seed({ conversation_id: 'c1', status: 'failed' });
     seed({ conversation_id: 'c2' });
     await deleteConversationAttachments('c1');
-    expect(removed.flat().sort()).toEqual([a.storage_path, a.extract_path, f.storage_path].sort());
+    expect(removed.flat().sort()).toEqual([a.storage_path, a.extract_path, f.storage_path, sibling(f)].sort());
     expect(logged).toEqual([]);
   });
 
@@ -562,7 +748,7 @@ describe('대화 삭제 때', () => {
   });
 });
 
-describe('라우트', () => {
+describe('라우트·마이그레이션', () => {
   it('확인 라우트는 60초까지 돈다', () => {
     const src = readFileSync('src/app/api/attachments/route.ts', 'utf8');
     expect(src).toMatch(/export const maxDuration = 60/);
@@ -571,5 +757,10 @@ describe('라우트', () => {
   it('감사 화면이 활동 코드를 한국어로 보인다', () => {
     const src = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');
     expect(src).toMatch(/file_attached:\s*'파일 첨부'/);
+  });
+
+  it('0030이 ready와 읽은 내용 경로를 짝으로 강제한다', () => {
+    const sql = readFileSync('supabase/migrations/0030_chat_attachments.sql', 'utf8');
+    expect(sql).toMatch(/CHECK\s*\(\s*\(status\s*=\s*'ready'\)\s*=\s*\(extract_path IS NOT NULL\)\s*\)/);
   });
 });

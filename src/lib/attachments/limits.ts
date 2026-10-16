@@ -10,6 +10,11 @@
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_SEND = 10;
 export const MAX_ATTACHMENTS_PER_CONVERSATION = 30;
+/**
+ * 보내지 않은 첨부(대화에 안 묶인 것, 24시간 안, 상태 무관) 상한. 서명 업로드 주소는 크기도 개수도
+ * 막지 않으므로 발급 수를 여기서 막는다. 거부·삭제로 남은 기록(failed)도 센다 — 그 주소도 살아 있다.
+ */
+export const MAX_PENDING_ATTACHMENTS = 20;
 
 /** 표 한 장에서 읽는 최대 크기. 넘으면 잘라 읽고 그 사실을 남긴다. */
 export const MAX_TABLE_ROWS = 20_000;
