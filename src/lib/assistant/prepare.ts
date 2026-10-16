@@ -11,7 +11,13 @@ import { getAllowedModelIds, resolveModel } from '@/lib/model-policy';
 import { connectorCatalog } from '@/lib/connectors';
 import { activeCapabilities, effectiveCapabilities, toolsFor } from '@/lib/capabilities';
 import type { TurnContext, PrepareResult, TurnAttachment } from '@/lib/capabilities/types';
-import { bindAttachments, listConversationAttachments, type AttachmentRecord } from '@/lib/attachments/store';
+import {
+  bindAttachments,
+  checkAttachable,
+  deleteConversationAttachments,
+  listConversationAttachments,
+  type AttachmentRecord,
+} from '@/lib/attachments/store';
 import { attachmentRequestError, toTurnAttachments } from './attachments';
 import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
@@ -28,6 +34,16 @@ type AgentRow = AgentAccessInfo & {
 
 function reject(message: string, status: number, details?: Record<string, unknown>): PrepareOutcome {
   return { ok: false, status, message, details };
+}
+
+/**
+ * 첫 턴이 첨부 묶기에서 거절됐을 때 방금 만든 대화를 치운다. 일부만 묶였을 수 있어
+ * 첨부 저장소를 먼저 지운다 — 행만 연쇄 삭제되면 객체가 남는다. 실패해도 던지지 않는다.
+ */
+async function discardNewConversation(conversationId: string, userId: string): Promise<void> {
+  await deleteConversationAttachments(conversationId);
+  const { error } = await supabaseAdmin.from('conversations').delete().eq('id', conversationId).eq('user_id', userId);
+  if (error) console.error('[assistant] 거절된 첫 턴의 대화를 지우지 못함:', conversationId, error.message);
 }
 
 /**
@@ -111,8 +127,17 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       .maybeSingle();
     if (!existing) return reject('대화를 찾을 수 없습니다.', 404);
     conversationId = existing.id;
+    if (sentIds.length > 0) {
+      const check = await checkAttachable(actor.userId, sentIds, conversationId);
+      if (!check.ok) return reject(check.message, 400);
+    }
     history = await loadHistory(conversationId);
   } else {
+    // 묶을 수 없는 첨부면 대화를 만들기 전에 돌려보낸다 — 거절될 요청으로 빈 대화가 남지 않게
+    if (sentIds.length > 0) {
+      const check = await checkAttachable(actor.userId, sentIds, null);
+      if (!check.ok) return reject(check.message, 400);
+    }
     const { data: created, error } = await supabaseAdmin
       .from('conversations')
       .insert({
@@ -134,17 +159,28 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   let attachments: TurnAttachment[] = [];
   if (capabilities.some((c) => c.acceptsFiles)) {
     let bound: AttachmentRecord[] = [];
+    let newlyBound: string[] = [];
     if (sentIds.length > 0) {
       const result = await bindAttachments(actor.userId, conversationId, sentIds);
-      if (!result.ok) return reject(result.message, 400);
+      if (!result.ok) {
+        // 확인과 묶기 사이에 바뀌었다. 방금 만든 대화면 지운다 — 대화 삭제 라우트와 같은 순서(첨부 저장소 → 행)
+        if (isNewConversation) await discardNewConversation(conversationId, actor.userId);
+        return reject(result.message, 400);
+      }
       bound = result.rows;
+      newlyBound = result.newlyBound;
     }
     // 새 대화에 보낸 것도 없으면 붙은 첨부가 있을 수 없다 — 조회를 아낀다
     const listed =
-      !isNewConversation || bound.length > 0 ? await listConversationAttachments(actor.userId, conversationId) : [];
+      !isNewConversation || bound.length > 0
+        ? await listConversationAttachments(actor.userId, conversationId, {
+            onError: (msg) =>
+              console.warn('[assistant] 첨부 목록을 읽지 못해 이번 턴은 방금 묶은 첨부만으로 진행합니다:', conversationId, msg),
+          })
+        : [];
     // 목록 조회가 실패하면 빈 배열이 온다. 방금 묶은 것만은 빠지지 않게 채워 넣는다
     const missing = bound.filter((b) => !listed.some((r) => r.id === b.id));
-    attachments = toTurnAttachments([...listed, ...missing], sentIds);
+    attachments = toTurnAttachments([...listed, ...missing], newlyBound);
   }
 
   // ── 모델 ── 기관 허용 범위 안이면 비서의 모델, 아니면 허용 목록의 첫 번째

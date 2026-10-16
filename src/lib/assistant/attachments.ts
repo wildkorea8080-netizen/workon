@@ -25,11 +25,11 @@ export function attachmentRequestError(ids: unknown, capabilities: Capability[])
 const MISSING_SUMMARY: AttachmentSummary = { kind: 'text', chars: 0, tables: [], warnings: ['읽은 내용 요약이 없습니다.'] };
 
 /**
- * 대화의 첨부 기록 → 이번 턴 첨부. ref는 대화 안 만든 순(a1…)이라 턴이 바뀌어도 같은 파일은 같은 ref다.
+ * 대화의 첨부 기록 → 이번 턴 첨부. ref(a1…)는 이 대화에 올린 순서(created_at, 같으면 id)를 따르므로 턴이 바뀌어도 같은 파일은 같은 ref다.
  * 저장소 경로는 여기서 뗀다 — ctx는 능력·도구로 퍼진다.
  */
-export function toTurnAttachments(records: AttachmentRecord[], sentIds: string[]): TurnAttachment[] {
-  const sent = new Set(sentIds);
+export function toTurnAttachments(records: AttachmentRecord[], newIds: string[]): TurnAttachment[] {
+  const fresh = new Set(newIds);
   return [...records]
     .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
     .map((r, i) => ({
@@ -37,6 +37,6 @@ export function toTurnAttachments(records: AttachmentRecord[], sentIds: string[]
       id: r.id,
       fileName: r.file_name,
       summary: r.summary ?? MISSING_SUMMARY,
-      isNew: sent.has(r.id),
+      isNew: fresh.has(r.id),
     }));
 }

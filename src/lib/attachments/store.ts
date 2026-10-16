@@ -416,7 +416,11 @@ export async function isConversationOwner(userId: string, conversationId: string
 }
 
 /** 서버용 기록(경로 포함). 화면에 보낼 때는 `toClientRow`로 뗀다 */
-export async function listConversationAttachments(userId: string, conversationId: string): Promise<AttachmentRecord[]> {
+export async function listConversationAttachments(
+  userId: string,
+  conversationId: string,
+  opts: { onError?: (message: string) => void } = {}
+): Promise<AttachmentRecord[]> {
   const { data, error } = await supabaseAdmin
     .from(TABLE)
     .select(RECORD_COLUMNS)
@@ -426,27 +430,25 @@ export async function listConversationAttachments(userId: string, conversationId
     .order('created_at', { ascending: true });
   if (error) {
     console.error('[attachments] 목록 조회 실패:', error.message);
+    // 빈 목록과 실패를 부른 쪽이 가를 수 있게 — 대화 실행기는 첨부 없이 도는 턴을 남긴다
+    opts.onError?.(error.message);
     return [];
   }
   return (data ?? []) as AttachmentRecord[];
 }
 
 const MSG_BIND_REFUSED = '쓸 수 없는 첨부가 있습니다. 첨부를 지우고 다시 올려 주세요.';
+const MSG_CONVERSATION_FULL = `한 대화에 첨부는 ${MAX_ATTACHMENTS_PER_CONVERSATION}개까지입니다.`;
+
+type Evaluation = { ok: true; usable: AttachmentRecord[]; toBind: string[] } | { ok: false; message: string };
 
 /**
- * 채팅 요청의 첨부를 이 대화로 묶는다. 하나라도 어긋나면 아무것도 묶지 않는다.
- * 다른 사람 것·다른 대화 것·읽지 못한 것(묘비 포함)을 끌어오지 못하게 하는 경계다(설계 4.2).
- * 돌려주는 행은 서버용 기록(경로 포함)이다.
+ * 묶을 수 있는가 — 확인(checkAttachable)과 묶기(bindAttachments)가 같은 규칙을 쓴다.
+ * conversationId가 null이면 새 대화: 미연결 첨부만 받는다.
+ * 대화 주인은 여기서 보지 않는다(부른 쪽이 본다).
  */
-export async function bindAttachments(
-  userId: string,
-  conversationId: string,
-  ids: string[]
-): Promise<{ ok: true; rows: AttachmentRecord[] } | { ok: false; message: string }> {
-  const unique = [...new Set(ids)];
-  if (unique.length === 0) return { ok: true, rows: [] };
+async function evaluateAttachable(userId: string, conversationId: string | null, unique: string[]): Promise<Evaluation> {
   if (!unique.every((id) => typeof id === 'string' && UUID.test(id))) return { ok: false, message: MSG_BIND_REFUSED };
-  if (!(await ownsConversation(userId, conversationId))) return { ok: false, message: MSG_BIND_REFUSED };
 
   const { data, error } = await supabaseAdmin
     .from(TABLE)
@@ -457,21 +459,61 @@ export async function bindAttachments(
   const rows = (data ?? []) as AttachmentRecord[];
 
   const usable = rows.filter(
-    (r) => r.status === 'ready' && (r.conversation_id === null || r.conversation_id === conversationId)
+    (r) => r.status === 'ready' && (r.conversation_id === null || (conversationId !== null && r.conversation_id === conversationId))
   );
   if (usable.length !== unique.length) return { ok: false, message: MSG_BIND_REFUSED };
 
   const toBind = usable.filter((r) => r.conversation_id === null).map((r) => r.id);
-  if (toBind.length === 0) return { ok: true, rows: usable };
+  if (toBind.length === 0) return { ok: true, usable, toBind };
 
-  const { count, error: countError } = await supabaseAdmin
-    .from(TABLE)
-    .select('id', { count: 'exact', head: true })
-    .eq('conversation_id', conversationId);
-  if (countError) return { ok: false, message: MSG_RETRY };
-  if ((count ?? 0) + toBind.length > MAX_ATTACHMENTS_PER_CONVERSATION) {
-    return { ok: false, message: `한 대화에 첨부는 ${MAX_ATTACHMENTS_PER_CONVERSATION}개까지입니다.` };
+  let count = 0;
+  if (conversationId !== null) {
+    const { count: c, error: countError } = await supabaseAdmin
+      .from(TABLE)
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+    if (countError) return { ok: false, message: MSG_RETRY };
+    count = c ?? 0;
   }
+  if (count + toBind.length > MAX_ATTACHMENTS_PER_CONVERSATION) return { ok: false, message: MSG_CONVERSATION_FULL };
+  return { ok: true, usable, toBind };
+}
+
+/**
+ * 읽기만 하는 사전 확인. 대화 실행기가 **대화를 만들기 전에** 부른다 — 묶기에서 거절될 요청으로
+ * 빈 대화가 생기지 않게. 최종 판정은 bindAttachments가 조건을 다시 걸어 한다(그 사이 바뀔 수 있다).
+ * 이어지는 대화면 부른 쪽이 대화 주인을 먼저 확인한 뒤 넘긴다.
+ */
+export async function checkAttachable(
+  userId: string,
+  ids: string[],
+  conversationId: string | null
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return { ok: true };
+  const result = await evaluateAttachable(userId, conversationId, unique);
+  return result.ok ? { ok: true } : result;
+}
+
+/**
+ * 채팅 요청의 첨부를 이 대화로 묶는다. 하나라도 어긋나면 아무것도 묶지 않는다.
+ * 다른 사람 것·다른 대화 것·읽지 못한 것(묘비 포함)을 끌어오지 못하게 하는 경계다(설계 4.2).
+ * 돌려주는 행은 서버용 기록(경로 포함)이다. newlyBound는 이번에 새로 묶은 id —
+ * 이미 이 대화에 있던 것을 '방금 붙임'으로 다시 적지 않게 한다.
+ */
+export async function bindAttachments(
+  userId: string,
+  conversationId: string,
+  ids: string[]
+): Promise<{ ok: true; rows: AttachmentRecord[]; newlyBound: string[] } | { ok: false; message: string }> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return { ok: true, rows: [], newlyBound: [] };
+  if (!(await ownsConversation(userId, conversationId))) return { ok: false, message: MSG_BIND_REFUSED };
+
+  const evaluation = await evaluateAttachable(userId, conversationId, unique);
+  if (!evaluation.ok) return evaluation;
+  const { usable, toBind } = evaluation;
+  if (toBind.length === 0) return { ok: true, rows: usable, newlyBound: [] };
 
   // 조건을 다시 건다 — 그 사이 다른 대화에 묶였거나 지워졌으면 여기서 빠지고 개수로 드러난다
   const { data: bound, error: bindError } = await supabaseAdmin
@@ -488,7 +530,7 @@ export async function bindAttachments(
     return { ok: false, message: MSG_BIND_REFUSED };
   }
 
-  return { ok: true, rows: usable.map((r) => ({ ...r, conversation_id: conversationId })) };
+  return { ok: true, rows: usable.map((r) => ({ ...r, conversation_id: conversationId })), newlyBound: toBind };
 }
 
 /**

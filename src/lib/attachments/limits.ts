@@ -25,6 +25,18 @@ export const MAX_EXTRACT_CHARS = 200_000;
 /** 모델이 한 번 읽을 때 돌려주는 분량. */
 export const READ_TEXT_CHARS = 20_000;
 export const READ_TABLE_ROWS = 200;
+/** 표 한 번 읽기의 글자 상한. 넓은 표는 200행이 수십만 자가 된다 — 행 수만으로는 막지 못한다 */
+export const READ_TABLE_CHARS = READ_TEXT_CHARS * 2;
+
+/**
+ * 시스템 프롬프트의 첨부 목록 상한. 이 목록은 매 턴 실리고 파일에서 온 글(이름·표 제목·열 이름)이라
+ * 크기를 파일이 정하게 두면 안 된다 — 넓은 표 하나·파일 30개가 프롬프트를 채운다.
+ */
+export const OVERVIEW_NAME_CHARS = 40;
+export const OVERVIEW_TABLES_PER_FILE = 10;
+export const OVERVIEW_WARNINGS_PER_FILE = 3;
+/** 넘으면 남은 파일은 ref와 이름만 적는다 */
+export const OVERVIEW_TOTAL_CHARS = 8000;
 
 /** 올린 파일을 보낼지 확인하는 유효 시간. */
 export const CONFIRM_WINDOW_MS = 10 * 60 * 1000;

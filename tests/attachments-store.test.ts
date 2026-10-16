@@ -180,6 +180,7 @@ import {
   isConfirmExpired,
   listConversationAttachments,
   bindAttachments,
+  checkAttachable,
   loadExtract,
   deleteAttachment,
   deleteConversationAttachments,
@@ -590,7 +591,59 @@ describe('대화에 묶기', () => {
   });
 
   it('빈 목록은 그대로 통과한다', async () => {
-    expect(await bindAttachments('u1', conv, [])).toEqual({ ok: true, rows: [] });
+    expect(await bindAttachments('u1', conv, [])).toEqual({ ok: true, rows: [], newlyBound: [] });
+  });
+
+  it('이번에 새로 묶은 id만 newlyBound로 알려 준다 — 이미 이 대화에 있던 것은 빠진다', async () => {
+    const a = seed({});
+    const b = seed({ conversation_id: conv });
+    const res = await bindAttachments('u1', conv, [a.id as string, b.id as string]);
+    expect(res.ok && res.newlyBound).toEqual([a.id]);
+  });
+});
+
+describe('묶기 전 확인 (checkAttachable)', () => {
+  const conv = 'c0000000-0000-4000-8000-000000000001';
+  const other = 'c0000000-0000-4000-8000-000000000002';
+
+  it('새 대화(null): 자기 ready 미연결 첨부만 통과, 아무것도 바꾸지 않는다', async () => {
+    const mine = seed({});
+    expect(await checkAttachable('u1', [mine.id as string], null)).toEqual({ ok: true });
+    const cases = [
+      seed({ user_id: 'u2' }),
+      seed({ conversation_id: other }),
+      seed({ status: 'failed' }),
+      seed({ status: 'pending' }),
+    ];
+    for (const bad of cases) {
+      expect((await checkAttachable('u1', [mine.id as string, bad.id as string], null)).ok, String(bad.id)).toBe(false);
+    }
+    expect((await checkAttachable('u1', ['not-a-uuid'], null)).ok).toBe(false);
+    expect((await checkAttachable('u1', ['00000000-0000-4000-8000-ffffffffffff'], null)).ok).toBe(false);
+    expect(db.chat_attachments.every((r) => r.conversation_id === null || r.conversation_id === other)).toBe(true);
+  });
+
+  it('이어지는 대화: 이 대화에 이미 묶인 것은 통과, 30개 상한을 본다', async () => {
+    const here = seed({ conversation_id: conv });
+    expect(await checkAttachable('u1', [here.id as string], conv)).toEqual({ ok: true });
+    for (let i = 0; i < 28; i += 1) seed({ conversation_id: conv });
+    const a = seed({});
+    const b = seed({});
+    const over = await checkAttachable('u1', [a.id as string, b.id as string], conv);
+    expect(over).toEqual({ ok: false, message: '한 대화에 첨부는 30개까지입니다.' });
+    expect(await checkAttachable('u1', [a.id as string], conv)).toEqual({ ok: true });
+    expect(db.chat_attachments.filter((r) => r.conversation_id === conv)).toHaveLength(29);
+  });
+
+  it('빈 목록은 통과한다', async () => {
+    expect(await checkAttachable('u1', [], null)).toEqual({ ok: true });
+  });
+
+  it('목록 조회가 실패하면 알린다 — 이번 턴이 첨부 없이 도는 것을 남긴다', async () => {
+    state.selectError = { message: 'boom' };
+    const errors: string[] = [];
+    expect(await listConversationAttachments('u1', conv, { onError: (m) => errors.push(m) })).toEqual([]);
+    expect(errors).toEqual(['boom']);
   });
 });
 

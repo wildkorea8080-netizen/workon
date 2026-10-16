@@ -10,12 +10,12 @@ import type { CapabilityId, CapabilitySettings } from './settings';
  * 서버가 user_id 조건으로 기록을 다시 찾는다.
  */
 export interface TurnAttachment {
-  /** 'a1'… 대화 안에서 만든 순. 턴이 바뀌어도 같은 파일은 같은 ref */
+  /** 'a1'… 이 대화에 올린 순서(첨부 기록의 created_at). 기록이 남아 있는 한 턴이 바뀌어도 같은 파일은 같은 ref */
   ref: string;
   id: string;
   fileName: string;
   summary: AttachmentSummary;
-  /** 이번 요청에 실려 온 것 */
+  /** 이번 요청으로 이 대화에 새로 묶인 것. 이미 묶여 있던 것을 다시 보내도 새것으로 치지 않는다 */
   isNew: boolean;
 }
 

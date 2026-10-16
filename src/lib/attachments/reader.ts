@@ -45,22 +45,29 @@ function escapeCell(cell: Cell | undefined): string {
  */
 export function tableAsMarkdown(
   table: ExtractedTable,
-  opts: { offset?: number; limit?: number } = {}
+  opts: { offset?: number; limit?: number; maxChars?: number } = {}
 ): string {
   const body = table.cells.slice(table.header.to + 1);
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const limit = Math.max(1, Math.floor(opts.limit ?? READ_TABLE_ROWS));
+  const maxChars = opts.maxChars ?? Number.POSITIVE_INFINITY;
   const page = body.slice(offset, offset + limit);
   const width = table.columns.length;
 
   const line = (cells: string[]) => `| ${cells.join(' | ')} |`;
-  const out = [
-    line(table.columns.map((c) => escapeCell(c))),
-    line(table.columns.map(() => '---')),
-    ...page.map((row) => line(Array.from({ length: width }, (_, c) => escapeCell(row[c])))),
-  ];
-  const rest = body.length - (offset + page.length);
-  if (rest > 0) out.push(`… 이하 ${rest}행 더 있음 (offset=${offset + page.length}로 이어 읽기)`);
+  const out = [line(table.columns.map((c) => escapeCell(c))), line(table.columns.map(() => '---'))];
+  let size = out[0].length + out[1].length + 2;
+  let shown = 0;
+  for (const row of page) {
+    const l = line(Array.from({ length: width }, (_, c) => escapeCell(row[c])));
+    // 한 행은 넘더라도 낸다 — 아무 행도 못 내면 이어 읽기가 제자리에서 돈다
+    if (shown > 0 && size + l.length + 1 > maxChars) break;
+    out.push(l);
+    size += l.length + 1;
+    shown += 1;
+  }
+  const rest = body.length - (offset + shown);
+  if (rest > 0) out.push(`… 이하 ${rest}행 더 있음 (offset=${offset + shown}로 이어 읽기)`);
   return out.join('\n');
 }
 

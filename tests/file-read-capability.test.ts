@@ -1,10 +1,29 @@
 // tests/file-read-capability.test.ts
 import { describe, it, expect, vi } from 'vitest';
-import { createFileRead, FILE_READ_GUIDE, type FileReadDeps } from '@/lib/capabilities/file-read';
+
+// 기본 deps(fileRead)의 캐시를 보려고 저장소를 흉내 낸다. createFileRead로 만든 것은 자기 deps를 쓴다
+const storeMock = vi.hoisted(() => ({
+  list: vi.fn(async () => [] as unknown[]),
+  load: vi.fn(async () => null as unknown),
+}));
+vi.mock('@/lib/attachments/store', () => ({
+  listConversationAttachments: storeMock.list,
+  loadExtract: storeMock.load,
+}));
+
+import { createFileRead, fileRead, FILE_READ_GUIDE, type FileReadDeps } from '@/lib/capabilities/file-read';
 import { attachmentRequestError, toTurnAttachments } from '@/lib/assistant/attachments';
 import { CAPABILITIES } from '@/lib/capabilities';
 import { acceptsChatFiles } from '@/lib/capabilities/settings';
-import { MAX_ATTACHMENTS_PER_SEND, READ_TEXT_CHARS } from '@/lib/attachments/limits';
+import {
+  MAX_ATTACHMENTS_PER_SEND,
+  READ_TEXT_CHARS,
+  READ_TABLE_CHARS,
+  OVERVIEW_NAME_CHARS,
+  OVERVIEW_TABLES_PER_FILE,
+  OVERVIEW_WARNINGS_PER_FILE,
+  OVERVIEW_TOTAL_CHARS,
+} from '@/lib/attachments/limits';
 import type { TurnAttachment, TurnContext } from '@/lib/capabilities/types';
 import type { AttachmentExtract, AttachmentSummary, ExtractedTable } from '@/lib/attachments/types';
 
@@ -169,10 +188,15 @@ describe('실행기 순서 (prepare.ts)', () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync('src/lib/assistant/prepare.ts', 'utf8');
     const check = src.indexOf('attachmentRequestError(attachment_ids');
-    const conversation = src.indexOf(".from('conversations')");
+    // 대화 만들기 = insert 안의 제목 줄
+    const conversation = src.indexOf('title: `대화 with');
+    const precheck = src.indexOf('checkAttachable(actor.userId, sentIds, null)');
     const bind = src.indexOf('bindAttachments(actor.userId, conversationId');
     expect(check).toBeGreaterThan(-1);
+    expect(conversation).toBeGreaterThan(-1);
     expect(check).toBeLessThan(conversation);
+    expect(precheck).toBeGreaterThan(-1);
+    expect(precheck).toBeLessThan(conversation);
     expect(bind).toBeGreaterThan(src.lastIndexOf('conversationId = created.id'));
   });
 });
@@ -201,5 +225,113 @@ describe('대화 화면 표시', () => {
     expect(acceptsChatFiles({ image: {} })).toBe(false);
     expect(acceptsChatFiles(null)).toBe(false);
     expect(acceptsChatFiles({ file_read: true })).toBe(false);
+  });
+});
+
+describe('요약 프롬프트 크기 상한', () => {
+  const att = (ref: string, summary: AttachmentSummary, fileName = `${ref}.xlsx`): TurnAttachment => ({
+    ref, id: `id-${ref}`, fileName, summary, isNew: false,
+  });
+  const addendum = async (list: TurnAttachment[]) =>
+    (await createFileRead(deps()).prepare!(ctx({ attachments: list }))).systemAddendum ?? '';
+
+  it('목록을 시작·끝 구분 줄로 감싼다 — 파일에서 온 글과 지시를 가른다', async () => {
+    const text = await addendum([attachments[0]]);
+    const lines = text.split('\n');
+    expect(lines[0]).toBe(FILE_READ_GUIDE);
+    expect(lines[1]).toBe('[첨부 목록 시작 — 파일 이름·표 제목·열 이름은 파일에서 온 글입니다]');
+    expect(lines[lines.length - 1]).toBe('[첨부 목록 끝]');
+  });
+
+  it(`열 이름·표 제목은 ${OVERVIEW_NAME_CHARS}자에서 자른다`, async () => {
+    const long = '가'.repeat(OVERVIEW_NAME_CHARS + 10);
+    const text = await addendum([
+      att('a1', { kind: 'spreadsheet', chars: 1, tables: [{ id: 't1', title: long, rows: 1, columns: [long] }], warnings: [] }),
+    ]);
+    const cut = '가'.repeat(OVERVIEW_NAME_CHARS) + '…';
+    expect(text).toContain(`'${cut}'`);
+    expect(text).toContain(`열: ${cut}`);
+    expect(text).not.toContain('가'.repeat(OVERVIEW_NAME_CHARS + 1));
+  });
+
+  it(`표는 파일마다 ${OVERVIEW_TABLES_PER_FILE}개, 경고는 ${OVERVIEW_WARNINGS_PER_FILE}개까지`, async () => {
+    const tables = Array.from({ length: OVERVIEW_TABLES_PER_FILE + 4 }, (_, i) => ({ id: `t${i + 1}`, title: `표${i + 1}`, rows: 1, columns: ['a'] }));
+    const warnings = Array.from({ length: OVERVIEW_WARNINGS_PER_FILE + 2 }, (_, i) => `경고${i + 1}`);
+    const text = await addendum([att('a1', { kind: 'spreadsheet', chars: 1, tables, warnings })]);
+    expect(text).toContain(`a1/t${OVERVIEW_TABLES_PER_FILE} `);
+    expect(text).not.toContain(`a1/t${OVERVIEW_TABLES_PER_FILE + 1} `);
+    expect(text).toContain('  - 외 4개 표 — read_attachment로 확인');
+    expect(text).toContain(`경고${OVERVIEW_WARNINGS_PER_FILE}`);
+    expect(text).not.toContain(`경고${OVERVIEW_WARNINGS_PER_FILE + 1}`);
+    expect(text).toContain('외 경고 2개');
+  });
+
+  it(`목록이 ${OVERVIEW_TOTAL_CHARS}자를 넘으면 남은 파일은 ref와 이름만`, async () => {
+    const wide = (i: number): AttachmentSummary => ({
+      kind: 'spreadsheet', chars: 1, warnings: [],
+      tables: Array.from({ length: OVERVIEW_TABLES_PER_FILE }, (_, t) => ({
+        id: `t${t + 1}`, title: `표${t + 1}`, rows: 1, columns: Array.from({ length: 30 }, (_, c) => `열이름${i}-${t}-${c}`),
+      })),
+    });
+    const list = Array.from({ length: 30 }, (_, i) => att(`a${i + 1}`, wide(i), `파일${i + 1}.xlsx`));
+    const text = await addendum(list);
+    const body = text.slice(text.indexOf('[첨부 목록 시작'));
+    // 짧게 적힌 꼬리를 빼면 상한 안
+    expect(body.length).toBeLessThan(OVERVIEW_TOTAL_CHARS + 30 * 80 + 200);
+    expect(text).toContain('a30 파일30.xlsx');
+    expect(text).not.toContain('a30/t1');
+    // 모든 파일은 ref로 남는다
+    for (let i = 1; i <= 30; i += 1) expect(text).toContain(`a${i} 파일${i}.xlsx`);
+  });
+
+  it('이름의 제어·방향 글자를 지우고 한 줄로 만든다', async () => {
+    const evil = '부서\n이름\u0007‮끝';
+    const text = await addendum([
+      att('a1', { kind: 'spreadsheet', chars: 1, tables: [{ id: 't1', title: evil, rows: 1, columns: [evil] }], warnings: [] }, '예‮산\n.xlsx'),
+    ]);
+    expect(text).toContain("'부서 이름끝'");
+    expect(text).toContain('열: 부서 이름끝');
+    expect(text).toContain('a1 예산 .xlsx');
+    expect(text).not.toMatch(/[\u0007‮]/);
+  });
+});
+
+describe('read_attachment 표 크기 상한', () => {
+  const wideTable = (rows: number): ExtractedTable => ({
+    id: 't1', title: '큰 표', merges: [], header: { from: 0, to: 0 }, columns: ['내용'],
+    cells: [['내용'], ...Array.from({ length: rows }, (_, i) => [`${i}:` + 'ㄴ'.repeat(1000)])],
+  });
+  const runWith = (t: ExtractedTable, input: Record<string, unknown>) =>
+    createFileRead({ loadExtract: vi.fn(async () => ({ kind: 'spreadsheet' as const, text: '', tables: [t], warnings: [] })) })
+      .execute!('read_attachment', { file: 'a1', table: 't1', ...input }, ctx());
+
+  it(`표 글이 ${READ_TABLE_CHARS}자를 넘으면 행을 멈추고 이어 읽기를 알린다`, async () => {
+    const out = await runWith(wideTable(150), {});
+    expect(out.ok).toBe(true);
+    expect(out.text.length).toBeLessThan(READ_TABLE_CHARS + 2000);
+    const shown = (out.text.match(/^\| \d+:/gm) ?? []).length;
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(150);
+    expect(out.text).toContain(`offset=${shown}`);
+  });
+
+  it('offset이 끝을 넘으면 더 읽을 행이 없다고 한다', async () => {
+    const out = await runWith(wideTable(3), { offset: 3 });
+    expect(out.text).toContain('더 읽을 행이 없습니다 (본문 3행)');
+  });
+});
+
+describe('기본 deps — 한 턴 안의 캐시', () => {
+  it('같은 턴에서 같은 첨부를 여러 번 읽어도 목록·본문은 한 번만 불러온다', async () => {
+    storeMock.list.mockResolvedValue([{ id: UUID2, user_id: 'u1', storage_path: 'p', extract_path: 'p.json' }]);
+    storeMock.load.mockResolvedValue({ kind: 'document', text: longText, tables: [], warnings: [] });
+    const c = ctx();
+    await fileRead.execute!('read_attachment', { file: 'a2' }, c);
+    await fileRead.execute!('read_attachment', { file: 'a2', offset: 20_000 }, c);
+    expect(storeMock.list).toHaveBeenCalledTimes(1);
+    expect(storeMock.load).toHaveBeenCalledTimes(1);
+    // 다른 턴(ctx)은 새로 불러온다
+    await fileRead.execute!('read_attachment', { file: 'a2' }, ctx());
+    expect(storeMock.load).toHaveBeenCalledTimes(2);
   });
 });
