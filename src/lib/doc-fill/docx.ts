@@ -32,6 +32,8 @@ interface DocxPara {
   end: number;
   /** 문단 속성 원문. 없으면 null */
   pPr: string | null;
+  /** pPr 원문의 시작 위치 */
+  pPrStart: number | null;
   pieces: DocxPiece[];
   text: string;
 }
@@ -79,7 +81,7 @@ function scanDocxParagraphs(xml: string, prefix: string): DocxPara[] {
         stack.push({ start: tag.start, pPr: null, pPrDepth: 0, pPrStart: 0, pieces: [], rDepth: 0, rPr: null, rPrDepth: 0, rPrStart: 0 });
       } else if (tag.kind === 'close' && top) {
         stack.pop();
-        out.push({ start: top.start, end: tag.end, pPr: top.pPr, pieces: top.pieces, text: top.pieces.map((p) => p.text).join('') });
+        out.push({ start: top.start, end: tag.end, pPr: top.pPr, pPrStart: top.pPr === null ? null : top.pPrStart, pieces: top.pieces, text: top.pieces.map((p) => p.text).join('') });
       }
       continue;
     }
@@ -92,6 +94,7 @@ function scanDocxParagraphs(xml: string, prefix: string): DocxPara[] {
         top.pPrDepth--;
         if (top.pPrDepth === 0 && top.pPr === null) top.pPr = xml.slice(top.pPrStart, tag.end);
       } else if (top.pPrDepth === 0 && top.pPr === null) {
+        top.pPrStart = tag.start;
         top.pPr = xml.slice(tag.start, tag.end);
       }
     } else if (tag.name === R) {
@@ -146,19 +149,21 @@ function labelsInOrder(paras: DocxPara[]): string[] {
   return labels;
 }
 
-/** 여분 줄 문단 속성: 구역 설정·쪽 나눔·번호 매김은 첫 문단에서만 — 줄마다 새 쪽·새 번호가 되면 안 된다 */
-function continuationPPr(pPr: string | null, prefix: string): string {
-  if (pPr === null) return '';
-  const drop = new Set([`${prefix}:sectPr`, `${prefix}:pageBreakBefore`, `${prefix}:numPr`]);
-  const tags = scanTags(pPr);
+/**
+ * 지정한 요소를 뺀다(자기 닫힘이든 안에 내용이 있든, 짝이 맞는 닫는 태그까지). opaque 요소는 통째로 건너뛰어
+ * 그 안은 보지 않는다. 뺀 요소의 원문도 돌려준다
+ */
+function removeElements(xml: string, drop: Set<string>, opaque: Set<string> = new Set()): { out: string; removed: string[] } {
+  const tags = scanTags(xml);
+  const removed: string[] = [];
   let out = '';
   let cursor = 0;
   for (let i = 0; i < tags.length; i++) {
     const tag = tags[i];
-    if (!drop.has(tag.name) || tag.kind === 'close') continue;
+    if (tag.kind === 'close' || !(drop.has(tag.name) || opaque.has(tag.name))) continue;
     let end = tag.end;
     if (tag.kind === 'open') {
-      // 같은 이름이 안에 또 있을 수 있어(sectPrChange 등) 짝이 맞는 닫는 태그까지 센다
+      // 같은 이름이 안에 또 있을 수 있어 짝이 맞는 닫는 태그까지 센다
       let depth = 1;
       for (let j = i + 1; j < tags.length && depth > 0; j++) {
         if (tags[j].name !== tag.name) continue;
@@ -170,17 +175,40 @@ function continuationPPr(pPr: string | null, prefix: string): string {
         }
       }
     }
-    out += pPr.slice(cursor, tag.start);
-    cursor = end;
+    if (drop.has(tag.name)) {
+      out += xml.slice(cursor, tag.start);
+      removed.push(xml.slice(tag.start, end));
+      cursor = end;
+    }
   }
-  return out + pPr.slice(cursor);
+  return { out: out + xml.slice(cursor), removed };
+}
+
+/**
+ * 여분 줄 문단 속성. 쪽 나눔·번호 매김은 첫 문단에서만 — 줄마다 새 쪽·새 번호가 되면 안 된다.
+ * 변경 추적 표시(pPrChange, 문단 부호의 ins/del, rPrChange)도 뺀다: 같은 변경 번호가 겹치고,
+ * 복사한 문단 부호의 del은 변경을 수락할 때 문단을 합쳐 버린다.
+ * 구역 설정(sectPr)은 DOCX에서 '이 문단 뒤'에서 구역이 끝난다는 뜻이라, 마지막 이어 붙인 문단에 달아야
+ * 이어 붙인 줄이 구역 나눔 앞에 남는다 — sectPr 인자가 그것이다
+ */
+function continuationPPr(pPr: string | null, prefix: string, sectPr: string | null): string {
+  const drop = new Set(
+    ['sectPr', 'pageBreakBefore', 'numPr', 'pPrChange', 'rPrChange', 'ins', 'del', 'moveFrom', 'moveTo'].map((n) => `${prefix}:${n}`)
+  );
+  const base = pPr === null ? '' : removeElements(pPr, drop).out;
+  if (sectPr === null) return base;
+  const close = `</${prefix}:pPr>`;
+  if (base === '' || /^<[^>]*\/>$/.test(base)) return `<${prefix}:pPr>${sectPr}${close}`;
+  const at = base.lastIndexOf(close);
+  return at < 0 ? base : base.slice(0, at) + sectPr + base.slice(at);
 }
 
 const textXml = (s: string) => escapeXml(stripInvalidXmlChars(s));
 
-function freshParagraph(pPr: string | null, rPr: string | null, line: string, prefix: string): string {
+function freshParagraph(pPr: string | null, rPr: string | null, line: string, prefix: string, sectPr: string | null): string {
+  const runPr = rPr === null ? '' : removeElements(rPr, new Set([`${prefix}:rPrChange`])).out;
   return (
-    `<${prefix}:p>${continuationPPr(pPr, prefix)}<${prefix}:r>${rPr ?? ''}` +
+    `<${prefix}:p>${continuationPPr(pPr, prefix, sectPr)}<${prefix}:r>${runPr}` +
     `<${prefix}:t xml:space="preserve">${textXml(line)}</${prefix}:t></${prefix}:r></${prefix}:p>`
   );
 }
@@ -191,7 +219,7 @@ function planParagraph(para: DocxPara, values: Map<string, string>, prefix: stri
 
   const offsets = pieceOffsets(para);
   const texts = para.pieces.map((p) => p.text);
-  const extraByMarker: string[][] = [];
+  const extraByMarker: { rPr: string | null; line: string }[][] = [];
 
   // 뒤에서부터 바꾼다 — 앞쪽 위치가 그대로 남는다
   for (const m of [...markers].reverse()) {
@@ -199,7 +227,7 @@ function planParagraph(para: DocxPara, values: Map<string, string>, prefix: stri
     const lines = valueLines(values.get(m.label)!);
     let home = offsets.length - 1;
     while (home > 0 && offsets[home] > m.start) home--;
-    extraByMarker.unshift(lines.slice(1).map((line) => freshParagraph(para.pPr, para.pieces[home].rPr, line, prefix)));
+    extraByMarker.unshift(lines.slice(1).map((line) => ({ rPr: para.pieces[home].rPr, line })));
     let first = true;
     for (let i = 0; i < para.pieces.length; i++) {
       const pieceStart = offsets[i];
@@ -222,9 +250,23 @@ function planParagraph(para: DocxPara, values: Map<string, string>, prefix: stri
       text: `<${p.tagName} xml:space="preserve">${textXml(texts[i])}</${p.tagName}>`,
     });
   });
-  // 여분 줄은 이 문단이 닫힌 바로 뒤(글상자 안이면 그 안)에 새 문단으로 잇는다
-  const extras = extraByMarker.flat().join('');
-  if (extras) edits.push({ start: para.end, end: para.end, text: extras });
+  const extras = extraByMarker.flat();
+  if (extras.length > 0) {
+    // 구역 나눔은 이 문단 '뒤'에서 일어난다. 원래 문단에서 떼어 마지막 이어 붙인 문단으로 옮긴다
+    let sectPr: string | null = null;
+    if (para.pPr !== null && para.pPrStart !== null) {
+      const split = removeElements(para.pPr, new Set([`${prefix}:sectPr`]), new Set([`${prefix}:pPrChange`]));
+      if (split.removed.length > 0) {
+        sectPr = split.removed.join('');
+        edits.push({ start: para.pPrStart, end: para.pPrStart + para.pPr.length, text: split.out });
+      }
+    }
+    // 여분 줄은 이 문단이 닫힌 바로 뒤(글상자 안이면 그 안)에 새 문단으로 잇는다
+    const built = extras
+      .map((x, i) => freshParagraph(para.pPr, x.rPr, x.line, prefix, i === extras.length - 1 ? sectPr : null))
+      .join('');
+    edits.push({ start: para.end, end: para.end, text: built });
+  }
   return edits;
 }
 

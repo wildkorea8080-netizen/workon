@@ -57,9 +57,8 @@ describe('DOCX 표시 채우기', () => {
     expect(await textOf(r.bytes)).toContain('{{나}}');
   });
 
-  it('여분 줄은 새 문단 — pPr의 sectPr·pageBreakBefore·numPr는 넘기지 않고 rPr는 표시의 것', async () => {
-    const pPr =
-      '<w:pPr><w:pStyle w:val="Body"/><w:numPr><w:ilvl w:val="0"/></w:numPr><w:pageBreakBefore/><w:sectPr/></w:pPr>';
+  it('여분 줄은 새 문단 — pPr의 pageBreakBefore·numPr는 넘기지 않고 rPr는 표시의 것', async () => {
+    const pPr = '<w:pPr><w:pStyle w:val="Body"/><w:numPr><w:ilvl w:val="0"/></w:numPr><w:pageBreakBefore/></w:pPr>';
     const bytes = await buildDocx(wp('{{본문}}', { pPr, rPr: '<w:rPr><w:b/></w:rPr>' }));
     const r = await fillDocx(bytes, new Map([['본문', 'a\nb']]));
     const xml = await entry(r.bytes, 'word/document.xml');
@@ -67,16 +66,58 @@ describe('DOCX 표시 채우기', () => {
     expect(paras).toHaveLength(2);
     // 첫 문단은 원래 pPr 그대로
     expect(paras[0]).toContain('<w:numPr>');
-    expect(paras[0]).toContain('<w:sectPr/>');
+    expect(paras[0]).toContain('<w:pageBreakBefore/>');
     // 둘째 문단
     expect(paras[1]).toContain('w:pStyle');
     expect(paras[1]).not.toContain('numPr');
     expect(paras[1]).not.toContain('pageBreakBefore');
-    expect(paras[1]).not.toContain('sectPr');
     expect(paras[1]).toContain('<w:b/>');
     expect(paras[1]).toContain('>b</w:t>');
-    expect(count(xml, 'sectPr')).toBe(1);
     expect(await textOf(r.bytes)).toContain('a');
+  });
+
+  it('구역 나눔(sectPr)은 마지막 이어 붙인 문단으로 옮긴다', async () => {
+    const pPr = '<w:pPr><w:pStyle w:val="Body"/><w:sectPr><w:pgSz w:w="11906"/></w:sectPr></w:pPr>';
+    const bytes = await buildDocx(wp('{{본문}}', { pPr }));
+    const r = await fillDocx(bytes, new Map([['본문', 'a\nb\nc']]));
+    const xml = await entry(r.bytes, 'word/document.xml');
+    const paras = xml.match(/<w:p>.*?<\/w:p>/g)!;
+    expect(paras).toHaveLength(3);
+    expect(count(xml, 'sectPr>')).toBe(2); // 여는 태그 하나 + 닫는 태그 하나 = 구역 설정 1개
+    expect(count(xml, '<w:sectPr>')).toBe(1);
+    expect(paras[0]).not.toContain('sectPr');
+    expect(paras[1]).not.toContain('sectPr');
+    expect(paras[2]).toContain('<w:sectPr><w:pgSz w:w="11906"/></w:sectPr>');
+    expect(paras[2]).toContain('>c</w:t>');
+    expect(paras[2]).toContain('w:pStyle');
+  });
+
+  it('여러 줄이 아니면 sectPr는 원래 문단에 그대로', async () => {
+    const pPr = '<w:pPr><w:sectPr><w:pgSz w:w="11906"/></w:sectPr></w:pPr>';
+    const r = await fillDocx(await buildDocx(wp('{{본문}}', { pPr })), new Map([['본문', 'a']]));
+    const xml = await entry(r.bytes, 'word/document.xml');
+    expect(xml.match(/<w:p>.*?<\/w:p>/g)).toHaveLength(1);
+    expect(xml).toContain('<w:pPr><w:sectPr><w:pgSz w:w="11906"/></w:sectPr></w:pPr>');
+  });
+
+  it('pPr에 sectPr만 있어도 마지막 문단에 pPr을 만들어 단다', async () => {
+    const r = await fillDocx(await buildDocx(wp('{{본문}}', { pPr: '<w:pPr><w:sectPr/></w:pPr>' })), new Map([['본문', 'a\nb']]));
+    const paras = (await entry(r.bytes, 'word/document.xml')).match(/<w:p>.*?<\/w:p>/g)!;
+    expect(paras[0]).not.toContain('sectPr');
+    expect(paras[1]).toContain('<w:pPr><w:sectPr/></w:pPr>');
+  });
+
+  it('복사본에서 변경 추적 표시를 뺀다 — 원래 문단은 그대로', async () => {
+    const pPr =
+      '<w:pPr><w:pStyle w:val="Body"/><w:rPr><w:del w:id="1" w:author="x"/><w:b/></w:rPr><w:pPrChange w:id="2" w:author="x"><w:pPr><w:jc w:val="left"/></w:pPr></w:pPrChange></w:pPr>';
+    const rPr = '<w:rPr><w:i/><w:rPrChange w:id="3" w:author="x"><w:rPr/></w:rPrChange></w:rPr>';
+    const r = await fillDocx(await buildDocx(wp('{{본문}}', { pPr, rPr })), new Map([['본문', 'a\nb']]));
+    const paras = (await entry(r.bytes, 'word/document.xml')).match(/<w:p>.*?<\/w:p>/g)!;
+    for (const tag of ['w:del ', 'pPrChange', 'rPrChange']) expect(paras[0]).toContain(tag);
+    for (const tag of ['w:del', 'w:ins', 'pPrChange', 'rPrChange']) expect(paras[1]).not.toContain(tag);
+    expect(paras[1]).toContain('<w:b/>');
+    expect(paras[1]).toContain('<w:i/>');
+    expect(paras[1]).toContain('w:pStyle');
   });
 
   it('pPr·rPr가 없으면 그 부분 없이 새 문단을 만든다', async () => {
