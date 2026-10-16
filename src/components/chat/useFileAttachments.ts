@@ -23,10 +23,12 @@ const UPLOAD_CONCURRENCY = 3;
 
 let chipSeq = 0;
 
+function deleteById(id: string) {
+  void fetch(`/api/attachments/${id}`, { method: 'DELETE' }).catch(() => {});
+}
+
 function deleteOnServer(chip: FileChip) {
-  if (chip.stage === 'ready' && chip.attachment) {
-    void fetch(`/api/attachments/${chip.attachment.id}`, { method: 'DELETE' }).catch(() => {});
-  }
+  if (chip.stage === 'ready' && chip.attachment) deleteById(chip.attachment.id);
 }
 
 /**
@@ -52,6 +54,11 @@ export function useFileAttachments(enabled: boolean) {
       running.current += 1;
       void uploadAttachment(next.file, (stage) => patchChip(next.key, { stage }))
         .then((result) => {
+          // 올리는 사이 칩이 사라졌다(비서가 바뀜·비움). 서버에 읽힌 첨부가 남지 않게 지운다
+          if (!chipsRef.current.some((c) => c.key === next.key)) {
+            if (result.ok && result.attachment.status === 'ready') deleteById(result.attachment.id);
+            return;
+          }
           if (!result.ok) {
             patchChip(next.key, { stage: 'failed', error: result.message });
           } else if (result.attachment.status === 'ready') {
@@ -120,7 +127,20 @@ export function useFileAttachments(enabled: boolean) {
   /** 보낸 뒤 비운다. 서버 기록은 대화에 묶였으므로 지우지 않는다 */
   const clear = useCallback(() => {
     setNotice(null);
+    chipsRef.current = [];
     setChips([]);
+  }, []);
+
+  /**
+   * 보내기가 스트림 시작 전에 거절됐을 때 준비된 칩을 되돌린다. 서버 기록은 아직 안 묶인 채 살아 있다.
+   * 앞에 두고, 이미 있는 첨부는 겹치지 않게 거른다.
+   */
+  const restore = useCallback((restored: FileChip[]) => {
+    const present = new Set(chipsRef.current.map((c) => c.attachment?.id).filter(Boolean));
+    const fresh = restored.filter((c) => c.stage === 'ready' && c.attachment && !present.has(c.attachment.id));
+    if (fresh.length === 0) return;
+    chipsRef.current = [...fresh, ...chipsRef.current];
+    setChips(chipsRef.current);
   }, []);
 
   // 파일을 받지 않는 비서로 바뀌면 붙여 둔 것을 놓는다(보내면 서버가 거절한다)
@@ -128,6 +148,7 @@ export function useFileAttachments(enabled: boolean) {
     if (enabled) return;
     chipsRef.current.forEach(deleteOnServer);
     queue.current = [];
+    chipsRef.current = [];
     setChips((prev) => (prev.length > 0 ? [] : prev));
   }, [enabled]);
 
@@ -136,5 +157,5 @@ export function useFileAttachments(enabled: boolean) {
     .filter((c) => c.stage === 'ready' && c.attachment)
     .map((c) => c.attachment!.id);
 
-  return { chips, notice, busy, readyIds, addFiles, remove, clear };
+  return { chips, notice, busy, readyIds, addFiles, remove, clear, restore };
 }

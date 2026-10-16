@@ -11,8 +11,10 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_SEND = 10;
 export const MAX_ATTACHMENTS_PER_CONVERSATION = 30;
 /**
- * 보내지 않은 첨부(대화에 안 묶인 것, 24시간 안, 상태 무관) 상한. 서명 업로드 주소는 크기도 개수도
- * 막지 않으므로 발급 수를 여기서 막는다. 거부·삭제로 남은 기록(failed)도 센다 — 그 주소도 살아 있다.
+ * 보내지 않은 첨부(대화에 안 묶인 것) 상한. 서명 업로드 주소는 크기도 개수도 막지 않으므로 발급 수를 여기서 막는다.
+ * 센 것: 24시간(ORPHAN_TTL_MS) 안의 pending·ready, 그리고 서명 주소가 아직 살아 있는
+ * TOMBSTONE_WINDOW_MS 안의 failed 묘비(거부·삭제로 남은 기록 — 그 주소로는 아직 올릴 수 있다).
+ * 시한이 지난 failed는 세지 않는다 — 안 그러면 올리기가 실패한 사용자가 하루 동안 갇힌다.
  */
 export const MAX_PENDING_ATTACHMENTS = 20;
 
@@ -42,6 +44,11 @@ export const OVERVIEW_TOTAL_CHARS = 8000;
 export const CONFIRM_WINDOW_MS = 10 * 60 * 1000;
 /** 대화에 붙지 못한 채 남은 첨부를 지우는 시한. */
 export const ORPHAN_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * 서명 업로드 주소는 2시간 살아 있다(Supabase). 거부·삭제로 failed가 된 첨부는 그 시한 + 여유 10분이 지나면
+ * 더 올라올 수 없으므로 상한에서 빼고 정리한다. 그 전에는 지우면 뒤늦게 올라온 객체가 기록 없이 남는다.
+ */
+export const TOMBSTONE_WINDOW_MS = (2 * 60 + 10) * 60 * 1000;
 
 export const ATTACHMENT_EXTENSIONS = [
   '.xlsx',

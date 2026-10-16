@@ -211,12 +211,12 @@ export default function ChatInterface({
     if (others.length > 0 && !canAttachFiles) {
       setImageError('이 비서는 파일을 읽지 않습니다. 사진만 첨부할 수 있습니다.');
     }
-    if (images.length > 0 && canAttachImages) void addImages(images);
     if (others.length > 0 && canAttachFiles) fileAttach.addFiles(others);
+    if (images.length > 0 && canAttachImages) void addImages(images);
   };
 
+  // 오류 문구는 handlePicked가 비운다 - 여기서 비우면 섞어 고른 파일의 안내가 지워진다
   const addImages = async (picked: File[]) => {
-    setImageError(null);
     if (!canAttachImages) return;
     if (picked.length === 0) return;
 
@@ -269,10 +269,14 @@ export default function ChatInterface({
       return;
     }
 
+    // 파일만 보낼 때 서버가 저장하는 문장과 같게 보인다 - 지난 대화를 열어도 같은 화면이 된다
+    const fileOnlyText = '첨부한 파일을 살펴보고 요약해 주세요.';
+    // 거절되면 되돌릴 준비된 칩(clear 전에 잡아 둔다)
+    const sentChips = fileAttach.chips.filter(c => c.stage === 'ready' && c.attachment);
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputMessage.trim(),
+      content: inputMessage.trim() || (fileIds.length > 0 ? fileOnlyText : ''),
       imagePreviews: pendingImages.map(p => p.preview),
       attachments: fileAttach.chips
         .filter(c => c.stage === 'ready' && c.attachment)
@@ -300,9 +304,7 @@ export default function ChatInterface({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent_id: selectedAgent.id,
-          message:
-            userMsg.content ||
-            (fileIds.length > 0 ? '첨부한 파일을 살펴보고 요약해 주세요.' : '이 이미지를 설명해주세요.'),
+          message: userMsg.content || '이 이미지를 설명해주세요.',
           conversation_id: conversationId,
           images: images.length > 0 ? images : undefined,
           attachment_ids: fileIds.length > 0 ? fileIds : undefined,
@@ -312,6 +314,8 @@ export default function ChatInterface({
       // 스트림 시작 전 실패는 JSON으로 돌아온다
       if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
         const result = await res.json().catch(() => null);
+        // 스트림이 시작되기 전에 거절됐다 - 올려 둔 파일은 서버에 안 묶인 채 있으니 칩을 돌려 다시 보낼 수 있게 한다
+        fileAttach.restore(sentChips);
         setMessages(prev => [...prev, {
           id: assistantId, role: 'assistant', content: '',
           error: result?.error?.message || '오류가 발생했습니다.',
@@ -609,7 +613,7 @@ export default function ChatInterface({
           <p className="mb-2 text-xs text-red-600">{imageError}</p>
         )}
         {fileAttach.notice && (
-          <p className="mb-2 text-xs text-red-600">{fileAttach.notice}</p>
+          <p role="alert" className="mb-2 text-xs text-red-600">{fileAttach.notice}</p>
         )}
 
         {canAttachFiles && conversationId && (

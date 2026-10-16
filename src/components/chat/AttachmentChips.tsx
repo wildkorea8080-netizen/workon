@@ -28,9 +28,9 @@ export function PendingFileChips({
   chips: FileChip[];
   onRemove: (key: string) => void;
 }) {
-  if (chips.length === 0) return null;
+  // 읽는 장치가 바뀐 내용을 알리려면 영역이 먼저 있어야 해서 비어 있어도 그린다
   return (
-    <div className="mb-2 flex flex-col gap-1.5">
+    <div aria-live="polite" className={chips.length > 0 ? 'mb-2 flex flex-col gap-1.5' : undefined}>
       {chips.map((chip) => {
         const inProgress = chip.stage === 'uploading' || chip.stage === 'reading';
         const tone =

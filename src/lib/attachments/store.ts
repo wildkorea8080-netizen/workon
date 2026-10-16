@@ -10,6 +10,7 @@ import {
   MAX_ATTACHMENTS_PER_CONVERSATION,
   MAX_PENDING_ATTACHMENTS,
   ORPHAN_TTL_MS,
+  TOMBSTONE_WINDOW_MS,
   attachmentExtension,
   refusedFormatMessage,
 } from './limits';
@@ -185,18 +186,27 @@ export async function createUpload(
   // 별도 예약 작업 없이, 올릴 때마다 그 사용자의 묵은 첨부를 치운다(설계 4.7)
   await purgeOrphans(actor.userId, now);
 
-  // 서명 주소는 크기도 개수도 막지 않는다. 보내지 않은 첨부 수로 발급을 막는다 — 세지 못하면 닫는다
-  const { count, error: countError } = await supabaseAdmin
-    .from(TABLE)
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', actor.userId)
-    .is('conversation_id', null)
-    .gte('created_at', new Date(now - ORPHAN_TTL_MS).toISOString());
+  // 서명 주소는 크기도 개수도 막지 않는다. 보내지 않은 첨부 수로 발급을 막는다 — 세지 못하면 닫는다.
+  // pending·ready는 24시간, failed 묘비는 서명 주소가 살아 있는 동안만 센다(limits.ts)
+  const countUnbound = (statuses: string[], windowMs: number) =>
+    supabaseAdmin
+      .from(TABLE)
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', actor.userId)
+      .is('conversation_id', null)
+      .in('status', statuses)
+      .gte('created_at', new Date(now - windowMs).toISOString());
+  const [live, tombstones] = await Promise.all([
+    countUnbound(['pending', 'ready'], ORPHAN_TTL_MS),
+    countUnbound(['failed'], TOMBSTONE_WINDOW_MS),
+  ]);
+  const countError = live.error ?? tombstones.error;
   if (countError) {
     console.error('[attachments] 보내지 않은 첨부 수 조회 실패:', countError.message);
     return { ok: false, status: 500, message: MSG_RETRY };
   }
-  if ((count ?? 0) >= MAX_PENDING_ATTACHMENTS) return { ok: false, status: 429, message: MSG_TOO_MANY };
+  const count = (live.count ?? 0) + (tombstones.count ?? 0);
+  if (count >= MAX_PENDING_ATTACHMENTS) return { ok: false, status: 429, message: MSG_TOO_MANY };
 
   const id = randomUUID();
   const { storage } = attachmentPaths(actor.organizationId, actor.userId, id, ext);
@@ -615,22 +625,34 @@ export async function deleteConversationAttachments(conversationId: string): Pro
 }
 
 /**
- * 대화에 묶이지 못한 채 24시간 지난 첨부(안 보냄·pending·묘비)를 치운다. 실패해도 던지지 않는다 —
- * 정리 때문에 새 업로드가 막히면 안 된다.
+ * 대화에 묶이지 못한 채 남은 첨부를 치운다 — 24시간 지난 것(안 보냄·pending·묘비)과, 서명 주소 시한
+ * (TOMBSTONE_WINDOW_MS)이 지난 failed 묘비. 실패해도 던지지 않는다 — 정리 때문에 새 업로드가 막히면 안 된다.
  * ① 조건부로 묘비(failed)로 바꾸며 경로를 받는다 — 이제 아무도 묶을 수 없다
  * ② 원본·읽은 내용 객체를 지운다 ③ 지워졌을 때만 행을 지운다. 객체 삭제가 실패하면 행이 남아 다음에 다시 시도한다.
  */
 export async function purgeOrphans(userId: string, now: number): Promise<void> {
   try {
-    const cutoff = new Date(now - ORPHAN_TTL_MS).toISOString();
-    const { data, error } = await supabaseAdmin
+    const expired = await supabaseAdmin
       .from(TABLE)
       .update({ ...TOMBSTONE, error: MSG_EXPIRED })
       .eq('user_id', userId)
       .is('conversation_id', null)
-      .lt('created_at', cutoff)
+      .lt('created_at', new Date(now - ORPHAN_TTL_MS).toISOString())
       .select('id, storage_path, extract_path');
+    // 묘비는 서명 주소가 죽은 뒤에만 지운다 — 그 전에 지우면 뒤늦게 올라온 객체가 기록 없이 남는다
+    const tombstones = await supabaseAdmin
+      .from(TABLE)
+      .update({ ...TOMBSTONE, error: MSG_EXPIRED })
+      .eq('user_id', userId)
+      .is('conversation_id', null)
+      .eq('status', 'failed')
+      .lt('created_at', new Date(now - TOMBSTONE_WINDOW_MS).toISOString())
+      .select('id, storage_path, extract_path');
+    const error = expired.error ?? tombstones.error;
     if (error) throw new Error(error.message);
+    const data = [...(expired.data ?? []), ...(tombstones.data ?? [])].filter(
+      (r: { id: string }, i: number, all: { id: string }[]) => all.findIndex((o) => o.id === r.id) === i
+    );
     const rows = (data ?? []) as (StoredPaths & { id: string })[];
     if (rows.length === 0) return;
 

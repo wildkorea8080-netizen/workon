@@ -190,6 +190,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   CONFIRM_WINDOW_MS,
   ORPHAN_TTL_MS,
+  TOMBSTONE_WINDOW_MS,
   MAX_PENDING_ATTACHMENTS,
 } from '@/lib/attachments/limits';
 import { GET as listRoute } from '@/app/api/attachments/route';
@@ -325,6 +326,34 @@ describe('업로드 주소 발급', () => {
       ok: false, status: 429, message: '보내지 않은 첨부가 너무 많습니다. 정리한 뒤 다시 올려 주세요.',
     });
     expect(db.chat_attachments.length).toBe(before);
+  });
+
+  it('failed 묘비는 서명 주소가 살아 있는 동안만 센다 — 지나면 상한을 차지하지 않는다', async () => {
+    expect(TOMBSTONE_WINDOW_MS).toBe((2 * 60 + 10) * 60 * 1000);
+    // 3시간 지난 failed는 세지 않고 정리된다
+    const oldFailed = seed({ status: 'failed', created_at: ago(3 * 60 * 60 * 1000) });
+    objects.set(String(oldFailed.storage_path), Buffer.from('x'));
+    for (let i = 0; i < MAX_PENDING_ATTACHMENTS - 1; i += 1) seed({ status: 'failed' });
+    expect((await createUpload(actor, { fileName: 'a.csv', size: 10 })).ok).toBe(true);
+    expect(db.chat_attachments.some((r) => r.id === oldFailed.id)).toBe(false);
+    expect(objects.has(String(oldFailed.storage_path))).toBe(false);
+  });
+
+  it('1시간 지난 failed 묘비는 아직 세고 지우지 않는다(서명 주소가 살아 있다)', async () => {
+    const young = seed({ status: 'failed', created_at: ago(60 * 60 * 1000) });
+    objects.set(String(young.storage_path), Buffer.from('x'));
+    for (let i = 0; i < MAX_PENDING_ATTACHMENTS - 1; i += 1) seed({ status: 'pending' });
+    const res = await createUpload(actor, { fileName: 'a.csv', size: 10 });
+    expect(res).toMatchObject({ ok: false, status: 429 });
+    expect(db.chat_attachments.some((r) => r.id === young.id)).toBe(true);
+    expect(objects.has(String(young.storage_path))).toBe(true);
+  });
+
+  it('3시간 지난 pending은 24시간 안이라 계속 센다', async () => {
+    for (let i = 0; i < MAX_PENDING_ATTACHMENTS; i += 1) {
+      seed({ status: 'pending', created_at: ago(3 * 60 * 60 * 1000) });
+    }
+    expect(await createUpload(actor, { fileName: 'a.csv', size: 10 })).toMatchObject({ ok: false, status: 429 });
   });
 
   it('상한을 세지 못하면 발급하지 않는다', async () => {
@@ -732,6 +761,26 @@ describe('정리', () => {
     }
     expect(objects.has(String(bound.storage_path))).toBe(true);
     expect(removed.flat()).not.toContain(others.storage_path);
+  });
+
+  it('failed 묘비는 서명 주소 시한(2시간+여유)이 지나면 24시간 전에도 지운다', async () => {
+    const now = Date.now();
+    const staleFailed = seed({ status: 'failed', created_at: ago(TOMBSTONE_WINDOW_MS + 1000) });
+    const youngFailed = seed({ status: 'failed', created_at: ago(TOMBSTONE_WINDOW_MS - 60_000) });
+    const threeHourPending = seed({ status: 'pending', created_at: ago(3 * 60 * 60 * 1000) });
+    const threeHourReady = seed({ created_at: ago(3 * 60 * 60 * 1000) });
+    for (const r of [staleFailed, youngFailed]) {
+      objects.set(String(r.storage_path), Buffer.from('x'));
+      objects.set(sibling(r), Buffer.from('{}'));
+    }
+
+    await purgeOrphans('u1', now);
+    expect(db.chat_attachments.map((r) => r.id).sort()).toEqual(
+      [youngFailed.id, threeHourPending.id, threeHourReady.id].sort()
+    );
+    expect(objects.has(String(staleFailed.storage_path))).toBe(false);
+    expect(objects.has(sibling(staleFailed))).toBe(false);
+    expect(objects.has(String(youngFailed.storage_path))).toBe(true);
   });
 
   it('저장소 삭제가 실패하면 기록을 남겨 다음에 다시 지운다(묶을 수는 없다)', async () => {

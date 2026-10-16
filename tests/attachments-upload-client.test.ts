@@ -6,9 +6,10 @@ const from = vi.fn(() => ({ uploadToSignedUrl }));
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ storage: { from } }),
 }));
+const cfg = vi.hoisted(() => ({ url: 'https://example.supabase.co', anon: 'anon' }));
 vi.mock('@/lib/config-public', () => ({
-  PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-  PUBLIC_SUPABASE_ANON_KEY: 'anon',
+  get PUBLIC_SUPABASE_URL() { return cfg.url; },
+  get PUBLIC_SUPABASE_ANON_KEY() { return cfg.anon; },
   SUPABASE_DOCUMENTS_BUCKET: 'docs-bucket',
 }));
 
@@ -39,6 +40,8 @@ describe('uploadAttachment', () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+    cfg.url = 'https://example.supabase.co';
+    cfg.anon = 'anon';
     uploadToSignedUrl.mockReset();
     from.mockClear();
     vi.stubGlobal('fetch', fetchMock);
@@ -176,5 +179,17 @@ describe('uploadAttachment', () => {
     expect(empty.ok).toBe(false);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('공개 설정이 비어 있으면 주소 발급 전에 안내하고 멈춘다', async () => {
+    for (const blank of ['url', 'anon'] as const) {
+      cfg.url = 'https://example.supabase.co';
+      cfg.anon = 'anon';
+      cfg[blank] = '';
+      const result = await uploadAttachment(makeFile(), () => {});
+      expect(result).toEqual({ ok: false, message: '파일 올리기 설정이 없습니다. 관리자에게 문의하세요.' });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(uploadToSignedUrl).not.toHaveBeenCalled();
   });
 });

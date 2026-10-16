@@ -15,15 +15,13 @@ export type UploadResult = { ok: true; attachment: AttachmentRow } | { ok: false
 const NETWORK_ERROR = '네트워크 오류가 발생했습니다. 다시 시도해 주세요.';
 const UPLOAD_ERROR = '파일을 올리지 못했습니다. 다시 시도해 주세요.';
 
+const MISSING_CONFIG = '파일 올리기 설정이 없습니다. 관리자에게 문의하세요.';
+
 let client: SupabaseClient | null = null;
 /** 올리기는 서명된 주소(토큰)가 허락하므로 로그인 세션이 필요 없다. 브라우저에서 처음 쓸 때 만든다 */
 function storageClient(): SupabaseClient {
   if (!client) {
-    client = createClient(
-      PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-      PUBLIC_SUPABASE_ANON_KEY || 'placeholder',
-      { auth: { persistSession: false } }
-    );
+    client = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, { auth: { persistSession: false } });
   }
   return client;
 }
@@ -62,6 +60,9 @@ export async function uploadAttachment(
   const local = checkAttachmentFile(file);
   if (local) return { ok: false, message: local };
 
+  // 설정이 비면 주소 발급(서버 기록)부터 만들지 않는다 — 올릴 수 없는 첨부가 상한만 차지한다
+  if (!PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY) return { ok: false, message: MISSING_CONFIG };
+
   onStage('uploading');
   let issued: { id: string; path: string; token: string };
   try {
@@ -78,7 +79,9 @@ export async function uploadAttachment(
       .uploadToSignedUrl(issued.path, issued.token, file);
     if (error) throw error;
   } catch {
-    // 올리지 못한 첨부가 '보내지 않은 첨부' 상한을 차지하지 않게 비운다. 실패해도 24시간 뒤 정리된다
+    // 삭제하면 서버 기록이 바로 묘비(failed)가 된다 — 확인(읽기)을 시도할 일이 없고, 묘비는 서명 주소 시한
+    // (약 2시간)이 지나면 '보내지 않은 첨부' 상한에서 빠진다. 이 호출이 실패해도 기록은 pending으로 남아
+    // 24시간 뒤 정리된다(그동안 상한을 차지한다).
     void fetch(`/api/attachments/${issued.id}`, { method: 'DELETE' }).catch(() => {});
     return { ok: false, message: UPLOAD_ERROR };
   }
