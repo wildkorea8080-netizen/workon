@@ -1,4 +1,5 @@
 import * as CFB from 'cfb';
+import { deflateRaw } from 'pako';
 
 /**
  * 시험용 HWP 5.0. 저장소에 진짜 HWP 파일이 없어 레코드 바이트를 손으로 쌓는다.
@@ -50,9 +51,12 @@ export interface HwpCell {
 }
 
 export interface HwpTable {
+  /** TABLE 레코드가 선언한 크기 */
   rows: number;
   cols: number;
   cells: HwpCell[];
+  /** TABLE 레코드를 빼고 만든다(깨진 표) */
+  noInfo?: boolean;
 }
 
 /** 표를 품은 문단. level은 그 문단의 깊이 */
@@ -66,7 +70,7 @@ export function tablePara(t: HwpTable, level = 0, text = ''): Rec[] {
   const info = Buffer.alloc(18);
   info.writeUInt16LE(t.rows, 4);
   info.writeUInt16LE(t.cols, 6);
-  recs.push([TABLE, level + 2, info]);
+  if (!t.noInfo) recs.push([TABLE, level + 2, info]);
   for (const c of t.cells) {
     const lh = Buffer.alloc(34);
     lh.writeInt32LE(c.paras.length, 0);
@@ -85,13 +89,28 @@ export function tablePara(t: HwpTable, level = 0, text = ''): Rec[] {
 
 /** 무압축 HWP 5.0 컨테이너. 구역마다 레코드 배열 하나 */
 export function buildHwp(...sections: Rec[][]): Buffer {
+  return buildHwpWith({}, sections);
+}
+
+/**
+ * compressed면 한글처럼 구역을 zlib 헤더 없는 raw deflate로 담는다.
+ * 구역 자리에 바이트를 주면 그대로 담는다(깨진 구역 시험용)
+ */
+export function buildHwpWith(opts: { compressed?: boolean }, sections: (Rec[] | Uint8Array)[]): Buffer {
   const cfb = CFB.utils.cfb_new();
-  // FileHeader 36번째 바이트의 속성 플래그 0 = 압축 안 함
+  // FileHeader 36번째 바이트부터 4바이트가 속성 플래그. 0x01 = 압축
   const header = Buffer.alloc(256);
   header.write('HWP Document File', 0, 'ascii');
+  if (opts.compressed) header.writeUInt32LE(1, 36);
   CFB.utils.cfb_add(cfb, '/FileHeader', header);
-  sections.forEach((recs, i) => {
-    CFB.utils.cfb_add(cfb, `/BodyText/Section${i}`, Buffer.concat(recs.map(record)));
+  sections.forEach((sec, i) => {
+    let bytes: Uint8Array;
+    if (sec instanceof Uint8Array) bytes = sec;
+    else {
+      const raw = Buffer.concat(sec.map(record));
+      bytes = opts.compressed ? deflateRaw(raw) : raw;
+    }
+    CFB.utils.cfb_add(cfb, `/BodyText/Section${i}`, Buffer.from(bytes));
   });
   return CFB.write(cfb, { type: 'buffer' }) as Buffer;
 }

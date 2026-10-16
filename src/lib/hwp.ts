@@ -339,8 +339,15 @@ function maybeInflate(raw: Uint8Array, compressed: boolean): Uint8Array {
   }
 }
 
-/** 본문 구역(BodyText/Section0, 1, …)을 번호 순서대로 풀어 돌려준다 */
-function readBodySections(buffer: Buffer): Uint8Array[] {
+/**
+ * 본문 구역(BodyText/Section0, 1, …)을 번호 순서대로 풀어 돌려준다.
+ * 풀지 못한 구역은 건너뛰고 그 번호를 skipped에 남긴다 — 색인은 조용히 넘어가지만
+ * 계산용 표는 빠진 표가 있다는 것을 알려야 한다.
+ */
+function readBodySections(buffer: Buffer): {
+  sections: { index: number; data: Uint8Array }[];
+  skipped: number[];
+} {
   let container: CFB.CFB$Container;
   try {
     container = CFB.read(buffer, { type: 'buffer' });
@@ -362,33 +369,33 @@ function readBodySections(buffer: Buffer): Uint8Array[] {
     (new DataView(headerBytes.buffer).getUint32(36, true) & FLAG_COMPRESSED) !== 0;
 
   // BodyText/Section0, Section1, ... 을 번호 순서대로 모은다
+  const n = (s: string) => parseInt(s.replace('Section', ''), 10);
   const sections = container.FileIndex.filter(
     (entry) => /^Section\d+$/.test(entry.name) && entry.content
-  ).sort((a, b) => {
-    const n = (s: string) => parseInt(s.replace('Section', ''), 10);
-    return n(a.name) - n(b.name);
-  });
+  ).sort((a, b) => n(a.name) - n(b.name));
 
   if (sections.length === 0) {
     throw new HwpParseError('본문(BodyText)을 찾을 수 없습니다.');
   }
 
-  const out: Uint8Array[] = [];
+  const out: { index: number; data: Uint8Array }[] = [];
+  const skipped: number[] = [];
   for (const section of sections) {
     const raw = Uint8Array.from(section.content as ArrayLike<number>);
     try {
-      out.push(maybeInflate(raw, compressed));
+      out.push({ index: n(section.name), data: maybeInflate(raw, compressed) });
     } catch (err: any) {
       // 한 섹션이 깨져도 나머지는 살린다
       console.warn(`[hwp] ${section.name} 압축 해제 실패, 건너뜀:`, err?.message);
+      skipped.push(n(section.name));
     }
   }
-  return out;
+  return { sections: out, skipped };
 }
 
 function extractHwp(buffer: Buffer): string {
   return readBodySections(buffer)
-    .map((data) => renderChildren(parseRecordTree(data)))
+    .sections.map(({ data }) => renderChildren(parseRecordTree(data)))
     .join('\n');
 }
 
@@ -405,6 +412,8 @@ export interface HwpTableGrid {
   caption?: string;
   /** 상한에 걸려 잘렸으면 원래 크기 */
   truncated?: { rows?: number; cols?: number };
+  /** 표 정보가 선언한 크기 밖에 놓여 버린 칸 수(깨진 표) — 부르는 쪽이 경고한다 */
+  droppedCells?: number;
 }
 
 /** 문단 자신의 글(안쪽 표·글상자 문단의 글은 빼고). 끝의 문단 구분은 뗀다 */
@@ -417,19 +426,39 @@ function ownParagraphText(paraHeader: HwpRecord): string {
   ).replace(/\n+$/, '');
 }
 
-/** 표 컨트롤 하나를 칸 배열로. 표 정보가 없거나 크기가 0이면 null */
+/**
+ * 표 컨트롤 하나를 칸 배열로. 칸이 하나도 없으면 null.
+ * 크기는 칸이 실제로 닿는 만큼이다(선언 크기와 상한 안에서) — 선언만 보고 미리 잡으면
+ * 깨진 선언(65535행)이 빈 칸 수만 개를 만든다. 선언이 없거나 0이면 칸이 닿는 만큼 그대로.
+ */
 function buildHwpTableGrid(ctrlHeader: HwpRecord): Omit<HwpTableGrid, 'caption'> | null {
   const size = readTableSize(ctrlHeader);
-  if (!size || size.rowCount === 0 || size.colCount === 0) return null;
-  // 행·열 수는 UINT16이라 상한을 넘을 수 있다 — 글로 떨어뜨리지 않고 잘라 읽는다
-  const rows = Math.min(size.rowCount, MAX_TABLE_ROWS);
-  const cols = Math.min(size.colCount, MAX_TABLE_COLS);
+  const boundRows = size && size.rowCount > 0 ? size.rowCount : Infinity;
+  const boundCols = size && size.colCount > 0 ? size.colCount : Infinity;
 
+  const kept: { p: Omit<TableCell, 'text'>; content: HwpRecord[] }[] = [];
+  let dropped = 0;
+  let height = 0;
+  let width = 0;
+  for (const { position: p, content } of tableCellRecords(ctrlHeader.children)) {
+    if (p.row >= boundRows || p.col >= boundCols) {
+      dropped++;
+      continue;
+    }
+    height = Math.max(height, Math.min(p.row + p.rowSpan, boundRows));
+    width = Math.max(width, Math.min(p.col + p.colSpan, boundCols));
+    kept.push({ p, content });
+  }
+  if (kept.length === 0) return null;
+
+  // 글로 떨어뜨리지 않고 잘라 읽는다
+  const rows = Math.min(height, MAX_TABLE_ROWS);
+  const cols = Math.min(width, MAX_TABLE_COLS);
   const cells: (string | null)[][] = Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => null)
   );
   const merges: TableMerge[] = [];
-  for (const { position: p, content } of tableCellRecords(ctrlHeader.children)) {
+  for (const { p, content } of kept) {
     if (p.row >= rows || p.col >= cols) continue;
     // 칸에 바로 든 문단만. 안쪽 표는 따로 표가 되므로 그 글은 넣지 않는다
     const text = content
@@ -445,9 +474,10 @@ function buildHwpTableGrid(ctrlHeader: HwpRecord): Omit<HwpTableGrid, 'caption'>
 
   const grid: Omit<HwpTableGrid, 'caption'> = { cells, merges };
   const truncated: { rows?: number; cols?: number } = {};
-  if (size.rowCount > MAX_TABLE_ROWS) truncated.rows = size.rowCount;
-  if (size.colCount > MAX_TABLE_COLS) truncated.cols = size.colCount;
+  if (height > MAX_TABLE_ROWS) truncated.rows = height;
+  if (width > MAX_TABLE_COLS) truncated.cols = width;
   if (truncated.rows || truncated.cols) grid.truncated = truncated;
+  if (dropped > 0) grid.droppedCells = dropped;
   return grid;
 }
 
@@ -472,22 +502,35 @@ function containsTable(records: HwpRecord[]): boolean {
 /**
  * HWP 5.0 문서의 표를 칸 배열로 뽑는다(첨부 읽기의 계산용 표).
  * 색인용 extractTextFromHwp와 출력이 독립이다 — 이쪽을 고쳐도 색인 글은 바뀌지 않는다.
+ * 머리말·꼬리말 안의 표도 본문 표처럼 읽는다(색인과 같다) — 그런 표가 있으면 번호가 그만큼 밀린다.
+ * skippedSections: 읽지 못해 그 안의 표가 빠진 구역 번호(0부터).
  */
-export function extractHwpTables(buffer: Buffer): HwpTableGrid[] {
-  const out: HwpTableGrid[] = [];
-  for (const data of readBodySections(buffer)) {
-    // 표 앞 문단 글. 표를 품은 문단을 지나면 비운다 — 표 바로 뒤의 표가 앞 표의 caption을 물려받지 않게
-    let lines: string[] = [];
-    for (const root of parseRecordTree(data)) {
-      if (containsTable(root.children)) {
-        collectTableGrids(root.children, captionAbove(lines), out);
-        lines = [];
-      } else if (root.tagId === HWPTAG_PARA_HEADER) {
-        lines.push(ownParagraphText(root));
+export function extractHwpTables(buffer: Buffer): { grids: HwpTableGrid[]; skippedSections: number[] } {
+  const { sections, skipped } = readBodySections(buffer);
+  const grids: HwpTableGrid[] = [];
+  const skippedSections = [...skipped];
+  for (const { index, data } of sections) {
+    const found: HwpTableGrid[] = [];
+    try {
+      // 표 앞 문단 글. 표를 품은 문단을 지나면 비운다 — 표 바로 뒤의 표가 앞 표의 caption을 물려받지 않게
+      let lines: string[] = [];
+      for (const root of parseRecordTree(data)) {
+        if (containsTable(root.children)) {
+          collectTableGrids(root.children, captionAbove(lines), found);
+          lines = [];
+        } else if (root.tagId === HWPTAG_PARA_HEADER) {
+          lines.push(ownParagraphText(root));
+        }
       }
+    } catch (err: any) {
+      // 한 구역의 레코드가 깨져도 나머지 구역의 표는 살린다
+      console.warn(`[hwp] Section${index} 표 읽기 실패, 건너뜀:`, err?.message);
+      skippedSections.push(index);
+      continue;
     }
+    for (const g of found) grids.push(g);
   }
-  return out;
+  return { grids, skippedSections: skippedSections.sort((a, b) => a - b) };
 }
 
 // ── HWPX (ZIP + XML) ─────────────────────────────────────────

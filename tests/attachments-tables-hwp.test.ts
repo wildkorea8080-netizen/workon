@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readHwpxTables } from '@/lib/attachments/tables-hwpx';
 import { extractHwpTables, extractTextFromHwp } from '@/lib/hwp';
-import { MAX_TABLE_COLS } from '@/lib/attachments/limits';
+import { MAX_TABLE_COLS, MAX_TABLE_ROWS } from '@/lib/attachments/limits';
 import { buildHwpx, para as xpara, tableAt, secPrPara, emptyPara } from './fixtures/hwpx';
-import { buildHwp, para, tablePara, type HwpTable } from './fixtures/hwp5';
+import { buildHwp, buildHwpWith, para, tablePara, type HwpTable } from './fixtures/hwp5';
 
 /**
  * 계산용 한글 표 읽기. 한글 표 칸은 전부 글자, 빈 칸은 null.
@@ -143,6 +143,60 @@ describe('HWPX 표 읽기', () => {
     expect(warnings).toEqual([`표 1: 열 ${width.toLocaleString('ko-KR')}개 중 ${MAX_TABLE_COLS.toLocaleString('ko-KR')}개만 읽었습니다`]);
   });
 
+  it('세로 병합(rowSpan)은 주인 칸에만 값', async () => {
+    const body = tbl([
+      tc('부서', { r: 0, c: 0 }) + tc('금액', { r: 0, c: 1 }),
+      tc('총무과', { r: 1, c: 0, rs: 2 }) + tc('100', { r: 1, c: 1 }),
+      tc('200', { r: 2, c: 1 }),
+    ]);
+    const { tables } = await readHwpxTables(await buildHwpx(body));
+    expect(tables[0].cells).toEqual([
+      ['부서', '금액'],
+      ['총무과', '100'],
+      [null, '200'],
+    ]);
+    expect(tables[0].merges).toEqual([{ row: 1, col: 0, rows: 2, cols: 1 }]);
+  });
+
+  it('묶음 빈칸·고정폭 빈칸은 띄어쓰기로 (HWP 5.0의 30·31과 같게)', async () => {
+    const p = `<hp:p id="1" paraPrIDRef="7" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>1<hp:nbSpace/>000<hp:fwSpace/>원</hp:t></hp:run></hp:p>`;
+    const body = tbl([tc('a', { r: 0, c: 0 }) + tc('b', { r: 0, c: 1 }), tc('', { r: 1, c: 0 }, p) + tc('1', { r: 1, c: 1 })]);
+    const { tables } = await readHwpxTables(await buildHwpx(body));
+    expect(tables[0].cells[1][0]).toBe('1 000 원');
+  });
+
+  it('표 자신의 캡션(hp:caption)이 앞 문단보다 먼저, 칸 글에는 섞이지 않는다', async () => {
+    const cap = `<hp:caption side="TOP" fullSz="0" width="8504" gap="850" lastWidth="42520"><hp:subList>${xpara('<표 2> 연도별 예산')}</hp:subList></hp:caption>`;
+    const body =
+      xpara('(단위: 원)') +
+      `<hp:p id="2" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="2" colCnt="2"><hp:sz width="1" height="1"/>${cap}` +
+      `<hp:tr>${tc('연도', { r: 0, c: 0 }) + tc('예산', { r: 0, c: 1 })}</hp:tr><hp:tr>${tc('2026', { r: 1, c: 0 }) + tc('500', { r: 1, c: 1 })}</hp:tr>` +
+      `</hp:tbl><hp:t/></hp:run></hp:p>`;
+    const { tables } = await readHwpxTables(await buildHwpx(body));
+    expect(tables[0].caption).toBe('<표 2> 연도별 예산');
+    expect(tables[0].cells).toEqual([
+      ['연도', '예산'],
+      ['2026', '500'],
+    ]);
+  });
+
+  it('행 25,000개 표도 터지지 않고 20,000행까지 읽고 경고한다', async () => {
+    const rows = 25_000;
+    const cell = (v: string) => `<hp:tc><hp:subList><hp:p><hp:run><hp:t>${v}</hp:t></hp:run></hp:p></hp:subList></hp:tc>`;
+    const trs: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      let tr = '<hp:tr>';
+      for (let c = 0; c < 6; c++) tr += cell(r === 0 ? `h${c}` : String(r * 10 + c));
+      trs.push(tr + '</hp:tr>');
+    }
+    const body = `<hp:p><hp:run><hp:tbl rowCnt="${rows}" colCnt="6">${trs.join('')}</hp:tbl></hp:run></hp:p>`;
+    const { tables, warnings } = await readHwpxTables(await buildHwpx(body));
+    expect(tables[0].cells).toHaveLength(MAX_TABLE_ROWS);
+    expect(tables[0].cells[MAX_TABLE_ROWS - 1]).toEqual(Array.from({ length: 6 }, (_, c) => String((MAX_TABLE_ROWS - 1) * 10 + c)));
+    expect(tables[0].truncated).toEqual({ rows });
+    expect(warnings).toEqual(['표 1: 행 25,000개 중 20,000개만 읽었습니다']);
+  }, 60_000);
+
   it('표가 없으면 빈 목록', async () => {
     const { tables, warnings } = await readHwpxTables(await buildHwpx(xpara('본문뿐')));
     expect(tables).toEqual([]);
@@ -180,7 +234,8 @@ const sample = () =>
 
 describe('HWP 5.0 표 읽기', () => {
   it('HWP 5.0 표 칸 배열과 병합', () => {
-    const tables = extractHwpTables(sample());
+    const { grids: tables, skippedSections } = extractHwpTables(sample());
+    expect(skippedSections).toEqual([]);
     expect(tables).toHaveLength(2);
     expect(tables[0].cells).toEqual([
       ['구분', null, '합계'],
@@ -208,7 +263,7 @@ describe('HWP 5.0 표 읽기', () => {
         { row: r, col: 1, paras: [r === 0 ? '값' : String(r * 10)] },
       ]).flat(),
     };
-    const tables = extractHwpTables(buildHwp(tablePara(t)));
+    const { grids: tables } = extractHwpTables(buildHwp(tablePara(t)));
     expect(tables).toHaveLength(1);
     expect(tables[0].cells).toHaveLength(rows);
     expect(tables[0].cells[599]).toEqual(['599', '5990']);
@@ -222,9 +277,74 @@ describe('HWP 5.0 표 읽기', () => {
       cols,
       cells: Array.from({ length: cols }, (_, c) => ({ row: 0, col: c, paras: [`h${c}`] })),
     };
-    const [table] = extractHwpTables(buildHwp(tablePara(t)));
+    const [table] = extractHwpTables(buildHwp(tablePara(t))).grids;
     expect(table.cells[0]).toHaveLength(MAX_TABLE_COLS);
     expect(table.truncated).toEqual({ cols });
+  });
+
+  it('압축된 구역(raw deflate)도 같은 칸 배열', () => {
+    const recs = [...para('1. 예산 현황'), ...para('(단위: 천원)'), ...tablePara(OUTER), ...para('끝 문단')];
+    const { grids, skippedSections } = extractHwpTables(buildHwpWith({ compressed: true }, [recs]));
+    expect(skippedSections).toEqual([]);
+    expect(grids).toEqual(extractHwpTables(sample()).grids);
+  });
+
+  it('깨진 구역은 건너뛰고 그 번호를 알린다 — 앞뒤 구역의 표는 살린다', async () => {
+    const t = (v: string): HwpTable => ({
+      rows: 1,
+      cols: 2,
+      cells: [
+        { row: 0, col: 0, paras: [v] },
+        { row: 0, col: 1, paras: ['x'] },
+      ],
+    });
+    const bytes = buildHwpWith({ compressed: true }, [tablePara(t('앞')), new Uint8Array(64).fill(0xff), tablePara(t('뒤'))]);
+    const { grids, skippedSections } = extractHwpTables(bytes);
+    expect(skippedSections).toEqual([1]);
+    expect(grids.map((g) => g.cells[0][0])).toEqual(['앞', '뒤']);
+    // 색인은 예전처럼 조용히 건너뛴다
+    expect(await extractTextFromHwp(bytes, 'c.hwp')).toContain('뒤');
+  });
+
+  it('칸이 닿는 만큼만 — 선언보다 작으면 줄이고, 선언 밖의 칸은 버리며 센다', () => {
+    const t: HwpTable = {
+      rows: 10,
+      cols: 3,
+      cells: [
+        { row: 0, col: 0, paras: ['a'] },
+        { row: 0, col: 1, paras: ['b'] },
+        { row: 1, col: 0, paras: ['1'] },
+        { row: 1, col: 1, paras: ['2'] },
+        { row: 12, col: 0, paras: ['밖'] },
+        { row: 0, col: 5, paras: ['밖'] },
+      ],
+    };
+    const [g] = extractHwpTables(buildHwp(tablePara(t))).grids;
+    expect(g.cells).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
+    expect(g.droppedCells).toBe(2);
+  });
+
+  it('표 정보 레코드가 없거나 크기가 0이어도 칸이 닿는 만큼 표가 된다', () => {
+    const cells = [
+      { row: 0, col: 0, paras: ['a'] },
+      { row: 1, col: 1, paras: ['b'] },
+    ];
+    for (const t of [
+      { rows: 2, cols: 2, cells, noInfo: true },
+      { rows: 0, cols: 0, cells },
+    ] as HwpTable[]) {
+      const [g] = extractHwpTables(buildHwp(tablePara(t))).grids;
+      expect(g.cells).toEqual([
+        ['a', null],
+        [null, 'b'],
+      ]);
+      expect(g.droppedCells).toBeUndefined();
+    }
+    // 칸도 없으면 표가 아니다
+    expect(extractHwpTables(buildHwp(tablePara({ rows: 0, cols: 0, cells: [] }))).grids).toEqual([]);
   });
 
   it('색인 출력은 그대로 — extractTextFromHwp 결과가 바뀌지 않는다', async () => {

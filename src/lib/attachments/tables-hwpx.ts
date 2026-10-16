@@ -50,6 +50,9 @@ function scanSectionTables(xml: string): RawTable[] {
   const SPAN = `${prefix}:cellSpan`;
   const TAB = `${prefix}:tab`;
   const BR = `${prefix}:lineBreak`;
+  /** 묶음 빈칸·고정폭 빈칸·반각 빈칸. HWP 5.0의 30·31처럼 띄어쓰기로 읽는다 */
+  const SPACES = new Set([`${prefix}:nbSpace`, `${prefix}:fwSpace`, `${prefix}:hwSpace`]);
+  const CAPTION = `${prefix}:caption`;
 
   interface ParaFrame {
     parts: string[];
@@ -62,6 +65,8 @@ function scanSectionTables(xml: string): RawTable[] {
     cell: (RawCell & { addr: { row: number | null; col: number | null } }) | null;
     /** 칸이 열릴 때의 문단 깊이 — 이 깊이에서 열리는 문단이 칸에 바로 든 문단 */
     depth: number;
+    /** 표 자신의 캡션(hp:caption) 안이면 그 문단 깊이와 글 */
+    caption: { depth: number; lines: string[] } | null;
   }
 
   const pStack: ParaFrame[] = [];
@@ -92,6 +97,7 @@ function scanSectionTables(xml: string): RawTable[] {
       else {
         if (para && tag.name === TAB) para.parts.push('\t');
         else if (para && tag.name === BR) para.parts.push('\n');
+        else if (para && SPACES.has(tag.name)) para.parts.push(' ');
         cursor = tag.end;
       }
       continue;
@@ -109,7 +115,9 @@ function scanSectionTables(xml: string): RawTable[] {
         const closed = pStack.pop();
         if (!closed) continue;
         const text = stripPrivateUse(closed.parts.join(''));
-        if (top?.cell && pStack.length === top.depth) top.cell.lines.push(text);
+        if (top?.caption) {
+          if (pStack.length === top.caption.depth) top.caption.lines.push(text);
+        } else if (top?.cell && pStack.length === top.depth) top.cell.lines.push(text);
         if (pStack.length === 0) {
           if (closed.hasTable) topLines = [];
           else topLines.push(text);
@@ -121,13 +129,21 @@ function scanSectionTables(xml: string): RawTable[] {
         // 안쪽 표도 품은 최상위 문단이 같으므로 caption이 같다
         const table: RawTable = { cells: [], caption: captionAbove(topLines) };
         out.push(table);
-        frames.push({ table, row: -1, col: 0, cell: null, depth: 0 });
+        frames.push({ table, row: -1, col: 0, cell: null, depth: 0, caption: null });
       } else if (tag.kind === 'close' && top) {
         closeCell(top);
         frames.pop();
       }
     } else if (!top) {
       continue;
+    } else if (tag.name === CAPTION) {
+      // 표에 달린 캡션이 있으면 그것이 표 제목이다 — 앞 문단보다 정확하다
+      if (tag.kind === 'open') top.caption = { depth: pStack.length, lines: [] };
+      else if (tag.kind === 'close' && top.caption) {
+        const text = top.caption.lines.join('\n').trim();
+        if (text) top.table.caption = text;
+        top.caption = null;
+      }
     } else if (tag.name === TR && tag.kind === 'open') {
       top.row++;
       top.col = 0;
@@ -159,8 +175,13 @@ function toGrid(raw: RawTable): {
   truncated?: { rows?: number; cols?: number };
 } | null {
   if (raw.cells.length === 0) return null;
-  const height = Math.max(...raw.cells.map((c) => c.row + c.rows));
-  const width = Math.max(...raw.cells.map((c) => c.col + c.cols));
+  // 칸이 수십만 개일 수 있다 — Math.max(...배열)은 인자 수 상한에 걸려 던진다
+  let height = 0;
+  let width = 0;
+  for (const c of raw.cells) {
+    if (c.row + c.rows > height) height = c.row + c.rows;
+    if (c.col + c.cols > width) width = c.col + c.cols;
+  }
   const rows = Math.min(height, MAX_TABLE_ROWS);
   const cols = Math.min(width, MAX_TABLE_COLS);
 
@@ -190,6 +211,7 @@ export function truncationWarnings(title: string, truncated?: { rows?: number; c
   return out;
 }
 
+/** 머리말·꼬리말 안의 표도 본문 표처럼 읽는다(색인과 같다) — 그런 표가 있으면 번호가 그만큼 밀린다 */
 export async function readHwpxTables(bytes: Buffer): Promise<{ tables: ExtractedTable[]; warnings: string[] }> {
   const doc = await openHwpx(bytes);
   const tables: ExtractedTable[] = [];

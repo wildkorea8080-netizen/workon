@@ -95,7 +95,9 @@ export function columnNames(
   merges: TableMerge[],
   header: { from: number; to: number }
 ): string[] {
-  const width = Math.max(0, ...cells.map((r) => r.length));
+  // 행이 많을 수 있다 — Math.max(...배열)은 인자 수 상한에 걸려 던진다
+  let width = 0;
+  for (const r of cells) if (r.length > width) width = r.length;
   const rowsCount = header.to - header.from + 1;
 
   // 머리글 줄만 떼어 병합을 주인 값으로 채운다 (머리글 밖으로 번지는 병합은 자른다)
