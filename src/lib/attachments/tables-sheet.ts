@@ -320,6 +320,8 @@ export function readCsvTables(bytes: Buffer): { tables: ExtractedTable[]; warnin
   // skipEmptyLines를 쓰지 않는다 — 빈 줄 2줄이 표 경계라 빈 줄이 남아야 한다.
   const parsed = Papa.parse<string[]>(text);
   const rows = (parsed.data ?? []).filter(Array.isArray);
+  // 끝의 빈 레코드(파일 끝 줄바꿈, 빈 줄, ',,'뿐인 줄)는 행이 아니다 — 세면 딱 20,000행 파일이 거짓 잘림 경고를 낸다
+  while (rows.length > 0 && rows[rows.length - 1].every((c) => !String(c ?? '').trim())) rows.pop();
 
   const warnings: string[] = [];
   let width = 0;

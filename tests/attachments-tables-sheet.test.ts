@@ -253,6 +253,17 @@ describe('1차 수정 — 조용히 틀리는 경우', () => {
     expect(warnings).toEqual(['행 20001개 중 20000개만 읽었습니다']);
   });
 
+  it('CSV: 끝 줄바꿈의 빈 레코드는 행으로 세지 않는다 — 딱 20,000행이면 잘림 경고 없음', () => {
+    const lines = ['번호,값'];
+    for (let i = 1; i < 20000; i += 1) lines.push(`${i},${i * 2}`);
+    for (const tail of ['\n', '\r\n', '\n\n\n', '\n,\n']) {
+      const { tables, warnings } = readCsvTables(Buffer.from(lines.join('\n') + tail, 'utf8'));
+      expect(warnings, JSON.stringify(tail)).toEqual([]);
+      expect(tables[0].cells).toHaveLength(20000);
+      expect(tables[0].truncated).toBeUndefined();
+    }
+  });
+
   it('CSV: 한 칸짜리 한 줄 블록은 표가 아니라 다음 표의 캡션', () => {
     const csv = '(단위: 천원)\n\n\n부서,예산\n총무과,100\n';
     const { tables } = readCsvTables(Buffer.from(csv, 'utf8'));

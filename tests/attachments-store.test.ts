@@ -1,6 +1,7 @@
 // tests/attachments-store.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
+import { gunzipSync } from 'zlib';
 import { NextRequest } from 'next/server';
 
 /**
@@ -290,6 +291,13 @@ describe('업로드 주소 발급', () => {
     expect(await createUpload(actor, { fileName: '보고서‮xcod.exe', size: 10 })).toMatchObject({ ok: false, status: 400 });
   });
 
+  it('서식 글자 전부(태그 문자·아랍 글자 표시·단어 잇기·약한 하이픈)와 [ ]를 뺀다', async () => {
+    const tag = String.fromCodePoint(0xe0049) + String.fromCodePoint(0xe0067) + String.fromCodePoint(0xe007f);
+    const res = await createUpload(actor, { fileName: `[예산]${tag}\u061C\u2060\u00AD표.csv`, size: 10 });
+    expect(res.ok).toBe(true);
+    expect(db.chat_attachments[0].file_name).toBe('예산표.csv');
+  });
+
   it('pending 행을 먼저 넣고 같은 id 경로로 서명 주소를 준다', async () => {
     const res = await createUpload(actor, { fileName: '2026 예산.XLSX', size: 1234 });
     expect(res.ok).toBe(true);
@@ -317,6 +325,11 @@ describe('업로드 주소 발급', () => {
     for (let i = 0; i < MAX_PENDING_ATTACHMENTS - 1; i += 1) seed({ status: statuses[i % 3] });
     seed({ conversation_id: 'c1' }); // 묶인 것은 세지 않는다
     seed({ user_id: 'u2' }); // 남의 것은 세지 않는다
+    // 묶인 failed·남의 failed도 — 오래된 것이든 서명 주소 시한 안이든
+    for (const created_at of [ago(1000), ago(TOMBSTONE_WINDOW_MS + 60_000)]) {
+      seed({ status: 'failed', conversation_id: 'c1', created_at });
+      seed({ status: 'failed', user_id: 'u2', storage_path: 'chat-uploads/o1/u2/x.csv', created_at });
+    }
     seed({ status: 'pending', created_at: ago(ORPHAN_TTL_MS + 1000) }); // 묵은 것은 먼저 정리된다
     expect((await createUpload(actor, { fileName: 'a.csv', size: 10 })).ok).toBe(true);
 
@@ -429,7 +442,11 @@ describe('확인', () => {
     expect(res.attachment.summary?.tables.length).toBe(1);
     expect(db.chat_attachments[0].extract_path).toBe(extractPath);
     expect(objects.has(up.path)).toBe(true); // 원본은 남긴다
-    const extract = JSON.parse(objects.get(extractPath)!.toString('utf8'));
+    // 읽은 내용은 gzip으로 저장한다(경로는 .json 그대로) — 원본보다 커져 버킷 상한에 걸리지 않게
+    const stored = objects.get(extractPath)!;
+    expect([stored[0], stored[1]]).toEqual([0x1f, 0x8b]);
+    expect(uploads.find((u) => u.path === extractPath)?.opts).toMatchObject({ contentType: 'application/gzip' });
+    const extract = JSON.parse(gunzipSync(stored).toString('utf8'));
     expect(extract.tables[0].columns).toEqual(['부서', '예산']);
     // 응답에 저장소 경로를 싣지 않는다
     expect(JSON.stringify(res.attachment)).not.toContain('chat-uploads');
@@ -458,9 +475,9 @@ describe('확인', () => {
 
   it('읽은 내용을 저장하지 못하면 pending으로 둔 채 500', async () => {
     const up = await uploaded('a.csv', CSV);
-    state.uploadError = { message: 'full' };
+    state.uploadError = { message: 'Payload too large' };
     const res = await confirmUpload(actor, up.id);
-    expect(res).toMatchObject({ ok: false, status: 500 });
+    expect(res).toEqual({ ok: false, status: 500, message: '읽은 내용을 저장하지 못했습니다. 잠시 뒤 다시 올려 주세요.' });
     expect(db.chat_attachments[0].status).toBe('pending');
   });
 
@@ -555,6 +572,12 @@ describe('읽은 내용 불러오기', () => {
     const [listed] = await listConversationAttachments('u1', 'c0000000-0000-4000-8000-000000000009');
     expect(await loadExtract(listed)).toMatchObject({ kind: 'spreadsheet' });
     expect(await loadExtract({ ...listed, extract_path: null })).toBeNull();
+  });
+
+  it('gzip이 아닌 읽은 내용(평문 JSON)도 읽는다', async () => {
+    const row = seed({});
+    objects.set(String(row.extract_path), Buffer.from(JSON.stringify({ kind: 'text', text: '평문', tables: [], warnings: [] }), 'utf8'));
+    expect(await loadExtract(row as never)).toMatchObject({ kind: 'text', text: '평문' });
   });
 });
 
@@ -769,6 +792,12 @@ describe('정리', () => {
     const youngFailed = seed({ status: 'failed', created_at: ago(TOMBSTONE_WINDOW_MS - 60_000) });
     const threeHourPending = seed({ status: 'pending', created_at: ago(3 * 60 * 60 * 1000) });
     const threeHourReady = seed({ created_at: ago(3 * 60 * 60 * 1000) });
+    // 묶인 failed·남의 failed는 시한이 지났든 아니든 건드리지 않는다
+    const keep = [ago(TOMBSTONE_WINDOW_MS + 60_000), ago(60_000)].flatMap((created_at) => [
+      seed({ status: 'failed', conversation_id: 'c1', created_at }),
+      seed({ status: 'failed', user_id: 'u2', storage_path: `chat-uploads/o1/u2/${created_at}.csv`, created_at }),
+    ]);
+    for (const r of keep) objects.set(String(r.storage_path), Buffer.from('x'));
     for (const r of [staleFailed, youngFailed]) {
       objects.set(String(r.storage_path), Buffer.from('x'));
       objects.set(sibling(r), Buffer.from('{}'));
@@ -776,8 +805,12 @@ describe('정리', () => {
 
     await purgeOrphans('u1', now);
     expect(db.chat_attachments.map((r) => r.id).sort()).toEqual(
-      [youngFailed.id, threeHourPending.id, threeHourReady.id].sort()
+      [youngFailed.id, threeHourPending.id, threeHourReady.id, ...keep.map((r) => r.id)].sort()
     );
+    for (const r of keep) {
+      expect(objects.has(String(r.storage_path))).toBe(true);
+      expect(db.chat_attachments.find((x) => x.id === r.id)?.error).toBeNull();
+    }
     expect(objects.has(String(staleFailed.storage_path))).toBe(false);
     expect(objects.has(sibling(staleFailed))).toBe(false);
     expect(objects.has(String(youngFailed.storage_path))).toBe(true);

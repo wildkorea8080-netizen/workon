@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { gunzipSync, gzipSync } from 'zlib';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
@@ -26,7 +27,11 @@ import type { AttachmentExtract, AttachmentRow } from './types';
  * 경로는 서버가 정하고 기록에 둔다. 확인 단계는 그 기록의 경로만 다룬다.
  *
  * 서명 업로드 주소는 2시간 살아 있어, 그 사이 기록을 지우면 다시 올린 객체가 기록 없이 남는다.
- * 그래서 확인 거부·보내기 전 삭제는 행을 지우지 않고 failed로 남긴다(묘비). 행 삭제는 24시간 정리만 한다.
+ * 그래서 확인 거부·보내기 전 삭제는 행을 지우지 않고 failed로 남긴다(묘비). 행 삭제는 정리(purgeOrphans)만 한다 —
+ * failed 묘비는 서명 주소 시한(TOMBSTONE_WINDOW_MS, 2시간 10분)이 지나면, 그 밖의 미연결 행은 24시간이 지나면.
+ *
+ * 읽은 내용(.json)은 gzip으로 저장한다. 표 읽기 결과 JSON은 원본(압축된 xlsx)보다 몇 배 커서
+ * 그대로 두면 버킷 file_size_limit에 걸린다. 경로는 .json 그대로 두고 내용만 gzip이다.
  */
 
 const TABLE = 'chat_attachments';
@@ -44,6 +49,7 @@ const MSG_DELETED = '보내기 전에 지웠습니다.';
 const MSG_RETRY = '첨부를 처리하지 못했습니다. 잠시 뒤 다시 올려 주세요.';
 const MSG_TOO_MANY = '보내지 않은 첨부가 너무 많습니다. 정리한 뒤 다시 올려 주세요.';
 const MSG_BAD_NAME = '파일 이름이 올바르지 않습니다.';
+const MSG_EXTRACT_SAVE = '읽은 내용을 저장하지 못했습니다. 잠시 뒤 다시 올려 주세요.';
 
 /** 확장자는 형식 목록에서 정해진 값이지만, 서버 형식 표에 없는 값이 경로에 섞이지 않게 다시 본다 */
 const MIME_BY_EXT: Record<string, string> = {
@@ -119,13 +125,15 @@ export function isConfirmExpired(createdAt: string, now: number): boolean {
 }
 
 /**
- * 제어 문자(C0·C1)·방향 제어(RLO 등)·폭 없는 글자를 빼고 공백을 하나로 줄인다.
- * 방향 제어는 화면·감사 목록에서 'gpj.exe'를 '…exe.jpg'처럼 보이게 하고, 확장자 판정도 여기서 다시 한다.
+ * 제어 문자(Cc)·서식 글자(Cf — 방향 제어 RLO, 폭 없는 글자, 태그 문자 U+E0000~E007F, U+061C, U+2060, U+00AD 등)와
+ * 대괄호를 빼고 공백을 하나로 줄인다. 방향 제어는 화면·감사 목록에서 'gpj.exe'를 '…exe.jpg'처럼 보이게 하고,
+ * 태그 문자는 보이지 않는 글을 모델에게 싣는다. 대괄호는 프롬프트의 첨부 목록 구분 줄('[첨부 목록 끝]')을 흉내 내지 못하게.
+ * 확장자 판정도 여기서 다시 한다.
  */
 function sanitizeFileName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const cleaned = raw
-    .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g, '')
+    .replace(/[\p{Cc}\p{Cf}[\]]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned || cleaned.length > MAX_FILE_NAME) return null;
@@ -346,13 +354,23 @@ export async function confirmUpload(
     let status: 'ready' | 'failed';
     try {
       const extract = await readAttachment(bytes, row.file_name);
-      const { error: uploadError } = await bucket().upload(
-        extractPath,
-        Buffer.from(JSON.stringify(extract), 'utf8'),
-        // 같은 확인이 겹쳐 들어와도 같은 내용이다
-        { contentType: 'application/json', upsert: true }
-      );
-      if (uploadError) throw new Error(`읽은 내용 저장 실패: ${uploadError.message}`);
+      let uploadError: string | null = null;
+      try {
+        const { error } = await bucket().upload(
+          extractPath,
+          gzipSync(Buffer.from(JSON.stringify(extract), 'utf8')),
+          // 같은 확인이 겹쳐 들어와도 같은 내용이다
+          { contentType: 'application/gzip', upsert: true }
+        );
+        if (error) uploadError = error.message;
+      } catch (e) {
+        uploadError = e instanceof Error ? e.message : String(e);
+      }
+      if (uploadError) {
+        // 버킷 상한·저장소 장애. 행은 pending으로 둔다(24시간 뒤 정리) — 사용자에게는 다시 올리라고만
+        console.error('[attachments] 읽은 내용 저장 실패:', uploadError);
+        return { ok: false, status: 500, message: MSG_EXTRACT_SAVE };
+      }
       uploadedExtract = true;
       tables = extract.tables.length;
       status = 'ready';
@@ -561,7 +579,10 @@ export async function loadExtract(
   try {
     const { data, error } = await bucket().download(path);
     if (error || !data) return null;
-    return JSON.parse(await data.text()) as AttachmentExtract;
+    const bytes = Buffer.from(await data.arrayBuffer());
+    // gzip(1f 8b)이 아니면 평문 JSON으로 읽는다 — 안전판(gzip 저장 이전에 만든 것 등)
+    const json = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes;
+    return JSON.parse(json.toString('utf8')) as AttachmentExtract;
   } catch (e) {
     console.error('[attachments] 읽은 내용 불러오기 실패:', e instanceof Error ? e.message : e);
     return null;
