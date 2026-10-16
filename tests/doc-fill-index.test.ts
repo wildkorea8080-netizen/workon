@@ -31,10 +31,41 @@ describe('양식 읽기', () => {
     });
   });
 
-  it('옛 HWP·DOCX·표시 없는 양식은 이유를 돌려준다', async () => {
-    expect(await readTemplate(CFB, '옛.hwp')).toEqual({ ok: false, reason: expect.stringContaining('HWPX로') });
-    expect(await readTemplate(await buildHwpx(para('x')), 'w.docx')).toEqual({ ok: false, reason: expect.stringContaining('DOCX') });
-    expect(await readTemplate(await buildHwpx(para('표시 없음')), 'n.hwpx')).toEqual({ ok: false, reason: expect.stringContaining('{{항목 이름}}') });
+  it('옛 HWP는 대체 목차', async () => {
+    // S2-a의 CFB 시험 바이트는 본문을 못 읽는다. 진짜 HWP 시험 파일이 없으니 이 동작을 고정한다
+    const r = await readTemplate(CFB, '옛.hwp');
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining('목차') });
+  });
+
+  it('알 수 없는 형식은 두 형식을 안내한다', async () => {
+    const r = await readTemplate(Buffer.from('plain'), 'x.txt');
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining('DOCX') });
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining('HWPX') });
+  });
+
+  it('자리 없는 HWPX는 대체 — mode fallback·reason·목차 자리', async () => {
+    const r = await readTemplate(await buildHwpx(para('1. 사업 개요') + para('본문') + para('2. 추진 일정')), 'n.hwpx');
+    expect(r).toEqual({
+      ok: true,
+      format: 'hwpx',
+      mode: 'fallback',
+      reason: expect.stringContaining('{{항목 이름}}'),
+      slots: [
+        { id: 's1', label: '1. 사업 개요', kind: 'section', path: [], hint: null },
+        { id: 's2', label: '2. 추진 일정', kind: 'section', path: [], hint: null },
+      ],
+    });
+  });
+
+  it('표시 없는 DOCX도 대체 목차', async () => {
+    const r = await readTemplate(await buildDocx(wp('1. 사업 개요') + wp('본문')), 'n.docx');
+    expect(r).toMatchObject({
+      ok: true,
+      format: 'docx',
+      mode: 'fallback',
+      reason: expect.stringContaining('DOCX'),
+      slots: [{ id: 's1', label: '1. 사업 개요', kind: 'section' }],
+    });
   });
 
   it('표시 없는 양식은 자동 자리를 돌려준다', async () => {
@@ -115,11 +146,52 @@ describe('양식 채우기', () => {
     expect(text).toContain('본문글');
   });
 
-  it('표시 없는 DOCX는 이유를 돌려준다', async () => {
-    expect(await readTemplate(await buildDocx(wp('표시 없음')), 'n.docx')).toEqual({
-      ok: false,
-      reason: expect.stringContaining('{{항목 이름}}'),
+});
+
+describe('대체 채우기', () => {
+  const REPORT_LABELS = ['제목', '작성일', '작성부서', '개요', '추진 경과', '주요 내용', '향후 계획', '건의 사항'];
+  const reportTemplate = () => buildHwpx(REPORT_LABELS.map((l) => para(`{{${l}}}`)).join(''));
+  const source = () => buildHwpx(para('1. 사업 개요') + para('본문') + para('2. 추진 일정'));
+
+  it('대체 채우기는 표준 보고서가 없으면 이유', async () => {
+    const values = [{ slot_id: 's1', text: '글' }];
+    for (const fallbackTemplate of [null, undefined]) {
+      const r = await fillTemplate(await source(), 'n.hwpx', values, { title: '보고', fallbackTemplate });
+      expect(r).toEqual({ ok: false, reason: expect.stringContaining('표준 서식(일반 보고서) 파일이 아직 준비되지 않아') });
+    }
+  });
+
+  it('대체 채우기는 표준 보고서로 hwpx를 만든다', async () => {
+    const r = await fillTemplate(await source(), 'n.hwpx', [{ slot_id: 's2', text: '일정은 11월이다.' }], {
+      title: '사업 보고',
+      fallbackTemplate: await reportTemplate(),
     });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.mode).toBe('fallback');
+    expect(r.extension).toBe('hwpx');
+    expect(r.mimeType).toBe('application/hwp+zip');
+    expect(r.filled).toEqual(['2. 추진 일정']);
+    expect(r.unfilled).toEqual(['1. 사업 개요']);
+    const text = await extractTextFromHwp(r.bytes, 'o.hwpx');
+    expect(text).toContain('사업 보고');
+    expect(text).toContain('일정은 11월이다.');
+    expect(text).not.toContain('{{');
+  });
+
+  it('대체에서도 없는 자리 번호는 거절한다', async () => {
+    const r = await fillTemplate(await source(), 'n.hwpx', [{ slot_id: 's9', text: 'x' }], {
+      title: '보고',
+      fallbackTemplate: await reportTemplate(),
+    });
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining('s9') });
+  });
+
+  it('제목이 없으면 첫 목차 이름으로', async () => {
+    const r = await fillTemplate(await source(), 'n.hwpx', [{ slot_id: 's1', text: '글' }], {
+      fallbackTemplate: await reportTemplate(),
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(await extractTextFromHwp(r.bytes, 'o.hwpx')).toContain('1. 사업 개요');
   });
 });
 

@@ -114,7 +114,71 @@ describe('문서 만들기 — 채우기', () => {
   });
 });
 
+describe('문서 만들기 — 대체 경로', () => {
+  const REPORT_LABELS = ['제목', '작성일', '작성부서', '개요', '추진 경과', '주요 내용', '향후 계획', '건의 사항'];
+
+  async function fallbackDeps() {
+    const minutes = await buildHwpx(para('{{회의명}}') + para('{{논의 내용}}'));
+    const report = await buildHwpx(REPORT_LABELS.map((l) => para(`{{${l}}}`)).join(''));
+    const noSlots = await buildHwpx(para('1. 사업 개요') + para('본문') + para('2. 추진 일정'));
+    return deps({
+      downloadAgentTemplate: vi.fn(async () => noSlots),
+      loadBuiltin: vi.fn(async (t) => (t.ref === 'builtin:report' ? report : minutes)),
+    });
+  }
+
+  it('대체 양식은 mode·reason을 싣고 표준 보고서로 만든다', async () => {
+    const d = await fallbackDeps();
+    const read = await run(d, 'read_template', { ref: 'tpl-1' });
+    expect(read.ok).toBe(true);
+    expect(JSON.parse(read.text)).toMatchObject({
+      ref: 'tpl-1',
+      mode: 'fallback',
+      reason: expect.stringContaining('표준 서식'),
+      slots: [{ id: 's1', label: '1. 사업 개요' }, { id: 's2', label: '2. 추진 일정' }],
+    });
+    const out = await run(d, 'fill_template', { ref: 'tpl-1', title: '사업 보고', values: [{ slot_id: 's1', text: '개요 글' }] });
+    expect(out.ok).toBe(true);
+    expect(out.text).toContain('표준 서식으로 만들었습니다');
+    expect(out.text).toContain('2. 추진 일정');
+    const saved = (d.saveFile as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(saved).toMatchObject({ templateRef: 'tpl-1', extension: 'hwpx', fileName: '사업 보고.hwpx' });
+    expect(d.loadBuiltin).toHaveBeenCalledWith(expect.objectContaining({ ref: 'builtin:report' }));
+  });
+
+  it('표준 보고서 파일이 없으면 이유를 돌려준다', async () => {
+    const noSlots = await buildHwpx(para('1. 사업 개요'));
+    const d = await deps({ downloadAgentTemplate: vi.fn(async () => noSlots), loadBuiltin: vi.fn(async () => null) });
+    const out = await run(d, 'fill_template', { ref: 'tpl-1', title: '보고', values: [{ slot_id: 's1', text: 'x' }] });
+    expect(out).toEqual({ ok: false, text: expect.stringContaining('표준 서식(일반 보고서) 파일이 아직 준비되지 않아') });
+    expect(d.saveFile).not.toHaveBeenCalled();
+  });
+
+  it('표시 경로에는 표준 보고서를 읽지 않는다', async () => {
+    const d = await deps();
+    await run(d, 'fill_template', { ref: 'tpl-1', title: '회의', values: [{ slot_id: 's1', text: 'x' }] });
+    expect(d.loadBuiltin).not.toHaveBeenCalled();
+    const read = JSON.parse((await run(d, 'read_template', { ref: 'tpl-1' })).text);
+    expect(read.mode).toBe('fill');
+    expect(read.reason).toBeUndefined();
+  });
+
+  it('기록에 mode가 남는다', async () => {
+    const d = await fallbackDeps();
+    await run(d, 'fill_template', { ref: 'tpl-1', title: '보고', values: [{ slot_id: 's1', text: 'x' }] });
+    expect(d.logGenerated).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ mode: 'fallback' }) }));
+    const d2 = await deps();
+    await run(d2, 'fill_template', { ref: 'tpl-1', title: '회의', values: [{ slot_id: 's1', text: 'x' }] });
+    expect(d2.logGenerated).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ mode: 'fill' }) }));
+  });
+});
+
 describe('문서 만들기 — 흐름 안내', () => {
+  it('대체 경로의 reason을 알리고 HWPX·표시를 안내하게 한다', () => {
+    expect(DOCUMENT_ADDENDUM).toContain('fallback');
+    expect(DOCUMENT_ADDENDUM).toContain('reason');
+  });
+
   it('목차 확인과 지어내지 않기를 프롬프트에 붙인다', async () => {
     const result = await createDocument(await deps()).prepare!(ctx);
     expect(result.systemAddendum).toBe(DOCUMENT_ADDENDUM);

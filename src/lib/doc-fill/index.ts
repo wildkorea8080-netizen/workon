@@ -1,6 +1,7 @@
 import { readHwpxMarkers, fillHwpx } from './hwpx';
 import { readHwpxAutoSlots, fillHwpxAutoSlots } from './hwpx-auto';
 import { readDocxMarkers, fillDocx } from './docx';
+import { fallbackOutline, fillFallback } from './fallback';
 import { DocFillError } from './errors';
 
 /**
@@ -49,19 +50,31 @@ export function detectFormat(fileName: string, bytes: Buffer): TemplateFormat {
   return 'unknown';
 }
 
-const UNSUPPORTED: Record<Exclude<TemplateFormat, 'hwpx' | 'docx'>, string> = {
-  hwp: '옛 한글(HWP) 형식은 직접 채울 수 없습니다. 한글에서 HWPX로 다시 저장해 올려 주세요.',
-  unknown: '양식 파일 형식을 알 수 없습니다. 한글(HWPX) 파일을 올려 주세요.',
-};
+const UNKNOWN_FORMAT = '양식 파일 형식을 알 수 없습니다. 한글(HWPX)이나 Word(DOCX) 파일을 올려 주세요.';
 
-const NO_MARKERS =
-  '이 양식에서 채울 자리를 찾지 못했습니다. 채울 자리에 {{항목 이름}}처럼 표시를 넣어 다시 올려 주세요.';
-
-// 표시 없는 DOCX의 대체 경로는 Task 7에서 이 실패를 바꾼다
-const NO_MARKERS_DOCX = 'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 채울 수 있습니다.';
+// 직접 채울 수 없어 표준 서식으로 대신 만들 때 사용자에게 알리는 이유(설계 4.4)
+const REASON_HWP =
+  '옛 한글(HWP) 형식이라 양식에 직접 채울 수 없어 표준 서식으로 만듭니다. 한글에서 HWPX로 다시 저장해 올리면 양식 그대로 채웁니다.';
+const REASON_NO_SLOTS =
+  '이 양식에서 채울 자리를 찾지 못해 표준 서식으로 만듭니다. 채울 자리에 {{항목 이름}} 표시를 넣어 다시 올리면 양식 그대로 채웁니다.';
+const REASON_NO_MARKERS_DOCX = 'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 직접 채울 수 있어 표준 서식으로 만듭니다.';
+const NO_REPORT_TEMPLATE = '표준 서식(일반 보고서) 파일이 아직 준비되지 않아 대신 만들 수 없습니다. 관리자에게 알려 주세요.';
 
 function tooManySlots(count: number): ReadResult {
   return { ok: false, reason: `채울 자리가 ${count}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다.` };
+}
+
+/** 직접 채울 수 없는 양식 — 본문의 번호 제목을 목차로 읽는다. 채울 때는 표준 보고서에 담는다 */
+async function readFallback(bytes: Buffer, format: 'hwpx' | 'docx' | 'hwp', reason: string): Promise<ReadResult> {
+  const outline = await fallbackOutline(bytes, format);
+  if (outline.length > MAX_SLOTS) return tooManySlots(outline.length);
+  return {
+    ok: true,
+    format: format === 'docx' ? 'docx' : 'hwpx',
+    mode: 'fallback',
+    reason,
+    slots: outline.map((o, i) => ({ id: `s${i + 1}`, label: o.label, kind: 'section' as const, path: [], hint: null })),
+  };
 }
 
 /** 표시({{이름}})가 있으면 표시, 없으면 자동으로 찾은 자리. 둘 다 없으면 실패 */
@@ -77,14 +90,14 @@ async function readHwpxSlots(bytes: Buffer): Promise<ReadResult> {
     };
   }
   const auto = await readHwpxAutoSlots(bytes);
-  if (auto.length === 0) return { ok: false, reason: NO_MARKERS };
+  if (auto.length === 0) return readFallback(bytes, 'hwpx', REASON_NO_SLOTS);
   if (auto.length > MAX_SLOTS) return tooManySlots(auto.length);
   return { ok: true, format: 'hwpx', mode: 'fill', slots: auto };
 }
 
 async function readDocxSlots(bytes: Buffer): Promise<ReadResult> {
   const labels = await readDocxMarkers(bytes);
-  if (labels.length === 0) return { ok: false, reason: NO_MARKERS_DOCX };
+  if (labels.length === 0) return readFallback(bytes, 'docx', REASON_NO_MARKERS_DOCX);
   if (labels.length > MAX_SLOTS) return tooManySlots(labels.length);
   return {
     ok: true,
@@ -96,8 +109,9 @@ async function readDocxSlots(bytes: Buffer): Promise<ReadResult> {
 
 export async function readTemplate(bytes: Buffer, fileName: string): Promise<ReadResult> {
   const format = detectFormat(fileName, bytes);
-  if (format !== 'hwpx' && format !== 'docx') return { ok: false, reason: UNSUPPORTED[format] };
+  if (format === 'unknown') return { ok: false, reason: UNKNOWN_FORMAT };
   try {
+    if (format === 'hwp') return await readFallback(bytes, 'hwp', REASON_HWP);
     return format === 'docx' ? await readDocxSlots(bytes) : await readHwpxSlots(bytes);
   } catch (error) {
     if (error instanceof DocFillError) return { ok: false, reason: error.message };
@@ -109,8 +123,8 @@ export async function fillTemplate(
   bytes: Buffer,
   fileName: string,
   values: { slot_id: string; text: string }[],
-  // 대체 경로(Task 7)에서 쓴다. 지금은 받기만 한다
-  _opts?: { title?: string; fallbackTemplate?: Buffer | null }
+  // 대체 경로에서 쓴다. fallbackTemplate은 표준 보고서(builtin:report) 바이트, title은 {{제목}}에 들어간다
+  opts?: { title?: string; fallbackTemplate?: Buffer | null }
 ): Promise<FillOutcome> {
   const read = await readTemplate(bytes, fileName);
   if (!read.ok) return read;
@@ -126,6 +140,16 @@ export async function fillTemplate(
   }
 
   try {
+    // 대체를 먼저 가른다. 대체 자리도 kind가 'section'이라 아래 자동 경로로 새면 안 된다
+    if (read.mode === 'fallback') {
+      if (!opts?.fallbackTemplate) return { ok: false, reason: NO_REPORT_TEMPLATE };
+      const outline = read.slots.map((s) => ({ label: s.label }));
+      const byIndex = new Map<number, string>();
+      for (const v of values) byIndex.set(Number(v.slot_id.slice(1)) - 1, v.text);
+      const title = opts.title?.trim() || outline[0]?.label || '문서';
+      const result = await fillFallback(opts.fallbackTemplate, title, outline, byIndex);
+      return { ok: true, bytes: result.bytes, mimeType: HWPX_MIME, extension: 'hwpx', mode: 'fallback', filled: result.filled, unfilled: result.unfilled };
+    }
     if (read.format === 'docx') {
       const result = await fillDocx(bytes, new Map(values.map((v) => [labelById.get(v.slot_id)!, v.text])));
       return { ok: true, bytes: result.bytes, mimeType: DOCX_MIME, extension: 'docx', mode: read.mode, filled: result.filled, unfilled: result.unfilled };

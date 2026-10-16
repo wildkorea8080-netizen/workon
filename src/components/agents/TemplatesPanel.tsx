@@ -88,6 +88,11 @@ export default function TemplatesPanel({
         결과를 채울 기관 서식을 올려 둡니다. 비서 하나에 {MAX_TEMPLATES}개까지, 양식마다 이름을 붙입니다.
         대화에서 &ldquo;사업계획서 양식으로 써 줘&rdquo;처럼 이름으로 고릅니다.
       </p>
+      <p className="text-xs text-slate-500">
+        채울 자리에 {'{{항목 이름}}'}을 넣어 두면 그 자리에 정확히 채웁니다. 표시가 없으면 번호 제목(1. 가. □ ○ 등) 아래의 빈 줄과
+        표의 빈칸을 자동으로 찾습니다. 옛 HWP 파일은 직접 채울 수 없어 표준 서식으로 대신 만들어지니 HWPX로 저장해 올려 주세요.
+        &quot;일시: ○○○&quot;처럼 문장 속 자리는 찾지 못하니 {'{{일시}}'}로 바꿔 주세요.
+      </p>
 
       <ul className="space-y-2">
         {items.map((item) => (

@@ -41,7 +41,11 @@ export const DOCUMENT_ADDENDUM = `[문서 만들기]
 4. 만들어 달라고 하면 대화에 쓴 초안 그대로 fill_template을 부릅니다. 고쳐 달라는 말이 있었으면 고친 내용으로 부릅니다. 사용자가 처음부터 바로 파일로 달라고 했으면 3의 질문 없이 만들고(2의 목차 확인은 그대로 거칩니다), 대화에는 짧은 요약만 씁니다.
 5. 일시·장소·참석자·문서번호·수신처처럼 받은 자료에 없는 사실은 지어내지 않습니다. 묻거나 빈칸으로 두고, 빈칸으로 둔 항목을 알려 줍니다.
 6. 도구가 실패하면 그 이유를 그대로 알리고, 대화에 초안을 썼다면 그 글을 복사해 쓸 수 있다고, 쓰지 않았다면 초안을 대화에 써 드릴 수 있다고 덧붙입니다.
-7. 앞 응답의 도구 결과는 다음 응답에 남지 않습니다. 파일을 만들 때는 list_templates·read_template으로 ref와 자리 번호를 다시 확인한 뒤 fill_template을 부릅니다. 자리 번호를 추측하지 않습니다.`;
+7. read_template 결과의 mode가 fallback이면 reason을 사용자에게 알리고, HWPX로 다시 저장해 올리거나 {{항목 이름}} 표시를 넣으면 양식 그대로 채울 수 있다고 안내합니다.
+8. 앞 응답의 도구 결과는 다음 응답에 남지 않습니다. 파일을 만들 때는 list_templates·read_template으로 ref와 자리 번호를 다시 확인한 뒤 fill_template을 부릅니다. 자리 번호를 추측하지 않습니다.`;
+
+/** 직접 채울 수 없는 양식을 담는 표준 서식 */
+const FALLBACK_REF = 'builtin:report';
 
 const NOT_ALLOWED = '이 비서에서 쓸 수 없는 양식입니다. list_templates로 쓸 수 있는 양식을 다시 확인해 주세요.';
 
@@ -161,7 +165,10 @@ export function createDocument(deps: DocumentDeps): Capability {
         if ('ok' in loaded) return loaded;
         const read = await readTemplate(loaded.bytes, loaded.t.fileName);
         if (!read.ok) return { ok: false, text: read.reason };
-        return { ok: true, text: JSON.stringify({ ref: loaded.t.ref, name: loaded.t.name, slots: read.slots }) };
+        return {
+          ok: true,
+          text: JSON.stringify({ ref: loaded.t.ref, name: loaded.t.name, mode: read.mode, ...(read.reason ? { reason: read.reason } : {}), slots: read.slots }),
+        };
       }
 
       if (tool === 'fill_template') {
@@ -170,10 +177,19 @@ export function createDocument(deps: DocumentDeps): Capability {
         const loaded = await loadOrFail(readRef(input), ctx);
         if ('ok' in loaded) return loaded;
 
-        const filled = await fillTemplate(loaded.bytes, loaded.t.fileName, values);
+        const title = typeof input.title === 'string' && input.title.trim() ? input.title : loaded.t.name;
+
+        // 직접 채울 수 없는 양식은 표준 보고서로 대신 만든다 — 그때만 표준 보고서를 읽는다
+        const read = await readTemplate(loaded.bytes, loaded.t.fileName);
+        if (!read.ok) return { ok: false, text: read.reason };
+        let fallbackTemplate: Buffer | null = null;
+        if (read.mode === 'fallback') {
+          fallbackTemplate = await deps.loadBuiltin(findBuiltinTemplate(FALLBACK_REF)!);
+        }
+
+        const filled = await fillTemplate(loaded.bytes, loaded.t.fileName, values, { title, fallbackTemplate });
         if (!filled.ok) return { ok: false, text: filled.reason };
 
-        const title = typeof input.title === 'string' && input.title.trim() ? input.title : loaded.t.name;
         const fileName = safeFileName(title, filled.extension);
 
         let saved: GeneratedFileRef;
@@ -211,15 +227,18 @@ export function createDocument(deps: DocumentDeps): Capability {
             size_bytes: saved.size_bytes,
             filled: filled.filled.length,
             unfilled: filled.unfilled.length,
+            mode: filled.mode,
           },
         });
 
         const unfilledNote = filled.unfilled.length
           ? ` 채우지 않은 항목 ${filled.unfilled.length}개: ${filled.unfilled.join(', ')} — 사용자에게 알려 주세요.`
           : '';
+        const fallbackNote =
+          filled.mode === 'fallback' ? ' (기관 양식에 직접 채우지 못해 표준 서식으로 만들었습니다 — 이유를 사용자에게 알려 주세요.)' : '';
         return {
           ok: true,
-          text: `한글 파일을 만들었습니다: ${saved.file_name} (채운 항목 ${filled.filled.length}개).${unfilledNote} 대화 아래에 내려받기 링크가 붙습니다.`,
+          text: `한글 파일을 만들었습니다: ${saved.file_name} (채운 항목 ${filled.filled.length}개).${fallbackNote}${unfilledNote} 대화 아래에 내려받기 링크가 붙습니다.`,
           files: [saved],
         };
       }
