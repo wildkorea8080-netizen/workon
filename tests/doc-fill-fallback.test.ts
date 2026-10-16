@@ -71,4 +71,18 @@ describe('표준 보고서 채우기', () => {
     expect(r.filled).toEqual(['A', 'B']);
     expect(r.unfilled).toEqual([]);
   });
+
+  it('양식에 {{주요 내용}} 표시가 없으면 조용히 버리지 않고 실패한다', async () => {
+    const bad = await buildHwpx(REPORT_LABELS.filter((l) => l !== '주요 내용').map((l) => para(`{{${l}}}`)).join(''));
+    await expect(fillFallback(bad, '제목', [{ label: 'A' }], new Map([[0, '글']]))).rejects.toThrow(
+      '기본 보고서 양식에 {{제목}}·{{주요 내용}} 표시가 없어 채울 수 없습니다.'
+    );
+    await expect(fillFallback(bad, '제목', [{ label: 'A' }], new Map())).rejects.toBeInstanceOf(DocFillError);
+  });
+
+  it('공백뿐인 값은 채운 것으로 치지 않고 줄도 쓰지 않는다', async () => {
+    const r = await fillFallback(await reportTemplate(), '제목', [{ label: 'A' }, { label: 'B' }], new Map([[0, '  \n '], [1, '글']]));
+    expect(r.filled).toEqual(['B']);
+    expect(r.unfilled).toEqual(['A']);
+  });
 });

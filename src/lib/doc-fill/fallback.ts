@@ -19,7 +19,9 @@ async function bodyText(bytes: Buffer, format: 'hwpx' | 'docx' | 'hwp'): Promise
       return value;
     }
     return await extractTextFromHwp(bytes, format === 'hwp' ? 'template.hwp' : 'template.hwpx');
-  } catch {
+  } catch (error) {
+    // 사용자에게는 같은 문구만 보이지만, 원인은 운영자가 볼 수 있게 남긴다
+    console.warn('[doc-fill] 대체 목차 읽기 실패', error);
     throw new DocFillError(READ_FAIL);
   }
 }
@@ -57,7 +59,7 @@ export async function fillFallback(
   outline.forEach((item, i) => {
     lines.push(item.label);
     const value = values.get(i);
-    if (value !== undefined && value !== '') {
+    if (value !== undefined && value.trim() !== '') {
       lines.push(...value.replace(/\r\n?/g, '\n').split('\n'));
       filled.push(item.label);
     } else {
@@ -71,5 +73,9 @@ export async function fillFallback(
   byLabel.set('주요 내용', lines.join('\n'));
 
   const out = await fillHwpx(reportTemplate, byLabel);
+  // 양식에 표시가 없으면 내용이 조용히 사라진다 - 채운 것처럼 돌려주지 않고 실패시킨다
+  if (!out.filled.includes('제목') || !out.filled.includes('주요 내용')) {
+    throw new DocFillError('기본 보고서 양식에 {{제목}}·{{주요 내용}} 표시가 없어 채울 수 없습니다.');
+  }
   return { bytes: out.bytes, filled, unfilled };
 }
