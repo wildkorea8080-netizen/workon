@@ -18,6 +18,9 @@ import * as CFB from 'cfb';
 import { inflate, inflateRaw } from 'pako';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
+import type { TableMerge } from '@/lib/attachments/types';
+import { MAX_TABLE_COLS, MAX_TABLE_ROWS } from '@/lib/attachments/limits';
+import { captionAbove } from '@/lib/attachments/header';
 
 // ── HWP 5.0 레코드 태그 ──────────────────────────────────────
 // 참고: 한글과컴퓨터 「한/글 문서 파일 형식」 공개 문서
@@ -202,29 +205,31 @@ function readCellPosition(payload: Uint8Array): Omit<TableCell, 'text'> | null {
   };
 }
 
-/** 표를 마크다운 표로 렌더링한다. 열 머리글이 각 값과 함께 읽히도록. */
-function renderTable(ctrlHeader: HwpRecord): string {
+/** TABLE 레코드가 선언한 행·열 수. 레코드가 없거나 짧으면 null */
+function readTableSize(ctrlHeader: HwpRecord): { rowCount: number; colCount: number } | null {
   const tableInfo = ctrlHeader.children.find((c) => c.tagId === HWPTAG_TABLE);
-  if (!tableInfo || tableInfo.payload.length < 8) return renderChildren(ctrlHeader.children);
-
+  if (!tableInfo || tableInfo.payload.length < 8) return null;
   const infoView = new DataView(
     tableInfo.payload.buffer,
     tableInfo.payload.byteOffset,
     tableInfo.payload.byteLength
   );
-  const rowCount = infoView.getUint16(4, true);
-  const colCount = infoView.getUint16(6, true);
+  return { rowCount: infoView.getUint16(4, true), colCount: infoView.getUint16(6, true) };
+}
 
-  if (rowCount === 0 || colCount === 0 || rowCount > 500 || colCount > 100) {
-    // 값이 비상식적이면 표로 취급하지 않고 본문처럼 이어붙인다
-    return renderChildren(ctrlHeader.children);
-  }
-
-  // LIST_HEADER와 셀 내용은 부모-자식이 아니라 형제로 나열된다.
-  // LIST_HEADER가 "뒤따르는 N개 문단이 이 셀"이라고 선언하는 구조라
-  // 순서대로 훑으면서 다음 LIST_HEADER 전까지를 해당 셀의 내용으로 묶는다.
-  const cells: TableCell[] = [];
-  const children = ctrlHeader.children;
+/**
+ * 표의 칸마다 위치와 그 칸에 속한 레코드.
+ *
+ * LIST_HEADER와 셀 내용은 부모-자식이 아니라 형제로 나열된다.
+ * LIST_HEADER가 "뒤따르는 N개 문단이 이 셀"이라고 선언하는 구조라
+ * 순서대로 훑으면서 다음 LIST_HEADER 전까지를 해당 셀의 내용으로 묶는다.
+ * 색인(renderTable)과 계산용 표(extractHwpTables)가 같이 쓴다 — 칸 해석이 갈라지면
+ * 같은 파일의 본문과 표가 서로 다른 칸을 보여 준다.
+ */
+function tableCellRecords(
+  children: HwpRecord[]
+): { position: Omit<TableCell, 'text'>; content: HwpRecord[] }[] {
+  const out: { position: Omit<TableCell, 'text'>; content: HwpRecord[] }[] = [];
 
   for (let i = 0; i < children.length; i++) {
     if (children[i].tagId !== HWPTAG_LIST_HEADER) continue;
@@ -249,14 +254,29 @@ function renderTable(ctrlHeader: HwpRecord): string {
       j++;
     }
 
-    cells.push({
-      ...position,
-      // 셀 안의 줄바꿈은 표 한 칸에 들어가야 하므로 공백으로 바꾼다
-      text: renderChildren(content).replace(/\s+/g, ' ').trim(),
-    });
-
+    out.push({ position, content });
     i = j - 1;
   }
+
+  return out;
+}
+
+/** 표를 마크다운 표로 렌더링한다. 열 머리글이 각 값과 함께 읽히도록. */
+function renderTable(ctrlHeader: HwpRecord): string {
+  const size = readTableSize(ctrlHeader);
+  if (!size) return renderChildren(ctrlHeader.children);
+  const { rowCount, colCount } = size;
+
+  if (rowCount === 0 || colCount === 0 || rowCount > 500 || colCount > 100) {
+    // 값이 비상식적이면 표로 취급하지 않고 본문처럼 이어붙인다
+    return renderChildren(ctrlHeader.children);
+  }
+
+  const cells: TableCell[] = tableCellRecords(ctrlHeader.children).map(({ position, content }) => ({
+    ...position,
+    // 셀 안의 줄바꿈은 표 한 칸에 들어가야 하므로 공백으로 바꾼다
+    text: renderChildren(content).replace(/\s+/g, ' ').trim(),
+  }));
 
   if (cells.length === 0) return '';
 
@@ -319,7 +339,8 @@ function maybeInflate(raw: Uint8Array, compressed: boolean): Uint8Array {
   }
 }
 
-function extractHwp(buffer: Buffer): string {
+/** 본문 구역(BodyText/Section0, 1, …)을 번호 순서대로 풀어 돌려준다 */
+function readBodySections(buffer: Buffer): Uint8Array[] {
   let container: CFB.CFB$Container;
   try {
     container = CFB.read(buffer, { type: 'buffer' });
@@ -352,21 +373,121 @@ function extractHwp(buffer: Buffer): string {
     throw new HwpParseError('본문(BodyText)을 찾을 수 없습니다.');
   }
 
-  const parts: string[] = [];
+  const out: Uint8Array[] = [];
   for (const section of sections) {
     const raw = Uint8Array.from(section.content as ArrayLike<number>);
-    let data: Uint8Array;
     try {
-      data = maybeInflate(raw, compressed);
+      out.push(maybeInflate(raw, compressed));
     } catch (err: any) {
       // 한 섹션이 깨져도 나머지는 살린다
       console.warn(`[hwp] ${section.name} 압축 해제 실패, 건너뜀:`, err?.message);
-      continue;
     }
-    parts.push(renderChildren(parseRecordTree(data)));
+  }
+  return out;
+}
+
+function extractHwp(buffer: Buffer): string {
+  return readBodySections(buffer)
+    .map((data) => renderChildren(parseRecordTree(data)))
+    .join('\n');
+}
+
+// ── 계산용 표 (첨부 읽기) ─────────────────────────────────────
+//
+// 색인용 renderTable은 500행·100열을 넘으면 본문으로 떨어지고 칸 글을 공백으로 뭉갠다.
+// 계산에는 칸 하나하나가 필요하므로 같은 레코드 해석(tableCellRecords)으로 칸 배열을 따로 낸다.
+
+export interface HwpTableGrid {
+  /** 빈 칸은 null. 병합은 주인 칸에만 글 */
+  cells: (string | null)[][];
+  merges: TableMerge[];
+  /** 표를 품은 최상위 문단 바로 앞의 비지 않은 최상위 문단 */
+  caption?: string;
+  /** 상한에 걸려 잘렸으면 원래 크기 */
+  truncated?: { rows?: number; cols?: number };
+}
+
+/** 문단 자신의 글(안쪽 표·글상자 문단의 글은 빼고). 끝의 문단 구분은 뗀다 */
+function ownParagraphText(paraHeader: HwpRecord): string {
+  return stripPrivateUse(
+    paraHeader.children
+      .filter((c) => c.tagId === HWPTAG_PARA_TEXT)
+      .map((c) => decodeParaText(c.payload))
+      .join('')
+  ).replace(/\n+$/, '');
+}
+
+/** 표 컨트롤 하나를 칸 배열로. 표 정보가 없거나 크기가 0이면 null */
+function buildHwpTableGrid(ctrlHeader: HwpRecord): Omit<HwpTableGrid, 'caption'> | null {
+  const size = readTableSize(ctrlHeader);
+  if (!size || size.rowCount === 0 || size.colCount === 0) return null;
+  // 행·열 수는 UINT16이라 상한을 넘을 수 있다 — 글로 떨어뜨리지 않고 잘라 읽는다
+  const rows = Math.min(size.rowCount, MAX_TABLE_ROWS);
+  const cols = Math.min(size.colCount, MAX_TABLE_COLS);
+
+  const cells: (string | null)[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => null)
+  );
+  const merges: TableMerge[] = [];
+  for (const { position: p, content } of tableCellRecords(ctrlHeader.children)) {
+    if (p.row >= rows || p.col >= cols) continue;
+    // 칸에 바로 든 문단만. 안쪽 표는 따로 표가 되므로 그 글은 넣지 않는다
+    const text = content
+      .filter((r) => r.tagId === HWPTAG_PARA_HEADER)
+      .map(ownParagraphText)
+      .join('\n')
+      .trim();
+    cells[p.row][p.col] = text === '' ? null : text;
+    const mr = Math.min(p.rowSpan, rows - p.row);
+    const mc = Math.min(p.colSpan, cols - p.col);
+    if (mr > 1 || mc > 1) merges.push({ row: p.row, col: p.col, rows: mr, cols: mc });
   }
 
-  return parts.join('\n');
+  const grid: Omit<HwpTableGrid, 'caption'> = { cells, merges };
+  const truncated: { rows?: number; cols?: number } = {};
+  if (size.rowCount > MAX_TABLE_ROWS) truncated.rows = size.rowCount;
+  if (size.colCount > MAX_TABLE_COLS) truncated.cols = size.colCount;
+  if (truncated.rows || truncated.cols) grid.truncated = truncated;
+  return grid;
+}
+
+const isTableCtrl = (r: HwpRecord) =>
+  r.tagId === HWPTAG_CTRL_HEADER && readCtrlId(r.payload) === 'tbl ';
+
+/** 레코드 아래의 표를 문서 순서(바깥 표 → 안쪽 표)로 모은다 */
+function collectTableGrids(records: HwpRecord[], caption: string | undefined, out: HwpTableGrid[]): void {
+  for (const record of records) {
+    if (isTableCtrl(record)) {
+      const grid = buildHwpTableGrid(record);
+      if (grid) out.push(caption ? { ...grid, caption } : grid);
+    }
+    if (record.children.length > 0) collectTableGrids(record.children, caption, out);
+  }
+}
+
+function containsTable(records: HwpRecord[]): boolean {
+  return records.some((r) => isTableCtrl(r) || containsTable(r.children));
+}
+
+/**
+ * HWP 5.0 문서의 표를 칸 배열로 뽑는다(첨부 읽기의 계산용 표).
+ * 색인용 extractTextFromHwp와 출력이 독립이다 — 이쪽을 고쳐도 색인 글은 바뀌지 않는다.
+ */
+export function extractHwpTables(buffer: Buffer): HwpTableGrid[] {
+  const out: HwpTableGrid[] = [];
+  for (const data of readBodySections(buffer)) {
+    // 표 앞 문단 글. 표를 품은 문단을 지나면 비운다 — 표 바로 뒤의 표가 앞 표의 caption을 물려받지 않게
+    let lines: string[] = [];
+    for (const root of parseRecordTree(data)) {
+      if (containsTable(root.children)) {
+        collectTableGrids(root.children, captionAbove(lines), out);
+        lines = [];
+      } else if (root.tagId === HWPTAG_PARA_HEADER) {
+        lines.push(ownParagraphText(root));
+      }
+    }
+  }
+  return out;
 }
 
 // ── HWPX (ZIP + XML) ─────────────────────────────────────────
@@ -466,6 +587,13 @@ function isPrivateUse(codePoint: number): boolean {
     (codePoint >= 0xf0000 && codePoint <= 0xffffd) ||
     (codePoint >= 0x100000 && codePoint <= 0x10fffd)
   );
+}
+
+/** 장식용 PUA 문자를 뺀다(계산용 표 칸과 caption) */
+export function stripPrivateUse(text: string): string {
+  return Array.from(text)
+    .filter((ch) => !isPrivateUse(ch.codePointAt(0) ?? 0))
+    .join('');
 }
 
 /** RAG 인덱싱에 쓸 수 있도록 장식 문자와 빈 줄을 정리한다 */
