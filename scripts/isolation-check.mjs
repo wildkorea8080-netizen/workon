@@ -123,7 +123,7 @@ for (const [table, labelCol] of [
 // organization_id가 NULL이면 visibilityFilter의 기관 조건에 걸리지 않아
 // 아무에게도 안 보이거나, 반대로 부서 조건으로만 걸려 의도와 어긋난다.
 console.log('\n=== 3. 기관 미연결 행 ===');
-for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'generated_files', 'conversations']) {
+for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'generated_files', 'chat_attachments', 'conversations']) {
   const { count, error } = await db
     .from(table)
     .select('id', { count: 'exact', head: true })
@@ -210,6 +210,22 @@ console.log('\n=== 4-2. 생성 파일 기관 일치 ===');
     const crossed = (files ?? []).filter((f) => deptOrg.get(f.department_id) !== f.organization_id);
     if (crossed.length > 0) fail(`생성 파일 ${files.length}개 중 기관 어긋남 ${crossed.length}개`);
     else pass(`생성 파일 ${files?.length ?? 0}개 — 부서와 기관이 일치`);
+  }
+}
+
+// ── 4-3. 첨부의 부서와 기관 ──────────────────────────────────
+// 첨부는 주인 조건으로만 열리지만, 기관이 어긋나면 기관 단위 집계·정리가 엇갈린다
+console.log('\n=== 4-3. 첨부 기관 일치 ===');
+{
+  const { data: atts, error } = await db.from('chat_attachments').select('id, department_id, organization_id');
+  if (error) {
+    // 0030 전이면 표가 없다. 확인 못 한 것은 위반으로 센다
+    fail('첨부 조회 실패', error.message);
+  } else {
+    const deptOrg = new Map(depts.map((d) => [d.id, d.organization_id]));
+    const crossed = (atts ?? []).filter((a) => deptOrg.get(a.department_id) !== a.organization_id);
+    if (crossed.length > 0) fail(`첨부 ${atts.length}개 중 기관 어긋남 ${crossed.length}개`);
+    else pass(`첨부 ${atts?.length ?? 0}개 — 부서와 기관이 일치`);
   }
 }
 

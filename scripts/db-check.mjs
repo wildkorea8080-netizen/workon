@@ -35,6 +35,7 @@ const checks = [
   ['0026', 'agent_templates 테이블',     () => db.from('agent_templates').select('id, retired_at').limit(1)],
   ['0026', 'messages.agent_version',     () => db.from('messages').select('agent_version').limit(1)],
   ['0029', 'generated_files 테이블',     () => db.from('generated_files').select('id, conversation_id, organization_id, storage_path').limit(1)],
+  ['0030', 'chat_attachments 테이블',    () => db.from('chat_attachments').select('id, conversation_id, organization_id, storage_path, extract_path, status').limit(1)],
 ];
 
 console.log('=== 컬럼 점검 ===');
@@ -82,7 +83,7 @@ for (const table of ['agents', 'documents']) {
 }
 
 console.log('\n=== 기관 미연결 행 (전부 0이어야 정상) ===');
-for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'generated_files']) {
+for (const table of ['departments', 'agents', 'documents', 'usage_logs', 'generated_files', 'chat_attachments']) {
   const { count, error } = await db
     .from(table)
     .select('id', { count: 'exact', head: true })
