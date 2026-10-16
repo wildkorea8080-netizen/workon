@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { headingLevel, isPlaceholderText, normalizeLabel } from '@/lib/doc-fill/slots';
+import { headingLevel, numberedHeadingLevel, isPlaceholderText, normalizeLabel } from '@/lib/doc-fill/slots';
 
 describe('번호 제목 급', () => {
   it.each([
@@ -46,4 +46,13 @@ describe('항목명', () => {
     expect(normalizeLabel('기 안 자')).toBe('기안자');
     expect(normalizeLabel('사업 기간')).toBe('사업 기간');
   });
+});
+
+describe('영역을 여는 번호 제목(최종 보강)', () => {
+  it.each(['○ 추진 방향', '● 현황', '- 세부 일정', '– 세부 일정', '  ○ 들여 쓴 글머리'])('"%s"는 글머리라 영역을 열지 않는다', (t) =>
+    expect(numberedHeadingLevel(t)).toBeNull());
+  it.each([
+    ['Ⅱ. 추진 계획', 1], ['1. 사업 개요', 2], ['□ 개요', 2], ['■ 개요', 2], ['가. 현황', 3], ['1) 인력', 4],
+    ['가) 예산', 5], ['(1) 1분기', 6], ['(가) 시범', 7], ['① 대상', 8],
+  ])('%s → %d', (text, level) => expect(numberedHeadingLevel(text)).toBe(level));
 });

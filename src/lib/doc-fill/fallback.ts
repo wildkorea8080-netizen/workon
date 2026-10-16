@@ -1,6 +1,6 @@
 import mammoth from 'mammoth';
 import { extractTextFromHwp } from '../hwp';
-import { headingLevel } from './slots';
+import { numberedHeadingLevel } from './slots';
 import { fillHwpx } from './hwpx';
 import { DocFillError } from './errors';
 
@@ -36,7 +36,8 @@ export async function fallbackOutline(
   for (const raw of text.split(/\r\n?|\n/)) {
     const line = raw.trim();
     if (!line || seen.has(line)) continue;
-    const level = headingLevel(line);
+    // 개조식 글머리(○●-–)는 본문 줄이다 — 목차에 넣으면 내용 줄마다 항목이 된다
+    const level = numberedHeadingLevel(line);
     if (level === null) continue;
     seen.add(line);
     outline.push({ label: line, level });

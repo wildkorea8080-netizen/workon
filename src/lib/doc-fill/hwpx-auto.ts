@@ -1,5 +1,5 @@
 import { paragraphPrefix, scanTags, type XmlTag } from './xml-scan';
-import { headingLevel, isPlaceholderText, normalizeLabel } from './slots';
+import { numberedHeadingLevel, isPlaceholderText, normalizeLabel } from './slots';
 import {
   openHwpx,
   readEntry,
@@ -19,7 +19,8 @@ import {
  * 표시({{이름}})가 없는 HWPX에서 채울 자리를 스스로 찾는다(설계 4.1, S2-b).
  *
  * - section: 본문 최상위의 번호 제목 아래, 다음 최상위 제목 전까지의 빈 문단·자리 표시 문단.
- *   그 영역에 이미 글이 쓰인 문단이 하나라도 있으면 자리가 아니다
+ *   그 영역에 이미 글이 쓰인 문단이 하나라도 있으면 자리가 아니다. 개조식 글머리(○●-–)는
+ *   영역을 열지 않는다 — 자리 표시 글('○ ○○○')이면 채울 곳, 아니면 이미 쓰인 글이다
  * - cell: 표에서 비었거나 자리 표시만 든 칸. 이름은 왼쪽 항목명 칸, 왼쪽이 없으면 첫 행의 열 머리.
  *   행이 '행 머리(0열) + 빈 데이터 칸' 꼴이고 첫 행에 열 머리가 있으면 '행 머리 / 열 머리'
  *
@@ -206,7 +207,8 @@ function locateSlots(xml: string, prefix: string): SectionScan {
     if (open && !open.written && open.fills.length > 0) {
       const [target, ...rest] = open.fills;
       out.push({
-        slot: { label: open.label, kind: 'section', path: open.path, hint: target.text.trim() || null },
+        // 첫 문단이 비었어도 영역 안의 첫 자리 표시 글이 무엇을 쓸지 알려 준다
+        slot: { label: open.label, kind: 'section', path: open.path, hint: open.fills.map((p) => p.text.trim()).find(Boolean) ?? null },
         pos: open.heading.start,
         target,
         rest,
@@ -216,7 +218,7 @@ function locateSlots(xml: string, prefix: string): SectionScan {
   };
   for (const p of paras) {
     if (p.ancestors.length > 0) continue;
-    const level = isPlaceholderText(p.text) ? null : headingLevel(p.text);
+    const level = isPlaceholderText(p.text) ? null : numberedHeadingLevel(p.text);
     if (level !== null) {
       close();
       // 같은 급 이상의 앞선 제목은 다른 갈래다 — 사슬에서 뺀다
@@ -263,18 +265,29 @@ function locateSlots(xml: string, prefix: string): SectionScan {
         .filter((o) => o.cell.row === row && o.cell.col < col)
         .sort((a, b) => b.cell.col - a.cell.col)
         // 숫자뿐인 칸은 값이다 — [예산|100|빈칸]의 빈칸 이름은 '100'이 아니라 '예산'.
-        // 열 머리에는 이 거름을 걸지 않는다('2026' 같은 연도 열 머리가 흔하다)
-        .find((o) => usable(o) && !NUMBER_ONLY.test(o.label));
+        // 0열(행 머리)과 열 머리에는 이 거름을 걸지 않는다('2026' 같은 연도 머리가 흔하다)
+        .find((o) => usable(o) && (o.cell.col === 0 || !NUMBER_ONLY.test(o.label)));
       // 위쪽은 첫 행(열 머리)에서만 — 바로 위 행의 칸은 대개 값이다('홍길동'이 항목명이 되면 안 된다)
-      const header = row > 0 ? usable(info.find((o) => o.cell.row === 0 && o.cell.col === col)) : null;
+      const headerOf = (c: number) => (row > 0 ? usable(info.find((o) => o.cell.row === 0 && o.cell.col === c)) : null);
+      const header = headerOf(col);
       // 열 머리는 '행 머리(0열) + 빈 데이터 칸' 꼴의 행에서만 붙인다. 항목·값이 번갈아 놓인
       // 서식([성명|홍길동|소속|총무과])의 첫 행은 값이라 열 머리가 아니다
       const matrixRow =
         left !== undefined &&
         left.cell.col === 0 &&
         info.every((o) => o.cell.row !== row || o.cell.col === 0 || o.blank);
+      // 왼쪽 칸이 값인 행([홍길동|총무과|빈칸], 첫 행은 [성명|소속|연락처])에서는 제 열 머리가 이름이다.
+      // 왼쪽 칸이 0열이 아니고 그 열에도 열 머리가 있으며, 그 앞이 빈칸 없이 채워진 행일 때만 —
+      // 항목·빈칸이 번갈아 놓인 서식([직급|빈칸|연락처|빈칸])의 '연락처'는 값이 아니라 항목명이다
+      const valueLeft =
+        left !== undefined &&
+        left.cell.col !== 0 &&
+        header !== null &&
+        headerOf(left.cell.col) !== null &&
+        info.every((o) => o.cell.row !== row || o.cell.col >= left.cell.col || !o.blank);
       let label: string;
-      if (left) label = matrixRow && header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
+      if (valueLeft && header) label = header.label;
+      else if (left) label = matrixRow && header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
       else if (header) label = header.label;
       else continue;
       const [target, ...rest] = me.paras;
@@ -338,7 +351,8 @@ export async function fillHwpxAutoSlots(
     for (const loc of slots) {
       const id = `s${++n}`;
       const value = values.get(id);
-      if (value === undefined) {
+      // 공백뿐인 값은 채우지 않는다 — 자리 표시를 지우고 빈 글을 넣으면 채운 것처럼 보인다
+      if (value === undefined || value.trim() === '') {
         unfilled.push(id);
         continue;
       }

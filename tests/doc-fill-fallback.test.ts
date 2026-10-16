@@ -86,3 +86,19 @@ describe('표준 보고서 채우기', () => {
     expect(r.unfilled).toEqual(['A']);
   });
 });
+
+describe('대체 목차 — 개조식 글머리(최종 보강)', () => {
+  it('○·●·-·– 글머리는 목차가 아니다 — 번호 제목만', async () => {
+    const bytes = await buildHwpx(
+      para('1. 추진 배경') +
+        para('○ 디지털 전환 가속화') +
+        para('- 정부 혁신 과제 반영') +
+        para('2. 추진 내용') +
+        para('● 민원 서비스 개선') +
+        para('– 세부 일정') +
+        para('3. 향후 계획') +
+        para('○ 단계별 확대')
+    );
+    expect((await fallbackOutline(bytes, 'hwpx')).map((o) => o.label)).toEqual(['1. 추진 배경', '2. 추진 내용', '3. 향후 계획']);
+  });
+});

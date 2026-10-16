@@ -1,6 +1,7 @@
 /**
- * 채울 자리 규칙. S2-a는 기관이 넣은 표시({{이름}})만 읽는다.
- * 번호 제목·표 빈칸·자리 표시 글자 찾기는 S2-b에서 여기에 더한다(설계 4.1).
+ * 채울 자리 규칙(설계 4.1). 표시({{이름}}) 찾기, 번호 제목 급, 자리 표시 글자, 표 항목명 다듬기.
+ * 표시 경로(hwpx.ts·docx.ts)·자동 자리(hwpx-auto.ts)·대체 목차(fallback.ts)가 함께 쓴다 —
+ * 기호·글자 판정은 이 파일 한 곳에만 둔다.
  */
 export interface MarkerMatch {
   label: string;
@@ -64,6 +65,19 @@ export function headingLevel(text: string): number | null {
   // 본문 글머리('○ 사업기간은 1년이다.')를 제목으로 잡지 않는다
   if (SENTENCE_END.test(hit.rest)) return null;
   return hit.level;
+}
+
+/** 개조식 글머리(○●-–). 본문 한 줄이지 영역을 여는 제목이 아니다 */
+const BULLET = /^[○●\-–]\s+/;
+
+/**
+ * 영역을 여는 번호 제목의 급. headingLevel에서 개조식 글머리(○●-–)를 뺀 것이다.
+ * 이미 쓴 보고서는 글머리마다 내용이 있다 — 글머리를 제목으로 보면 내용 줄 사이 빈 줄이
+ * 자리가 되어 기존 글 사이에 끼워 넣는다. 자동 자리와 대체 목차가 이것을 쓴다
+ */
+export function numberedHeadingLevel(text: string): number | null {
+  if (BULLET.test(text.trimStart())) return null;
+  return headingLevel(text);
 }
 
 /** 자리 표시 글자: 같은 글자 3개 이상 반복(○○○·OOO·ㅇㅇㅇ)과 안내 문구. 글 전체가 이것일 때만 */

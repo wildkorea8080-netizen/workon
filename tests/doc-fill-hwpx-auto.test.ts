@@ -142,9 +142,12 @@ describe('표 빈칸', () => {
     expect((await readHwpxAutoSlots(partly)).map((s) => s.label)).toEqual(['예산']);
   });
 
-  it('숫자뿐인 칸은 왼쪽 항목명이 아니다 — 연도 같은 숫자 열 머리는 쓴다', async () => {
-    const numbered = await buildHwpx(tableAt([['번호', '성명'], ['1', '']]));
-    expect((await readHwpxAutoSlots(numbered)).map((s) => s.label)).toEqual(['성명']);
+  it('숫자뿐인 칸은 왼쪽 항목명이 아니다 — 연도 같은 숫자 열 머리·0열 행 머리는 쓴다', async () => {
+    const valued = await buildHwpx(tableAt([['구분', '금액', '비고'], ['예산', '100', '']]));
+    expect((await readHwpxAutoSlots(valued)).map((s) => s.label)).toEqual(['예산']);
+    // 0열의 숫자는 행 머리다(일련번호·연도) — 행마다 이름이 갈린다
+    const numbered = await buildHwpx(tableAt([['번호', '성명'], ['1', ''], ['2', '']]));
+    expect((await readHwpxAutoSlots(numbered)).map((s) => s.label)).toEqual(['1 / 성명', '2 / 성명']);
     const years = await buildHwpx(tableAt([['구분', '2025', '2026'], ['예산', '', '']]));
     expect((await readHwpxAutoSlots(years)).map((s) => s.label)).toEqual(['예산 / 2025', '예산 / 2026']);
   });
@@ -331,5 +334,66 @@ describe('채우기', () => {
       const at = xml.lastIndexOf(s.label, positions[i]);
       expect(at).toBeGreaterThan(i === 0 ? -1 : positions[i - 1]);
     });
+  });
+});
+
+describe('최종 보강 — 개조식 글머리·행 머리·공백 값', () => {
+  it('이미 쓴 개조식 문서에는 자리가 없다 — ○·- 글머리는 제목이 아니라 쓰인 글', async () => {
+    const bytes = await buildHwpx(
+      para('1. 추진 배경') +
+        para('○ 디지털 전환 가속화') +
+        para('- 정부 혁신 과제 반영') +
+        emptyPara() +
+        para('2. 추진 내용') +
+        para('○ 민원 서비스 개선') +
+        emptyPara() +
+        para('3. 향후 계획') +
+        para('○ 단계별 확대')
+    );
+    expect(await readHwpxAutoSlots(bytes)).toEqual([]);
+    // ●·– 글머리도 같다
+    expect(await readHwpxAutoSlots(await buildHwpx(para('1. 개요') + para('● 현황 분석') + emptyPara()))).toEqual([]);
+    expect(await readHwpxAutoSlots(await buildHwpx(para('1. 개요') + para('– 세부 일정') + emptyPara()))).toEqual([]);
+  });
+
+  it('글머리 자리 표시(○ ○○○)는 여전히 채울 곳이다', async () => {
+    const bytes = await buildHwpx(para('1. 추진 배경') + para('○ ○○○') + emptyPara());
+    expect(await readHwpxAutoSlots(bytes)).toEqual([
+      { id: 's1', label: '1. 추진 배경', kind: 'section', path: [], hint: '○ ○○○' },
+    ]);
+    expect((await readHwpxAutoSlots(await buildHwpx(para('1. 개요') + para('○ ') + emptyPara()))).map((s) => s.label)).toEqual(['1. 개요']);
+  });
+
+  it('글머리는 제목 경로에도 끼지 않는다', async () => {
+    const bytes = await buildHwpx(para('1. 개요') + para('○ 추진 방향') + tableAt([['담당자', '']]));
+    expect(await readHwpxAutoSlots(bytes)).toEqual([{ id: 's1', label: '담당자', kind: 'cell', path: ['1. 개요'], hint: null }]);
+  });
+
+  it('section 자리의 hint는 영역의 첫 자리 표시 글 — 첫 문단이 비었어도', async () => {
+    const bytes = await buildHwpx(para('1. 개요') + emptyPara() + para('○○○'));
+    expect(await readHwpxAutoSlots(bytes)).toEqual([{ id: 's1', label: '1. 개요', kind: 'section', path: [], hint: '○○○' }]);
+  });
+
+  it('연도 같은 숫자 행 머리는 행 머리로 쓴다', async () => {
+    const bytes = await buildHwpx(tableAt([['구분', '예산', '비고'], ['2025', '', ''], ['2026', '', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['2025 / 예산', '2025 / 비고', '2026 / 예산', '2026 / 비고']);
+  });
+
+  it('값 칸은 이름이 되지 않는다 — 값이 든 행의 빈칸은 제 열 머리', async () => {
+    const bytes = await buildHwpx(tableAt([['성명', '소속', '연락처'], ['홍길동', '총무과', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['연락처']);
+    // 항목·빈칸이 번갈아 놓인 서식은 그대로 왼쪽 항목명
+    const kv = await buildHwpx(tableAt([['성명', '', '소속', ''], ['연락처', '', '직급', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(kv)).map((s) => s.label)).toEqual(['성명', '소속', '연락처', '직급']);
+  });
+
+  it('공백뿐인 값은 채우지 않고 자리 표시를 남긴다', async () => {
+    const bytes = await buildHwpx(para('1. 개요') + para('(내용)', '5') + tableAt([['비고', '']]));
+    const result = await fillHwpxAutoSlots(bytes, values({ s1: '  \n ', s2: '\t' }));
+    expect(result.filled).toEqual([]);
+    expect(result.unfilled).toEqual(['s1', 's2']);
+    const xml = await sectionXml(result.bytes);
+    expect(xml).toContain(para('(내용)', '5'));
+    expect(xml).toContain(emptyPara('7'));
   });
 });
