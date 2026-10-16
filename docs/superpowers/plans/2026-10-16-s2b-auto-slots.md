@@ -279,7 +279,7 @@ it('읽기와 채우기의 자리 번호가 같다 — 같은 바이트면 같�
   export async function readDocxMarkers(bytes: Buffer): Promise<string[]>;
   export async function fillDocx(bytes: Buffer, values: Map<string, string>): Promise<{ bytes: Buffer; filled: string[]; unfilled: string[] }>;
   ```
-  index.ts: `docx`이고 표시가 있으면 `format:'docx'`, `mode:'fill'`, 결과 `extension:'docx'`, `mimeType: DOCX_MIME`. 표시가 없으면 이 Task에서는 실패 이유("Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 채울 수 있습니다…") — Task 7에서 대체 경로로 바뀐다.
+  index.ts: `docx`이고 표시가 있으면 `format:'docx'`, `mode:'fill'`, 결과 `extension:'docx'`, `mimeType: DOCX_MIME`. 표시가 없으면 이 Task에서는 실패 이유 `'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 채울 수 있습니다.'` — Task 7에서 대체 경로로 바뀐다.
 
 규칙 (설계 4.5의 구체화):
 - 대상 부분: `word/document.xml`, `word/header*.xml`, `word/footer*.xml`. 그 밖의 항목은 내용 그대로, 원래 압축 방식으로
