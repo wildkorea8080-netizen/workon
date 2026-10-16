@@ -55,7 +55,7 @@ src/
 │   ├── llm/              # AI 연결부 — types.ts · anthropic.ts(어댑터) · index.ts(streamChat·complete)
 │   ├── assistant/        # 대화 실행기 — prepare.ts · stream.ts · prompt.ts · history.ts · persist.ts
 │   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image · document
-│   ├── doc-fill/         # 양식 채우기 엔진(HWPX)
+│   ├── doc-fill/         # 양식 채우기 엔진(HWPX·DOCX) — hwpx-core · slots · hwpx-auto · docx · fallback · index
 │   ├── generated-files.ts # 생성 파일 보관
 │   ├── builtin-templates.ts # 기본 양식
 │   ├── config.ts         # 환경 변수 (직접 process.env 접근 금지)
@@ -89,7 +89,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 415개) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 541개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력.hwpx 출력.hwpx` | 한글 호환 확인 — 출력 파일을 한글에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -319,7 +319,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
 클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).
 
-### 문서 만들기 (S2-a)
+### 문서 만들기 (S2-a·S2-b)
 
 능력 `document`를 켜면 비서가 `list_templates` · `read_template` · `fill_template`을 쓴다.
 흐름(양식 → 목차 확인 → 초안 → 파일)과 "모르는 사실은 지어내지 않는다"는 능력이
@@ -328,7 +328,26 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 - **엔진(`src/lib/doc-fill/`)은 DB·저장소를 모른다.** 바이트를 받아 바이트를 돌려준다. HWPX의 본문 XML
   (`Contents/section*.xml`)만 문자열 단위로 고치고 나머지(서식 정의·그림)는 그대로 둔다. 파서로 읽어
   다시 쓰면 한글이 까다롭게 군다. zip 항목은 원래 압축 방식(무압축 STORE 포함)을 유지한다
-- **S2-a는 `{{이름}}` 표시만 채운다.** DOCX·옛 HWP·표시 없는 양식은 이유와 함께 실패한다(S2-b에서 대체 경로)
+- **무엇을 채울지는 `readTemplate`(`doc-fill/index.ts`)가 이 순서로 고른다.** ① HWPX에 `{{이름}}` 표시가 하나라도 있으면 표시만
+  채운다(자동 찾기는 하지 않는다) → ② 표시가 없는 HWPX는 **자동 자리**(`hwpx-auto.ts`) → ③ DOCX는 표시가 있을 때만(`docx.ts`)
+  → ④ 그 밖(옛 HWP, 자리를 못 찾은 HWPX, 표시 없는 DOCX)은 **대체 경로**(`fallback.ts`). 결과의 `mode`(`fill`·`fallback`)와
+  대체일 때의 `reason`은 `read_template` 응답에 실려 사용자에게 이유가 간다. 자리는 최대 100곳(`MAX_SLOTS`), 한 자리 6,000자
+- **자동 자리 규칙**(`slots.ts`·`hwpx-auto.ts`). 같은 바이트에서 읽기와 채우기가 같은 함수로 자리를 다시 계산하므로 자리 번호(s1…)가 결정적이다
+  - section: 본문 최상위의 **번호 제목**(Ⅰ. · 1. · □ · ○ · 가. · 1) · (1) · ① 등 9급, 판정은 `headingLevel` 한 곳)
+    아래 다음 최상위 제목 전까지의 **빈 문단·자리 표시 문단**. 그 영역에 이미 글이 쓰인 문단이 하나라도 있으면 자리가 아니다
+  - cell: 표의 빈 칸·자리 표시 칸. 이름은 왼쪽의 가장 가까운 항목명 칸(숫자뿐인 칸은 값이라 건너뜀), 왼쪽이 없으면 첫 행의 열 머리.
+    '행 머리 + 빈 데이터 칸' 꼴의 행에서만 `행 머리 / 열 머리`로 붙인다. 항목명도 열 머리도 없는 빈 칸(결재란 등)은 자리가 아니다
+  - **컨트롤을 품은 문단은 제외한다**(구역 설정·표·그림·필드 등 글 조각 밖의 태그가 있는 문단) — 채우면 컨트롤이 깨진다
+  - 자리 표시는 **글 전체가** 비었거나 `○○○`류(같은 글자 3개 이상)·`(내용)` 등일 때만 본다. **문장 속 자리**(`일시: ○○○`)는 찾지 못한다 — 양식 탭에서 `{{일시}}`로 바꾸라고 안내한다
+  - 번호 기호 ○●□■·하이픈은 뒤에 공백이 있어야 제목이다('□개요'·'---'는 제목이 아님). 날짜('26. 3. 5.')·'1.5배'는 번호가 아니다
+  - 자리마다 `hint`(그 자리에 있던 자리 표시 글자나 칸 글)와 `path`(위 급 제목의 사슬)가 붙어 모델이 무엇을 넣을지 가늠한다
+- **DOCX는 표시만 채운다.** 표시가 쪼개진 글 조각에 걸쳐도 찾는다(머리글·글상자 포함). 여러 줄이면 새 문단으로 잇는데
+  `sectPr`(구역 나눔)는 **마지막 이어 붙인 문단**으로 옮기고 `pageBreakBefore`·`numPr`·변경 추적 표시는 복사본에 넘기지 않는다
+- **대체 경로**: 직접 채울 수 없는 양식은 본문에서 **번호 제목만 목차로 읽고**(HWP·HWPX는 `hwp.ts`, DOCX는 mammoth) 표준 보고서
+  (`builtin:report`)의 `{{제목}}`·`{{주요 내용}}`에 담는다. 항목 이름 줄 다음에 그 항목의 글이 목차 순서로 이어진다. 번호 제목이
+  없으면 목차는 '본문' 하나다. 나머지 표시는 빈 글로 채워 `{{…}}`가 남지 않게 한다. 표준 보고서에 `{{제목}}`·`{{주요 내용}}`이
+  없으면 내용이 조용히 사라지므로 **실패시킨다**. 결과는 항상 HWPX이고, 사용자에게는 이유(`reason`)를 알려 HWPX로 다시 저장하거나
+  표시를 넣도록 안내한다. 기관 양식의 서식은 대체 경로에서 살지 않는다
 - 표 칸·머리말처럼 다른 문단에 중첩된 문단의 표시도 제자리에서 채운다. 여러 줄이면 첫 줄은 표시 자리에,
   나머지는 **새 문단**으로 잇는다(원래 문단을 복제하면 구역 설정·표·그림 컨트롤이 함께 복제돼 파일이 깨진다).
   새 문단은 표시의 문단·글자 서식을 이어받고 쪽·단 나눔은 넘기지 않는다
@@ -337,13 +356,13 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 - 표준 서식 = `assets/templates/`의 기본 양식 3종(공문 기안문·일반 보고서·회의록, 정의는 `builtin-templates.ts`).
   **한글로 만든 진짜 HWPX**라야 한다(`assets/templates/README.md`). 파일이 없으면 능력이 "아직 준비되지 않았다"고 알린다.
   기관 양식(`agent_templates`)은 비서에 올려 둔 것이 `list_templates`에 함께 나온다
-- 만든 파일은 `generated_files` + 저장소 `generated/{기관}/{대화}/{id}.hwpx`. **주인만** `/api/files/[id]`로 받는다
+- 만든 파일은 `generated_files` + 저장소 `generated/{기관}/{대화}/{id}.{hwpx|docx}`. **주인만** `/api/files/[id]`로 받는다
   (60초 서명 주소로 302 — Vercel 함수 응답 4.5MB 상한 때문에 직접 보내지 않는다). 관리자도 못 받는다.
   내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
   이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
 - 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
-- 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드
-- 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님)
+- 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드(배지는 확장자에 따라 `DOC`·`HWP`)
+- 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님). `details.mode`(`fill`·`fallback`)를 남긴다
 - 한글 호환은 단위 테스트로 못 본다. `npm run hwpx:probe`로 만든 파일을 한글에서 직접 열어 본다
 
 ### 이미지 첨부 (`/api/chat`)
@@ -515,7 +534,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-15 기준 415개).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-16 기준 541개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -535,6 +554,10 @@ MAIL_FROM=
    | `capabilities.test.ts` | 능력 목록·도구 이름 중복, 기관 범위로 거른 능력, 문서 찾기 3경우(자료·근거 없음·문서 없음) |
    | `assistant-parts.test.ts` | 시스템 프롬프트 조립, 사진 순서·저장 표시, 이력 다듬기, 메시지 저장 행 키 일치·판 번호, 모델별 사용량 |
    | `tool-loop.test.ts` | 도구 루프 라운드 누적, 상한 시 `tool_choice=none` 마무리, 꺼낸 적 없는 도구 거부, 도중 실패 시 쓴 토큰 보존 |
+   | `doc-fill-slots.test.ts` | 번호 제목 9급 판정(날짜·'1.5배'·기호만 있는 글·문장형 글머리 제외), 자리 표시 글자 판정, 항목명 다듬기 |
+   | `doc-fill-hwpx-auto.test.ts` | 자동 자리 — 번호 제목 영역·표 빈칸 이름 규칙·컨트롤 문단 제외·이미 글이 쓰인 영역 제외, 채운 뒤 재읽기·줄 배치 캐시·읽기/채우기 자리 번호 일치 |
+   | `doc-fill-docx.test.ts` | DOCX 표시 읽기·채우기, 조각난 표시, 여러 줄 이을 때 `sectPr` 이동·쪽 나눔/번호/변경 추적 표시 제거, 압축 방식 유지 |
+   | `doc-fill-fallback.test.ts` | 대체 목차(HWPX·DOCX·깨진 파일), 표준 보고서 채우기, `{{주요 내용}}` 표시 없으면 실패, 공백 값은 안 채움 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
