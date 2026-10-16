@@ -198,3 +198,98 @@ describe('병합 복사본', () => {
     expect(ex.tables[0].cells[2][1]).toBeNull();
   });
 });
+
+describe('단위·잘림이 모델에게 보인다 (최종 수정)', () => {
+  it('표 위 글(단위)을 표 앞에 적는다 — 본문에도 남는다', async () => {
+    const t = buildTable(1, 'Sheet1', [['부서', '예산'], ['총무과', 100]], [], '(단위: 천원)');
+    const md = tableAsMarkdown(t);
+    expect(md.split('\n')[0]).toBe('표 위 글: (단위: 천원)');
+    expect(md).toContain('| 부서 | 예산 |');
+
+    const bytes = await xlsx((wb) => {
+      const ws = wb.addWorksheet('Sheet1');
+      ws.addRow(['(단위: 천원)']);
+      ws.addRow(['부서', '예산']);
+      ws.addRow(['총무과', 100]);
+    });
+    const ex = await readAttachment(bytes, '예산.xlsx');
+    expect(ex.text).toContain('표 위 글: (단위: 천원)');
+  });
+
+  it('잘린 표는 원래 크기를 표 앞에 적는다', () => {
+    const t = buildTable(1, '표 1', [['부서', '예산'], ['총무과', 100]], [], undefined, { rows: 25_000 });
+    expect(tableAsMarkdown(t)).toContain('잘림: 원래 25,000행 · 2열 중 일부만 읽음');
+    const wide = buildTable(1, '표 1', [['부서', '예산'], ['총무과', 100]], [], undefined, { rows: 30_000, cols: 250 });
+    expect(tableAsMarkdown(wide, { offset: 0 })).toContain('잘림: 원래 30,000행 · 250열 중 일부만 읽음');
+  });
+
+  it('요약 표에 caption·잘림을 싣는다(없으면 키 없음)', () => {
+    const t = buildTable(1, '표 1', [['부서', '예산'], ['총무과', 100]], [], '(단위: 원)', { rows: 25_000 });
+    const plain = buildTable(2, '표 2', [['부서', '예산'], ['총무과', 100]], []);
+    const s = summarize({ kind: 'document', text: 'x', tables: [t, plain], warnings: [] });
+    expect(s.tables[0]).toMatchObject({ caption: '(단위: 원)', truncated: true });
+    expect(s.tables[1]).toEqual({ id: 't2', title: '표 2', rows: 1, columns: ['부서', '예산'] });
+  });
+});
+
+describe('표 보기 — 세로 병합 글자 칸 (최종 수정)', () => {
+  it('세로 병합된 글자 칸은 보기에서만 아래로 채운다 — 숫자는 주인 칸에만', () => {
+    const cells = [['부서', '항목', '금액'], ['총무과', '인건비', 300], [null, '운영비', null], ['기획과', '인건비', 10]];
+    const merges = [{ row: 1, col: 0, rows: 2, cols: 1 }, { row: 1, col: 2, rows: 2, cols: 1 }];
+    const t = buildTable(1, '표 1', cells, merges);
+    const md = tableAsMarkdown(t);
+    expect(md).toContain('| 총무과 | 운영비 |  |');
+    expect(md.match(/300/g)).toHaveLength(1);
+    // 저장된 칸은 그대로
+    expect(t.cells[2][0]).toBeNull();
+    // 이어 읽기로 주인 행이 앞쪽 쪽에 있어도 채운다
+    expect(tableAsMarkdown(t, { offset: 1 })).toContain('| 총무과 | 운영비 |');
+  });
+
+  it('머리글에서 내려온 세로 병합은 데이터 칸에 채우지 않는다', () => {
+    const cells = [['구분', '값'], [null, 'a'], [null, 'b']];
+    const t = buildTable(1, '표 1', cells, [{ row: 0, col: 0, rows: 3, cols: 1 }]);
+    expect(tableAsMarkdown(t)).not.toContain('| 구분 | a |');
+  });
+});
+
+describe('형식·크기 보정 (최종 수정)', () => {
+  it('이름이 .hwp여도 내용이 HWPX(zip)면 HWPX 표로 읽는다', async () => {
+    const bytes = await buildHwpx(xpara('개요') + tableAt([['구분', '금액'], ['가', '10']]));
+    const ex = await readAttachment(bytes, '이름만바뀐.hwp');
+    expect(ex.tables).toHaveLength(1);
+    expect(ex.tables[0].cells[1]).toEqual(['가', '10']);
+  });
+
+  it('표가 100개를 넘으면 앞의 100개만 읽고 알린다', async () => {
+    const blocks = Array.from({ length: 150 }, (_, i) => `부서${i},예산\n총무과,${i}`);
+    const ex = await readAttachment(Buffer.from(blocks.join('\n\n\n')), 'many.csv');
+    expect(ex.tables).toHaveLength(100);
+    expect(ex.warnings).toContain('표가 많아 앞의 100개만 읽었습니다 (전체 150개)');
+    expect(ex.text).not.toContain('부서100,');
+    expect(ex.text).not.toContain('| 부서100 |');
+  });
+
+  it('큰 표의 본문은 상한에서 멈춘다 — 다 만든 뒤 자르지 않는다', async () => {
+    const lines = ['이름,내용,금액'];
+    for (let i = 0; i < 19_000; i += 1) lines.push(`항목${i},${'가'.repeat(60)},${i}`);
+    const ex = await readAttachment(Buffer.from(lines.join('\n')), 'big.csv');
+    expect(ex.text.length).toBeLessThanOrEqual(MAX_EXTRACT_CHARS);
+    expect(ex.text).not.toContain('이어 읽기');
+    expect(ex.warnings.join('\n')).toContain(`앞의 ${MAX_EXTRACT_CHARS.toLocaleString('ko-KR')}자만 읽었습니다`);
+    // 본문을 다 만든 뒤 잘랐다면 전체 길이('본문이 1,400,000자라')를 알 수 있다 — 멈췄으면 모른다
+    expect(ex.warnings.join('\n')).not.toMatch(/본문이 [\d,]+자라/);
+    // 표 자체는 전부 남는다(계산용)
+    expect(ex.tables[0].cells).toHaveLength(19_001);
+  });
+
+  it('여러 표의 본문도 상한을 넘으면 뒤 표는 본문에 붙이지 않는다', async () => {
+    const block = (k: number) => [`이름${k},내용`, ...Array.from({ length: 2000 }, (_, i) => `항목${i},${'나'.repeat(50)}`)].join('\n');
+    const ex = await readAttachment(Buffer.from([block(1), block(2), block(3)].join('\n\n\n')), 'three.csv');
+    expect(ex.tables).toHaveLength(3);
+    expect(ex.text).toContain('## 표 1');
+    expect(ex.text).not.toContain('## 표 3');
+    expect(ex.text.length).toBeLessThanOrEqual(MAX_EXTRACT_CHARS);
+    expect(ex.warnings.join('\n')).not.toMatch(/본문이 [\d,]+자라/);
+  });
+});

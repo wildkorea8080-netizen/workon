@@ -53,11 +53,12 @@ export const OVERVIEW_END = '[첨부 목록 끝]';
 /**
  * 파일에서 온 글을 한 줄로. 줄바꿈은 공백으로, 그 밖의 제어·서식 글자(벨, 방향 바꾸기 U+202E 등)는 지운다 —
  * 줄을 깨거나 화면과 모델이 보는 글을 다르게 만들 수 있다. 한 파일·한 표가 한 줄이어야 모델이 구분한다.
+ * 대괄호도 지운다 — 열 이름 '[첨부 목록 끝]'이 구분 줄을 흉내 내 목록 밖 지시처럼 보이지 않게.
  */
 function oneLine(s: string): string {
   return s
     .replace(/[\t\n\r\v\f]/g, ' ')
-    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/[\p{Cc}\p{Cf}[\]]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -95,10 +96,15 @@ export function describeAttachment(a: TurnAttachment): string {
   for (const t of s.tables.slice(0, OVERVIEW_TABLES_PER_FILE)) {
     const shown = t.columns.slice(0, MAX_LISTED_COLUMNS).map((c) => nameOf(c));
     const more = t.columns.length > MAX_LISTED_COLUMNS ? ` 외 ${t.columns.length - MAX_LISTED_COLUMNS}개` : '';
-    lines.push(`  - ${a.ref}/${t.id} '${nameOf(t.title)}' ${num(t.rows)}행 · 열: ${shown.join(', ')}${more}`);
+    // 단위(표 위 글)·잘림은 경고 상한(3개)에 가리지 않게 표 줄에 직접 단다
+    const caption = t.caption && oneLine(t.caption) ? ` · 표 위 글: ${nameOf(t.caption)}` : '';
+    const cut = t.truncated ? ' · 잘림' : '';
+    lines.push(`  - ${a.ref}/${t.id} '${nameOf(t.title)}' ${num(t.rows)}행 · 열: ${shown.join(', ')}${more}${caption}${cut}`);
   }
   if (s.tables.length > OVERVIEW_TABLES_PER_FILE) {
-    lines.push(`  - 외 ${s.tables.length - OVERVIEW_TABLES_PER_FILE}개 표 — read_attachment로 확인`);
+    const hidden = s.tables.slice(OVERVIEW_TABLES_PER_FILE);
+    const cutNote = hidden.some((t) => t.truncated) ? '(잘린 표 있음)' : '';
+    lines.push(`  - 외 ${hidden.length}개 표${cutNote} — read_attachment로 확인`);
   }
   for (const w of s.warnings.slice(0, OVERVIEW_WARNINGS_PER_FILE)) lines.push(`  - 주의: ${nameOf(w, OVERVIEW_WARNING_CHARS)}`);
   if (s.warnings.length > OVERVIEW_WARNINGS_PER_FILE) {

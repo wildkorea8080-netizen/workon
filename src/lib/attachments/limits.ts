@@ -22,6 +22,9 @@ export const MAX_PENDING_ATTACHMENTS = 20;
 export const MAX_TABLE_ROWS = 20_000;
 export const MAX_TABLE_COLS = 200;
 
+/** 파일 하나에서 읽는 표 수 상한. 넘으면 앞의 것만 읽고 경고한다(읽은 내용 크기·개요를 파일이 정하지 않게) */
+export const MAX_TABLES_PER_FILE = 100;
+
 /** 파일 하나에서 뽑는 본문 글자 상한. */
 export const MAX_EXTRACT_CHARS = 200_000;
 /** 모델이 한 번 읽을 때 돌려주는 분량. */

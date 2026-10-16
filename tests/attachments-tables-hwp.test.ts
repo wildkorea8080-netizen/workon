@@ -165,7 +165,7 @@ describe('HWPX 표 읽기', () => {
     expect(tables[0].cells[1][0]).toBe('1 000 원');
   });
 
-  it('표 자신의 캡션(hp:caption)이 앞 문단보다 먼저, 칸 글에는 섞이지 않는다', async () => {
+  it('표 캡션(hp:caption)은 앞 문단(단위 줄) 뒤에 잇는다 — 칸 글에는 섞이지 않는다', async () => {
     const cap = `<hp:caption side="TOP" fullSz="0" width="8504" gap="850" lastWidth="42520"><hp:subList>${xpara('<표 2> 연도별 예산')}</hp:subList></hp:caption>`;
     const body =
       xpara('(단위: 원)') +
@@ -173,11 +173,23 @@ describe('HWPX 표 읽기', () => {
       `<hp:tr>${tc('연도', { r: 0, c: 0 }) + tc('예산', { r: 0, c: 1 })}</hp:tr><hp:tr>${tc('2026', { r: 1, c: 0 }) + tc('500', { r: 1, c: 1 })}</hp:tr>` +
       `</hp:tbl><hp:t/></hp:run></hp:p>`;
     const { tables } = await readHwpxTables(await buildHwpx(body));
-    expect(tables[0].caption).toBe('<표 2> 연도별 예산');
+    // 앞 문단의 단위를 버리면 S3-b가 단위를 못 찾는다
+    expect(tables[0].caption).toBe('(단위: 원) <표 2> 연도별 예산');
     expect(tables[0].cells).toEqual([
       ['연도', '예산'],
       ['2026', '500'],
     ]);
+  });
+
+  it('칸 안 그림의 캡션은 표 캡션이 아니다', async () => {
+    const pic = `<hp:p id="3" paraPrIDRef="7" styleIDRef="0"><hp:run charPrIDRef="0"><hp:pic id="5"><hp:caption side="BOTTOM"><hp:subList>${xpara('그림 1. 조직도')}</hp:subList></hp:caption></hp:pic><hp:t/></hp:run></hp:p>`;
+    const body =
+      xpara('(단위: 천원)') +
+      tbl([tc('부서', { r: 0, c: 0 }) + tc('예산', { r: 0, c: 1 }), tc('', { r: 1, c: 0 }, pic) + tc('100', { r: 1, c: 1 })]);
+    const { tables } = await readHwpxTables(await buildHwpx(body));
+    expect(tables[0].caption).toBe('(단위: 천원)');
+    expect(tables[0].cells[0]).toEqual(['부서', '예산']);
+    expect(tables[0].cells[1][1]).toBe('100');
   });
 
   it('행 25,000개 표도 터지지 않고 20,000행까지 읽고 경고한다', async () => {

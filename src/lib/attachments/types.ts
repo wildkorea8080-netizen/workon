@@ -40,8 +40,11 @@ export interface AttachmentSummary {
   pages?: number;
   sheets?: string[];
   chars: number;
-  /** rows = 머리글 아래 행 수 */
-  tables: { id: string; title: string; rows: number; columns: string[] }[];
+  /**
+   * rows = 머리글 아래 행 수. caption(단위 줄 등)과 잘림은 개요에 실려 모델이 매 턴 본다 —
+   * 경고 상한(파일당 3개)에 가려도 '단위: 천원'·'일부만 읽음'을 놓치지 않게. 없으면 키가 없다
+   */
+  tables: { id: string; title: string; rows: number; columns: string[]; caption?: string; truncated?: boolean }[];
   warnings: string[];
 }
 

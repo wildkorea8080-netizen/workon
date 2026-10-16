@@ -65,8 +65,8 @@ function scanSectionTables(xml: string): RawTable[] {
     cell: (RawCell & { addr: { row: number | null; col: number | null } }) | null;
     /** 칸이 열릴 때의 문단 깊이 — 이 깊이에서 열리는 문단이 칸에 바로 든 문단 */
     depth: number;
-    /** 표 자신의 캡션(hp:caption) 안이면 그 문단 깊이와 글 */
-    caption: { depth: number; lines: string[] } | null;
+    /** 표 자신의 캡션(hp:caption) 안이면 그 문단 깊이와 글. nest: 캡션 안에 든 캡션(그림 등)의 깊이 */
+    caption: { depth: number; lines: string[]; nest: number } | null;
   }
 
   const pStack: ParaFrame[] = [];
@@ -136,12 +136,17 @@ function scanSectionTables(xml: string): RawTable[] {
       }
     } else if (!top) {
       continue;
-    } else if (tag.name === CAPTION) {
-      // 표에 달린 캡션이 있으면 그것이 표 제목이다 — 앞 문단보다 정확하다
-      if (tag.kind === 'open') top.caption = { depth: pStack.length, lines: [] };
-      else if (tag.kind === 'close' && top.caption) {
+    } else if (tag.name === CAPTION && (top.caption || top.cell === null)) {
+      // 표에 달린 캡션(hp:caption)은 앞 문단 뒤에 잇는다 — 앞 문단이 '(단위: 원)'인 경우가 흔하고 S3-b가 단위를 caption에서 찾는다.
+      // 칸이 열려 있을 때의 캡션은 칸 안 그림 따위의 것이라 표 캡션이 아니다(위 조건으로 건너뜀)
+      if (tag.kind === 'open') {
+        if (top.caption) top.caption.nest += 1;
+        else top.caption = { depth: pStack.length, lines: [], nest: 0 };
+      } else if (tag.kind === 'close' && top.caption && top.caption.nest > 0) {
+        top.caption.nest -= 1;
+      } else if (tag.kind === 'close' && top.caption) {
         const text = top.caption.lines.join('\n').trim();
-        if (text) top.table.caption = text;
+        if (text) top.table.caption = top.table.caption ? `${top.table.caption} ${text}` : text;
         top.caption = null;
       }
     } else if (tag.name === TR && tag.kind === 'open') {
