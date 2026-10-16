@@ -15,6 +15,23 @@ describe('번호 제목 급', () => {
   });
 });
 
+describe('번호 제목 보강(fix round 1)', () => {
+  it.each(['○○○', '□□□', '○○시청', '□개요', '26. 3. 5.', '10. 16. 시행', '2026. 10. 16.'])(
+    '"%s"는 제목이 아니다', (t) => expect(headingLevel(t)).toBeNull());
+  it('기호 뒤 공백이 있으면 제목', () => {
+    expect(headingLevel('□ 개요')).toBe(2);
+    expect(headingLevel('○ 추진 방향')).toBe(3);
+    expect(headingLevel('1. 사업 개요')).toBe(2);
+  });
+});
+
+describe('반복 글자 자리 표시 보강(fix round 1)', () => {
+  it.each(['---', '===', '___', '...', '······', '―――', '111', '2222'])('"%s"는 빈 자리가 아니다', (t) =>
+    expect(isPlaceholderText(t)).toBe(false));
+  it.each(['○○○', 'OOOO', 'ㅇㅇㅇ', 'XXX', '000'])('"%s"는 빈 자리', (t) =>
+    expect(isPlaceholderText(t)).toBe(true));
+});
+
 describe('자리 표시 글자', () => {
   it.each(['', '   ', '○○○', 'OOOO', '(내용)', '○ (내용)', '- (작성)', '내용을 입력하세요'])('"%s"는 빈 자리', (t) =>
     expect(isPlaceholderText(t)).toBe(true));

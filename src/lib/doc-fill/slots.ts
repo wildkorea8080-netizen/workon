@@ -27,10 +27,11 @@ export function findMarkers(text: string): MarkerMatch[] {
  */
 const HEADING_SYMBOLS: ReadonlyArray<{ level: number; re: RegExp }> = [
   { level: 1, re: /^[Ⅰ-Ⅹ]\./ },
-  { level: 2, re: /^\d{1,2}\.(?!\d)/ }, // 1.5배의 '1.'은 번호가 아니다
-  { level: 2, re: /^[□■]/ },
+  // 1.5배의 '1.'은 번호가 아니고, '26. 3. 5.'처럼 뒤가 또 '숫자.'면 날짜다
+  { level: 2, re: /^\d{1,2}\.(?!\d)(?!\s*\d+\.)/ },
+  { level: 2, re: /^[□■]\s+/ }, // 기호 뒤 공백 필수: '□개요'·'□□□'는 제목이 아니다
   { level: 3, re: /^[가나다라마바사아자차카타파하]\./ },
-  { level: 3, re: /^[○●]/ },
+  { level: 3, re: /^[○●]\s+/ },
   { level: 4, re: /^\d{1,2}\)/ },
   { level: 4, re: /^[-–]\s+/ }, // 하이픈은 뒤에 공백이 있을 때만 글머리
   { level: 5, re: /^[가나다라마바사아자차카타파하]\)/ },
@@ -58,6 +59,8 @@ export function headingLevel(text: string): number | null {
   if (!hit) return null;
   const len = hit.rest.length;
   if (len < 1 || len > HEADING_MAX_CHARS) return null;
+  // 기호뿐인 글(글자·숫자가 하나도 없음)은 제목이 아니라 빈 자리다
+  if (!/[\p{L}\p{N}]/u.test(hit.rest)) return null;
   // 본문 글머리('○ 사업기간은 1년이다.')를 제목으로 잡지 않는다
   if (SENTENCE_END.test(hit.rest)) return null;
   return hit.level;
@@ -65,7 +68,8 @@ export function headingLevel(text: string): number | null {
 
 /** 자리 표시 글자: 같은 글자 3개 이상 반복(○○○·OOO·ㅇㅇㅇ)과 안내 문구. 글 전체가 이것일 때만 */
 export const PLACEHOLDER_PATTERNS: readonly RegExp[] = [
-  /^(\S)\1{2,}$/u,
+  // 구분선(---, ===, ...)이나 값(111)을 빈 자리로 오인하지 않게 글자를 한정한다
+  /^([○●□■OoㅇXx0])\1{2,}$/u,
   /^\((?:내용|작성|기재|입력|예시)\)$/,
   /^내용 입력$/,
   /^내용을 입력하세요\.?$/,
@@ -76,7 +80,8 @@ export function isPlaceholderText(text: string): boolean {
   const whole = text.trim();
   if (!whole) return true;
   // 기호를 뗀 글과 떼지 않은 글을 모두 본다: '○○○'은 기호 하나 뗀 '○○'로는 반복이 모자란다
-  const body = (matchSymbol(whole)?.rest ?? whole).trim();
+  // 공백 없는 ○□ 기호('○(내용)')도 번호 기호로 떼어 본다
+  const body = (matchSymbol(whole)?.rest ?? whole.replace(/^[○●□■]\s*/, '')).trim();
   if (!body) return true;
   return PLACEHOLDER_PATTERNS.some((re) => re.test(body) || re.test(whole));
 }
