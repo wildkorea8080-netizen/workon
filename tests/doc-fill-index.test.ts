@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { detectFormat, readTemplate, fillTemplate, MAX_SLOT_TEXT } from '@/lib/doc-fill';
+import { detectFormat, readTemplate, fillTemplate, MAX_SLOT_TEXT, DOCX_MIME } from '@/lib/doc-fill';
+import mammoth from 'mammoth';
 import { extractTextFromHwp } from '@/lib/hwp';
 import { buildHwpx, para, emptyPara, tableAt } from './fixtures/hwpx';
+import { buildDocx, wp } from './fixtures/docx';
 
 const CFB = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
 
@@ -97,6 +99,27 @@ describe('양식 채우기', () => {
   it('한 자리 글자 수 상한을 넘으면 거절한다', async () => {
     const r = await fillTemplate(await buildHwpx(para('{{제목}}')), 'a.hwpx', [{ slot_id: 's1', text: '가'.repeat(MAX_SLOT_TEXT + 1) }]);
     expect(r).toEqual({ ok: false, reason: expect.stringContaining('제목') });
+  });
+
+  it('DOCX 표시 양식은 docx로 채운다', async () => {
+    const bytes = await buildDocx(wp('{{제목}}') + wp('{{본문}}'));
+    const read = await readTemplate(bytes, 'w.docx');
+    expect(read).toMatchObject({ ok: true, format: 'docx', mode: 'fill', slots: [{ id: 's1', label: '제목' }, { id: 's2', label: '본문' }] });
+    const r = await fillTemplate(bytes, 'w.docx', [{ slot_id: 's1', text: '제목글' }, { slot_id: 's2', text: '본문글' }]);
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.extension).toBe('docx');
+    expect(r.mimeType).toBe(DOCX_MIME);
+    expect(r.filled).toEqual(['제목', '본문']);
+    const text = (await mammoth.extractRawText({ buffer: r.bytes })).value;
+    expect(text).toContain('제목글');
+    expect(text).toContain('본문글');
+  });
+
+  it('표시 없는 DOCX는 이유를 돌려준다', async () => {
+    expect(await readTemplate(await buildDocx(wp('표시 없음')), 'n.docx')).toEqual({
+      ok: false,
+      reason: expect.stringContaining('{{항목 이름}}'),
+    });
   });
 });
 

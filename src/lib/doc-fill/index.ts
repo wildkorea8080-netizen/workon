@@ -1,5 +1,6 @@
 import { readHwpxMarkers, fillHwpx } from './hwpx';
 import { readHwpxAutoSlots, fillHwpxAutoSlots } from './hwpx-auto';
+import { readDocxMarkers, fillDocx } from './docx';
 import { DocFillError } from './errors';
 
 /**
@@ -48,14 +49,16 @@ export function detectFormat(fileName: string, bytes: Buffer): TemplateFormat {
   return 'unknown';
 }
 
-const UNSUPPORTED: Record<Exclude<TemplateFormat, 'hwpx'>, string> = {
-  docx: 'Word(DOCX) 양식은 아직 채울 수 없습니다. 한글에서 HWPX로 저장해 올려 주세요.',
+const UNSUPPORTED: Record<Exclude<TemplateFormat, 'hwpx' | 'docx'>, string> = {
   hwp: '옛 한글(HWP) 형식은 직접 채울 수 없습니다. 한글에서 HWPX로 다시 저장해 올려 주세요.',
   unknown: '양식 파일 형식을 알 수 없습니다. 한글(HWPX) 파일을 올려 주세요.',
 };
 
 const NO_MARKERS =
   '이 양식에서 채울 자리를 찾지 못했습니다. 채울 자리에 {{항목 이름}}처럼 표시를 넣어 다시 올려 주세요.';
+
+// 표시 없는 DOCX의 대체 경로는 Task 7에서 이 실패를 바꾼다
+const NO_MARKERS_DOCX = 'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 채울 수 있습니다.';
 
 function tooManySlots(count: number): ReadResult {
   return { ok: false, reason: `채울 자리가 ${count}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다.` };
@@ -79,11 +82,23 @@ async function readHwpxSlots(bytes: Buffer): Promise<ReadResult> {
   return { ok: true, format: 'hwpx', mode: 'fill', slots: auto };
 }
 
+async function readDocxSlots(bytes: Buffer): Promise<ReadResult> {
+  const labels = await readDocxMarkers(bytes);
+  if (labels.length === 0) return { ok: false, reason: NO_MARKERS_DOCX };
+  if (labels.length > MAX_SLOTS) return tooManySlots(labels.length);
+  return {
+    ok: true,
+    format: 'docx',
+    mode: 'fill',
+    slots: labels.map((label, i) => ({ id: `s${i + 1}`, label, kind: 'marker' as const, path: [], hint: null })),
+  };
+}
+
 export async function readTemplate(bytes: Buffer, fileName: string): Promise<ReadResult> {
   const format = detectFormat(fileName, bytes);
-  if (format !== 'hwpx') return { ok: false, reason: UNSUPPORTED[format] };
+  if (format !== 'hwpx' && format !== 'docx') return { ok: false, reason: UNSUPPORTED[format] };
   try {
-    return await readHwpxSlots(bytes);
+    return format === 'docx' ? await readDocxSlots(bytes) : await readHwpxSlots(bytes);
   } catch (error) {
     if (error instanceof DocFillError) return { ok: false, reason: error.message };
     throw error;
@@ -111,6 +126,10 @@ export async function fillTemplate(
   }
 
   try {
+    if (read.format === 'docx') {
+      const result = await fillDocx(bytes, new Map(values.map((v) => [labelById.get(v.slot_id)!, v.text])));
+      return { ok: true, bytes: result.bytes, mimeType: DOCX_MIME, extension: 'docx', mode: read.mode, filled: result.filled, unfilled: result.unfilled };
+    }
     if (read.slots[0].kind === 'marker') {
       const result = await fillHwpx(bytes, new Map(values.map((v) => [labelById.get(v.slot_id)!, v.text])));
       return { ok: true, bytes: result.bytes, mimeType: HWPX_MIME, extension: 'hwpx', mode: read.mode, filled: result.filled, unfilled: result.unfilled };

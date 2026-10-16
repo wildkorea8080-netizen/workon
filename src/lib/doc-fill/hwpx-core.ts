@@ -49,7 +49,7 @@ export interface Edit {
 
 const SECTION = /^Contents\/section(\d+)\.xml$/i;
 
-type Method = 'STORE' | 'DEFLATE';
+export type Method = 'STORE' | 'DEFLATE';
 
 export interface HwpxDoc {
   zip: JSZip;
@@ -64,7 +64,7 @@ function sectionNames(zip: JSZip): string[] {
 }
 
 /** 읽어 들인 항목의 압축 방식. 그림처럼 무압축으로 저장된 항목은 그대로 둔다 */
-function entryMethods(zip: JSZip): Map<string, Method> {
+export function entryMethods(zip: JSZip): Map<string, Method> {
   const out = new Map<string, Method>();
   for (const [name, file] of Object.entries(zip.files)) {
     if (file.dir) continue;
@@ -185,7 +185,7 @@ export function scanParagraphs(xml: string, prefix: string): Para[] {
   return out.sort((a, b) => a.start - b.start);
 }
 
-export function pieceOffsets(para: Para): number[] {
+export function pieceOffsets(para: { pieces: { text: string }[] }): number[] {
   const offsets: number[] = [];
   let acc = 0;
   for (const p of para.pieces) {
