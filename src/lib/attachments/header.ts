@@ -9,7 +9,22 @@ import type { Cell, ExtractedTable, TableMerge } from './types';
 
 const MAX_HEADER_ROWS = 3;
 
-const NUMERIC_TEXT = /^[+-]?[\d,]+(\.\d+)?%?$/;
+/**
+ * 값으로 읽는 글. CSV·한글 표는 숫자도 글자로 온다.
+ * 공공기관 표의 값 꼴: 증감 표시(△100·▲ 50), 회계식 음수 (1,234), 단위 접미사(1,000원·12.5%·30명),
+ * 홀로 쓴 줄표('-' — 값 없음 표시). 이런 칸이 머리글로 잡히면 첫 데이터 행이 열 이름에 섞인다.
+ */
+const NUMBER_BODY = /^[+-]?[\d,]+(\.\d+)?$/;
+const UNIT_SUFFIX = /\s*(%|원|천원|백만원|억원|명|건|개|톤)$/;
+const DASH_ONLY = /^[-—–]$/;
+
+export function isNumericText(text: string): boolean {
+  let t = text.trim();
+  if (DASH_ONLY.test(t)) return true;
+  t = t.replace(/^[△▲]\s*/, '').replace(UNIT_SUFFIX, '');
+  if (t.startsWith('(') && t.endsWith(')')) t = t.slice(1, -1).trim();
+  return NUMBER_BODY.test(t);
+}
 
 function isEmpty(cell: Cell | undefined): boolean {
   return cell == null || (typeof cell === 'string' && cell.trim() === '');
@@ -26,19 +41,30 @@ function isYearLike(cell: Cell | undefined): boolean {
 }
 
 /**
- * 머리글 후보 칸. 글자, 또는 연도 꼴 숫자('구분, 2024, 2025'의 연도 열 머리글).
- * 그 밖의 숫자(또는 숫자처럼 생긴 글)는 값이다 — CSV는 숫자도 글자로 읽힌다.
+ * 연도꼴은 한 줄에 2개 이상일 때만 머리글 근거다('구분 | 2024 | 2025'). 하나뿐이면 값이다 —
+ * '기준연도 | 2025' 같은 메타 줄이 머리글로 잡히면 진짜 머리글이 데이터가 된다.
  */
-function isHeaderLike(cell: Cell | undefined): boolean {
-  if (isEmpty(cell)) return false;
-  if (isYearLike(cell)) return true;
-  return typeof cell === 'string' && !NUMERIC_TEXT.test(cell.trim());
+function yearsAreHeaders(row: Cell[] | undefined): boolean {
+  let count = 0;
+  for (const c of row ?? []) if (isYearLike(c) && (count += 1) >= 2) return true;
+  return false;
 }
 
-/** 값 칸. 연도 꼴은 머리글일 수 있으므로 세지 않는다. */
-function isNumericCell(cell: Cell | undefined): boolean {
-  if (isEmpty(cell) || isYearLike(cell)) return false;
-  return typeof cell === 'number' || NUMERIC_TEXT.test(String(cell).trim());
+/**
+ * 머리글 후보 칸. 글자, 또는 (그 줄의 연도꼴이 둘 이상이면) 연도꼴 숫자.
+ * 그 밖의 숫자(또는 숫자처럼 생긴 글)는 값이다.
+ */
+function isHeaderLike(cell: Cell | undefined, years: boolean): boolean {
+  if (isEmpty(cell)) return false;
+  if (isYearLike(cell)) return years;
+  return typeof cell === 'string' && !isNumericText(cell);
+}
+
+/** 값 칸. 연도꼴은 그 줄이 연도 머리글 줄이면 세지 않는다. */
+function isNumericCell(cell: Cell | undefined, years: boolean): boolean {
+  if (isEmpty(cell)) return false;
+  if (isYearLike(cell)) return !years;
+  return typeof cell === 'number' || isNumericText(String(cell));
 }
 
 /** 그 행에 걸친 가로 병합들. */
@@ -48,12 +74,27 @@ function horizontalMerges(row: number, merges: TableMerge[]): TableMerge[] {
 
 /**
  * 가로 병합 아래 줄이 하위 머리글인가. 아니면 그 줄은 데이터다.
- * 숫자 칸이 있으면 데이터이고, 병합된 칸마다 그 아래에 글이 하나는 있어야 하위 머리글이다.
+ * - 숫자 칸이 있으면 데이터
+ * - 머리글 줄의 가로 병합 범위 밖에 글이 있고 그 칸이 머리글 줄에서 내려온 세로 병합에 덮이지 않았으면 데이터 —
+ *   진짜 하위 머리글 줄은 항목 열('구분')이 비었거나 위에서 세로로 병합돼 있다
+ * - 병합된 칸마다 그 아래에 글이 하나는 있어야 하위 머리글
  */
 function isSubHeaderRow(cells: Cell[][], row: number, merges: TableMerge[]): boolean {
   const below = cells[row + 1];
-  if (!below || below.some(isNumericCell)) return false;
-  return horizontalMerges(row, merges).every((m) => {
+  if (!below) return false;
+  const years = yearsAreHeaders(below);
+  if (below.some((c) => isNumericCell(c, years))) return false;
+
+  const spans = horizontalMerges(row, merges);
+  const coveredFromAbove = (c: number) =>
+    merges.some((m) => m.row <= row && row + 1 < m.row + m.rows && c >= m.col && c < m.col + m.cols);
+  for (let c = 0; c < below.length; c += 1) {
+    if (isEmpty(below[c])) continue;
+    const inSpan = spans.some((m) => c >= m.col && c < m.col + m.cols);
+    if (!inSpan && !coveredFromAbove(c)) return false;
+  }
+
+  return spans.every((m) => {
     // 세로로도 이어진 병합은 아래 줄을 이미 덮고 있다
     if (row + 1 < m.row + m.rows) return true;
     for (let c = m.col; c < m.col + m.cols; c += 1) if (!isEmpty(below[c])) return true;
@@ -69,7 +110,8 @@ export function detectHeader(
   let from = -1;
   for (let r = 0; r <= last; r += 1) {
     const filled = cells[r].filter((c) => !isEmpty(c));
-    if (filled.length >= 2 && filled.filter(isHeaderLike).length * 2 > filled.length) {
+    const years = yearsAreHeaders(cells[r]);
+    if (filled.length >= 2 && filled.filter((c) => isHeaderLike(c, years)).length * 2 > filled.length) {
       from = r;
       break;
     }

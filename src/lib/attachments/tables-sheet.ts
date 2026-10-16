@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import { MAX_TABLE_COLS, MAX_TABLE_ROWS } from './limits';
-import { buildTable, captionAbove, detectHeader } from './header';
+import { buildTable, captionAbove, detectHeader, isNumericText } from './header';
 import type { Cell, ExtractedTable, TableMerge } from './types';
 
 /**
@@ -26,7 +26,7 @@ interface Grid {
 
 /** 제목·단위 줄로 볼 수 있는 글(숫자나 숫자처럼 생긴 글은 아니다). */
 function isTitleText(c: Cell | undefined): boolean {
-  return typeof c === 'string' && !/^[+-]?[\d,]+(\.\d+)?%?$/.test(c.trim());
+  return typeof c === 'string' && !isNumericText(c);
 }
 
 const isBlank = (c: Cell | undefined) => c == null || (typeof c === 'string' && c.trim() === '');

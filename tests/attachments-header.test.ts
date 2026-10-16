@@ -142,3 +142,39 @@ describe('머리글 보정 (1차 수정)', () => {
     expect(detectHeader(cells, merges)).toEqual({ from: 0, to: 1 });
   });
 });
+
+describe('머리글이 첫 데이터 행을 삼키지 않는다 (최종 수정)', () => {
+  const merged = [{ row: 0, col: 1, rows: 1, cols: 2 }];
+
+  it('가로 병합 밖 칸에 글이 있는 아래 줄은 데이터다 — 연도꼴 숫자만 있어도', () => {
+    const cells = [['구분', '인원', null], ['총무과', 2000, 2010], ['기획과', 300, 400]];
+    const header = detectHeader(cells, merged);
+    expect(header).toEqual({ from: 0, to: 0 });
+    expect(columnNames(cells, merged, header)).toEqual(['구분', '인원', '인원 (2)']);
+  });
+
+  it('△ 음수가 든 아래 줄도 데이터다', () => {
+    const cells = [['구분', '인원', null], ['총무과', '△100', '△50'], ['기획과', 300, 400]];
+    expect(detectHeader(cells, merged)).toEqual({ from: 0, to: 0 });
+  });
+
+  it('세로 병합된 항목 칸 아래의 하위 머리글은 그대로 잇는다', () => {
+    const cells = [['구분', '예산', null], [null, '본예산', '추경'], ['총무과', 100, 20]];
+    const merges = [{ row: 0, col: 0, rows: 2, cols: 1 }, ...merged];
+    expect(detectHeader(cells, merges)).toEqual({ from: 0, to: 1 });
+  });
+
+  it('기준연도 같은 메타 줄은 머리글이 아니다 — 연도꼴은 한 줄에 2개 이상일 때만 머리글 근거', () => {
+    expect(detectHeader([['기준연도', 2025], ['부서', '예산'], ['총무과', 100]], [])).toEqual({ from: 1, to: 1 });
+    expect(detectHeader([['단위', '2026년'], ['부서', '예산'], ['총무과', 100]], [])).toEqual({ from: 1, to: 1 });
+  });
+
+  it('숫자 판정: △▲·괄호 음수·단위 접미사·홀로 쓴 줄표는 값이다', () => {
+    for (const v of ['△100', '▲ 1,200', '(1,234)', '1,000원', '30천원', '5백만원', '2억원', '12.5%', '30명', '4건', '7개', '2,000톤', '-', '—']) {
+      // 값 칸이 섞인 줄은 머리글로 뽑히지 않는다
+      expect(detectHeader([['총무과', v, v], ['부서', '예산', '집행']], []), v).toEqual({ from: 1, to: 1 });
+    }
+    // 글자 머리글은 그대로
+    expect(detectHeader([['구분', '원가', '비율(%)'], ['가', 1, 2]], [])).toEqual({ from: 0, to: 0 });
+  });
+});
