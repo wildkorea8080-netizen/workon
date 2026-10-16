@@ -156,7 +156,11 @@ describe('사진 첨부 버튼 (화면 표시)', () => {
     // 서버가 거절하므로(prepare.ts acceptsImages) 버튼을 두면 보낸 뒤에야 실패를 안다
     const ui = readFileSync('src/components/chat/ChatInterface.tsx', 'utf8');
     expect(ui).toMatch(/const canAttachImages =[\s\S]{0,120}acceptsChatImages\(selectedAgent\.capabilities\)/);
-    expect(ui).toMatch(/\{canAttachImages && \(\s*<input/);
+    // 첨부 단추 하나가 사진과 파일을 함께 받는다. 둘 다 꺼진 비서에서만 단추가 없다
+    expect(ui).toMatch(/const canAttachAnything = canAttachImages \|\| canAttachFiles/);
+    expect(ui).toMatch(/\{canAttachAnything && \(\s*<input/);
+    // 사진 형식은 사진이 켜진 비서에서만 accept에 든다
+    expect(ui).toMatch(/\.\.\.\(canAttachImages \? \[IMAGE_ACCEPT_ATTRIBUTE\] : \[\]\)/);
   });
 });
 

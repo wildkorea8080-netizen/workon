@@ -28,6 +28,8 @@ interface MessageBubbleProps {
   content: string;
   /** 사용자가 첨부한 이미지 미리보기 (blob URL) */
   imagePreviews?: string[];
+  /** 사용자가 이 질문에 붙인 파일 - 이름 칩으로만 보인다 */
+  attachments?: { id: string; file_name: string }[];
   sources?: RetrievedChunk[];
   /** 외부 도구(국가법령정보 등)가 돌려준 출처 링크 */
   links?: ToolLink[];
@@ -36,7 +38,7 @@ interface MessageBubbleProps {
   error?: string;
 }
 
-export default function MessageBubble({ role, content, imagePreviews, sources, links, files, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, imagePreviews, attachments, sources, links, files, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -80,6 +82,22 @@ export default function MessageBubble({ role, content, imagePreviews, sources, l
                   alt={`첨부 이미지 ${index + 1}`}
                   className="w-20 h-20 object-cover rounded-lg border border-white/30"
                 />
+              ))}
+            </div>
+          )}
+          {attachments && attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachments.map((a) => (
+                <span
+                  key={a.id}
+                  title={a.file_name}
+                  className="inline-flex items-center gap-1 max-w-full bg-white/15 border border-white/25 rounded-lg px-2 py-1 text-xs"
+                >
+                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                  <span className="truncate">{a.file_name}</span>
+                </span>
               ))}
             </div>
           )}

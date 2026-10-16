@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
+import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
+import { useFileAttachments } from './useFileAttachments';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 import {
   MAX_CHAT_IMAGES,
@@ -13,7 +15,8 @@ import {
 import { fileToChatImage } from '@/lib/image-resize';
 import { connectorShortLabel } from '@/lib/connector-labels';
 import { connectorIdsOf } from '@/lib/agent-form';
-import { acceptsChatImages } from '@/lib/capabilities/settings';
+import { acceptsChatImages, acceptsChatFiles } from '@/lib/capabilities/settings';
+import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_SEND } from '@/lib/attachments/limits';
 
 interface ToolLink {
   title: string;
@@ -26,6 +29,8 @@ interface Message {
   content: string;
   /** 사용자가 이 메시지에 붙인 이미지 미리보기 (blob URL) */
   imagePreviews?: string[];
+  /** 사용자가 이 메시지에 붙인 파일 (이름만 남는다) */
+  attachments?: { id: string; file_name: string }[];
   sources?: RetrievedChunk[];
   /** 외부 도구가 돌려준 출처 링크 */
   links?: ToolLink[];
@@ -97,6 +102,12 @@ export default function ChatInterface({
   // 그래도 모를 때는 버튼을 두고 서버 판정에 맡긴다(표시일 뿐, 실제 제한은 서버).
   const canAttachImages =
     selectedAgent.capabilities === undefined || acceptsChatImages(selectedAgent.capabilities);
+  // 파일 받아 읽기도 같은 원칙 - 표시일 뿐이고 서버가 거절한다
+  const canAttachFiles =
+    selectedAgent.capabilities === undefined || acceptsChatFiles(selectedAgent.capabilities);
+  const fileAttach = useFileAttachments(canAttachFiles);
+  // 보낼 때마다 올려 대화의 첨부 목록을 다시 불러오게 한다
+  const [attachmentsRefresh, setAttachmentsRefresh] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
@@ -151,14 +162,19 @@ export default function ChatInterface({
                 chunks?: RetrievedChunk[];
                 links?: ToolLink[];
                 files?: { id: string; file_name: string; size_bytes: number }[];
+                attachments?: { id: string; file_name: string }[];
               };
             }) => ({
               id: m.id,
               role: m.role,
-              content: m.content,
+              // 이름 칩으로 보이므로 저장된 '[첨부 파일: ...]' 표시 줄은 뺀다
+              content: m.role === 'user' && m.source_references?.attachments?.length
+                ? m.content.replace(/^\[첨부 파일: [^\n]*\]\n?/m, '')
+                : m.content,
               sources: m.source_references?.chunks,
               links: m.source_references?.links,
               files: m.source_references?.files,
+              attachments: m.role === 'user' ? m.source_references?.attachments : undefined,
             })
           )
         );
@@ -181,10 +197,27 @@ export default function ChatInterface({
     });
   }, [canAttachImages]);
 
-  const addFiles = async (files: FileList | File[]) => {
+  // 첨부 단추 하나가 사진과 파일을 함께 받는다. 사진은 지금 흐름, 그 밖은 파일 흐름
+  const handlePicked = (files: FileList | File[]) => {
+    setImageError(null);
+    const picked = Array.from(files);
+    const isImage = (f: File) => f.type.startsWith('image/');
+    const images = picked.filter(isImage);
+    const others = picked.filter(f => !isImage(f));
+
+    if (images.length > 0 && !canAttachImages) {
+      setImageError('이 비서는 사진을 읽지 않습니다.');
+    }
+    if (others.length > 0 && !canAttachFiles) {
+      setImageError('이 비서는 파일을 읽지 않습니다. 사진만 첨부할 수 있습니다.');
+    }
+    if (images.length > 0 && canAttachImages) void addImages(images);
+    if (others.length > 0 && canAttachFiles) fileAttach.addFiles(others);
+  };
+
+  const addImages = async (picked: File[]) => {
     setImageError(null);
     if (!canAttachImages) return;
-    const picked = Array.from(files);
     if (picked.length === 0) return;
 
     const room = MAX_CHAT_IMAGES - pendingImages.length;
@@ -223,8 +256,9 @@ export default function ChatInterface({
   };
 
   const handleSendMessage = async () => {
-    if ((!inputMessage.trim() && pendingImages.length === 0) || isLoading) return;
-    if (preparingImages) return;
+    const fileIds = fileAttach.readyIds;
+    if ((!inputMessage.trim() && pendingImages.length === 0 && fileIds.length === 0) || isLoading) return;
+    if (preparingImages || fileAttach.busy) return;
 
     // 화면 검사는 편의일 뿐이고 서버가 다시 본다. 다만 여기서 걸러야
     // 사용자가 보낸 뒤에야 거절당하는 일이 없다.
@@ -240,6 +274,9 @@ export default function ChatInterface({
       role: 'user',
       content: inputMessage.trim(),
       imagePreviews: pendingImages.map(p => p.preview),
+      attachments: fileAttach.chips
+        .filter(c => c.stage === 'ready' && c.attachment)
+        .map(c => ({ id: c.attachment!.id, file_name: c.name })),
     };
     const assistantId = String(Date.now() + 1);
 
@@ -247,6 +284,7 @@ export default function ChatInterface({
     setInputMessage('');
     // 미리보기 URL은 말풍선이 계속 쓰므로 여기서 revoke 하지 않는다
     setPendingImages([]);
+    fileAttach.clear();
     setImageError(null);
     setIsLoading(true);
     setActiveTool(null);
@@ -262,9 +300,12 @@ export default function ChatInterface({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent_id: selectedAgent.id,
-          message: userMsg.content || '이 이미지를 설명해주세요.',
+          message:
+            userMsg.content ||
+            (fileIds.length > 0 ? '첨부한 파일을 살펴보고 요약해 주세요.' : '이 이미지를 설명해주세요.'),
           conversation_id: conversationId,
           images: images.length > 0 ? images : undefined,
+          attachment_ids: fileIds.length > 0 ? fileIds : undefined,
         }),
       });
 
@@ -390,6 +431,7 @@ export default function ChatInterface({
     } finally {
       setIsLoading(false);
       setActiveTool(null);
+      setAttachmentsRefresh(n => n + 1);
     }
   };
 
@@ -400,6 +442,11 @@ export default function ChatInterface({
     }
   };
 
+  const canAttachAnything = canAttachImages || canAttachFiles;
+  const attachLabel = canAttachFiles ? (canAttachImages ? '파일·이미지 첨부' : '파일 첨부') : '이미지 첨부';
+  const attachTitle = canAttachFiles
+    ? `${canAttachImages ? `이미지 (최대 ${MAX_CHAT_IMAGES}장)와 ` : ''}엑셀·한글·PDF 등 파일 첨부 (최대 ${MAX_ATTACHMENTS_PER_SEND}개)`
+    : `이미지 첨부 (최대 ${MAX_CHAT_IMAGES}장)`;
   const bg = pickBg(selectedAgent.name);
   // 이 비서가 쓸 수 있는 외부 도구. 이름은 connector-labels.ts 한 곳에서 온다.
   const connectorNames = connectorIdsOf(selectedAgent.capabilities).map(connectorShortLabel);
@@ -507,6 +554,7 @@ export default function ChatInterface({
               role={msg.role}
               content={msg.content}
               imagePreviews={msg.imagePreviews}
+              attachments={msg.attachments}
               sources={msg.sources}
               links={msg.links}
               files={msg.files}
@@ -560,6 +608,14 @@ export default function ChatInterface({
         {imageError && (
           <p className="mb-2 text-xs text-red-600">{imageError}</p>
         )}
+        {fileAttach.notice && (
+          <p className="mb-2 text-xs text-red-600">{fileAttach.notice}</p>
+        )}
+
+        {canAttachFiles && conversationId && (
+          <ConversationAttachments conversationId={conversationId} refreshKey={attachmentsRefresh} />
+        )}
+        <PendingFileChips chips={fileAttach.chips} onRemove={fileAttach.remove} />
 
         {pendingImages.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
@@ -589,15 +645,18 @@ export default function ChatInterface({
           </div>
         )}
 
-        {canAttachImages && (
+        {canAttachAnything && (
           <input
             ref={fileInputRef}
             type="file"
-            accept={IMAGE_ACCEPT_ATTRIBUTE}
+            accept={[
+              ...(canAttachImages ? [IMAGE_ACCEPT_ATTRIBUTE] : []),
+              ...(canAttachFiles ? [ATTACHMENT_ACCEPT] : []),
+            ].join(',')}
             multiple
             className="hidden"
             onChange={e => {
-              if (e.target.files) addFiles(e.target.files);
+              if (e.target.files) handlePicked(e.target.files);
               // 같은 파일을 다시 고를 수 있게 비운다
               e.target.value = '';
             }}
@@ -605,13 +664,13 @@ export default function ChatInterface({
         )}
 
         <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#003087] focus-within:ring-2 focus-within:ring-[#003087]/10 transition-all">
-          {canAttachImages && (
+          {canAttachAnything && (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading || preparingImages || pendingImages.length >= MAX_CHAT_IMAGES}
-              aria-label="이미지 첨부"
-              title={`이미지 첨부 (최대 ${MAX_CHAT_IMAGES}장)`}
+              disabled={isLoading || preparingImages}
+              aria-label={attachLabel}
+              title={attachTitle}
               className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
             >
               {preparingImages ? (
@@ -639,7 +698,12 @@ export default function ChatInterface({
           />
           <button
             onClick={handleSendMessage}
-            disabled={(!inputMessage.trim() && pendingImages.length === 0) || isLoading || preparingImages}
+            disabled={
+              (!inputMessage.trim() && pendingImages.length === 0 && fileAttach.readyIds.length === 0) ||
+              isLoading ||
+              preparingImages ||
+              fileAttach.busy
+            }
             className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#003087] hover:bg-[#002070] disabled:bg-slate-200 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors"
           >
             {isLoading ? (

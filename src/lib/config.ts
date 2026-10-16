@@ -20,7 +20,8 @@ function getEnv(key: string, required = true, fallbackKeys: string[] = []): stri
 export const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL', true, ['SUPABASE_URL']);
 export const SUPABASE_ANON_KEY = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', true, ['SUPABASE_ANON_KEY']);
 export const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY');
-export const SUPABASE_DOCUMENTS_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET ?? 'documents';
+// 버킷 이름은 화면(첨부 업로드)도 읽으므로 정의는 config-public.ts 한 곳에 둔다
+export { SUPABASE_DOCUMENTS_BUCKET } from './config-public';
 export const NEXTAUTH_URL = getEnv('NEXTAUTH_URL');
 export const NEXTAUTH_SECRET = getEnv('NEXTAUTH_SECRET');
 export const VOYAGE_API_KEY = getEnv('VOYAGE_API_KEY');
