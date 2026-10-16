@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectFormat, readTemplate, fillTemplate, MAX_SLOT_TEXT } from '@/lib/doc-fill';
 import { extractTextFromHwp } from '@/lib/hwp';
-import { buildHwpx, para } from './fixtures/hwpx';
+import { buildHwpx, para, emptyPara, tableAt } from './fixtures/hwpx';
 
 const CFB = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
 
@@ -21,6 +21,7 @@ describe('양식 읽기', () => {
     expect(r).toEqual({
       ok: true,
       format: 'hwpx',
+      mode: 'fill',
       slots: [
         { id: 's1', label: '제목', kind: 'marker', path: [], hint: null },
         { id: 's2', label: '본문', kind: 'marker', path: [], hint: null },
@@ -32,6 +33,18 @@ describe('양식 읽기', () => {
     expect(await readTemplate(CFB, '옛.hwp')).toEqual({ ok: false, reason: expect.stringContaining('HWPX로') });
     expect(await readTemplate(await buildHwpx(para('x')), 'w.docx')).toEqual({ ok: false, reason: expect.stringContaining('DOCX') });
     expect(await readTemplate(await buildHwpx(para('표시 없음')), 'n.hwpx')).toEqual({ ok: false, reason: expect.stringContaining('{{항목 이름}}') });
+  });
+
+  it('표시 없는 양식은 자동 자리를 돌려준다', async () => {
+    const r = await readTemplate(await buildHwpx(para('1. 개요') + emptyPara()), 'a.hwpx');
+    expect(r).toMatchObject({ ok: true, format: 'hwpx', mode: 'fill', slots: [{ id: 's1', label: '1. 개요', kind: 'section' }] });
+  });
+
+  it('표시가 하나라도 있으면 자동 찾기를 하지 않는다', async () => {
+    const r = await readTemplate(await buildHwpx(para('{{제목}}') + para('1. 개요') + emptyPara()), 'a.hwpx');
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.slots).toHaveLength(1);
+    expect(r.slots[0].kind).toBe('marker');
   });
 
   it('깨진 파일도 던지지 않고 이유를 돌려준다', async () => {
@@ -50,6 +63,30 @@ describe('양식 채우기', () => {
     const text = await extractTextFromHwp(r.bytes, 'o.hwpx');
     expect(text).toContain('제목글');
     expect(text).toContain('본문글');
+  });
+
+  it('자동 자리를 번호로 채우고 결과는 이름으로', async () => {
+    const bytes = await buildHwpx(tableAt([['비고', ''], ['비고', '']]));
+    const read = await readTemplate(bytes, 'a.hwpx');
+    if (!read.ok) throw new Error(read.reason);
+    expect(read.slots.map((s) => [s.id, s.label])).toEqual([['s1', '비고'], ['s2', '비고']]);
+    const r = await fillTemplate(bytes, 'a.hwpx', [{ slot_id: 's1', text: '가' }, { slot_id: 's2', text: '나' }]);
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.mode).toBe('fill');
+    expect(r.filled).toEqual(['비고', '비고']);
+    expect(r.unfilled).toEqual([]);
+    const text = await extractTextFromHwp(r.bytes, 'o.hwpx');
+    expect(text).toContain('가');
+    expect(text).toContain('나');
+  });
+
+  it('자동 자리에도 없는 번호·글자 수 상한을 건다', async () => {
+    const bytes = await buildHwpx(para('1. 개요') + emptyPara());
+    expect(await fillTemplate(bytes, 'a.hwpx', [{ slot_id: 's7', text: 'x' }])).toEqual({ ok: false, reason: expect.stringContaining('s7') });
+    expect(await fillTemplate(bytes, 'a.hwpx', [{ slot_id: 's1', text: '가'.repeat(MAX_SLOT_TEXT + 1) }])).toEqual({
+      ok: false,
+      reason: expect.stringContaining('1. 개요'),
+    });
   });
 
   it('없는 자리 번호는 거절한다', async () => {

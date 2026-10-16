@@ -1,4 +1,5 @@
 import { readHwpxMarkers, fillHwpx } from './hwpx';
+import { readHwpxAutoSlots, fillHwpxAutoSlots } from './hwpx-auto';
 import { DocFillError } from './errors';
 
 /**
@@ -9,6 +10,7 @@ import { DocFillError } from './errors';
 export const MAX_SLOTS = 100;
 export const MAX_SLOT_TEXT = 6000;
 export const HWPX_MIME = 'application/hwp+zip';
+export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 export type TemplateFormat = 'hwpx' | 'docx' | 'hwp' | 'unknown';
 
@@ -20,10 +22,20 @@ export interface Slot {
   hint: string | null;
 }
 
-export type ReadResult = { ok: true; format: 'hwpx'; slots: Slot[] } | { ok: false; reason: string };
+export type ReadResult =
+  | { ok: true; format: 'hwpx' | 'docx'; mode: 'fill' | 'fallback'; reason?: string; slots: Slot[] }
+  | { ok: false; reason: string };
 
 export type FillOutcome =
-  | { ok: true; bytes: Buffer; mimeType: string; extension: 'hwpx'; filled: string[]; unfilled: string[] }
+  | {
+      ok: true;
+      bytes: Buffer;
+      mimeType: string;
+      extension: 'hwpx' | 'docx';
+      mode: 'fill' | 'fallback';
+      filled: string[];
+      unfilled: string[];
+    }
   | { ok: false; reason: string };
 
 export function detectFormat(fileName: string, bytes: Buffer): TemplateFormat {
@@ -45,20 +57,33 @@ const UNSUPPORTED: Record<Exclude<TemplateFormat, 'hwpx'>, string> = {
 const NO_MARKERS =
   '이 양식에서 채울 자리를 찾지 못했습니다. 채울 자리에 {{항목 이름}}처럼 표시를 넣어 다시 올려 주세요.';
 
+function tooManySlots(count: number): ReadResult {
+  return { ok: false, reason: `채울 자리가 ${count}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다.` };
+}
+
+/** 표시({{이름}})가 있으면 표시, 없으면 자동으로 찾은 자리. 둘 다 없으면 실패 */
+async function readHwpxSlots(bytes: Buffer): Promise<ReadResult> {
+  const labels = await readHwpxMarkers(bytes);
+  if (labels.length > 0) {
+    if (labels.length > MAX_SLOTS) return tooManySlots(labels.length);
+    return {
+      ok: true,
+      format: 'hwpx',
+      mode: 'fill',
+      slots: labels.map((label, i) => ({ id: `s${i + 1}`, label, kind: 'marker' as const, path: [], hint: null })),
+    };
+  }
+  const auto = await readHwpxAutoSlots(bytes);
+  if (auto.length === 0) return { ok: false, reason: NO_MARKERS };
+  if (auto.length > MAX_SLOTS) return tooManySlots(auto.length);
+  return { ok: true, format: 'hwpx', mode: 'fill', slots: auto };
+}
+
 export async function readTemplate(bytes: Buffer, fileName: string): Promise<ReadResult> {
   const format = detectFormat(fileName, bytes);
   if (format !== 'hwpx') return { ok: false, reason: UNSUPPORTED[format] };
   try {
-    const labels = await readHwpxMarkers(bytes);
-    if (labels.length === 0) return { ok: false, reason: NO_MARKERS };
-    if (labels.length > MAX_SLOTS) {
-      return { ok: false, reason: `채울 자리가 ${labels.length}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다.` };
-    }
-    return {
-      ok: true,
-      format,
-      slots: labels.map((label, i) => ({ id: `s${i + 1}`, label, kind: 'marker' as const, path: [], hint: null })),
-    };
+    return await readHwpxSlots(bytes);
   } catch (error) {
     if (error instanceof DocFillError) return { ok: false, reason: error.message };
     throw error;
@@ -68,7 +93,9 @@ export async function readTemplate(bytes: Buffer, fileName: string): Promise<Rea
 export async function fillTemplate(
   bytes: Buffer,
   fileName: string,
-  values: { slot_id: string; text: string }[]
+  values: { slot_id: string; text: string }[],
+  // 대체 경로(Task 7)에서 쓴다. 지금은 받기만 한다
+  _opts?: { title?: string; fallbackTemplate?: Buffer | null }
 ): Promise<FillOutcome> {
   const read = await readTemplate(bytes, fileName);
   if (!read.ok) return read;
@@ -84,8 +111,21 @@ export async function fillTemplate(
   }
 
   try {
-    const result = await fillHwpx(bytes, new Map(values.map((v) => [labelById.get(v.slot_id)!, v.text])));
-    return { ok: true, bytes: result.bytes, mimeType: HWPX_MIME, extension: 'hwpx', filled: result.filled, unfilled: result.unfilled };
+    if (read.slots[0].kind === 'marker') {
+      const result = await fillHwpx(bytes, new Map(values.map((v) => [labelById.get(v.slot_id)!, v.text])));
+      return { ok: true, bytes: result.bytes, mimeType: HWPX_MIME, extension: 'hwpx', mode: read.mode, filled: result.filled, unfilled: result.unfilled };
+    }
+    const result = await fillHwpxAutoSlots(bytes, new Map(values.map((v) => [v.slot_id, v.text])));
+    const names = (ids: string[]) => ids.map((id) => labelById.get(id) ?? id);
+    return {
+      ok: true,
+      bytes: result.bytes,
+      mimeType: HWPX_MIME,
+      extension: 'hwpx',
+      mode: read.mode,
+      filled: names(result.filled),
+      unfilled: names(result.unfilled),
+    };
   } catch (error) {
     if (error instanceof DocFillError) return { ok: false, reason: error.message };
     throw error;
