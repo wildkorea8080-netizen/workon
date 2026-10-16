@@ -397,3 +397,23 @@ describe('최종 보강 — 개조식 글머리·행 머리·공백 값', () => 
     expect(xml).toContain(emptyPara('7'));
   });
 });
+
+describe('XML 올바름', () => {
+  it('자동 자리를 채운 HWPX의 XML 항목은 모두 올바르다 — 표·여러 줄·특수문자', async () => {
+    const { XMLValidator } = await import('fast-xml-parser');
+    const JSZip = (await import('jszip')).default;
+    const bytes = await buildHwpx(
+      secPrPara() + para('1. 개요') + emptyPara() + para('○○○') + tableAt([['담당', ''], ['비고', '(작성)']], { addr: true })
+    );
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+    const result = await fillHwpxAutoSlots(
+      bytes,
+      values({ s1: 'A <&> "따옴표"\n둘째 & 줄', s2: '홍길동 <팀장>\n"010" & 끝', s3: "작은 '따옴표' & <꺾쇠>" })
+    );
+    expect(result.filled).toEqual(['s1', 's2', 's3']);
+    const zip = await JSZip.loadAsync(result.bytes);
+    const names = Object.keys(zip.files).filter((n) => n.endsWith('.xml'));
+    expect(names).toContain('Contents/section0.xml');
+    for (const n of names) expect([n, XMLValidator.validate(await zip.file(n)!.async('string'))]).toEqual([n, true]);
+  });
+});

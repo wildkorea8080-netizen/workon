@@ -183,3 +183,22 @@ describe('DOCX 표시 채우기', () => {
     expect(magic('word/document.xml')).not.toBe('\u0000\u0000');
   });
 });
+
+describe('DOCX XML 올바름', () => {
+  it('채운 DOCX의 XML 항목은 모두 올바르다 — 구역 나눔 + 여러 줄 + 특수문자', async () => {
+    const { XMLValidator } = await import('fast-xml-parser');
+    const pPr = '<w:pPr><w:pStyle w:val="Body"/><w:sectPr><w:pgSz w:w="11906"/></w:sectPr></w:pPr>';
+    const bytes = await buildDocx(wp('{{본문}}', { pPr, rPr: '<w:rPr><w:b/></w:rPr>' }) + wtable([['{{칸}}', '값']]), {
+      header: wp(['{{기', '관}}']),
+    });
+    const r = await fillDocx(
+      bytes,
+      new Map([['본문', 'A <&> "따옴표"\n둘째 & 줄\n셋째'], ['칸', '홍길동 <팀장>\n"010"'], ['기관', "○○시 & '구'"]])
+    );
+    expect(r.filled).toEqual(['기관', '본문', '칸']);
+    const zip = await JSZip.loadAsync(r.bytes);
+    const names = Object.keys(zip.files).filter((n) => n.endsWith('.xml') || n.endsWith('.rels'));
+    expect(names).toContain('word/document.xml');
+    for (const n of names) expect([n, XMLValidator.validate(await zip.file(n)!.async('string'))]).toEqual([n, true]);
+  });
+});

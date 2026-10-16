@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectFormat, readTemplate, fillTemplate, MAX_SLOT_TEXT, DOCX_MIME } from '@/lib/doc-fill';
+import { detectFormat, readTemplate, fillTemplate, MAX_SLOT_TEXT, MAX_SLOTS, DOCX_MIME, HWPX_MIME, FALLBACK_REASONS } from '@/lib/doc-fill';
 import mammoth from 'mammoth';
 import { extractTextFromHwp } from '@/lib/hwp';
 import { buildHwpx, para, emptyPara, tableAt } from './fixtures/hwpx';
@@ -57,11 +57,11 @@ describe('양식 읽기', () => {
     });
   });
 
-  it('표시 없는 DOCX도 대체 목차', async () => {
+  it('표시 없는 DOCX도 대체 목차 — format은 만들 파일의 형식(hwpx)', async () => {
     const r = await readTemplate(await buildDocx(wp('1. 사업 개요') + wp('본문')), 'n.docx');
     expect(r).toMatchObject({
       ok: true,
-      format: 'docx',
+      format: 'hwpx',
       mode: 'fallback',
       reason: expect.stringContaining('DOCX'),
       slots: [{ id: 's1', label: '1. 사업 개요', kind: 'section' }],
@@ -213,5 +213,31 @@ describe('항목이 깨진 파일', () => {
     expect(read).toEqual({ ok: false, reason: expect.stringContaining('손상') });
     const fill = await fillTemplate(bytes, 'c.hwpx', [{ slot_id: 's1', text: 'x' }]);
     expect(fill).toEqual({ ok: false, reason: expect.stringContaining('손상') });
+  });
+});
+
+describe('최종 보강 — 안내 문구·대체 형식', () => {
+  it('자리가 상한을 넘으면 {{항목 이름}} 표시로 좁히라고 안내한다', async () => {
+    const row = ['항목', ...Array.from({ length: MAX_SLOTS + 1 }, () => '')];
+    const r = await readTemplate(await buildHwpx(tableAt([row])), 'big.hwpx');
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining(`상한(${MAX_SLOTS}곳)`) });
+    expect(r).toEqual({ ok: false, reason: expect.stringContaining('{{항목 이름}} 표시를 넣으면 그 자리만 채웁니다') });
+  });
+
+  it('대체 이유마다 무엇을 하면 양식 그대로 채우는지 알린다', () => {
+    expect(FALLBACK_REASONS.hwp).toContain('한글에서 HWPX로 저장해 다시 올려 주세요');
+    expect(FALLBACK_REASONS.noSlots).toContain('{{항목 이름}} 표시를 넣어 다시 올려 주세요');
+    expect(FALLBACK_REASONS.docxNoMarkers).toContain('{{항목 이름}} 표시를 넣어 다시 올려 주세요');
+  });
+
+  it('표시 없는 DOCX의 대체 채우기 결과는 hwpx로 일관되게', async () => {
+    const REPORT_LABELS = ['제목', '작성일', '작성부서', '개요', '추진 경과', '주요 내용', '향후 계획', '건의 사항'];
+    const report = await buildHwpx(REPORT_LABELS.map((l) => para(`{{${l}}}`)).join(''));
+    const bytes = await buildDocx(wp('1. 사업 개요') + wp('본문'));
+    const read = await readTemplate(bytes, 'n.docx');
+    if (!read.ok) throw new Error(read.reason);
+    const r = await fillTemplate(bytes, 'n.docx', [{ slot_id: 's1', text: '글' }], { title: '보고', fallbackTemplate: report });
+    if (!r.ok) throw new Error(r.reason);
+    expect([read.format, r.extension, r.mimeType]).toEqual(['hwpx', 'hwpx', HWPX_MIME]);
   });
 });

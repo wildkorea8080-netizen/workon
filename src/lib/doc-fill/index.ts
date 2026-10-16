@@ -24,6 +24,7 @@ export interface Slot {
   hint: string | null;
 }
 
+/** format은 만들 파일의 형식(대체 경로는 원래 형식과 관계없이 hwpx) */
 export type ReadResult =
   | { ok: true; format: 'hwpx' | 'docx'; mode: 'fill' | 'fallback'; reason?: string; slots: Slot[] }
   | { ok: false; reason: string };
@@ -52,16 +53,22 @@ export function detectFormat(fileName: string, bytes: Buffer): TemplateFormat {
 
 const UNKNOWN_FORMAT = '양식 파일 형식을 알 수 없습니다. 한글(HWPX)이나 Word(DOCX) 파일을 올려 주세요.';
 
-// 직접 채울 수 없어 표준 서식으로 대신 만들 때 사용자에게 알리는 이유(설계 4.4)
-const REASON_HWP =
-  '옛 한글(HWP) 형식이라 양식에 직접 채울 수 없어 표준 서식으로 만듭니다. 한글에서 HWPX로 다시 저장해 올리면 양식 그대로 채웁니다.';
-const REASON_NO_SLOTS =
-  '이 양식에서 채울 자리를 찾지 못해 표준 서식으로 만듭니다. 채울 자리에 {{항목 이름}} 표시를 넣어 다시 올리면 양식 그대로 채웁니다.';
-const REASON_NO_MARKERS_DOCX = 'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 직접 채울 수 있어 표준 서식으로 만듭니다.';
+// 직접 채울 수 없어 표준 서식으로 대신 만들 때 사용자에게 알리는 이유(설계 4.4).
+// 모델이 그대로 전한다 — 무엇을 하면 양식 그대로 채우는지까지 담는다
+export const FALLBACK_REASONS = {
+  hwp: '옛 한글(HWP) 형식이라 양식에 직접 채울 수 없어 표준 서식으로 만듭니다. 양식 그대로 채우려면 한글에서 HWPX로 저장해 다시 올려 주세요.',
+  noSlots:
+    '이 양식에서 채울 자리를 찾지 못해 표준 서식으로 만듭니다. 양식 그대로 채우려면 채울 자리에 {{항목 이름}} 표시를 넣어 다시 올려 주세요.',
+  docxNoMarkers:
+    'Word(DOCX) 양식은 {{항목 이름}} 표시가 있어야 직접 채울 수 있어 표준 서식으로 만듭니다. 양식 그대로 채우려면 채울 자리에 {{항목 이름}} 표시를 넣어 다시 올려 주세요.',
+} as const;
 const NO_REPORT_TEMPLATE = '표준 서식(일반 보고서) 파일이 아직 준비되지 않아 대신 만들 수 없습니다. 관리자에게 알려 주세요.';
 
 function tooManySlots(count: number): ReadResult {
-  return { ok: false, reason: `채울 자리가 ${count}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다.` };
+  return {
+    ok: false,
+    reason: `채울 자리가 ${count}곳이라 상한(${MAX_SLOTS}곳)을 넘습니다. 채울 곳에만 {{항목 이름}} 표시를 넣으면 그 자리만 채웁니다.`,
+  };
 }
 
 /** 직접 채울 수 없는 양식 — 본문의 번호 제목을 목차로 읽는다. 채울 때는 표준 보고서에 담는다 */
@@ -70,7 +77,8 @@ async function readFallback(bytes: Buffer, format: 'hwpx' | 'docx' | 'hwp', reas
   if (outline.length > MAX_SLOTS) return tooManySlots(outline.length);
   return {
     ok: true,
-    format: format === 'docx' ? 'docx' : 'hwpx',
+    // format은 만들 파일의 형식이다. 대체는 원래 형식과 관계없이 표준 보고서(HWPX)로 만든다
+    format: 'hwpx',
     mode: 'fallback',
     reason,
     slots: outline.map((o, i) => ({ id: `s${i + 1}`, label: o.label, kind: 'section' as const, path: [], hint: null })),
@@ -90,14 +98,14 @@ async function readHwpxSlots(bytes: Buffer): Promise<ReadResult> {
     };
   }
   const auto = await readHwpxAutoSlots(bytes);
-  if (auto.length === 0) return readFallback(bytes, 'hwpx', REASON_NO_SLOTS);
+  if (auto.length === 0) return readFallback(bytes, 'hwpx', FALLBACK_REASONS.noSlots);
   if (auto.length > MAX_SLOTS) return tooManySlots(auto.length);
   return { ok: true, format: 'hwpx', mode: 'fill', slots: auto };
 }
 
 async function readDocxSlots(bytes: Buffer): Promise<ReadResult> {
   const labels = await readDocxMarkers(bytes);
-  if (labels.length === 0) return readFallback(bytes, 'docx', REASON_NO_MARKERS_DOCX);
+  if (labels.length === 0) return readFallback(bytes, 'docx', FALLBACK_REASONS.docxNoMarkers);
   if (labels.length > MAX_SLOTS) return tooManySlots(labels.length);
   return {
     ok: true,
@@ -111,7 +119,7 @@ export async function readTemplate(bytes: Buffer, fileName: string): Promise<Rea
   const format = detectFormat(fileName, bytes);
   if (format === 'unknown') return { ok: false, reason: UNKNOWN_FORMAT };
   try {
-    if (format === 'hwp') return await readFallback(bytes, 'hwp', REASON_HWP);
+    if (format === 'hwp') return await readFallback(bytes, 'hwp', FALLBACK_REASONS.hwp);
     return format === 'docx' ? await readDocxSlots(bytes) : await readHwpxSlots(bytes);
   } catch (error) {
     if (error instanceof DocFillError) return { ok: false, reason: error.message };
