@@ -285,19 +285,18 @@ describe('사용자 삭제 때', () => {
     expect(JSON.stringify(logged)).toContain('generated/a.hwpx');
   });
 
-  it('사용자 삭제 라우트: 경로는 DB 삭제 전에 모으고, 저장소는 DB 삭제가 성공한 뒤 지운다', () => {
-    // 사용자 삭제는 ON DELETE 없는 외래 키(conversations·usage_logs 등)에 막힐 수 있다.
-    // 저장소를 먼저 지우면 막혔을 때 기록은 남고 파일만 사라진다
-    const src = readFileSync('src/app/api/super/accounts/users/[id]/route.ts', 'utf8');
-    const del = src.slice(src.indexOf('export async function DELETE'));
-    const listAt = del.indexOf('listUserFilePaths(');
-    const deleteAt = del.search(/\.from\('users'\)\.delete\(\)/);
-    const throwAt = del.indexOf('if (dbErr) throw dbErr');
-    const removeAt = del.indexOf('removeUserFiles(');
+  it('사용자 삭제(탈퇴 처리): 경로는 DB 처리 전에 모으고, 저장소는 DB 처리가 성공한 뒤 지운다', () => {
+    // 대화를 지우면 generated_files 행이 연쇄 삭제돼 경로를 잃는다. 저장소를 먼저 지우면
+    // DB 단계가 실패했을 때 기록은 남고 파일만 사라진다. 실제 순서는 user-withdrawal.test.ts가 실행으로 본다
+    const src = readFileSync('src/lib/user-withdrawal.ts', 'utf8');
+    const body = src.slice(src.indexOf('export async function withdrawUser'));
+    const listAt = body.indexOf('listUserFilePaths(');
+    const convAt = body.search(/\.from\('conversations'\)\.delete\(\)/);
+    const stampFailAt = body.indexOf('if (stampError) return');
+    const removeAt = body.indexOf('removeUserFiles(');
     expect(listAt).toBeGreaterThan(-1);
-    expect(deleteAt).toBeGreaterThan(-1);
-    expect(listAt).toBeLessThan(deleteAt);
-    expect(throwAt).toBeGreaterThan(deleteAt);
-    expect(removeAt).toBeGreaterThan(throwAt);
+    expect(listAt).toBeLessThan(convAt);
+    expect(stampFailAt).toBeGreaterThan(convAt);
+    expect(removeAt).toBeGreaterThan(stampFailAt);
   });
 });

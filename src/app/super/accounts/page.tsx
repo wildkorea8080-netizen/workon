@@ -101,7 +101,7 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
     setDeleting(false);
     setDeleteTarget(null);
     if (data.ok) { fetchUsers(page); onToast('계정이 삭제됐습니다.'); }
-    else onToast(data.error ?? '삭제 실패');
+    else onToast(data.error?.message ?? '삭제 실패');
   };
 
   const activeCount   = users.filter(u => u.is_active !== false).length;
@@ -240,7 +240,8 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
             </div>
             <p className="text-sm text-slate-300">
               계정을 삭제하면 <span className="text-red-400 font-semibold">복구할 수 없습니다.</span><br/>
-              해당 사용자의 모든 데이터가 영구 삭제됩니다.
+              로그인할 수 없게 되고 대화·만든 파일·개인 비서가 지워집니다.
+              사용 기록은 과금·감사 근거라 이름과 함께 남습니다.
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteTarget(null)}

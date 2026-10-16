@@ -27,6 +27,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       .from('users')
       .select('id, email, full_name, role, position, department_id, created_at, updated_at, is_super_admin')
       .in('department_id', deptIds)
+      .is('deleted_at', null) // 삭제(탈퇴)한 계정은 행만 남아 있다 (0030)
       .order('created_at', { ascending: false });
 
     if (search) query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);

@@ -89,7 +89,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 581개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 597개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -159,6 +159,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 0027 | 문서가 있는데 `doc_search`가 꺼진 비서를 다시 켬 (S1-b 코드보다 먼저 적용). 판 기록에 켜진 적 있는 비서는 사람이 끈 것이라 건드리지 않음 |
 | 0028 | 옛 칸(`agents.is_personal`·`enabled_connectors`)과 맞춤 트리거·함수 제거, `v_organization_summary`를 `tier <> 'personal' AND deleted_at IS NULL`로 재작성, 승인 판 도장은 `trg_agents_stamp_approval_version`으로 따로 남김. **코드 배포 확인 뒤 적용** |
 | 0029 | 생성 파일(`generated_files`) — 비서가 만든 파일 기록 · 기관 채움 트리거. **코드 배포 전에 적용** |
+| 0030 | `users.deleted_at` — 사용자 탈퇴 처리(아래 '사용자 삭제'). **코드 배포 전에 적용** — 로그인이 이 칸을 select 하므로, 칸이 없으면 users 조회가 실패해 로그인이 기본 권한(USER)으로 떨어진다 |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -375,8 +376,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
   내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
   이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
 - 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
-- 사용자를 지우면(슈퍼관리자) DB 삭제 **전에** 경로를 모으고(`listUserFilePaths`) **성공한 뒤** 저장소를 지운다(`removeUserFiles`).
-  `conversations`·`usage_logs`의 `user_id`는 ON DELETE가 없어 사용자 삭제가 막힐 수 있는데, 먼저 지우면 기록만 남고 파일이 사라진다
+- 사용자를 지우면(슈퍼관리자 '계정 삭제' = 탈퇴 처리) DB 처리 **전에** 경로를 모으고(`listUserFilePaths`) **성공한 뒤** 저장소를 지운다(`removeUserFiles`).
+  대화를 지우면 `generated_files` 행이 연쇄 삭제돼 경로를 잃고, 저장소를 먼저 지우면 DB 단계가 실패했을 때 기록만 남고 파일이 사라진다
 - 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드(배지는 확장자에 따라 `DOC`·`HWP`)
 - 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님). `details.mode`(`fill`·`fallback`)를 남긴다
 - 만든 파일 안내(`fill_template` 결과)는 확장자에 따라 '한글 파일' / 'Word(DOCX) 파일'이라 말한다
@@ -553,7 +554,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-16 기준 581개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-17 기준 597개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -577,6 +578,7 @@ MAIL_FROM=
    | `doc-fill-hwpx-auto.test.ts` | 자동 자리 — 번호 제목 영역·표 빈칸 이름 규칙·컨트롤 문단 제외·이미 글이 쓰인 영역 제외, 채운 뒤 재읽기·줄 배치 캐시·읽기/채우기 자리 번호 일치, **이미 쓴 개조식 문서에 끼워 넣지 않음**·위 급 제목까지 쓰인 글 표시·0열 숫자 행 머리·값 칸 행은 '왼쪽 / 열 머리'·공백 값 안 채움, 채운 XML 올바름 |
    | `doc-fill-docx.test.ts` | DOCX 표시 읽기·채우기, 조각난 표시, 여러 줄 이을 때 `sectPr` 이동·쪽 나눔/번호/변경 추적 표시 제거, 압축 방식 유지, 채운 XML 올바름 |
    | `doc-fill-fallback.test.ts` | 대체 목차(HWPX·DOCX·깨진 파일), 표준 보고서 채우기, `{{주요 내용}}` 표시 없으면 실패, 공백 값은 안 채움, 글머리는 목차가 아님 |
+   | `user-withdrawal.test.ts` | 사용자 삭제는 행을 지우지 않는 탈퇴 처리, 순서(경로 → 대화 → 개인 비서 → 도장 → 저장소 → Auth), 도중 실패 시 저장소를 건드리지 않음, 로그인이 비활성·삭제 계정을 막음 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
 
@@ -1060,6 +1062,23 @@ details: {
 
 **CSV에는 반드시 UTF-8 BOM(`﻿`)을 붙이세요.** 없으면 Excel에서 한글이 깨집니다.
 기존 클라이언트 측 내보내기(`super/logs`, `super/usage`)도 같은 방식입니다.
+
+### 사용자 삭제 = 탈퇴 처리 (0030)
+
+슈퍼관리자의 '계정 삭제'는 **users 행을 지우지 않습니다** (`src/lib/user-withdrawal.ts`의 `withdrawUser`).
+
+- `conversations`·`messages`·`usage_logs`·`documents.uploaded_by`·`agents.created_by/updated_by`·`report_templates`가
+  users를 **ON DELETE 없이**(NO ACTION) 가리킵니다. 행을 지우면 한 번이라도 대화한 사용자는 23503으로 막힙니다
+- 외래 키를 SET NULL로 풀지 않은 이유: 사용 기록은 남아도 **누가 썼는지가 영영 사라집니다.** 감사에서
+  "그 직원의 사용 내역"을 낼 수 없게 되고, 한번 NULL이 된 귀속은 되살릴 수 없습니다
+- 탈퇴 = 대화 삭제(메시지·생성 파일 연쇄) → 개인 비서 숨김 → 행 도장(`deleted_at`·`is_active=false`·이메일을
+  `withdrawn+{id}@deleted.invalid`로 — 같은 주소로 다시 가입 가능) → 저장소 파일 삭제 → Supabase Auth 계정 삭제.
+  **이름·부서는 남깁니다** (사용 기록의 귀속). 대화를 도장보다 먼저 지우는 이유는, 도장 뒤에 실패하면 '이미 삭제됨'이라 다시 시도할 수 없어서입니다
+- **로그인은 `canSignIn`이 막습니다** — 비활성(`is_active=false`)도 같이. 예전에는 로그인이 `is_active`를 보지 않아
+  슈퍼관리자 화면의 '비활성'이 표시뿐이었습니다. 이미 발급된 세션(JWT)은 만료까지 남습니다
+- 사용자 목록·인원 수는 `.is('deleted_at', null)`로 거릅니다. 감사·사용 기록 조회는 거르지 않습니다
+- 슈퍼관리자 계정은 이 경로로 처리하지 않습니다(슈퍼관리자 탭에서 비활성화). `super_admin_logs.admin_user_id`가
+  SET NULL인데 NOT NULL이라 행 삭제는 어차피 23502로 막힙니다
 
 ---
 

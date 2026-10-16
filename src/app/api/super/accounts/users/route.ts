@@ -45,8 +45,9 @@ export async function GET(request: NextRequest) {
     // 3) 사용자 쿼리
     let query = supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, department_id, is_super_admin, created_at, updated_at, position', { count: 'exact' })
-      .eq('is_super_admin', false); // 슈퍼관리자는 별도 탭에서 관리
+      .select('id, email, full_name, role, department_id, is_super_admin, is_active, created_at, updated_at, position', { count: 'exact' })
+      .eq('is_super_admin', false) // 슈퍼관리자는 별도 탭에서 관리
+      .is('deleted_at', null);     // 삭제(탈퇴)한 계정은 행만 남아 있다 (0030)
 
     if (search)      query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
     if (role !== 'all') query = query.eq('role', role);
@@ -73,6 +74,7 @@ export async function GET(request: NextRequest) {
       .from('users')
       .select('id', { count: 'exact', head: true })
       .eq('is_super_admin', false)
+      .is('deleted_at', null)
       .gte('created_at', monthStart);
 
     return NextResponse.json({

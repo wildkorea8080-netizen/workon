@@ -201,13 +201,12 @@ async function removeStoragePaths(paths: string[]): Promise<{ paths: string[]; e
 }
 
 /**
- * 사용자 삭제(슈퍼관리자) 때 — DB 행을 지우기 **전에** 그 사용자의 생성 파일 경로를 모은다.
- * generated_files.user_id는 ON DELETE CASCADE라 사용자 행이 지워지면 경로를 알 길이 없다.
+ * 사용자 탈퇴 처리(user-withdrawal.ts) 때 — DB를 건드리기 **전에** 그 사용자의 생성 파일 경로를 모은다.
+ * 탈퇴는 대화를 지우고, generated_files는 대화와 함께 연쇄 삭제돼 그 뒤로는 경로를 알 길이 없다.
  * 사용자가 쓴 모든 대화의 파일이 여기에 든다(파일 주인 = 대화 주인).
  *
- * 저장소는 여기서 지우지 않는다. 사용자 삭제는 다른 외래 키(conversations·usage_logs 등,
- * ON DELETE 없음)에 막혀 실패할 수 있는데, 먼저 지우면 행은 남고 파일만 사라진다.
- * DB 삭제가 성공한 뒤 removeUserFiles로 지운다.
+ * 저장소는 여기서 지우지 않는다. 탈퇴의 DB 단계가 실패할 수 있는데, 먼저 지우면 행은 남고
+ * 파일만 사라진다. DB 단계가 성공한 뒤 removeUserFiles로 지운다.
  *
  * 실패해도 던지지 않는다(빈 목록) — 사용자 삭제를 막지 않되 로그를 남긴다.
  * S3의 chat_attachments(chat-uploads/…)가 생기면 그 경로도 여기서 함께 모은다.
@@ -238,7 +237,7 @@ export async function listUserFilePaths(userId: string): Promise<string[]> {
   }
 }
 
-/** 사용자 DB 삭제가 성공한 뒤 부른다. 실패해도 던지지 않고 남은 경로를 로그에 남긴다 */
+/** 사용자 탈퇴의 DB 단계가 성공한 뒤 부른다. 실패해도 던지지 않고 남은 경로를 로그에 남긴다 */
 export async function removeUserFiles(userId: string, paths: string[]): Promise<void> {
   let failed: { paths: string[]; error: string } | null;
   try {
