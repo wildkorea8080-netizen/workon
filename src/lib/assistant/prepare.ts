@@ -10,7 +10,9 @@ import { validateChatImages, type ChatImage } from '@/lib/chat-images';
 import { getAllowedModelIds, resolveModel } from '@/lib/model-policy';
 import { connectorCatalog } from '@/lib/connectors';
 import { activeCapabilities, effectiveCapabilities, toolsFor } from '@/lib/capabilities';
-import type { TurnContext, PrepareResult } from '@/lib/capabilities/types';
+import type { TurnContext, PrepareResult, TurnAttachment } from '@/lib/capabilities/types';
+import { bindAttachments, listConversationAttachments, type AttachmentRecord } from '@/lib/attachments/store';
+import { attachmentRequestError, toTurnAttachments } from './attachments';
 import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
 import { loadHistory } from './history';
@@ -33,7 +35,7 @@ function reject(message: string, status: number, details?: Record<string, unknow
  * (스트림 시작 전 실패 규약).
  */
 export async function prepareTurn(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome> {
-  const { agent_id, message, conversation_id, images } = body;
+  const { agent_id, message, conversation_id, images, attachment_ids } = body;
 
   if (typeof agent_id !== 'string' || !agent_id) return reject('에이전트 ID는 필수입니다.', 400);
   if (typeof message !== 'string' || !message.trim()) return reject('메시지는 필수입니다.', 400);
@@ -82,6 +84,11 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     return reject('이 비서는 사진을 받지 않습니다. 사진 읽기를 켠 비서에서 물어 주세요.', 400);
   }
 
+  // 대화를 만들기 전에 거른다 — 꺼진 비서에 파일을 보낸 요청으로 빈 대화가 생기지 않게
+  const attachmentError = attachmentRequestError(attachment_ids, capabilities);
+  if (attachmentError) return reject(attachmentError, 400);
+  const sentIds: string[] = Array.isArray(attachment_ids) ? (attachment_ids as string[]) : [];
+
   const filterResult = await filterUserInput(actor.departmentId, message);
   if (!filterResult.isValid) {
     return reject('메시지에 금지된 내용이 포함되어 있습니다.', 400, {
@@ -91,9 +98,10 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   }
 
   // ── 대화 ──
+  const isNewConversation = !(typeof conversation_id === 'string' && conversation_id);
   let conversationId: string;
   let history: Awaited<ReturnType<typeof loadHistory>> = [];
-  if (typeof conversation_id === 'string' && conversation_id) {
+  if (!isNewConversation) {
     const { data: existing } = await supabaseAdmin
       .from('conversations')
       .select('id')
@@ -122,6 +130,23 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     conversationId = created.id;
   }
 
+  // ── 첨부 ── 대화가 정해진 뒤에 묶는다(새 대화면 방금 만든 id로). bindAttachments가 주인을 다시 본다
+  let attachments: TurnAttachment[] = [];
+  if (capabilities.some((c) => c.acceptsFiles)) {
+    let bound: AttachmentRecord[] = [];
+    if (sentIds.length > 0) {
+      const result = await bindAttachments(actor.userId, conversationId, sentIds);
+      if (!result.ok) return reject(result.message, 400);
+      bound = result.rows;
+    }
+    // 새 대화에 보낸 것도 없으면 붙은 첨부가 있을 수 없다 — 조회를 아낀다
+    const listed =
+      !isNewConversation || bound.length > 0 ? await listConversationAttachments(actor.userId, conversationId) : [];
+    // 목록 조회가 실패하면 빈 배열이 온다. 방금 묶은 것만은 빠지지 않게 채워 넣는다
+    const missing = bound.filter((b) => !listed.some((r) => r.id === b.id));
+    attachments = toTurnAttachments([...listed, ...missing], sentIds);
+  }
+
   // ── 모델 ── 기관 허용 범위 안이면 비서의 모델, 아니면 허용 목록의 첫 번째
   const allowedModels = await getAllowedModelIds(actor.organizationId);
   const { modelId, substituted } = resolveModel(agent.model_id, allowedModels);
@@ -138,6 +163,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     capabilities: capabilitySettings,
     message,
     conversationId,
+    attachments,
   };
 
   const prepared: PrepareResult[] = await Promise.all(
@@ -157,9 +183,13 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       tools,
       capabilities,
       conversationId,
-      isNewConversation: !(typeof conversation_id === 'string' && conversation_id),
+      isNewConversation,
       chunks,
-      storedUserContent: storedUserContent(message, attachedImages.length),
+      storedUserContent: storedUserContent(
+        message,
+        attachedImages.length,
+        attachments.filter((a) => a.isNew).map((a) => a.fileName)
+      ),
     },
   };
 }

@@ -132,7 +132,7 @@ describe('대화 실행기 연결', () => {
     expect(JSON.stringify(buildUserContent('질문', images))).toContain(data); // 모델에는 간다
     const rows = buildMessageRows({
       conversationId: 'c', userId: 'u', userContent: storedUserContent('질문', 1),
-      assistantText: '답', chunks: [], links: [], files: [], agentVersion: 1,
+      assistantText: '답', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
     });
     expect(JSON.stringify(rows)).not.toContain(data);
     expect(rows[0].content).toContain('1장');

@@ -224,7 +224,7 @@ console.log('\n=== 비서 단계와 판 ===');
     const versions = new Set(history.map((h) => `${h.agent_id}:${h.version}`));
     const noCurrent = agents.filter((a) => !versions.has(`${a.id}:${a.version}`));
     const badDept = agents.filter((a) => a.tier === 'department' && a.visibility !== 'department');
-    const KNOWN_CAPS = ['doc_search', 'public_data', 'image', 'document'];
+    const KNOWN_CAPS = ['doc_search', 'public_data', 'image', 'document', 'file_read'];
     const badCaps = agents.filter((a) => Object.keys(a.capabilities ?? {}).some((k) => !KNOWN_CAPS.includes(k)));
     const tally = agents.reduce((m, a) => ({ ...m, [a.tier]: (m[a.tier] ?? 0) + 1 }), {});
 

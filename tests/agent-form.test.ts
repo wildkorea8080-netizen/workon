@@ -21,7 +21,7 @@ describe('설정 값', () => {
     expect(settingsFromAgent(agent as never)).toEqual({
       name: '공문 비서', description: '', icon: '📨', category: '공공기관', usage_guide: '',
       starter_prompts: '교육 안내\n자료 요청', system_prompt: '공문을 씁니다', model_id: '',
-      doc_search: false, image: true, document: false, connectors: ['law'],
+      doc_search: false, image: true, document: false, file_read: false, connectors: ['law'],
     });
   });
 
@@ -35,6 +35,14 @@ describe('설정 값', () => {
   it('문서 만들기를 능력으로 보낸다', () => {
     const body = settingsToBody({ ...settingsFromAgent(agent as never), document: true }, { isLink: false });
     expect(body.capabilities).toEqual({ image: {}, document: {}, public_data: { connectors: ['law'] } });
+  });
+
+  it('파일 받아 읽기를 저장 값에서 읽고 그대로 보낸다', () => {
+    // 편집 창에 칸이 없어도 저장할 때 조용히 빠지면 안 된다
+    const withFileRead = { ...agent, capabilities: { ...agent.capabilities, file_read: {} } };
+    expect(settingsFromAgent(withFileRead as never).file_read).toBe(true);
+    const body = settingsToBody(settingsFromAgent(withFileRead as never), { isLink: false });
+    expect(body.capabilities).toEqual({ image: {}, file_read: {}, public_data: { connectors: ['law'] } });
   });
 
   it('연결을 다 끄면 공공데이터 능력을 뺀다', () => {

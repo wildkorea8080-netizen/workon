@@ -34,6 +34,16 @@ describe('사용자 내용', () => {
     expect(stored).toContain('이 표 설명해줘');
     expect(stored).not.toContain('AAAA');
   });
+
+  it('저장 글: 사진 줄 → 파일 줄 → 질문', () => {
+    const stored = storedUserContent('합쳐줘', 1, ['a.xlsx', 'b.hwp']);
+    const lines = stored.split('\n');
+    expect(lines[0]).toContain('1장');
+    expect(lines[1]).toBe('[첨부 파일: a.xlsx, b.hwp]');
+    expect(lines[2]).toBe('합쳐줘');
+    expect(storedUserContent('질문', 0, ['a.xlsx'])).toBe('[첨부 파일: a.xlsx]\n질문');
+    expect(storedUserContent('질문', 0, [])).toBe('질문');
+  });
 });
 
 describe('이력 다듬기', () => {
@@ -60,6 +70,7 @@ describe('메시지 저장 행', () => {
     chunks: [{ documentId: 'd', documentTitle: 't', chunkIndex: 0, text: '본문', similarity: 0.4 }],
     links: [{ title: '법', url: 'https://a' }],
     files: [{ id: 'f', file_name: 'a.hwpx', size_bytes: 1 }],
+    attachments: [],
     agentVersion: 7,
   });
 

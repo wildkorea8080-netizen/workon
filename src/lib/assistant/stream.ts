@@ -240,6 +240,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
       chunks: turn.chunks,
       links: result.links,
       files: result.files,
+      attachments: turn.ctx.attachments.filter((a) => a.isNew).map((a) => ({ id: a.id, file_name: a.fileName })),
       agentVersion: turn.ctx.agentVersion,
     })
   );

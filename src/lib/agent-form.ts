@@ -19,6 +19,7 @@ export interface AgentSettingsValue {
   doc_search: boolean;
   image: boolean;
   document: boolean;
+  file_read: boolean;
   connectors: string[];
 }
 
@@ -68,6 +69,7 @@ export function settingsFromAgent(
     doc_search: 'doc_search' in caps,
     image: 'image' in caps,
     document: 'document' in caps,
+    file_read: 'file_read' in caps,
     connectors: connectorIdsOf(caps),
   };
 }
@@ -91,6 +93,8 @@ export function settingsToBody(value: AgentSettingsValue, opts: { isLink: boolea
       ...(value.doc_search ? { doc_search: {} } : {}),
       ...(value.image ? { image: {} } : {}),
       ...(value.document ? { document: {} } : {}),
+      // 저장 값에서 읽어 그대로 돌려보낸다 — 빠뜨리면 다른 칸을 저장할 때 조용히 꺼진다
+      ...(value.file_read ? { file_read: {} } : {}),
       ...(value.connectors.length > 0 ? { public_data: { connectors: value.connectors } } : {}),
     },
   };

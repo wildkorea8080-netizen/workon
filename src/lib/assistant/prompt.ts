@@ -28,6 +28,11 @@ export function buildUserContent(message: string, images: ChatImage[]): string |
  * 다시 청구되고(이력 20개), 현장 사진·명단 같은 개인정보를 보관하게 된다.
  * 대신 첨부가 있었다는 사실은 남긴다 — 없으면 나중에 답변의 근거를 알 수 없다.
  */
-export function storedUserContent(message: string, imageCount: number): string {
-  return imageCount > 0 ? `${imageAttachmentMarker(imageCount)}\n${message}` : message;
+export function storedUserContent(message: string, imageCount: number, fileNames: string[] = []): string {
+  // 파일도 같은 이유로 이름만 남긴다. 본문은 첨부 기록에 있고 대화와 함께 지워진다
+  const lines = [
+    ...(imageCount > 0 ? [imageAttachmentMarker(imageCount)] : []),
+    ...(fileNames.length > 0 ? [`[첨부 파일: ${fileNames.join(', ')}]`] : []),
+  ];
+  return [...lines, message].join('\n');
 }

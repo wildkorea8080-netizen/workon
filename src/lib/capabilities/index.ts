@@ -4,6 +4,7 @@ import { docSearch } from './doc-search';
 import { publicData } from './public-data';
 import { image } from './image';
 import { documentCapability } from './document';
+import { fileRead } from './file-read';
 import {
   CAPABILITY_IDS,
   normalizeCapabilities,
@@ -17,7 +18,7 @@ import type { Capability, TurnContext } from './types';
  * 능력 목록. 능력을 더할 때는 파일 하나를 만들고 여기 올린다 —
  * 대화 실행기는 고치지 않는다(설계 4.1).
  */
-export const CAPABILITIES: Capability[] = [docSearch, publicData, image, documentCapability];
+export const CAPABILITIES: Capability[] = [docSearch, publicData, image, documentCapability, fileRead];
 
 /** 켜져 있고 쓸 준비가 된 능력 */
 export function activeCapabilities(settings: CapabilitySettings): Capability[] {

@@ -14,6 +14,8 @@ export interface MessageRowInput {
   chunks: RetrievedChunk[];
   links: ToolSource[];
   files: GeneratedFileRef[];
+  /** 이번 질문에 붙인 첨부. 저장소 경로는 싣지 않는다 — 화면이 이 행을 그대로 읽는다 */
+  attachments: { id: string; file_name: string }[];
   agentVersion: number;
 }
 
@@ -36,7 +38,10 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
       user_id: input.userId,
       role: 'user',
       content: input.userContent,
-      source_references: {},
+      // 칸은 하나(source_references)라 첨부가 있든 없든 두 행의 키 집합은 같다
+      source_references: input.attachments.length
+        ? { attachments: input.attachments.map((a) => ({ id: a.id, file_name: a.file_name })) }
+        : {},
       agent_version: input.agentVersion,
     },
     {

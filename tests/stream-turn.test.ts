@@ -49,7 +49,7 @@ const IMAGE_DATA = 'SU1BR0VCWVRFU19TSE9VTERfTk9UX0JFX1NUT1JFRA==';
 function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
   return {
     ctx: {
-      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문', conversationId: 'c1',
+      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문', conversationId: 'c1', attachments: [],
     },
     modelId: MODEL,
     modelSubstituted: false,
@@ -202,6 +202,30 @@ describe('streamTurn — 사진', () => {
     expect(rows).toHaveLength(2);
     expect(JSON.stringify(rows)).not.toContain(IMAGE_DATA);
     expect(rows[0].content).toContain('1장');
+  });
+});
+
+describe('streamTurn — 첨부 파일', () => {
+  it('이번에 보낸 첨부만 사용자 행에 id·이름으로 남긴다', async () => {
+    setLlmAdapterForTests(adapter());
+    const summary = { kind: 'text' as const, chars: 1, tables: [], warnings: [] };
+    const base = turn();
+    await run(
+      turn({
+        ctx: {
+          ...base.ctx,
+          attachments: [
+            { ref: 'a1', id: 'old', fileName: '지난.xlsx', summary, isNew: false },
+            { ref: 'a2', id: 'new', fileName: '예산.xlsx', summary, isNew: true },
+          ],
+        },
+        storedUserContent: storedUserContent('질문', 0, ['예산.xlsx']),
+      })
+    );
+    const rows = inserted('messages');
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(rows[0].source_references).toEqual({ attachments: [{ id: 'new', file_name: '예산.xlsx' }] });
+    expect(rows[0].content).toBe('[첨부 파일: 예산.xlsx]\n질문');
   });
 });
 

@@ -7,7 +7,7 @@ import type { TurnContext } from '@/lib/capabilities/types';
 import type { RetrievedChunk } from '@/lib/db';
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
-  organizationId: 'org', departmentId: 'dept', userId: 'u', agentId: 'a', agentVersion: 1, conversationId: 'c',
+  organizationId: 'org', departmentId: 'dept', userId: 'u', agentId: 'a', agentVersion: 1, conversationId: 'c', attachments: [],
   capabilities: {}, message: '여비 규정', ...over,
 });
 
@@ -71,7 +71,7 @@ describe('대화할 때의 능력', () => {
 
   it('모르는 능력 id가 섞여도 나머지 능력은 켜진다 — 되돌리기 배포에서 다른 능력이 꺼지지 않게', () => {
     const caps = effectiveCapabilities(
-      { doc_search: {}, file_read: {}, future_cap: { x: 1 } },
+      { doc_search: {}, table_merge: {}, future_cap: { x: 1 } },
       { tier: 'official', scope: { publicDataConnectors: new Set() }, knownConnectorIds: [] }
     );
     expect(caps).toEqual({ doc_search: {} });

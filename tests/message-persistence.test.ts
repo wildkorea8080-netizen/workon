@@ -47,10 +47,28 @@ describe('대화 실행기의 메시지 삽입', () => {
   it('두 행이 같은 키를 갖는다', async () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({
-      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], agentVersion: 1,
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
     });
     expect(hasUniformKeys(rows)).toBe(true);
     expect(rows[0]).toHaveProperty('source_references');
+  });
+
+  const withAttachments = async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    return buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: '[첨부 파일: 예산.xlsx]\nq', assistantText: 'a', chunks: [], links: [], files: [],
+      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1,
+    });
+  };
+
+  it('첨부가 있어도 두 행의 칸 집합이 같다', async () => {
+    expect(hasUniformKeys(await withAttachments())).toBe(true);
+  });
+
+  it('사용자 행 source_references.attachments', async () => {
+    const rows = await withAttachments();
+    // 저장소 경로는 싣지 않는다 — id와 이름만
+    expect(rows[0].source_references).toEqual({ attachments: [{ id: 'att-1', file_name: '예산.xlsx' }] });
   });
 
   it('저장 실패를 화면에 알린다', async () => {
