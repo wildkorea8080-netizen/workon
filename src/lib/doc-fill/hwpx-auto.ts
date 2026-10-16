@@ -10,6 +10,7 @@ import {
   applyEdits,
   ancestorLineSegDeletes,
   writeHwpx,
+  CHAR_PR,
   type Para,
   type Edit,
 } from './hwpx-core';
@@ -17,8 +18,10 @@ import {
 /**
  * 표시({{이름}})가 없는 HWPX에서 채울 자리를 스스로 찾는다(설계 4.1, S2-b).
  *
- * - section: 본문 최상위의 번호 제목 아래, 다음 최상위 제목 전까지의 빈 문단·자리 표시 문단
- * - cell: 표에서 비었거나 자리 표시만 든 칸. 이름은 왼쪽(없으면 위쪽) 항목명 칸
+ * - section: 본문 최상위의 번호 제목 아래, 다음 최상위 제목 전까지의 빈 문단·자리 표시 문단.
+ *   그 영역에 이미 글이 쓰인 문단이 하나라도 있으면 자리가 아니다
+ * - cell: 표에서 비었거나 자리 표시만 든 칸. 이름은 왼쪽 항목명 칸(첫 행에 열 머리가 있으면
+ *   '항목 / 열 머리'), 왼쪽이 없으면 첫 행의 열 머리
  *
  * 읽기와 채우기는 같은 바이트에서 같은 함수(locateSlots)로 자리를 다시 계산한다 —
  * 자리 id(s1..)가 둘 사이의 약속이라 결정적이어야 한다.
@@ -67,8 +70,6 @@ function inlineOnly(para: Para, tags: XmlTag[], prefix: string): boolean {
   }
   return true;
 }
-
-const CHAR_PR = /\scharPrIDRef\s*=\s*(?:"([^"]*)"|'([^']*)')/;
 
 /**
  * 새 문단이 쓸 글자 서식. 첫 글 조각의 것, 조각이 없는 빈 문단이면 그 문단 첫 조각(run)의 것.
@@ -196,9 +197,10 @@ function locateSlots(xml: string, prefix: string): SectionScan {
   const chain: { level: number; label: string }[] = [];
   /** 제목마다 그 시점의 제목 사슬(자기 포함) — 표 칸의 경로에 쓴다 */
   const chains: { start: number; labels: string[] }[] = [];
-  let open: { heading: Para; label: string; path: string[]; fills: Para[] } | null = null;
+  let open: { heading: Para; label: string; path: string[]; fills: Para[]; written: boolean } | null = null;
   const close = () => {
-    if (open && open.fills.length > 0) {
+    // 이미 글이 쓰인 영역은 자리가 아니다 — 본문 위·아래의 빈 줄에 쓰면 기존 글과 섞인다
+    if (open && !open.written && open.fills.length > 0) {
       const [target, ...rest] = open.fills;
       out.push({
         slot: { label: open.label, kind: 'section', path: open.path, hint: target.text.trim() || null },
@@ -217,11 +219,12 @@ function locateSlots(xml: string, prefix: string): SectionScan {
       // 같은 급 이상의 앞선 제목은 다른 갈래다 — 사슬에서 뺀다
       while (chain.length > 0 && chain[chain.length - 1].level >= level) chain.pop();
       const label = p.text.trim();
-      open = { heading: p, label, path: chain.map((h) => h.label), fills: [] };
+      open = { heading: p, label, path: chain.map((h) => h.label), fills: [], written: false };
       chain.push({ level, label });
       chains.push({ start: p.start, labels: chain.map((h) => h.label) });
-    } else if (open && fillable(p)) {
-      open.fills.push(p);
+    } else if (open) {
+      if (!isPlaceholderText(p.text)) open.written = true;
+      else if (fillable(p)) open.fills.push(p);
     }
   }
   close();
@@ -248,17 +251,21 @@ function locateSlots(xml: string, prefix: string): SectionScan {
         hint: texts.join(' ') || null,
       };
     });
-    const labelFrom = (cands: typeof info): string | null => {
-      for (const c of cands) if (!c.blank && c.label) return c.label;
-      return null;
-    };
+    const usable = (c: (typeof info)[number] | undefined) => (c && !c.blank && c.label ? c : null);
     for (const me of info) {
       if (me.paras.length === 0 || !me.paras.every(fillable)) continue;
       const { row, col } = me.cell;
-      const left = info.filter((o) => o.cell.row === row && o.cell.col < col).sort((a, b) => b.cell.col - a.cell.col);
-      const up = info.filter((o) => o.cell.col === col && o.cell.row < row).sort((a, b) => b.cell.row - a.cell.row);
-      const label = labelFrom(left) ?? labelFrom(up);
-      if (label === null) continue;
+      // 왼쪽: 같은 행에서 가장 가까운 항목명 칸
+      const left = info
+        .filter((o) => o.cell.row === row && o.cell.col < col)
+        .sort((a, b) => b.cell.col - a.cell.col)
+        .find((o) => usable(o));
+      // 위쪽은 첫 행(열 머리)에서만 — 바로 위 행의 칸은 대개 값이다('홍길동'이 항목명이 되면 안 된다)
+      const header = row > 0 ? usable(info.find((o) => o.cell.row === 0 && o.cell.col === col)) : null;
+      let label: string;
+      if (left) label = header && header.cell.col !== left.cell.col ? `${left.label} / ${header.label}` : left.label;
+      else if (header) label = header.label;
+      else continue;
       const [target, ...rest] = me.paras;
       out.push({
         slot: { label, kind: 'cell', path: pathAt(table.topStart), hint: me.hint },

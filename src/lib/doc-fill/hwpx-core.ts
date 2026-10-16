@@ -95,7 +95,8 @@ export async function readEntry(zip: JSZip, name: string): Promise<string> {
   }
 }
 
-const CHAR_PR = /\scharPrIDRef\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+/** 조각(run) 여는 태그의 글자 서식 참조 */
+export const CHAR_PR = /\scharPrIDRef\s*=\s*(?:"([^"]*)"|'([^']*)')/;
 
 /** 모든 문단과 그 자신의 글 조각. 시작 위치 순 */
 export function scanParagraphs(xml: string, prefix: string): Para[] {

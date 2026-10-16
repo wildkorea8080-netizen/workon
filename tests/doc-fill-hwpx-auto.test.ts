@@ -5,6 +5,11 @@ import { buildHwpx, para, emptyPara, secPrPara, SEC_PR_PARA, tableAt, sectionXml
 
 const values = (o: Record<string, string>) => new Map(Object.entries(o));
 const count = (s: string, sub: string) => s.split(sub).length - 1;
+/** 글 t가 든 (중첩 없는) 문단 원문 */
+const paraWith = (xml: string, t: string) => {
+  const at = xml.indexOf(`>${t}<`);
+  return xml.slice(xml.lastIndexOf('<hp:p ', at), xml.indexOf('</hp:p>', at) + '</hp:p>'.length);
+};
 
 describe('번호 제목 영역', () => {
   it('번호 제목 아래 빈 문단을 자리로, 급으로 경로를 단다', async () => {
@@ -39,6 +44,31 @@ describe('번호 제목 영역', () => {
     expect(await readHwpxAutoSlots(bytes)).toEqual([]);
   });
 
+  it('이미 글이 쓰인 영역의 제목은 자리가 아니다 — 본문 위·아래의 빈 줄에 쓰지 않는다', async () => {
+    expect(await readHwpxAutoSlots(await buildHwpx(para('1. 개요') + emptyPara() + para('본 계획은 기존 사업을 이어 간다.')))).toEqual([]);
+    expect(await readHwpxAutoSlots(await buildHwpx(para('2. 기타') + para('끝.') + emptyPara()))).toEqual([]);
+    // 빈 문단·자리 표시 문단뿐이면 그대로 자리
+    expect((await readHwpxAutoSlots(await buildHwpx(para('1. 개요') + emptyPara()))).map((s) => s.label)).toEqual(['1. 개요']);
+    expect((await readHwpxAutoSlots(await buildHwpx(para('가. 현황') + para('(내용)')))).map((s) => s.label)).toEqual(['가. 현황']);
+  });
+
+  it('제목 영역은 구역(섹션)을 넘지 않고, 자리 번호는 구역을 이어 간다', async () => {
+    const bytes = await buildHwpx(para('1. 개요') + emptyPara() + para('2. 끝'), {
+      moreSections: [emptyPara() + para('3. 기타') + para('(내용)')],
+    });
+    expect((await readHwpxAutoSlots(bytes)).map((s) => `${s.id}:${s.label}`)).toEqual(['s1:1. 개요', 's2:3. 기타']);
+    const result = await fillHwpxAutoSlots(bytes, values({ s1: '첫 구역 값', s2: '둘째 구역 값' }));
+    expect(result.filled).toEqual(['s1', 's2']);
+    const sec0 = await sectionXml(result.bytes, 0);
+    const sec1 = await sectionXml(result.bytes, 1);
+    expect(sec0).toContain('첫 구역 값');
+    expect(sec0).not.toContain('둘째 구역 값');
+    expect(sec1).toContain('둘째 구역 값');
+    expect(sec1).not.toContain('(내용)');
+    // '2. 끝'이 다음 구역 맨 앞 빈 문단을 가져가지 않았다
+    expect(sec1.startsWith(sec1.slice(0, sec1.indexOf('<hp:p')) + emptyPara())).toBe(true);
+  });
+
   it('자리 표시 문단은 제목이 아니라 채울 곳이다', async () => {
     const bytes = await buildHwpx(para('1. 개요') + para('○ (내용)') + para('○○○'));
     expect(await readHwpxAutoSlots(bytes)).toEqual([
@@ -67,7 +97,7 @@ describe('번호 제목 영역', () => {
 });
 
 describe('표 빈칸', () => {
-  it('표 빈칸은 왼쪽 항목명, 없으면 위쪽 항목명', async () => {
+  it('표 빈칸은 왼쪽 항목명, 없으면 첫 행의 항목명', async () => {
     const bytes = await buildHwpx(
       tableAt(
         [
@@ -82,9 +112,39 @@ describe('표 빈칸', () => {
       { id: 's1', label: '회의명', kind: 'cell', path: [], hint: null }, // (0,1)
       { id: 's2', label: '회의명', kind: 'cell', path: [], hint: null }, // (0,2)
       { id: 's3', label: '일시', kind: 'cell', path: [], hint: '(작성)' }, // (1,1)
-      { id: 's4', label: '일시', kind: 'cell', path: [], hint: null }, // (2,0) 위쪽
-      { id: 's5', label: '장소', kind: 'cell', path: [], hint: null }, // (2,2) 위쪽
+      { id: 's4', label: '회의명', kind: 'cell', path: [], hint: null }, // (2,0) 첫 행에서
+      // (2,1)·(2,2): 왼쪽이 빈칸뿐이고 첫 행의 같은 열도 빈칸이라 자리 아님
     ]);
+  });
+
+  it('위쪽 항목명은 첫 행에서만 — 위 행의 값을 항목명으로 쓰지 않는다', async () => {
+    const bytes = await buildHwpx(tableAt([['성명', '소속'], ['홍길동', '총무과'], ['', '']]));
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['성명', '소속']);
+  });
+
+  it('왼쪽 항목명에 첫 행의 열 머리를 붙인다', async () => {
+    const bytes = await buildHwpx(tableAt([['구분', '1분기', '2분기'], ['예산', '', '']], { addr: true }));
+    expect((await readHwpxAutoSlots(bytes)).map((s) => s.label)).toEqual(['예산 / 1분기', '예산 / 2분기']);
+    // 첫 행 칸은 열 머리를 붙이지 않는다
+    expect((await readHwpxAutoSlots(await buildHwpx(tableAt([['회의명', '']])))).map((s) => s.label)).toEqual(['회의명']);
+  });
+
+  it('표 안의 표 — 안쪽 칸은 안쪽 표의 항목명을 받고, 채우면 바깥 문단들의 줄 배치 캐시만 지운다', async () => {
+    const inner = tableAt([['내부', '']]);
+    const body = tableAt([['외부', 'NESTED']]).replace(para('NESTED', '7'), inner) + para('그대로');
+    const bytes = await buildHwpx(body);
+    expect(await readHwpxAutoSlots(bytes)).toEqual([{ id: 's1', label: '내부', kind: 'cell', path: [], hint: null }]);
+    expect(count(await sectionXml(bytes), '<hp:linesegarray>')).toBe(6);
+
+    const xml = await sectionXml((await fillHwpxAutoSlots(bytes, values({ s1: '안쪽 값' }))).bytes);
+    // 바깥 표 문단·안쪽 표 문단의 캐시와 바뀐 칸 문단의 캐시가 사라지고, 외부·내부·그대로는 남는다
+    expect(count(xml, '<hp:linesegarray>')).toBe(3);
+    const pos = xml.indexOf('안쪽 값');
+    expect(pos).toBeGreaterThan(xml.lastIndexOf('<hp:tbl '));
+    expect(pos).toBeLessThan(xml.indexOf('</hp:tbl>'));
+    for (const t of ['외부', '내부', '그대로']) {
+      expect(paraWith(xml, t)).toContain('linesegarray');
+    }
   });
 
   it('칸 위치는 칸 주소를 따른다', async () => {
@@ -226,7 +286,7 @@ describe('채우기', () => {
         para('(내용)') +
         para('2. 일정') +
         emptyPara() +
-        tableAt([['구분', '기간'], ['', '']])
+        tableAt([['구분', ''], ['기간', '']])
     );
     const slots = await readHwpxAutoSlots(bytes);
     expect(await readHwpxAutoSlots(bytes)).toEqual(slots);
@@ -246,7 +306,10 @@ describe('채우기', () => {
     const positions = slots.map((s) => xml.indexOf(`값-${s.id}<`));
     expect(positions.every((p) => p > 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
-    // 각 값은 제 이름 뒤에 온다
-    for (const s of slots) expect(xml.lastIndexOf(s.label, xml.indexOf(`값-${s.id}<`))).toBeGreaterThan(-1);
+    // 각 자리의 이름은 앞 자리의 값과 제 값 사이에 있다 — 값이 제 자리에 들어갔다
+    slots.forEach((s, i) => {
+      const at = xml.lastIndexOf(s.label, positions[i]);
+      expect(at).toBeGreaterThan(i === 0 ? -1 : positions[i - 1]);
+    });
   });
 });

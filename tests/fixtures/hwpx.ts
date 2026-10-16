@@ -65,12 +65,17 @@ export function tableAt(rows: (string | string[])[][], opts: { addr?: boolean } 
   return `<hp:p id="2" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="${rows.length}" colCnt="${rows[0].length}">${trs}</hp:tbl><hp:t/></hp:run>${LINESEG}</hp:p>`;
 }
 
-export async function buildHwpx(body: string, opts: { prvText?: string; binData?: Buffer; prvImage?: Buffer } = {}): Promise<Buffer> {
+export async function buildHwpx(
+  body: string,
+  opts: { prvText?: string; binData?: Buffer; prvImage?: Buffer; /** section1.xml부터 차례로 */ moreSections?: string[] } = {}
+): Promise<Buffer> {
   const zip = new JSZip();
   zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE', createFolders: false });
   zip.file('version.xml', '<?xml version="1.0" encoding="UTF-8"?><hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" major="5" minor="1"/>', { createFolders: false });
   zip.file('Contents/header.xml', HEADER, { createFolders: false });
-  zip.file('Contents/section0.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><hs:sec ${NS}>${body}</hs:sec>`, { createFolders: false });
+  [body, ...(opts.moreSections ?? [])].forEach((b, i) =>
+    zip.file(`Contents/section${i}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><hs:sec ${NS}>${b}</hs:sec>`, { createFolders: false })
+  );
   zip.file('Preview/PrvText.txt', opts.prvText ?? '미리보기 {{제목}}', { createFolders: false });
   if (opts.prvImage) zip.file('Preview/PrvImage.png', opts.prvImage, { compression: 'STORE', createFolders: false });
   // 그림 같은 이미 압축된 항목은 한글이 무압축으로 저장한다
@@ -78,6 +83,6 @@ export async function buildHwpx(body: string, opts: { prvText?: string; binData?
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
-export async function sectionXml(bytes: Buffer): Promise<string> {
-  return (await JSZip.loadAsync(bytes)).file('Contents/section0.xml')!.async('string');
+export async function sectionXml(bytes: Buffer, n = 0): Promise<string> {
+  return (await JSZip.loadAsync(bytes)).file(`Contents/section${n}.xml`)!.async('string');
 }
