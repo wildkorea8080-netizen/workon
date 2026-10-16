@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createDocument, DOCUMENT_ADDENDUM, type DocumentDeps } from '@/lib/capabilities/document';
 import type { TurnContext } from '@/lib/capabilities/types';
 import { buildHwpx, para } from './fixtures/hwpx';
+import { buildDocx, wp } from './fixtures/docx';
 
 const ctx: TurnContext = {
   organizationId: 'org', departmentId: 'dept', userId: 'u1', agentId: 'agent-1', agentVersion: 3,
@@ -114,6 +115,24 @@ describe('문서 만들기 — 채우기', () => {
   });
 });
 
+describe('문서 만들기 — 형식에 맞는 문구', () => {
+  it('HWPX는 한글 파일, DOCX는 Word(DOCX) 파일이라고 알린다', async () => {
+    const hwpx = await run(await deps(), 'fill_template', { ref: 'tpl-1', title: '회의', values: [{ slot_id: 's1', text: 'x' }] });
+    expect(hwpx.text).toContain('한글 파일을 만들었습니다');
+
+    const docx = await buildDocx(wp('{{회의명}}'));
+    const d = await deps({
+      listAgentTemplates: vi.fn(async () => [{ id: 'tpl-2', name: 'Word 회의록', file_name: '회의록.docx', storage_path: 'templates/y.docx' }]),
+      downloadAgentTemplate: vi.fn(async () => docx),
+    });
+    const out = await run(d, 'fill_template', { ref: 'tpl-2', title: '회의', values: [{ slot_id: 's1', text: '주간 회의' }] });
+    expect(out.ok).toBe(true);
+    expect(out.text).toContain('Word(DOCX) 파일을 만들었습니다');
+    expect(out.text).not.toContain('한글 파일');
+    expect(out.files).toEqual([{ id: 'file-1', file_name: '회의.docx', size_bytes: expect.any(Number) }]);
+  });
+});
+
 describe('문서 만들기 — 대체 경로', () => {
   const REPORT_LABELS = ['제목', '작성일', '작성부서', '개요', '추진 경과', '주요 내용', '향후 계획', '건의 사항'];
 
@@ -140,6 +159,10 @@ describe('문서 만들기 — 대체 경로', () => {
     const out = await run(d, 'fill_template', { ref: 'tpl-1', title: '사업 보고', values: [{ slot_id: 's1', text: '개요 글' }] });
     expect(out.ok).toBe(true);
     expect(out.text).toContain('표준 서식으로 만들었습니다');
+    // 내용이 어디로 갔고 무엇이 살지 않았는지 알게 한다
+    expect(out.text).toContain('주요 내용');
+    expect(out.text).toContain('원래 양식의 모양은 살리지 못했습니다');
+    expect(out.text).toContain('한글 파일을 만들었습니다');
     expect(out.text).toContain('2. 추진 일정');
     const saved = (d.saveFile as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(saved).toMatchObject({ templateRef: 'tpl-1', extension: 'hwpx', fileName: '사업 보고.hwpx' });
@@ -174,9 +197,15 @@ describe('문서 만들기 — 대체 경로', () => {
 });
 
 describe('문서 만들기 — 흐름 안내', () => {
-  it('대체 경로의 reason을 알리고 HWPX·표시를 안내하게 한다', () => {
+  it('대체 경로의 reason을 그대로 전하게 한다 — 안내는 reason에 들어 있다', () => {
     expect(DOCUMENT_ADDENDUM).toContain('fallback');
-    expect(DOCUMENT_ADDENDUM).toContain('reason');
+    expect(DOCUMENT_ADDENDUM).toContain('reason을 사용자에게 그대로');
+  });
+
+  it('한글·Word 양식을 다루고, 자리 hint의 기호를 이어 쓰게 한다', () => {
+    expect(DOCUMENT_ADDENDUM).toContain('한글·Word 양식');
+    expect(DOCUMENT_ADDENDUM).toContain('○·- 같은 기호가 있으면 그 기호로 시작해');
+    expect(DOCUMENT_ADDENDUM).not.toContain('이대로 한글 파일로 만들까요');
   });
 
   it('목차 확인과 지어내지 않기를 프롬프트에 붙인다', async () => {

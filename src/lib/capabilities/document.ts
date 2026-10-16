@@ -10,7 +10,7 @@ import { writeUsageLog } from '@/lib/assistant/persist';
 import type { Capability, GeneratedFileRef, ToolOutcome, TurnContext } from './types';
 
 /**
- * 문서 만들기 — 양식을 채우거나 표준 서식(기본 양식)으로 한글 파일을 만든다(설계 3절).
+ * 문서 만들기 — 한글·Word 양식을 채우거나 표준 서식(기본 양식)으로 문서 파일을 만든다(설계 3절).
  *
  * 도구 입력에는 기관·대화·비서 id가 없다. 양식은 이 비서의 것과 기본 양식만,
  * 파일은 서버 문맥(ctx)의 대화·사용자에 묶는다. 입력에 다른 값이 와도 쓰지 않는다.
@@ -34,15 +34,19 @@ export interface DocumentDeps {
 }
 
 export const DOCUMENT_ADDENDUM = `[문서 만들기]
-이 비서는 양식을 채우거나 표준 서식으로 한글(HWPX) 파일을 만들 수 있습니다.
+이 비서는 한글·Word 양식을 채우거나 표준 서식으로 문서 파일을 만들 수 있습니다. 한글(HWPX) 양식은 한글 파일로, Word(DOCX) 양식은 Word 파일로 나오고, 직접 채울 수 없는 양식은 표준 서식(한글 파일)으로 대신 만듭니다.
 1. 공문·보고서·회의록 같은 문서를 만들어 달라고 하면 list_templates로 쓸 양식을 고릅니다. 사용자가 양식을 말하지 않았고 후보가 여럿이면 어느 양식으로 할지 묻습니다.
 2. read_template으로 채울 항목을 읽어 목차로 보여 주고 이대로 쓸지 확인을 받습니다. 확인 전에는 파일을 만들지 않습니다.
-3. 확인되면 항목별 초안을 대화에 쓰고 끝에 "이대로 한글 파일로 만들까요?"라고 묻습니다.
+3. 확인되면 항목별 초안을 대화에 쓰고 끝에 "이대로 파일로 만들까요?"라고 묻습니다.
 4. 만들어 달라고 하면 대화에 쓴 초안 그대로 fill_template을 부릅니다. 고쳐 달라는 말이 있었으면 고친 내용으로 부릅니다. 사용자가 처음부터 바로 파일로 달라고 했으면 3의 질문 없이 만들고(2의 목차 확인은 그대로 거칩니다), 대화에는 짧은 요약만 씁니다.
 5. 일시·장소·참석자·문서번호·수신처처럼 받은 자료에 없는 사실은 지어내지 않습니다. 묻거나 빈칸으로 두고, 빈칸으로 둔 항목을 알려 줍니다.
-6. 도구가 실패하면 그 이유를 그대로 알리고, 대화에 초안을 썼다면 그 글을 복사해 쓸 수 있다고, 쓰지 않았다면 초안을 대화에 써 드릴 수 있다고 덧붙입니다.
-7. read_template 결과의 mode가 fallback이면 reason을 사용자에게 알리고, HWPX로 다시 저장해 올리거나 {{항목 이름}} 표시를 넣으면 양식 그대로 채울 수 있다고 안내합니다.
-8. 앞 응답의 도구 결과는 다음 응답에 남지 않습니다. 파일을 만들 때는 list_templates·read_template으로 ref와 자리 번호를 다시 확인한 뒤 fill_template을 부릅니다. 자리 번호를 추측하지 않습니다.`;
+6. 자리의 hint에 ○·- 같은 기호가 있으면 그 기호로 시작해 씁니다. 양식의 개조식 모양을 지키기 위해서입니다.
+7. 도구가 실패하면 그 이유를 그대로 알리고, 대화에 초안을 썼다면 그 글을 복사해 쓸 수 있다고, 쓰지 않았다면 초안을 대화에 써 드릴 수 있다고 덧붙입니다.
+8. read_template 결과의 mode가 fallback이면 reason을 사용자에게 그대로 전합니다. reason에 양식 그대로 채우려면 무엇을 하면 되는지가 들어 있으니 다른 방법을 지어 안내하지 않습니다.
+9. 앞 응답의 도구 결과는 다음 응답에 남지 않습니다. 파일을 만들 때는 list_templates·read_template으로 ref와 자리 번호를 다시 확인한 뒤 fill_template을 부릅니다. 자리 번호를 추측하지 않습니다.`;
+
+/** 만든 파일 형식을 사용자에게 말하는 이름 */
+const KIND_NAME: Record<'hwpx' | 'docx', string> = { hwpx: '한글', docx: 'Word(DOCX)' };
 
 /** 직접 채울 수 없는 양식을 담는 표준 서식 */
 const FALLBACK_REF = 'builtin:report';
@@ -98,7 +102,7 @@ export function createDocument(deps: DocumentDeps): Capability {
   return {
     id: 'document',
     label: '문서 만들기',
-    description: '양식을 채우거나 표준 서식으로 한글 파일을 만듭니다.',
+    description: '한글·Word 양식을 채우거나 표준 서식으로 문서 파일을 만듭니다.',
     isAvailable: () => true,
 
     async prepare() {
@@ -123,7 +127,7 @@ export function createDocument(deps: DocumentDeps): Capability {
         },
         {
           name: 'fill_template',
-          description: '확인받은 초안을 양식에 채워 한글 파일을 만든다. 대화에 내려받기 링크가 붙는다.',
+          description: '확인받은 초안을 양식에 채워 파일을 만든다(한글 양식은 한글, Word 양식은 Word 파일). 대화에 내려받기 링크가 붙는다.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -235,10 +239,12 @@ export function createDocument(deps: DocumentDeps): Capability {
           ? ` 채우지 않은 항목 ${filled.unfilled.length}개: ${filled.unfilled.join(', ')} — 사용자에게 알려 주세요.`
           : '';
         const fallbackNote =
-          filled.mode === 'fallback' ? ' (기관 양식에 직접 채우지 못해 표준 서식으로 만들었습니다 — 이유를 사용자에게 알려 주세요.)' : '';
+          filled.mode === 'fallback'
+            ? " (기관 양식에 직접 채우지 못해 표준 서식으로 만들었습니다. 내용은 표준 보고서의 '주요 내용' 아래에 항목 순서대로 들어갔고, 원래 양식의 모양은 살리지 못했습니다 — 이유와 함께 사용자에게 알려 주세요.)"
+            : '';
         return {
           ok: true,
-          text: `한글 파일을 만들었습니다: ${saved.file_name} (채운 항목 ${filled.filled.length}개).${fallbackNote}${unfilledNote} 대화 아래에 내려받기 링크가 붙습니다.`,
+          text: `${KIND_NAME[filled.extension]} 파일을 만들었습니다: ${saved.file_name} (채운 항목 ${filled.filled.length}개).${fallbackNote}${unfilledNote} 대화 아래에 내려받기 링크가 붙습니다.`,
           files: [saved],
         };
       }

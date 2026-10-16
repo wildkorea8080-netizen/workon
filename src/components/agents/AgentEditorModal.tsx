@@ -348,7 +348,7 @@ export default function AgentEditorModal({
                       [
                         ['doc_search', '참고 문서 찾기', '연결한 문서에서 근거를 찾아 출처와 함께 답합니다'],
                         ['image', '사진 읽기', '캡처·사진·도표를 첨부받아 읽습니다'],
-                        ['document', '문서 만들기', '양식을 채우거나 표준 서식으로 한글 파일을 만듭니다'],
+                        ['document', '문서 만들기', '한글·Word 양식을 채우거나 표준 서식으로 문서 파일을 만듭니다'],
                       ] as const
                     ).map(([key, text, hint]) => (
                       <label key={key} className="flex items-start gap-2.5 cursor-pointer">
