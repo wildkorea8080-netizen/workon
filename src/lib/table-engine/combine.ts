@@ -7,7 +7,7 @@ import { columnNames } from '@/lib/attachments/header';
 import type { Cell, ExtractedTable } from '@/lib/attachments/types';
 import { parseNumber, type Parsed } from './number';
 import { unitMagnitude, unitWithMagnitude } from './unit-names';
-import { columnUnitInfo, nameDimension, normalizeUnit, type UnitSource } from './units';
+import { columnUnitInfo, isKeyLikeName, nameDimension, normalizeUnit, type UnitSource } from './units';
 import type {
   CombineResult,
   CombineSpec,
@@ -171,23 +171,23 @@ function emptyLineage(): Lineage {
 
 // ── 1단계: 원천 준비 ─────────────────────────────────────────────
 
-/** 일련번호 열 이름. 값이 1..n이어도 이름이 이렇지 않으면 일련번호로 보지 않는다 — '예산'이 1·2·3일 수도 있다 */
-const SERIAL_NAME = /^(연번|순번|번호|일련번호|no\.?)$/i;
-/** 이름만으로 키성인 열: 코드·번호류. 연도·년도·년은 이름만으로 정하지 않는다('전년도'는 금액, '청년'은 인원일 수 있다) */
-const CODE_NAME = /코드|번호|순번|연번|일련|(^|[^a-z])id([^a-z]|$)/i;
 /** 측정 단위가 아닌 단위 — 비율·점수·배수·기간. 그 밖의 아는 단위(원·명·건·개·톤·㎡…)가 붙은 열은 측정값이다 */
 const NON_MEASURE_UNITS = new Set(['%', '%p', '점', '배', '일', '시간', '년', '개월']);
 
 /**
  * 숫자이지만 측정값이 아니라 행을 가리키는 열(일련번호·연도·코드). 쌓기의 라벨 열 찾기와 합계 행이 같은 판정을 쓴다.
- * 측정 단위가 있으면 키 열이 아니다 → 일련번호·코드·번호 이름이면 키 열(이름에 숫자가 든 열은 빼고) →
- * 값이 전부 1900~2100 정수면 키 열(연도 이름이어도 이 값 규칙을 거쳐야 한다)
+ * 칸·열 이름이 말한 측정 단위가 있으면 키 열이 아니다(캡션 단위는 표 전체 글이라 믿지 않는다) →
+ * 키성 이름(units.ts isKeyLikeName — 캡션 단위 막기와 같은 판정: 이름 전체가 연도·No, 또는 연번·번호·코드·ID가 든 이름)이면 키 열 →
+ * 값이 전부 1900~2100 정수면 키 열. 값이 1..n이어도 이름이 일련번호류가 아니면 키 열이 아니다('예산'이 1·2·3일 수 있다)
  */
-function isKeyColumn(name: string, unit: string | null, values: Iterable<Cell | ResultValue>): boolean {
-  if (unit && !NON_MEASURE_UNITS.has(unit)) return false;
-  const compact = squash(splitUnitName(name).base);
-  if (SERIAL_NAME.test(compact)) return true;
-  if (!/\d/.test(compact) && CODE_NAME.test(compact)) return true;
+function isKeyColumn(
+  name: string,
+  unit: string | null,
+  unitSource: UnitSource | null,
+  values: Iterable<Cell | ResultValue>
+): boolean {
+  if (unit && unitSource !== 'caption' && !NON_MEASURE_UNITS.has(unit)) return false;
+  if (isKeyLikeName(name)) return true;
   let numbers = 0;
   for (const v of values) {
     const p = parseNumber(v ?? null);
@@ -217,8 +217,8 @@ function labelColumns(rows: Cell[][], width: number, names: string[], caption: s
     if (nonEmpty === 0) continue;
     if (numbers * 2 > nonEmpty) {
       const cells = rows.map((row) => row[c]);
-      const unit = columnUnitInfo({ columnName: names[c] ?? '', caption, cells })?.unit ?? null;
-      if (isKeyColumn(names[c] ?? '', unit, cells)) continue;
+      const info = columnUnitInfo({ columnName: names[c] ?? '', caption, cells });
+      if (isKeyColumn(names[c] ?? '', info?.unit ?? null, info?.source ?? null, cells)) continue;
       break;
     }
     found.push(c);
@@ -632,7 +632,11 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
     if (numeric && unit) name = named.unit === unit ? g.firstName : `${named.base}(${unit})`;
     // 단위를 정하지 못했는데 이름에 단위 괄호가 남으면 틀린 단위를 보인다
     else if (numeric && named.unit) name = named.base;
-    columns.push({ name, unit: numeric ? unit : null, numeric });
+    // 단위 출처: 칸·이름이 말한 원천이 하나라도 있으면 그쪽(키 열 판정이 믿는 출처), 전부 캡션이면 캡션
+    const sources = g.slots.filter((s) => s.col.unit !== null).map((s) => s.col.unitSource);
+    const unitSource: UnitSource | null =
+      numeric && unit ? (sources.find((x) => x === 'cell') ?? sources.find((x) => x === 'name') ?? 'caption') : null;
+    columns.push({ name, unit: numeric ? unit : null, unitSource, numeric });
 
     // 숫자가 섞였는데 글자 열로 두면 합계에서 조용히 빠진다 — 알린다
     if (!numeric && numbers > 0) {
@@ -690,7 +694,7 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
       rows.push({ source: src, row: r.row, values, keys });
     });
   });
-  if (spec.add_source_column) columns.unshift({ name: SOURCE_COLUMN, unit: null, numeric: false });
+  if (spec.add_source_column) columns.unshift({ name: SOURCE_COLUMN, unit: null, unitSource: null, numeric: false });
 
   const offset = spec.add_source_column ? 1 : 0;
   const columnOf = new Map<string, number>();
@@ -924,7 +928,7 @@ function nonAdditiveKind(col: ResultColumn, values: ResultValue[]): NonAdditive 
   if (col.unit === '점') return 'score';
   if (col.unit && PERIOD_UNITS.has(col.unit)) return 'period';
   if (!col.unit && nameDimension(splitUnitName(col.name).base) === '비율') return 'ratio';
-  return isKeyColumn(col.name, col.unit, values) ? 'key' : null;
+  return isKeyColumn(col.name, col.unit, col.unitSource, values) ? 'key' : null;
 }
 
 function sumNumbers(values: ResultValue[]): number | null {
@@ -1054,7 +1058,12 @@ function groupAndAggregate(
 
   const resultColumns: ResultColumn[] = [
     ...groupBy.map((ci) => ({ ...columns[ci] })),
-    ...aggregates.map((a) => ({ name: a.name, unit: a.fn === 'count' ? null : columns[a.ci].unit, numeric: true })),
+    ...aggregates.map((a) => ({
+      name: a.name,
+      unit: a.fn === 'count' ? null : columns[a.ci].unit,
+      unitSource: a.fn === 'count' ? null : columns[a.ci].unitSource,
+      numeric: true,
+    })),
   ];
   const seen = new Set<string>();
   for (const c of resultColumns) {

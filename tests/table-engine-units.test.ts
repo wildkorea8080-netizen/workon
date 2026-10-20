@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { columnUnit, columnUnitInfo, nameDimension, normalizeUnit } from '@/lib/table-engine/units';
+import { columnUnit, columnUnitInfo, isKeyLikeName, nameDimension, normalizeUnit } from '@/lib/table-engine/units';
 import { unitDimension } from '@/lib/table-engine/unit-names';
 
 describe('normalizeUnit', () => {
@@ -179,5 +179,41 @@ describe('차원 — 수로 끝나는 열·대비', () => {
     expect(columnUnit({ columnName: '전년대비', caption: '(단위: 천원)', cells: [1] })).toBeNull();
     expect(columnUnit({ columnName: '전년대비', caption: '(단위: %)', cells: [1] })).toBeNull();
     expect(columnUnit({ columnName: '전년대비(%)', cells: [1] })).toBe('%');
+  });
+});
+
+describe('캡션 단위는 키성 열에 붙지 않는다', () => {
+  const caption = '(단위: 천원)';
+  it.each([
+    ['연도', [2024, 2025]],
+    ['기준연도', [2024, 2025]],
+    ['No', [1, 2]],
+    ['연번', [1, 2]],
+    ['부서코드', [101, 102]],
+    ['관리번호', [11, 27]],
+    ['사업 ID', [5, 6]],
+    ['기준', [2024, 2025]],
+  ] as [string, number[]][])('%s', (columnName, cells) => {
+    expect(columnUnitInfo({ columnName, caption, cells })).toBeNull();
+  });
+
+  it('전년도·청년·예산은 캡션을 받는다(이름 전체가 연도일 때만 막는다)', () => {
+    expect(columnUnitInfo({ columnName: '전년도', caption, cells: [1000, 500] })).toEqual({ unit: '천원', source: 'caption' });
+    expect(columnUnitInfo({ columnName: '예산', caption, cells: [1000, 500] })).toEqual({ unit: '천원', source: 'caption' });
+  });
+
+  it('열 이름의 단위는 키성 이름이어도 그대로', () => {
+    expect(columnUnitInfo({ columnName: '코드(건)', caption, cells: [1, 2] })).toEqual({ unit: '건', source: 'name' });
+  });
+});
+
+describe('isKeyLikeName', () => {
+  it('이름 전체가 연도·No이거나 번호·코드·ID가 든 이름', () => {
+    for (const n of ['연도', '연도(년)', '기준 연도', 'No', 'No.', '연번', '관리번호', '부서코드', '사업 ID', '일련번호']) {
+      expect(isKeyLikeName(n), n).toBe(true);
+    }
+    for (const n of ['전년도', '청년', '청소년', '예산', 'video', '2025년 번호표', '연도별 예산']) {
+      expect(isKeyLikeName(n), n).toBe(false);
+    }
   });
 });

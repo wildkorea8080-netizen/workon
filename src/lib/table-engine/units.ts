@@ -134,6 +134,38 @@ export function nameDimension(columnName: string): string | null {
   return null;
 }
 
+/** 이름에 들면 키성인 낱말: 코드·번호·ID류 */
+const CODE_NAME = /코드|번호|순번|연번|일련|(^|[^a-z])id([^a-z]|$)/i;
+/** 이름 전체가 연도·일련번호인 열 — '전년도'·'청년'은 금액·인원일 수 있어 포함이 아니라 전체로 본다 */
+const KEY_WHOLE_NAME = /^(연도|년도|기준연도|기준년도|회계연도|사업연도|no\.?)$/i;
+
+/**
+ * 이름만으로 키성(행을 가리키는 값)인 열: 이름 전체가 연도·년도·기준연도·No이거나, 연번·순번·번호·일련·코드·ID가 든 이름.
+ * 괄호·공백은 떼고 본다. 이름에 숫자가 든 열('2025년 번호표')은 코드 낱말 규칙에서 뺀다.
+ * 캡션 단위 막기(여기)와 쌓기·합계 행의 키 열 판정(combine.ts)이 같은 함수를 쓴다
+ */
+export function isKeyLikeName(columnName: string): boolean {
+  const name = columnName.replace(/[(（[][^()（）[\]]*[)）\]]/g, '').replace(/\s+/g, '');
+  if (KEY_WHOLE_NAME.test(name)) return true;
+  return !/\d/.test(name) && CODE_NAME.test(name);
+}
+
+/**
+ * 캡션 단위를 받지 않는 키성 열: 이름이 연번·순번·번호·No·일련·코드·ID·연도·년도·기준연도이거나, 숫자 칸이 전부 1900~2100 정수.
+ * '(단위: 천원)' 표의 연도 열에 천원이 붙으면 측정 열로 보여 '[2025, 합계, 300]'이 두 번 더해진다
+ */
+function isKeyLikeForCaption(columnName: string, cells: (string | number | null)[]): boolean {
+  if (isKeyLikeName(columnName)) return true;
+  let numbers = 0;
+  for (const cell of cells) {
+    const p = parseNumber(cell);
+    if (p.kind !== 'number') continue;
+    if (!Number.isInteger(p.value) || p.value < 1900 || p.value > 2100) return false;
+    numbers += 1;
+  }
+  return numbers > 0;
+}
+
 /** 열 이름 차원에 캡션 단위가 맞는가 */
 function captionFits(nameDim: string, unitDim: string): boolean {
   if (nameDim === '모름') return false;
@@ -148,6 +180,7 @@ export function columnUnitInfo(input: ColumnUnitInput): { unit: string; source: 
   const fromName = unitFromColumnName(input.columnName);
   if (fromName.unit) return { unit: fromName.unit, source: 'name' };
   if (fromName.blocked || !input.caption) return null;
+  if (isKeyLikeForCaption(input.columnName, input.cells)) return null;
   const fromCaption = unitFromCaption(input.caption);
   if (!fromCaption) return null;
   // 이름이 다른 차원을 말하면(인원 ↔ 천원) 캡션 단위는 이 열 것이 아니다. 차원 낱말이 없으면 캡션을 따른다

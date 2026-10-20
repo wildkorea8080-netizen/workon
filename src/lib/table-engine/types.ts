@@ -3,6 +3,7 @@
  * Lineage(계산 근거)는 엑셀 근거 시트와 도구 결과에 그대로 실린다 — 무엇을 빼고 바꿨는지 사람이 확인할 수 있게.
  */
 import type { ExtractedTable } from '@/lib/attachments/types';
+import type { UnitSource } from './units';
 
 export interface SourceSpec {
   file: string;
@@ -38,6 +39,8 @@ export interface SourceTable {
 export interface ResultColumn {
   name: string;
   unit: string | null;
+  /** 단위의 출처 — 키 열 판정은 name·cell만 믿는다(캡션은 표 전체 글이라 이 열 것이 아닐 수 있다) */
+  unitSource: UnitSource | null;
   numeric: boolean;
 }
 

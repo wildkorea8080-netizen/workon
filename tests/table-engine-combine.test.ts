@@ -221,9 +221,9 @@ describe('단위', () => {
   it('캡션의 천원은 인원 열에 붙지 않는다', () => {
     const r = ok(combine([src('a1', [['부서', '인원', '예산'], ['총무과', 12, 100], ['기획과', 8, 50]], { caption: CAP_THOUSAND })]));
     expect(r.columns).toEqual([
-      { name: '부서', unit: null, numeric: false },
-      { name: '인원', unit: null, numeric: true },
-      { name: '예산(천원)', unit: '천원', numeric: true },
+      { name: '부서', unit: null, unitSource: null, numeric: false },
+      { name: '인원', unit: null, unitSource: null, numeric: true },
+      { name: '예산(천원)', unit: '천원', unitSource: 'caption', numeric: true },
     ]);
   });
 
@@ -292,8 +292,8 @@ describe('단위', () => {
       ])
     );
     expect(r.columns).toEqual([
-      { name: '부서', unit: null, numeric: false },
-      { name: '예산(천원)', unit: '천원', numeric: true },
+      { name: '부서', unit: null, unitSource: null, numeric: false },
+      { name: '예산(천원)', unit: '천원', unitSource: 'name', numeric: true },
     ]);
     expect(r.rows).toEqual([
       ['총무과', 100],
@@ -319,7 +319,7 @@ describe('단위', () => {
         src('a2', [['부서', '예산'], ['b', 30000]]),
       ])
     );
-    expect(r.columns[1]).toEqual({ name: '예산(원)', unit: '원', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '예산(원)', unit: '원', unitSource: 'caption', numeric: true });
     expect(r.rows.map((row) => row[1])).toEqual([100000, 30000]);
     expect(r.lineage.unitWarnings).toEqual(['열 "예산": a2/t1은 단위를 알 수 없습니다 — 같은 단위인지 확인하세요']);
   });
@@ -345,18 +345,18 @@ describe('단위', () => {
         src('a2', [['부서', '예산'], ['기획과', 50]]),
       ])
     );
-    expect(r.columns[1]).toEqual({ name: '예산(천원)', unit: '천원', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '예산(천원)', unit: '천원', unitSource: 'caption', numeric: true });
     expect(r.lineage.unitWarnings).toEqual(['열 "예산": a2/t1은 단위를 알 수 없습니다 — 같은 단위인지 확인하세요']);
   });
 
   it('이미 괄호 단위가 있는 열 이름은 그대로 둔다', () => {
     const r = ok(combine([src('a1', [['부서', '예산(천원)'], ['총무과', 100]])]));
-    expect(r.columns[1]).toEqual({ name: '예산(천원)', unit: '천원', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '예산(천원)', unit: '천원', unitSource: 'name', numeric: true });
   });
 
   it('% 단위는 결과 열에 그대로 남긴다', () => {
     const r = ok(combine([src('a1', [['부서', '집행률'], ['총무과', '12.5%'], ['기획과', '30%']])]));
-    expect(r.columns[1]).toEqual({ name: '집행률(%)', unit: '%', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '집행률(%)', unit: '%', unitSource: 'cell', numeric: true });
     expect(r.rows.map((row) => row[1])).toEqual([12.5, 30]);
   });
 
@@ -683,7 +683,7 @@ describe('수정 2차 — scale·단위', () => {
     const r = ok(
       combine([src('a1', [['부서', '전년대비'], ['a', 5]], { caption: CAP_THOUSAND }), src('a2', [['부서', '전년대비(%)'], ['b', 3]])])
     );
-    expect(r.columns[1]).toEqual({ name: '전년대비(%)', unit: '%', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '전년대비(%)', unit: '%', unitSource: 'name', numeric: true });
     expect(r.lineage.unitWarnings).toEqual(['열 "전년대비": a1/t1은 단위를 알 수 없습니다 — 같은 단위인지 확인하세요']);
   });
 
@@ -724,7 +724,7 @@ describe('수정 2차 — scale·단위', () => {
       ])
     );
     expect(r.rows.map((row) => row[1])).toEqual([12, 3]);
-    expect(r.columns[1]).toEqual({ name: '비율(%)', unit: '%', numeric: true });
+    expect(r.columns[1]).toEqual({ name: '비율(%)', unit: '%', unitSource: 'name', numeric: true });
     expect(r.lineage.unitWarnings).toEqual([
       '열 "비율": a1/t1 값을 ×100 했습니다(분수 → 백분율)',
       '열 "비율": a2/t1 값을 ×100 했습니다(분수 → 백분율)',
@@ -873,9 +873,9 @@ describe('묶기·집계', () => {
       })
     );
     expect(r.columns).toEqual([
-      { name: '부서', unit: null, numeric: false },
-      { name: '예산 합계', unit: null, numeric: true },
-      { name: '예산 개수', unit: null, numeric: true },
+      { name: '부서', unit: null, unitSource: null, numeric: false },
+      { name: '예산 합계', unit: null, unitSource: null, numeric: true },
+      { name: '예산 개수', unit: null, unitSource: null, numeric: true },
     ]);
     expect(r.rows).toEqual([
       ['총무과', 300, 2],
@@ -943,12 +943,12 @@ describe('묶기·집계', () => {
       })
     );
     expect(r.columns).toEqual([
-      { name: '부서', unit: null, numeric: false },
-      { name: '총예산', unit: '천원', numeric: true },
-      { name: '예산(천원) 평균', unit: '천원', numeric: true },
-      { name: '예산(천원) 최소', unit: '천원', numeric: true },
-      { name: '예산(천원) 최대', unit: '천원', numeric: true },
-      { name: '예산(천원) 개수', unit: null, numeric: true },
+      { name: '부서', unit: null, unitSource: null, numeric: false },
+      { name: '총예산', unit: '천원', unitSource: 'caption', numeric: true },
+      { name: '예산(천원) 평균', unit: '천원', unitSource: 'caption', numeric: true },
+      { name: '예산(천원) 최소', unit: '천원', unitSource: 'caption', numeric: true },
+      { name: '예산(천원) 최대', unit: '천원', unitSource: 'caption', numeric: true },
+      { name: '예산(천원) 개수', unit: null, unitSource: null, numeric: true },
     ]);
     expect(r.rows).toEqual([
       ['총무과', 300, 150, 100, 200, 2],
@@ -1533,5 +1533,54 @@ describe('수정 1차 — 안내 문장·정렬', () => {
       sort: [{ column: '예산' }],
     });
     expect(r).toEqual({ ok: false, error: '정렬의 "예산"에 맞는 열이 여럿입니다: 예산 합계, 예산 평균. 정확한 이름으로 주세요.' });
+  });
+});
+
+// ── Task 3 수정 2차 — 캡션 단위는 키성 열에 붙지 않는다 ─────────────────
+
+describe('수정 2차 — 캡션 단위와 키성 열', () => {
+  const cases: [string, Cell[][]][] = [
+    ['연도', [['연도', '부서', '예산'], [2025, '총무과', 100], [2025, '기획과', 200], [2025, '합계', 300]]],
+    ['No', [['No', '부서', '예산'], [1, '총무과', 100], [2, '기획과', 200], [3, '합계', 300]]],
+    ['부서코드', [['부서코드', '부서', '예산'], [101, '총무과', 100], [102, '기획과', 200], [103, '합계', 300]]],
+    ['번호', [['번호', '부서', '예산'], [11, '총무과', 100], [27, '기획과', 200], [35, '소계', 300]]],
+  ];
+  for (const [name, cells] of cases) {
+    it(`(단위: 천원) 표의 ${name} 열 뒤 합계 행은 빠지고, ${name} 열에는 천원이 붙지 않는다`, () => {
+      const r = ok(combine([src('a1', cells, { caption: CAP_THOUSAND })], { total_row: true }));
+      expect(r.columns.map((c) => c.name)).toEqual([name, '부서', '예산(천원)']);
+      expect(r.columns[0]).toMatchObject({ unit: null, unitSource: null, numeric: true });
+      expect(r.columns[2]).toMatchObject({ unit: '천원', unitSource: 'caption' });
+      expect(r.lineage.skippedRows).toHaveLength(1);
+      expect(r.total).toEqual([null, '합계', 300]);
+    });
+  }
+
+  it('이름 전체가 연도인 열은 값이 두 자리(25)여도 키 열 — 합계 행이 빠진다', () => {
+    const r = ok(
+      combine([src('a1', [['연도', '부서', '예산'], [25, '총무과', 100], [25, '합계', 100]], { caption: CAP_THOUSAND })], { total_row: true })
+    );
+    expect(r.lineage.skippedRows).toHaveLength(1);
+    expect(r.total).toEqual([null, '합계', 100]);
+  });
+
+  it('값이 전부 1900~2100인 단위 없는 열에도 캡션 단위가 붙지 않고 합계에서 빠진다', () => {
+    const r = ok(combine([src('a1', [['기준', '부서', '예산'], [2024, '총무과', 1], [2025, '기획과', 2]], { caption: CAP_THOUSAND })], { total_row: true }));
+    expect(r.columns.map((c) => c.name)).toEqual(['기준', '부서', '예산(천원)']);
+    expect(r.total).toEqual([null, '합계', 3]);
+  });
+
+  it('전년도·청년(명)은 캡션 표에서도 합계를 낸다', () => {
+    const r = ok(
+      combine([src('a1', [['구분', '전년도', '청년(명)'], ['a', 1000, 3], ['b', 500, 5]], { caption: CAP_THOUSAND })], { total_row: true })
+    );
+    expect(r.columns.map((c) => c.name)).toEqual(['구분', '전년도(천원)', '청년(명)']);
+    expect(r.total).toEqual(['합계', 1500, 8]);
+  });
+
+  it('열 이름이 말한 단위는 키 판정에 쓴다 — 코드(건)은 측정 열', () => {
+    const r = ok(combine([src('a1', [['코드(건)', '부서', '예산'], [101, '총무과', 1], [102, '기획과', 2]])], { total_row: true }));
+    expect(r.columns[0]).toMatchObject({ unit: '건', unitSource: 'name' });
+    expect(r.total).toEqual([203, '합계', 3]);
   });
 });
