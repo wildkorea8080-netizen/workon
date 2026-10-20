@@ -155,3 +155,29 @@ describe('캡션 단위는 열 이름의 차원과 맞을 때만', () => {
     expect(columnUnitInfo({ columnName: '인원', caption: '(단위: 천원)', cells: [1] })).toBeNull();
   });
 });
+
+
+describe('차원 — 수로 끝나는 열·대비', () => {
+  it('…수로 끝나는 열은 셈 차원, 대비는 차원 모름', () => {
+    for (const w of ['학생수', '가구수', '세대수', '횟수', '참석자수', '지수']) expect(nameDimension(w)).toBe('수');
+    expect(nameDimension('인원수')).toBe('사람');
+    expect(nameDimension('개소수')).toBe('개');
+    expect(nameDimension('수수료')).toBe('돈');
+    for (const w of ['대비', '전년대비', '전년대비 증감']) expect(nameDimension(w)).toBe('모름');
+    expect(nameDimension('전년대비 증감액')).toBe('돈');
+    expect(nameDimension('전년대비 증감률')).toBe('비율');
+  });
+
+  it('셈 차원 열에는 돈·% 캡션이 붙지 않고, 사람·가구 같은 캡션은 붙는다', () => {
+    expect(columnUnit({ columnName: '학생수', caption: '(단위: 천원)', cells: [1] })).toBeNull();
+    expect(columnUnit({ columnName: '학생수', caption: '(단위: %)', cells: [1] })).toBeNull();
+    expect(columnUnit({ columnName: '학생수', caption: '(단위: 명)', cells: [1] })).toBe('명');
+    expect(columnUnit({ columnName: '가구수', caption: '(단위: 가구)', cells: [1] })).toBe('가구');
+  });
+
+  it('대비 열에는 어떤 캡션 단위도 붙지 않는다', () => {
+    expect(columnUnit({ columnName: '전년대비', caption: '(단위: 천원)', cells: [1] })).toBeNull();
+    expect(columnUnit({ columnName: '전년대비', caption: '(단위: %)', cells: [1] })).toBeNull();
+    expect(columnUnit({ columnName: '전년대비(%)', cells: [1] })).toBe('%');
+  });
+});

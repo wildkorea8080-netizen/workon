@@ -116,12 +116,29 @@ const DIMENSION_WORDS: { dimension: string; words: string[]; suffixes: string[] 
   { dimension: '돈', words: ['금액', '예산', '원가', '단가', '수입', '지출', '매출', '집행'], suffixes: ['액', '비', '료'] },
 ];
 
+/**
+ * '…대비'는 비교 기준이 무엇이냐에 따라 금액·비율·배수가 다 된다 — 차원을 모르니 캡션 단위를 붙이지 않는다('모름').
+ * '…수'(학생수·가구수·횟수)는 셈이다 — 돈·% 캡션은 붙지 않고 명·가구·회 같은 캡션은 붙는다('수').
+ * 낱말 목록이 먼저다 — '인원수'는 사람, '개소수'는 개, '수수료'는 돈
+ */
 export function nameDimension(columnName: string): string | null {
   const name = columnName.replace(/[(（[][^()（）[\]]*[)）\]]/g, '').replace(/\s+/g, '');
+  const endsWithDaebi = name.endsWith('대비');
   for (const d of DIMENSION_WORDS) {
-    if (d.words.some((w) => name.includes(w)) || d.suffixes.some((w) => name.endsWith(w))) return d.dimension;
+    // '전년대비'의 끝 '비'는 경비의 비가 아니다
+    const suffixes = endsWithDaebi ? d.suffixes.filter((w) => w !== '비') : d.suffixes;
+    if (d.words.some((w) => name.includes(w)) || suffixes.some((w) => name.endsWith(w))) return d.dimension;
   }
+  if (name.includes('대비')) return '모름';
+  if (name.endsWith('수')) return '수';
   return null;
+}
+
+/** 열 이름 차원에 캡션 단위가 맞는가 */
+function captionFits(nameDim: string, unitDim: string): boolean {
+  if (nameDim === '모름') return false;
+  if (nameDim === '수') return unitDim !== '돈' && unitDim !== '비율';
+  return nameDim === unitDim;
 }
 
 export function columnUnitInfo(input: ColumnUnitInput): { unit: string; source: UnitSource } | null {
@@ -135,7 +152,7 @@ export function columnUnitInfo(input: ColumnUnitInput): { unit: string; source: 
   if (!fromCaption) return null;
   // 이름이 다른 차원을 말하면(인원 ↔ 천원) 캡션 단위는 이 열 것이 아니다. 차원 낱말이 없으면 캡션을 따른다
   const dimension = nameDimension(input.columnName);
-  if (dimension && dimension !== unitDimension(fromCaption)) return null;
+  if (dimension && !captionFits(dimension, unitDimension(fromCaption))) return null;
   return { unit: fromCaption, source: 'caption' };
 }
 

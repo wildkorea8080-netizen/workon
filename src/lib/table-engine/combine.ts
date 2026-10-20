@@ -158,10 +158,29 @@ function emptyLineage(): Lineage {
 
 // ── 1단계: 원천 준비 ─────────────────────────────────────────────
 
-/** 숫자가 과반이 아닌(=글자) 열 중 값이 있는 앞의 두 열 — 합계 표기는 순번 뒤나 구분 뒤 칸에도 온다 */
-function labelColumns(rows: Cell[][], width: number): number[] {
+/** 앞머리 순번 열: 이름이 연번·순번·번호이거나, 값이 1부터 1씩 늘어나는 숫자 */
+const SERIAL_NAME = /^(연번|순번|번호|일련번호|no\.?)$/i;
+
+function isSerialColumn(name: string, rows: Cell[][], c: number): boolean {
+  if (SERIAL_NAME.test(squash(name))) return true;
+  const values: number[] = [];
+  for (const row of rows) {
+    const p = parseNumber(row[c]);
+    if (p.kind === 'empty') continue;
+    if (p.kind !== 'number') return false;
+    values.push(p.value);
+  }
+  return values.length >= 2 && values.every((v, i) => v === i + 1);
+}
+
+/**
+ * 합계 표기를 찾을 라벨 열 = 첫 숫자 열 왼쪽의 글자 열(앞의 순번 열은 건너뜀).
+ * 숫자 열 오른쪽(비고 등)의 '계(추정)'·'소계(포함)'은 데이터라 보지 않는다 — 보면 데이터 행이 지워진다
+ */
+function labelColumns(rows: Cell[][], width: number, names: string[]): number[] {
+  const start = width > 0 && isSerialColumn(names[0], rows, 0) ? 1 : 0;
   const found: number[] = [];
-  for (let c = 0; c < width && found.length < 2; c += 1) {
+  for (let c = start; c < width; c += 1) {
     let nonEmpty = 0;
     let numbers = 0;
     for (const row of rows) {
@@ -170,7 +189,9 @@ function labelColumns(rows: Cell[][], width: number): number[] {
       nonEmpty += 1;
       if (p.kind === 'number') numbers += 1;
     }
-    if (nonEmpty > 0 && numbers * 2 <= nonEmpty) found.push(c);
+    if (nonEmpty === 0) continue;
+    if (numbers * 2 > nonEmpty) break;
+    found.push(c);
   }
   return found;
 }
@@ -225,10 +246,30 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     }
   }
 
-  const labels = labelColumns(original, width);
+  const labels = labelColumns(original, width, names);
   const skipWords = new Set(
     (spec.skip_rows_matching ?? []).map((w) => squash(String(w)).toLowerCase()).filter((w) => w !== '')
   );
+  const labelReason = (c: Cell | undefined): string | null => {
+    if (typeof c !== 'string' || c.trim() === '') return null;
+    if (TOTAL_LABELS.has(totalLabel(c))) return '합계 행';
+    if (skipWords.has(squash(c).toLowerCase()) || skipWords.has(totalLabel(c))) return '지정한 글';
+    return null;
+  };
+  // 여러 행에 병합된 합계 라벨: 원래 칸에는 첫 행에만 글이 있어, 아래 행(결산·시비 등)이 남아 두 번 더해진다
+  const coveredReason = new Map<number, string>();
+  for (const m of table.merges) {
+    if (m.rows < 2 || m.row < bodyStart || m.col >= width) continue;
+    const at = m.row - bodyStart;
+    const owner = original[at]?.[m.col];
+    const isFirst = original[at]?.findIndex((c) => !isBlank(c)) === m.col;
+    if (!labels.includes(m.col) && !isFirst) continue;
+    const reason = labelReason(owner);
+    if (!reason) continue;
+    for (let r = at; r < Math.min(at + m.rows, original.length); r += 1) {
+      if (!coveredReason.has(r)) coveredReason.set(r, reason);
+    }
+  }
   const rows: PreparedRow[] = [];
   const bodyIndexes: number[] = [];
   let rowsIn = 0;
@@ -236,15 +277,13 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     if (orig.every(isBlank)) return; // 빈 행은 근거에 남기지 않는다
     rowsIn += 1;
     const rowNo = bodyStart + i + 1;
-    // 첫 칸 + 앞의 두 글자 열. 병합된 '총무과' 아래 '소계'는 원래 칸에서 첫 칸이 '소계'다
-    const candidates = [orig.find((c) => !isBlank(c)), ...labels.map((c) => orig[c])].filter(
-      (c): c is string => typeof c === 'string' && c.trim() !== ''
-    );
-    const reason = candidates.some((c) => TOTAL_LABELS.has(totalLabel(c)))
+    // 첫 비지 않은 칸 + 라벨 열. 병합된 '총무과' 아래 '소계'는 원래 칸에서 첫 칸이 '소계'다
+    const reasons = [orig.find((c) => !isBlank(c)), ...labels.map((c) => orig[c])].map(labelReason);
+    const reason = reasons.includes('합계 행')
       ? '합계 행'
-      : candidates.some((c) => skipWords.has(squash(c).toLowerCase()) || skipWords.has(totalLabel(c)))
+      : reasons.includes('지정한 글')
         ? '지정한 글'
-        : null;
+        : (coveredReason.get(i) ?? null);
     if (reason) {
       lineage.skippedRows.push({ file: spec.file, table: table.id, row: rowNo, reason, text: rowText(orig) });
       return;
@@ -396,21 +435,43 @@ function unitConflict(group: ColumnGroup, known: Slot[], prepared: PreparedSourc
   const head = `열 "${group.key}"의 단위가 원천마다 다릅니다: ${list}.`;
   if (!other || !targetMag) fail(`${head} 서로 바꿀 수 없는 단위라 같은 열인지 확인하세요.`);
   // 숫자 예시는 돈 열에서만 — 사람 수·건수에 배율을 권하면 그대로 따라 틀린 값이 된다
-  const dimension = nameDimension(group.key);
-  const money = targetMag.base === '원' && (dimension === null || dimension === '돈');
+  const money = targetMag.base === '원' && nameDimension(group.key) === '돈';
   if (!money) fail(`${head} scale로 맞춘 뒤 다시 계산하세요.`);
   const factor = powerOfTen((unitMagnitude(other.col.unit as string)?.exponent ?? 0) - targetMag.exponent);
   fail(`${head} scale로 맞춘 뒤 다시 계산하세요(예: ${prepared[other.src].file}의 "${group.key}"에 ${factor}).`);
 }
 
-/** 숫자 열의 단위. 서로 다르면 실패, scale은 단위 크기로 검사하고 환산된 단위를 아는 단위로 친다 */
+/** %·%p·배 열에서 분수 ↔ 백분율 바꿈(×100·×0.01)은 단위 이름이 그대로라 따로 허용한다 */
+const RATIO_UNITS = new Set(['%', '%p', '배']);
+
+/**
+ * 숫자 열의 단위. 서로 다르면 실패. scale은 단위 크기로 검사한다 — 단위를 아는 열에 준 배율이 아는 단위로
+ * 떨어지지 않으면(원 ×1000, 천원 ×1.5) 비교할 원천이 없어도 실패. 환산된 단위는 아는 단위로 친다
+ */
 function resolveUnit(group: ColumnGroup, prepared: PreparedSource[], lineage: Lineage): string | null {
   const unscaled = group.slots.filter((s) => s.col.scale === undefined && s.col.unit !== null);
   if (new Set(unscaled.map((s) => s.col.unit)).size > 1) unitConflict(group, unscaled, prepared);
   const scaled = group.slots
     .filter((s) => s.col.scale !== undefined && s.col.unit !== null)
-    .map((s) => ({ slot: s, unit: convertedUnit(s.col.unit as string, s.col.scale as number) }));
+    .map((s) => {
+      const from = s.col.unit as string;
+      const factor = s.col.scale as number;
+      const p = prepared[s.src];
+      if (RATIO_UNITS.has(from) && (factor === 100 || factor === 0.01)) {
+        lineage.unitWarnings.push(
+          `열 "${group.key}": ${p.label} 값을 ×${factor} 했습니다(${factor === 100 ? '분수 → 백분율' : '백분율 → 분수'})`
+        );
+        return { slot: s, unit: from };
+      }
+      return { slot: s, unit: convertedUnit(from, factor) };
+    });
   const unit = unscaled[0]?.col.unit ?? scaled.find((c) => c.unit !== null)?.unit ?? null;
+  // 비교할 단위가 없어도 아는 단위로 떨어지지 않는 배율은 틀린 배율이다
+  const lost = scaled.find((c) => c.unit === null);
+  if (lost && !unit) {
+    const { slot } = lost;
+    fail(`scale 방향/크기가 단위와 맞지 않습니다 (${prepared[slot.src].file} ${slot.col.unit}×${slot.col.scale} → 맞는 단위 없음)`);
+  }
   if (unit) {
     for (const c of scaled) {
       if (c.unit !== unit) {
@@ -433,6 +494,31 @@ function resolveUnit(group: ColumnGroup, prepared: PreparedSource[], lineage: Li
     }
   }
   return unit;
+}
+
+/**
+ * % 열에 분수(0.85)로 적은 원천과 백분수(92)로 적은 원천이 섞이면 합·평균이 틀린다(엑셀은 % 서식 칸을 분수로 저장한다).
+ * 값만으로는 확정할 수 없어 바꾸지 않고 알린다
+ */
+function warnFractionPercent(
+  name: string,
+  slots: Slot[],
+  bySource: Map<number, { values: ResultValue[] }>,
+  prepared: PreparedSource[],
+  lineage: Lineage
+): void {
+  const fraction: Slot[] = [];
+  let hasPercent = false;
+  for (const s of slots) {
+    const nums = (bySource.get(s.src)?.values ?? []).filter((v): v is number => typeof v === 'number');
+    if (nums.length === 0) continue;
+    if (nums.every((v) => Math.abs(v) <= 1)) fraction.push(s);
+    else hasPercent = true;
+  }
+  if (!hasPercent) return;
+  for (const s of fraction) {
+    lineage.unitWarnings.push(`열 "${name}": ${prepared[s.src].label} 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요`);
+  }
 }
 
 function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
@@ -539,6 +625,7 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
             }
       );
     }
+    if (numeric && (unit === '%' || unit === '%p')) warnFractionPercent(name, g.slots, bySource, prepared, lineage);
     layers.push(bySource);
   }
 

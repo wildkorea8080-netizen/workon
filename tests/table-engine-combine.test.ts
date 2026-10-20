@@ -560,3 +560,193 @@ describe('원천 지정', () => {
     });
   });
 });
+
+
+describe('수정 2차 — 병합된 합계 라벨·라벨 열', () => {
+  it('여러 행에 병합된 합계 라벨은 병합이 덮는 모든 행을 뺀다', () => {
+    const r = ok(
+      combine([
+        src(
+          'a1',
+          [
+            ['구분', '항목', '금액'],
+            ['총무과', '예산', 100],
+            ['총무과', '결산', 90],
+            ['기획과', '예산', 200],
+            ['기획과', '결산', 180],
+            ['합계', '예산', 300],
+            [null, '결산', 270],
+          ],
+          { merges: [{ row: 5, col: 0, rows: 2, cols: 1 }] }
+        ),
+      ])
+    );
+    expect(r.rows.map((row) => row[2])).toEqual([100, 90, 200, 180]);
+    expect(r.lineage.skippedRows.map((s) => [s.row, s.reason])).toEqual([
+      [6, '합계 행'],
+      [7, '합계 행'],
+    ]);
+  });
+
+  it('국비·시비 두 행에 병합된 소계도 두 행 다 뺀다', () => {
+    const r = ok(
+      combine([
+        src(
+          'a1',
+          [
+            ['부서', '구분', '재원', '금액'],
+            ['총무과', '사업A', '국비', 10],
+            ['총무과', '사업A', '시비', 5],
+            ['총무과', '소계', '국비', 10],
+            ['총무과', null, '시비', 5],
+          ],
+          { merges: [{ row: 3, col: 1, rows: 2, cols: 1 }] }
+        ),
+      ])
+    );
+    expect(r.rows.map((row) => row[3])).toEqual([10, 5]);
+    expect(r.lineage.skippedRows).toHaveLength(2);
+  });
+
+  it('2행×2열로 병합된 합계도 뺀다', () => {
+    const r = ok(
+      combine([
+        src(
+          'a1',
+          [
+            ['구분', '세부', '금액'],
+            ['총무과', 'A', 10],
+            ['총무과', 'B', 20],
+            ['합계', null, 30],
+            [null, null, 30],
+          ],
+          { merges: [{ row: 3, col: 0, rows: 2, cols: 2 }] }
+        ),
+      ])
+    );
+    expect(r.rows.map((row) => row[2])).toEqual([10, 20]);
+    expect(r.lineage.skippedRows.map((s) => s.row)).toEqual([4, 5]);
+  });
+
+  it('숫자 열 오른쪽의 비고에 적힌 계·소계·합계는 데이터다', () => {
+    const r = ok(
+      combine([
+        src('a1', [
+          ['부서', '예산', '비고'],
+          ['총무과', 10, '계(추정)'],
+          ['기획과', 20, '소계(포함)'],
+          ['인사과', 5, '[합계]'],
+          ['감사과', 7, '총계'],
+          ['재무과', 3, '계속사업'],
+        ]),
+      ])
+    );
+    expect(r.rows.map((row) => row[0])).toEqual(['총무과', '기획과', '인사과', '감사과', '재무과']);
+    expect(r.lineage.skippedRows).toEqual([]);
+  });
+
+  it('연번 뒤 첫 숫자 열 왼쪽의 글자 열은 모두 본다 — 셋째 열의 합계', () => {
+    const r = ok(combine([src('a1', [['연번', '부서', '팀', '예산'], [1, '총무과', 'A', 10], [null, '총무과', '합계', 10]])]));
+    expect(r.rows).toEqual([[1, '총무과', 'A', 10]]);
+  });
+
+  it('구분 아래 항목이 계인 행은 합계 행이다', () => {
+    const r = ok(
+      combine([src('a1', [['구분', '항목', '금액'], ['일반회계', '계', 30], ['일반회계', '인건비', 10], ['일반회계', '운영비', 20]])])
+    );
+    expect(r.rows.map((row) => row[1])).toEqual(['인건비', '운영비']);
+  });
+});
+
+describe('수정 2차 — scale·단위', () => {
+  it('scale 예시는 열 이름 차원이 돈일 때만 — 학생수는 캡션 돈 단위를 받지 않는다', () => {
+    const A: Cell[][] = [['학교', '학생수', '예산'], ['A', 300, 100]];
+    const B: Cell[][] = [['학교', '학생수', '예산'], ['B', 200, 50000]];
+    const r = combine([src('a1', A, { caption: CAP_THOUSAND }), src('a2', B, { caption: '(단위: 원)' })]);
+    expect(r).toEqual({
+      ok: false,
+      error:
+        '열 "예산"의 단위가 원천마다 다릅니다: a1/t1=천원(표 위 글), a2/t1=원(표 위 글). scale로 맞춘 뒤 다시 계산하세요(예: a2의 "예산"에 0.001).',
+    });
+    // 차원 낱말이 없는 열은 원 단위라도 숫자 예시를 주지 않는다
+    const r2 = combine([
+      src('a1', [['부서', '실적'], ['a', 1]], { caption: CAP_THOUSAND }),
+      src('a2', [['부서', '실적'], ['b', 1000]], { caption: '(단위: 원)' }),
+    ]);
+    expect(r2).toEqual({
+      ok: false,
+      error: '열 "실적"의 단위가 원천마다 다릅니다: a1/t1=천원(표 위 글), a2/t1=원(표 위 글). scale로 맞춘 뒤 다시 계산하세요.',
+    });
+  });
+
+  it('전년대비는 캡션 단위를 받지 않고 전년대비(%)와 쌓인다', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '전년대비'], ['a', 5]], { caption: CAP_THOUSAND }), src('a2', [['부서', '전년대비(%)'], ['b', 3]])])
+    );
+    expect(r.columns[1]).toEqual({ name: '전년대비(%)', unit: '%', numeric: true });
+    expect(r.lineage.unitWarnings).toEqual(['열 "전년대비": a1/t1은 단위를 알 수 없습니다 — 같은 단위인지 확인하세요']);
+  });
+
+  it('단위를 아는 열에 준 scale이 맞는 단위로 떨어지지 않으면 실패 — 비교할 원천이 없어도', () => {
+    expect(combine([src('a1', [['부서', '예산(원)'], ['a', 12]], { spec: { scale: { 예산: 1000 } } })])).toEqual({
+      ok: false,
+      error: 'scale 방향/크기가 단위와 맞지 않습니다 (a1 원×1000 → 맞는 단위 없음)',
+    });
+    expect(
+      combine([
+        src('a1', [['부서', '예산(천원)'], ['a', 12]]),
+        src('a2', [['부서', '예산(천원)'], ['b', 3]], { spec: { scale: { 예산: 1.5 } } }),
+      ])
+    ).toEqual({ ok: false, error: 'scale 방향/크기가 단위와 맞지 않습니다 (a2 천원×1.5 ≠ 천원)' });
+  });
+
+  it('명 ↔ 천명 scale: 맞는 방향은 통과, 거꾸로면 실패', () => {
+    const good = ok(
+      combine([
+        src('a1', [['부서', '인원(명)'], ['a', 12]]),
+        src('a2', [['부서', '인원(천명)'], ['b', 1.5]], { spec: { scale: { 인원: 1000 } } }),
+      ])
+    );
+    expect(good.rows.map((row) => row[1])).toEqual([12, 1500]);
+    expect(
+      combine([
+        src('a1', [['부서', '인원(명)'], ['a', 12]]),
+        src('a2', [['부서', '인원(천명)'], ['b', 1.5]], { spec: { scale: { 인원: 0.001 } } }),
+      ])
+    ).toEqual({ ok: false, error: 'scale 방향/크기가 단위와 맞지 않습니다 (a2 천명×0.001 ≠ 명)' });
+  });
+
+  it('% 열의 ×100·×0.01은 실패가 아니라 경고', () => {
+    const r = ok(
+      combine([
+        src('a1', [['부서', '비율(%)'], ['a', 0.12]], { spec: { scale: { 비율: 100 } } }),
+        src('a2', [['부서', '비율(%)'], ['b', 0.03]], { spec: { scale: { 비율: 100 } } }),
+      ])
+    );
+    expect(r.rows.map((row) => row[1])).toEqual([12, 3]);
+    expect(r.columns[1]).toEqual({ name: '비율(%)', unit: '%', numeric: true });
+    expect(r.lineage.unitWarnings).toEqual([
+      '열 "비율": a1/t1 값을 ×100 했습니다(분수 → 백분율)',
+      '열 "비율": a2/t1 값을 ×100 했습니다(분수 → 백분율)',
+    ]);
+    const r2 = ok(
+      combine([
+        src('a1', [['부서', '비율(%)'], ['a', 12]]),
+        src('a2', [['부서', '비율(%)'], ['b', 0.15]], { spec: { scale: { 비율: 100 } } }),
+      ])
+    );
+    expect(r2.rows.map((row) => row[1])).toEqual([12, 15]);
+  });
+
+  it('% 열에서 한 원천만 분수(0~1)로 적혀 있으면 경고', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '집행률(%)'], ['a', 0.85], ['c', 0.5]]), src('a2', [['부서', '집행률(%)'], ['b', 92]])])
+    );
+    expect(r.lineage.unitWarnings).toEqual([
+      '열 "집행률(%)": a1/t1 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요',
+    ]);
+    // 모두 분수거나 모두 백분수면 경고하지 않는다
+    const same = ok(combine([src('a1', [['부서', '집행률(%)'], ['a', 85]]), src('a2', [['부서', '집행률(%)'], ['b', 92]])]));
+    expect(same.lineage.unitWarnings).toEqual([]);
+  });
+});
