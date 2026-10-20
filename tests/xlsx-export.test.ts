@@ -177,7 +177,7 @@ describe('buildResultWorkbook', () => {
       mergedNumbers: [{ file: 'a1', table: 't1', row: 3, rowEnd: 5, column: '예산(천원)' }],
       onlyIn: [{ column: '비고', files: ['a1/t1'] }],
       unitWarnings: ['단위 경고 문장'],
-      parenthesizedNegatives: ['증감'],
+      parenthesizedNegatives: ['열 "증감": a1/t1의 괄호 숫자 1개를 음수로 읽었습니다 — 괄호가 부분 금액이면 확인하세요'],
       columnWarnings: ['열 경고 문장'],
       similarKeys: [['총무과', '총무 과']],
       notes: ['합계 행은 전체 5,003행 기준 — 표에는 5,000행만'],
@@ -201,7 +201,9 @@ describe('buildResultWorkbook', () => {
     expect(joined).toContain('비고');
     expect(text).toContain('단위 경고 문장');
     expect(text).toContain('열 경고 문장');
-    expect(joined).toContain('증감');
+    // 엔진이 만든 문장 그대로 — 다시 감싸지 않는다
+    expect(text).toContain('열 "증감": a1/t1의 괄호 숫자 1개를 음수로 읽었습니다 — 괄호가 부분 금액이면 확인하세요');
+    expect(joined).not.toContain("열의 괄호 숫자는 음수로 읽었습니다");
     expect(joined).toContain('총무과, 총무 과');
     expect(joined).toContain('결과 5,003');
     // 안내는 만든 때 바로 아래

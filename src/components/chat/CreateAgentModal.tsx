@@ -280,7 +280,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                     <span className="text-xl">📎</span>
                     <div>
                       <p className="text-sm font-semibold text-slate-800">대화 중 파일 받기</p>
-                      <p className="text-xs text-slate-500">대화할 때 엑셀·한글·PDF 등 파일을 붙여 물어볼 수 있습니다</p>
+                      <p className="text-xs text-slate-500">대화할 때 엑셀·한글·PDF 파일을 붙여 묻고, 표를 합쳐 합계·엑셀을 만들 수 있습니다</p>
                     </div>
                   </div>
                   <Toggle checked={readChatFiles} onChange={setReadChatFiles} />

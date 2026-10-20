@@ -255,7 +255,8 @@ function writeLineageSheet(workbook: Workbook, input: ResultWorkbookInput) {
 
   const warnings = [
     ...l.unitWarnings,
-    ...l.parenthesizedNegatives.map((c) => `'${c}' 열의 괄호 숫자는 음수로 읽었습니다 — 부분 금액 표기라면 확인하세요.`),
+    // 엔진이 이미 완성된 문장(열·원천·개수)으로 준다 — 다시 감싸면 문장이 겹친다
+    ...l.parenthesizedNegatives,
     ...l.columnWarnings,
     ...l.similarKeys.map((g) => `비슷한 이름이 따로 묶였습니다: ${g.join(', ')}`),
     ...(l.truncated ? ['결과가 길어 표에는 일부 행만 담았습니다 — 위 안내를 확인하세요.'] : []),
