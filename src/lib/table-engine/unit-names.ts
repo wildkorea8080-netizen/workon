@@ -42,3 +42,24 @@ export function normalizeUnit(raw: string): string | null {
   if (alias) return alias;
   return KNOWN.has(t) ? t : null;
 }
+
+/** 수량 접두의 10의 거듭제곱 */
+const PREFIX_EXPONENT: Record<string, number> = {
+  '': 0, 천: 3, 만: 4, 백만: 6, 천만: 7, 억: 8, 십억: 9, 백억: 10, 조: 12,
+};
+
+/**
+ * 정본 단위를 기본 단위와 10의 지수로 가른다('천원' → 원·3). 단독 단위는 지수 0.
+ * 단위 충돌 안내에서 scale 예시(원 → 천원이면 0.001)를 내는 데만 쓴다 — 자동으로 바꾸지 않는다
+ */
+export function unitMagnitude(unit: string): { base: string; exponent: number } | null {
+  if (STANDALONE_UNITS.includes(unit)) return { base: unit, exponent: 0 };
+  // 긴 접두부터 — '천만원'은 '천'+'만원'이 아니라 '천만'+'원'
+  const prefixes = Object.keys(PREFIX_EXPONENT).sort((a, b) => b.length - a.length);
+  for (const p of prefixes) {
+    if (!unit.startsWith(p)) continue;
+    const base = unit.slice(p.length);
+    if (BASE_UNITS.includes(base)) return { base, exponent: PREFIX_EXPONENT[p] };
+  }
+  return null;
+}
