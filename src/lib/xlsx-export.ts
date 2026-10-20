@@ -28,7 +28,7 @@ const MAX_CELL_CHARS = 32000;
 const MAX_DECIMALS = 4;
 
 /**
- * 엑셀이 수식으로 읽는 첫 글자(= + - @)와, 일부 프로그램이 명령으로 읽는 탭·줄바꿈 앞에 '를 붙인다.
+ * 엑셀이 수식으로 읽는 첫 글자(= + - @)와, 일부 프로그램이 명령으로 읽는 탭·캐리지 리턴(CR) 앞에 '를 붙인다.
  * 숫자는 건드리지 않는다 — 음수 -5는 글자가 아니라 number로 들어간다.
  */
 export function safeText(text: string): string {
