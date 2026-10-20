@@ -743,7 +743,7 @@ describe('수정 2차 — scale·단위', () => {
       combine([src('a1', [['부서', '집행률(%)'], ['a', 0.85], ['c', 0.5]]), src('a2', [['부서', '집행률(%)'], ['b', 92]])])
     );
     expect(r.lineage.unitWarnings).toEqual([
-      '열 "집행률(%)": a1/t1 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요',
+      '열 "집행률(%)": a1/t1 값이 모두 1 이하입니다 — 엑셀 % 서식 칸(0.85=85%)을 읽은 것이면 scale 100, 실제 1% 미만 값이면 그대로 두세요',
     ]);
     // 모두 분수거나 모두 백분수면 경고하지 않는다
     const same = ok(combine([src('a1', [['부서', '집행률(%)'], ['a', 85]]), src('a2', [['부서', '집행률(%)'], ['b', 92]])]));
@@ -1624,7 +1624,7 @@ describe('최종 수정 — 접두 붙은 합계 행(I1)', () => {
     expect(r.rows).toHaveLength(5);
     expect(r.lineage.skippedRows).toEqual([]);
     expect(r.lineage.columnWarnings).toContain(
-      '"월"에 누계·계로 보이는 행 3개가 있습니다 — 합계 행이면 skip_rows_matching으로 빼세요'
+      '"월"에 누계·계로 보이는 행 3개가 있습니다(예: 누계) — 합계 행이면 skip_rows_matching으로 빼세요'
     );
   });
 
@@ -1726,7 +1726,7 @@ describe('최종 수정 — 자원 상한(I4)', () => {
 describe('최종 수정 — % 열 분수 경고(M2)', () => {
   it('원천이 하나여도 % 열 값이 모두 1 이하면 경고한다', () => {
     const r = ok(combine([src('a1', [['부서', '집행률(%)'], ['총무과', 0.85], ['기획과', 0.9]])], { aggregate: [{ column: '집행률', fn: 'avg' }] }));
-    expect(r.lineage.unitWarnings).toEqual(['열 "집행률(%)": 값이 모두 1 이하라 분수로 적힌 것 같습니다 — 백분율이면 scale 100']);
+    expect(r.lineage.unitWarnings).toEqual(['열 "집행률(%)": 값이 모두 1 이하입니다 — 엑셀 % 서식 칸(0.85=85%)을 읽은 것이면 scale 100, 실제 1% 미만 값이면 그대로 두세요']);
   });
 
   it('섞였을 때의 원천별 경고와 겹쳐 적지 않는다', () => {
@@ -1734,12 +1734,98 @@ describe('최종 수정 — % 열 분수 경고(M2)', () => {
       combine([src('a1', [['부서', '집행률(%)'], ['a', 0.85], ['c', 0.5]]), src('a2', [['부서', '집행률(%)'], ['b', 92]])])
     );
     expect(r.lineage.unitWarnings).toEqual([
-      '열 "집행률(%)": a1/t1 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요',
+      '열 "집행률(%)": a1/t1 값이 모두 1 이하입니다 — 엑셀 % 서식 칸(0.85=85%)을 읽은 것이면 scale 100, 실제 1% 미만 값이면 그대로 두세요',
     ]);
   });
 
   it('scale 100으로 맞춘 뒤에는 경고하지 않는다', () => {
     const r = ok(combine([src('a1', [['부서', '집행률(%)'], ['총무과', 0.85]], { spec: { scale: { '집행률(%)': 100 } } })]));
     expect(r.lineage.unitWarnings.filter((w) => w.includes('1 이하'))).toEqual([]);
+  });
+});
+
+describe('재검토 수정 — 지정한 빼기 낱말은 낱말 경계에서만(N1)', () => {
+  it("skip_rows_matching ['계']는 '총무과 계'만 빼고 '실시설계'·'회계'는 남긴다", () => {
+    const r = ok(
+      combine([src('a1', [['구분', '예산'], ['실시설계', 100], ['회계', 50], ['총무과 계', 150], ['기획', 30]], { spec: { skip_rows_matching: ['계'] } })], {
+        total_row: true,
+      })
+    );
+    expect(r.rows.map((row) => row[0])).toEqual(['실시설계', '회계', '기획']);
+    expect(r.total).toEqual(['합계', 180]);
+    expect(r.lineage.skippedRows.map((x) => [x.reason, x.text])).toEqual([['지정한 글', '총무과 계 | 150']]);
+  });
+
+  it("['누계']는 '상반기 누계'·'[국비]누계'·'국비·누계'를 빼고 '월누계'처럼 붙은 글은 남긴다", () => {
+    const r = ok(
+      combine([
+        src('a1', [['구분', '예산'], ['상반기 누계', 1], ['[국비]누계', 2], ['국비·누계', 3], ['월누계', 4], ['누계', 5]], {
+          spec: { skip_rows_matching: ['누계'] },
+        }),
+      ])
+    );
+    expect(r.rows.map((row) => row[0])).toEqual(['월누계']);
+  });
+
+  it('누계·계 경고에 예시 라벨 하나를 다듬어 싣는다', () => {
+    const r = ok(combine([src('a1', [['구분', '예산'], ['총무과\n[계]', 150], ['기획', 30]])]));
+    expect(r.lineage.columnWarnings).toEqual([
+      '"구분"에 누계·계로 보이는 행 1개가 있습니다(예: 총무과 계) — 합계 행이면 skip_rows_matching으로 빼세요',
+    ]);
+  });
+});
+
+describe('재검토 수정 — % 분수 경고 대상(N2)', () => {
+  it('%p 열은 값이 작아도 경고하지 않는다', () => {
+    const r = ok(combine([src('a1', [['부서', '증감(%p)'], ['총무과', 0.3], ['기획과', -0.5]])], { total_row: true }));
+    expect(r.lineage.unitWarnings).toEqual([]);
+  });
+
+  it("칸에 %가 적힌 열('0.3%')은 실제 백분율이라 경고하지 않는다 — 섞여도", () => {
+    const r = ok(combine([src('a1', [['부서', '증감률'], ['총무과', '0.3%'], ['기획과', '0.8%']])], { aggregate: [{ column: '증감률', fn: 'avg' }] }));
+    expect(r.lineage.unitWarnings).toEqual([]);
+    const mixed = ok(
+      combine([src('a1', [['부서', '증감률'], ['a', '0.3%'], ['b', '0.8%']]), src('a2', [['부서', '증감률(%)'], ['c', 92]])])
+    );
+    expect(mixed.lineage.unitWarnings).toEqual([]);
+  });
+
+  it('열 이름에서 온 % 열이 모두 1 이하면 묻는 꼴로 경고한다', () => {
+    const r = ok(combine([src('a1', [['부서', '집행률(%)'], ['총무과', 0.85], ['기획과', 0.9]])]));
+    expect(r.lineage.unitWarnings).toEqual(['열 "집행률(%)": 값이 모두 1 이하입니다 — 엑셀 % 서식 칸(0.85=85%)을 읽은 것이면 scale 100, 실제 1% 미만 값이면 그대로 두세요']);
+  });
+});
+
+describe('재검토 수정 — 보이는 이름으로 열 찾기(N3)', () => {
+  const B = () => src('a1', [['부서', '예산[천원]'], ['총무과', 100], ['기획과', 50]]);
+
+  it("개요에 '예산천원'으로 보인 '예산[천원]'을 그 이름으로 집계·rename한다", () => {
+    const r = ok(combine([B()], { aggregate: [{ column: '예산천원', fn: 'sum' }] }));
+    expect(r.rows).toEqual([[150]]);
+    const b = B();
+    b.spec.rename = { 예산천원: '예산' };
+    const r2 = ok(combine([b]));
+    expect(r2.columns.map((c) => c.name)).toEqual(['부서', '예산(천원)']); // 열 이름의 단위는 결과 이름에 다시 붙는다
+    const c = B();
+    c.spec.scale = { 예산천원: 1000 };
+    const r3 = ok(combine([c]));
+    expect(r3.rows.map((row) => row[1])).toEqual([100000, 50000]);
+  });
+
+  it('40자에서 잘려 보인 긴 이름은 보인 앞부분(…)으로 찾는다', () => {
+    const long = `${'가'.repeat(45)} 예산`;
+    const r = ok(combine([src('a1', [['부서', long], ['총무과', 100]])], { aggregate: [{ column: `${'가'.repeat(40)}…`, fn: 'sum' }] }));
+    expect(r.rows).toEqual([[100]]);
+    // '…' 없이 40자만 줘도 앞부분 일치
+    const g = ok(combine([src('a1', [['부서', long], ['총무과', 100]])], { group_by: ['가'.repeat(40)] }));
+    expect(g.columns.map((c) => c.name)).toEqual([long]);
+  });
+
+  it('보인 앞부분이 여러 열에 맞으면 실패한다', () => {
+    const a = `${'나'.repeat(42)}A`;
+    const b = `${'나'.repeat(42)}B`;
+    const r = combine([src('a1', [['부서', a, b], ['총무과', 1, 2]])], { aggregate: [{ column: `${'나'.repeat(40)}…`, fn: 'sum' }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('여럿입니다');
   });
 });

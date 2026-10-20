@@ -139,8 +139,56 @@ function isTotalLabel(text: string): boolean {
  */
 function isCumulativeLabel(text: string): boolean {
   if (totalLabel(text).endsWith('누계')) return true;
-  const spaced = normalizeName(text).replace(/\s*[(（][^()（）]*[)）]$/, '');
+  // 대괄호는 낱말 사이로 본다('총무과 [계]')
+  const spaced = normalizeName(text.replace(/[[\]［］【】〔〕]/g, ' ')).replace(/\s*[(（][^()（）]*[)）]$/, '');
   return /\s계$/.test(spaced);
+}
+
+/** 낱말 경계 — 지정한 빼기 낱말은 글 시작이나 이 글자 뒤에서 끝나야 한다('계'가 '회계'·'실시설계'에 걸리지 않게) */
+const WORD_BREAK = /[\s[\]［］【】〔〕(（)）·]/;
+
+/**
+ * 지정한 빼기 낱말(skip_rows_matching). 합계 낱말과 달리 끝 일치는 낱말 경계 뒤에서만 — 직원·모델이 '계'를 주면
+ * 기본 끝 일치로는 '회계'·'실시설계' 행까지 빠져 합계가 조용히 줄어든다.
+ * 같음은 공백을 지우고 본다('누 계' = '누계'). 끝 일치는 다듬은 글(공백 접기)로, 끝 괄호를 뗀 글도 본다('총무과 계(A)')
+ */
+function matchesSkipWord(text: string, word: string): boolean {
+  if (squash(text).toLowerCase() === squash(word).toLowerCase()) return true;
+  const w = normalizeName(word).toLowerCase();
+  if (w === '') return false;
+  const full = normalizeName(text).toLowerCase();
+  const trimmed = full.replace(/\s*[(（][^()（）]*[)）]$/, '');
+  return [full, trimmed].some((t) => {
+    if (t === w) return true;
+    if (!t.endsWith(w)) return false;
+    const before = t[t.length - w.length - 1];
+    return before !== undefined && WORD_BREAK.test(before);
+  });
+}
+
+/** 개요에 보이는 열 이름 — 첨부 개요(file-read nameOf)와 같은 꼴: 한 줄로 다듬고([ ] 지움) 40자에서 자름 */
+function shownForm(name: string): string {
+  return cut(oneLine(name), ERROR_NAME_CHARS);
+}
+
+/**
+ * 열 찾기 마지막 단계: 모델은 개요에서 '예산[천원]'을 '예산천원'으로, 40자 넘는 이름을 앞 40자 + '…'로 본다.
+ * 보이는 꼴이 같은 열 → 원하는 이름이 '…'로 끝나거나 40자면 보이는 꼴의 앞부분이 같은 열. 결과는 열 번호들(여럿이면 부르는 쪽이 실패)
+ */
+function shownMatches(raw: string, names: string[]): number[] {
+  const wanted = oneLine(normalizeName(raw));
+  if (wanted === '') return [];
+  const shown = names.map(shownForm);
+  const exact = shown.flatMap((n, i) => (n === wanted ? [i] : []));
+  if (exact.length > 0) return exact;
+  if (!wanted.endsWith('…') && Array.from(wanted).length !== ERROR_NAME_CHARS) return [];
+  const prefix = wanted.replace(/…$/, '');
+  if (prefix === '') return [];
+  return shown.flatMap((n, i) => (n.replace(/…$/, '').startsWith(prefix) ? [i] : []));
+}
+
+function ambiguous(stage: string, wanted: string, names: string[]): never {
+  fail(`${stage}의 "${shownName(wanted)}"에 맞는 열이 여럿입니다: ${nameList(names)}. 정확한 이름으로 주세요.`);
 }
 
 interface PreparedColumn {
@@ -299,7 +347,7 @@ function prepareSource(
   source: SourceTable,
   spec: SourceSpec,
   lineage: Lineage,
-  cumulative: Map<string, number>
+  cumulative: Map<string, { count: number; example: string }>
 ): PreparedSource {
   const { table } = source;
   const label = `${spec.file}/${spec.table}`;
@@ -353,16 +401,12 @@ function prepareSource(
   }
 
   const labels = labelColumns(original, width, names, table.caption);
-  const skipWords = [
-    ...new Set((spec.skip_rows_matching ?? []).map((w) => squash(String(w)).toLowerCase()).filter((w) => w !== '')),
-  ];
+  const skipWords = [...new Set((spec.skip_rows_matching ?? []).map((w) => String(w)).filter((w) => squash(w) !== ''))];
   const labelReason = (c: Cell | undefined): string | null => {
     if (typeof c !== 'string' || c.trim() === '') return null;
     if (isTotalLabel(c)) return '합계 행';
-    // 지정한 글도 합계 표기와 같은 규칙 — 같거나 그 글로 끝나면('누계' → '상반기 누계')
-    const squashed = squash(c).toLowerCase();
-    const label = totalLabel(c);
-    if (skipWords.some((w) => squashed.endsWith(w) || label.endsWith(w))) return '지정한 글';
+    // 지정한 글: 같거나 낱말 경계 뒤에서 끝나면('누계' → '상반기 누계', '계' → '총무과 계' — '회계'는 아님)
+    if (skipWords.some((w) => matchesSkipWord(c, w))) return '지정한 글';
     return null;
   };
   // 여러 행에 병합된 합계 라벨: 원래 칸에는 첫 행에만 글이 있어, 아래 행(결산·시비 등)이 남아 두 번 더해진다
@@ -404,7 +448,9 @@ function prepareSource(
     const cumulativeCol = looked.find((c) => typeof orig[c] === 'string' && isCumulativeLabel(orig[c] as string));
     if (cumulativeCol !== undefined) {
       const name = names[cumulativeCol] ?? '';
-      cumulative.set(name, (cumulative.get(name) ?? 0) + 1);
+      const seen = cumulative.get(name);
+      if (seen) seen.count += 1;
+      else cumulative.set(name, { count: 1, example: shownForm(orig[cumulativeCol] as string) });
     }
     rows.push({ row: rowNo, values: values[i], keys: keys[i] });
     bodyIndexes.push(i);
@@ -429,13 +475,19 @@ function prepareSource(
   for (const [rawFrom, rawTo] of Object.entries(spec.rename ?? {})) {
     // 지시의 이름도 열 이름과 같은 다듬기 — 모델은 개요에서 줄바꿈이 공백으로 바뀐 이름을 본다
     const from = normalizeName(rawFrom);
-    const col = columns.find((c) => c.original === from);
+    let col = columns.find((c) => c.original === from);
+    if (!col) {
+      // 개요에 보인 꼴('예산천원'·앞 40자 + '…')로도 찾는다
+      const hits = shownMatches(from, columns.map((c) => c.original));
+      if (hits.length > 1) ambiguous(label, from, hits.map((i) => columns[i].original));
+      col = hits.length === 1 ? columns[hits[0]] : undefined;
+    }
     if (!col) missingColumn(label, from, columns.map((c) => c.original));
     const to = normalizeName(String(rawTo ?? ''));
     if (to === '') fail(`${label}의 "${shownName(from)}" 열을 바꿀 이름이 비어 있습니다.`);
-    if (to === from) continue;
+    if (to === col.original) continue;
     col.name = to;
-    lineage.renamed.push({ file: spec.file, from, to });
+    lineage.renamed.push({ file: spec.file, from: col.original, to });
   }
   const seen = new Set<string>();
   for (const c of columns) {
@@ -454,10 +506,16 @@ function prepareSource(
 
   for (const [rawName, factor] of Object.entries(spec.scale ?? {})) {
     const name = normalizeName(rawName);
-    const col =
+    let col =
       columns.find((c) => c.name === name) ??
       columns.find((c) => c.original === name) ??
       columns.find((c) => c.base === name);
+    if (!col) {
+      const byName = shownMatches(name, columns.map((c) => c.name));
+      const hits = byName.length > 0 ? byName : shownMatches(name, columns.map((c) => c.original));
+      if (hits.length > 1) ambiguous(label, name, hits.map((i) => columns[i].name));
+      col = hits.length === 1 ? columns[hits[0]] : undefined;
+    }
     if (!col) missingColumn(label, name, columns.map((c) => c.name));
     if (typeof factor !== 'number' || !Number.isFinite(factor) || factor <= 0) {
       fail(`${label}의 "${shownName(name)}" scale은 0보다 큰 숫자여야 합니다.`);
@@ -619,8 +677,12 @@ function resolveUnit(group: ColumnGroup, prepared: PreparedSource[], lineage: Li
 
 /**
  * % 열에 분수(0.85)로 적은 원천과 백분수(92)로 적은 원천이 섞이면 합·평균이 틀린다(엑셀은 % 서식 칸을 분수로 저장한다).
- * 값만으로는 확정할 수 없어 바꾸지 않고 알린다
+ * 값만으로는 확정할 수 없어 바꾸지 않고 묻는 꼴로 알린다 — 실제 1% 미만 값(금리 0.25%)일 수도 있다.
+ * 칸에 '%'가 적힌 원천(unitSource 'cell')은 이미 백분율로 쓴 값이라 보지 않는다. %p는 부르지 않는다(0.3%p 같은 작은 변동이 흔하다)
  */
+const FRACTION_NOTE =
+  '값이 모두 1 이하입니다 — 엑셀 % 서식 칸(0.85=85%)을 읽은 것이면 scale 100, 실제 1% 미만 값이면 그대로 두세요';
+
 function warnFractionPercent(
   name: string,
   slots: Slot[],
@@ -631,6 +693,7 @@ function warnFractionPercent(
   const fraction: Slot[] = [];
   let hasPercent = false;
   for (const s of slots) {
+    if (s.col.unitSource === 'cell') continue;
     const nums = (bySource.get(s.src)?.values ?? []).filter((v): v is number => typeof v === 'number');
     if (nums.length === 0) continue;
     if (nums.every((v) => Math.abs(v) <= 1)) fraction.push(s);
@@ -639,12 +702,12 @@ function warnFractionPercent(
   if (!hasPercent) {
     // 원천이 하나이거나 모두 분수면 섞임으로는 못 잡는다 — 엑셀 % 서식 칸(0.85)을 그대로 읽은 열이 흔하다
     if (fraction.length > 0) {
-      lineage.unitWarnings.push(`열 "${name}": 값이 모두 1 이하라 분수로 적힌 것 같습니다 — 백분율이면 scale 100`);
+      lineage.unitWarnings.push(`열 "${name}": ${FRACTION_NOTE}`);
     }
     return;
   }
   for (const s of fraction) {
-    lineage.unitWarnings.push(`열 "${name}": ${prepared[s.src].label} 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요`);
+    lineage.unitWarnings.push(`열 "${name}": ${prepared[s.src].label} ${FRACTION_NOTE}`);
   }
 }
 
@@ -675,10 +738,13 @@ function stack(sources: SourceTable[], spec: CombineSpec, limits: CombineLimits)
   }
 
   const lineage = emptyLineage();
-  const cumulative = new Map<string, number>();
+  const cumulative = new Map<string, { count: number; example: string }>();
   const prepared = pairs.map((p) => prepareSource(p.source, p.spec, lineage, cumulative));
-  for (const [column, n] of cumulative) {
-    lineage.columnWarnings.push(`"${column}"에 누계·계로 보이는 행 ${n}개가 있습니다 — 합계 행이면 skip_rows_matching으로 빼세요`);
+  for (const [column, { count, example }] of cumulative) {
+    // 예시 라벨을 함께 — 그 글 그대로 skip_rows_matching에 주면 그 행만 빠진다
+    lineage.columnWarnings.push(
+      `"${column}"에 누계·계로 보이는 행 ${count}개가 있습니다(예: ${example}) — 합계 행이면 skip_rows_matching으로 빼세요`
+    );
   }
   for (const p of prepared) {
     lineage.sources.push({
@@ -770,7 +836,7 @@ function stack(sources: SourceTable[], spec: CombineSpec, limits: CombineLimits)
             }
       );
     }
-    if (numeric && (unit === '%' || unit === '%p')) warnFractionPercent(name, g.slots, bySource, prepared, lineage);
+    if (numeric && unit === '%') warnFractionPercent(name, g.slots, bySource, prepared, lineage);
     layers.push(bySource);
   }
 
@@ -933,10 +999,12 @@ function lookupColumn(stage: string, raw: unknown, columns: ResultColumn[]): num
     if (want.unit && want.unit !== (have.unit ?? c.unit)) return;
     matches.push(i);
   });
-  if (matches.length > 1) {
-    fail(`${stage}의 "${shownName(wanted)}"에 맞는 열이 여럿입니다: ${nameList(matches.map((i) => columns[i].name))}. 정확한 이름으로 주세요.`);
-  }
-  return matches[0] ?? null;
+  if (matches.length > 1) ambiguous(stage, wanted, matches.map((i) => columns[i].name));
+  if (matches.length === 1) return matches[0];
+  // 마지막: 개요에 보인 꼴('예산[천원]' → '예산천원', 긴 이름 → 앞 40자 + '…')
+  const shown = shownMatches(wanted, columns.map((c) => c.name));
+  if (shown.length > 1) ambiguous(stage, wanted, shown.map((i) => columns[i].name));
+  return shown[0] ?? null;
 }
 
 function findColumn(stage: string, raw: unknown, columns: ResultColumn[]): number {
