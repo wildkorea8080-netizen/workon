@@ -27,8 +27,9 @@ export interface CombineSpec {
   total_row?: boolean;
 }
 
+/** 찾아 온 표. 원천 옵션(rename·scale 등)은 여기 없고 CombineSpec.sources에서 file·table로 짝지어 읽는다 — 근원이 하나여야 어긋나지 않는다 */
 export interface SourceTable {
-  spec: SourceSpec;
+  file: string;
   fileName: string;
   table: ExtractedTable;
 }
@@ -60,13 +61,15 @@ export interface Lineage {
    * reason은 숫자로는 읽혔지만 단위가 맞지 않아 뺀 칸에만 있다
    */
   unreadable: { file: string; table: string; row: number; column: string; text: string; reason?: string }[];
-  /** 세로 병합 숫자 — 한 번만 셈 */
-  mergedNumbers: { file: string; table: string; row: number; column: string }[];
+  /** 세로 병합 숫자 — 주인 칸(row)에서 한 번만 셈. rowEnd = 병합이 끝나는 행(1부터) */
+  mergedNumbers: { file: string; table: string; row: number; rowEnd: number; column: string }[];
   /** 일부 원천에만 있는 열과 그 열이 있는 원천(a1/t1) */
   onlyIn: { column: string; files: string[] }[];
   unitWarnings: string[];
   /** 괄호 숫자 '(1,234)'를 음수로 읽은 열 — 부분 금액 표기일 수도 있어 확인을 청한다 */
   parenthesizedNegatives: string[];
+  /** 열 판정 경고 — 숫자가 섞였지만 과반이 아니라 글자 열로 둔 열 등 */
+  columnWarnings: string[];
   similarKeys: string[][];
   rowCounts: { stacked: number; filtered: number; result: number };
   truncated: boolean;

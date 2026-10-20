@@ -1,9 +1,10 @@
 /**
  * 열의 단위 찾기. 순서: 칸에 적힌 단위의 과반 → 열 이름의 괄호 → 캡션의 '단위' 표기.
  * 못 찾으면 null — 단위를 지어내지 않는다(RAG의 '2,000톤' 사례와 같은 이유).
+ * 캡션의 단위는 표 전체에 쓰인 글이라 열마다 맞는지 따로 본다(nameDimension) — '(단위: 천원)' 표의 '인원' 열은 천원이 아니다.
  */
 import { parseNumber } from './number';
-import { normalizeUnit } from './unit-names';
+import { normalizeUnit, unitDimension } from './unit-names';
 
 export { KNOWN_UNITS, normalizeUnit } from './unit-names';
 
@@ -100,11 +101,44 @@ function unitFromCaption(caption: string): string | null {
   return [...resolved][0];
 }
 
-export function columnUnit(input: ColumnUnitInput): string | null {
+export type UnitSource = 'cell' | 'name' | 'caption';
+
+/**
+ * 열 이름의 차원 낱말. 앞 순서가 먼저다 — '집행률'은 돈이 아니라 비율, '예산 건수'는 돈이 아니라 건.
+ * 한 글자 낱말(율·률·건·명·액·비·료)은 이름 끝에서만 본다 — '비고'·'명칭'·'건물'을 잘못 잡지 않게.
+ * 괄호 속('예산(국비, 시비)')은 보지 않는다
+ */
+const DIMENSION_WORDS: { dimension: string; words: string[]; suffixes: string[] }[] = [
+  { dimension: '비율', words: ['비율', '비중', '점유'], suffixes: ['율', '률'] },
+  { dimension: '건', words: ['건수'], suffixes: ['건'] },
+  { dimension: '개', words: ['개수', '수량', '개소'], suffixes: [] },
+  { dimension: '사람', words: ['인원', '직원', '정원', '현원'], suffixes: ['명'] },
+  { dimension: '돈', words: ['금액', '예산', '원가', '단가', '수입', '지출', '매출', '집행'], suffixes: ['액', '비', '료'] },
+];
+
+export function nameDimension(columnName: string): string | null {
+  const name = columnName.replace(/[(（[][^()（）[\]]*[)）\]]/g, '').replace(/\s+/g, '');
+  for (const d of DIMENSION_WORDS) {
+    if (d.words.some((w) => name.includes(w)) || d.suffixes.some((w) => name.endsWith(w))) return d.dimension;
+  }
+  return null;
+}
+
+export function columnUnitInfo(input: ColumnUnitInput): { unit: string; source: UnitSource } | null {
   const fromCells = unitFromCells(input.cells);
-  if (fromCells) return fromCells;
+  if (fromCells) return { unit: fromCells, source: 'cell' };
   // 열 이름이 단위를 말했으나 모르는 단위면 거기서 멈춘다 — 캡션으로 넘어가면 엉뚱한 단위가 붙는다
   const fromName = unitFromColumnName(input.columnName);
-  if (fromName.unit || fromName.blocked) return fromName.unit;
-  return input.caption ? unitFromCaption(input.caption) : null;
+  if (fromName.unit) return { unit: fromName.unit, source: 'name' };
+  if (fromName.blocked || !input.caption) return null;
+  const fromCaption = unitFromCaption(input.caption);
+  if (!fromCaption) return null;
+  // 이름이 다른 차원을 말하면(인원 ↔ 천원) 캡션 단위는 이 열 것이 아니다. 차원 낱말이 없으면 캡션을 따른다
+  const dimension = nameDimension(input.columnName);
+  if (dimension && dimension !== unitDimension(fromCaption)) return null;
+  return { unit: fromCaption, source: 'caption' };
+}
+
+export function columnUnit(input: ColumnUnitInput): string | null {
+  return columnUnitInfo(input)?.unit ?? null;
 }

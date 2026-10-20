@@ -63,3 +63,22 @@ export function unitMagnitude(unit: string): { base: string; exponent: number } 
   }
   return null;
 }
+
+/** 기본 단위 + 지수 → 정본 단위('원'·3 → '천원'). 그런 이름이 없으면 null */
+export function unitWithMagnitude(base: string, exponent: number): string | null {
+  for (const u of KNOWN_UNITS) {
+    const m = unitMagnitude(u);
+    if (m && m.base === base && m.exponent === exponent) return u;
+  }
+  return null;
+}
+
+/** 단위의 차원. 열 이름의 차원 낱말(units.ts nameDimension)과 맞춰 본다 — 그 밖의 단위는 기본 단위가 곧 차원 */
+const BASE_DIMENSION: Record<string, string> = {
+  원: '돈', 명: '사람', 건: '건', 개: '개', 개소: '개', '%': '비율', '%p': '비율',
+};
+
+export function unitDimension(unit: string): string {
+  const base = unitMagnitude(unit)?.base ?? unit;
+  return BASE_DIMENSION[base] ?? base;
+}

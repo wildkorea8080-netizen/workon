@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { columnUnit, normalizeUnit } from '@/lib/table-engine/units';
+import { columnUnit, columnUnitInfo, nameDimension, normalizeUnit } from '@/lib/table-engine/units';
+import { unitDimension } from '@/lib/table-engine/unit-names';
 
 describe('normalizeUnit', () => {
   it.each([
@@ -110,5 +111,47 @@ describe('columnUnit', () => {
   it('값이 아닌 칸은 세지 않는다', () => {
     expect(columnUnit({ columnName: 'x', cells: ['미제출', null, '', '100원'] })).toBe('원');
     expect(columnUnit({ columnName: 'x', cells: [null, '-'] })).toBeNull();
+  });
+});
+
+describe('캡션 단위는 열 이름의 차원과 맞을 때만', () => {
+  it('열 이름의 차원 낱말', () => {
+    expect(nameDimension('인원')).toBe('사람');
+    expect(nameDimension('현원(명)')).toBe('사람');
+    expect(nameDimension('처리 건수')).toBe('건');
+    expect(nameDimension('개소')).toBe('개');
+    expect(nameDimension('집행률')).toBe('비율');
+    expect(nameDimension('예산 비중')).toBe('비율');
+    expect(nameDimension('사업비')).toBe('돈');
+    expect(nameDimension('집행액')).toBe('돈');
+    expect(nameDimension('예산(국비, 시비)')).toBe('돈');
+    expect(nameDimension('부서')).toBeNull();
+    expect(nameDimension('2025년')).toBeNull();
+  });
+
+  it('단위의 차원', () => {
+    expect(unitDimension('천원')).toBe('돈');
+    expect(unitDimension('천명')).toBe('사람');
+    expect(unitDimension('건')).toBe('건');
+    expect(unitDimension('개소')).toBe('개');
+    expect(unitDimension('%p')).toBe('비율');
+    expect(unitDimension('톤')).toBe('톤');
+  });
+
+  it('인원 열에 캡션의 천원을 붙이지 않는다', () => {
+    expect(columnUnit({ columnName: '인원', caption: '(단위: 천원)', cells: [12, 8] })).toBeNull();
+    expect(columnUnit({ columnName: '처리 건수', caption: '(단위: 천원)', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '집행률', caption: '(단위: 천원)', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '인원', caption: '(단위: 명)', cells: [] })).toBe('명');
+    expect(columnUnit({ columnName: '사업비', caption: '(단위: 천원)', cells: [] })).toBe('천원');
+    // 차원 낱말이 없는 열은 캡션을 따른다
+    expect(columnUnit({ columnName: '2025년', caption: '(단위: 천원)', cells: [] })).toBe('천원');
+  });
+
+  it('단위가 어디서 왔는지 함께 돌려준다', () => {
+    expect(columnUnitInfo({ columnName: 'x', cells: ['1원', '2원'] })).toEqual({ unit: '원', source: 'cell' });
+    expect(columnUnitInfo({ columnName: '예산(천원)', cells: [1] })).toEqual({ unit: '천원', source: 'name' });
+    expect(columnUnitInfo({ columnName: '예산', caption: '(단위: 천원)', cells: [1] })).toEqual({ unit: '천원', source: 'caption' });
+    expect(columnUnitInfo({ columnName: '인원', caption: '(단위: 천원)', cells: [1] })).toBeNull();
   });
 });
