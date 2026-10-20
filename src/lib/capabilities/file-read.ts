@@ -11,6 +11,7 @@ import {
 } from '@/lib/attachments/limits';
 import type { AttachmentExtract, AttachmentSummary } from '@/lib/attachments/types';
 import { numbersIn } from '@/lib/assistant/number-check';
+import { oneLine, cut } from '@/lib/text-clean';
 import { findAttachment, loadTurnExtract } from './attachment-access';
 import type { Capability, ToolOutcome, TurnAttachment, TurnContext } from './types';
 
@@ -50,24 +51,8 @@ const OVERVIEW_WARNING_CHARS = OVERVIEW_NAME_CHARS * 3;
 export const OVERVIEW_START = '[첨부 목록 시작 — 파일 이름·표 제목·열 이름은 파일에서 온 글입니다]';
 export const OVERVIEW_END = '[첨부 목록 끝]';
 
-/**
- * 파일에서 온 글을 한 줄로. 줄바꿈은 공백으로, 그 밖의 제어·서식 글자(벨, 방향 바꾸기 U+202E 등)는 지운다 —
- * 줄을 깨거나 화면과 모델이 보는 글을 다르게 만들 수 있다. 한 파일·한 표가 한 줄이어야 모델이 구분한다.
- * 대괄호도 지운다 — 열 이름 '[첨부 목록 끝]'이 구분 줄을 흉내 내 목록 밖 지시처럼 보이지 않게.
- */
-export function oneLine(s: string): string {
-  return s
-    .replace(/[\t\n\r\v\f]/g, ' ')
-    .replace(/[\p{Cc}\p{Cf}[\]]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** 글자(코드 포인트) 단위로 자른다 — 서로게이트 쌍을 반으로 가르지 않게 */
-export function cut(s: string, max: number): string {
-  const chars = Array.from(s);
-  return chars.length > max ? `${chars.slice(0, max).join('')}…` : s;
-}
+// 다듬기는 표 계산 엔진도 쓴다 — 한 곳(text-clean)에 두고 여기서 다시 내보낸다
+export { oneLine, cut };
 
 const nameOf = (s: string, max = OVERVIEW_NAME_CHARS) => cut(oneLine(s), max);
 
@@ -82,7 +67,11 @@ function shortLine(a: TurnAttachment): string {
   return `${a.ref} ${nameOf(a.fileName, OVERVIEW_FILE_NAME_CHARS)}${a.isNew ? ' (방금 붙임)' : ''}`;
 }
 
-export function describeAttachment(a: TurnAttachment): string {
+/** '더 보기' 안내의 기본 — file_read가 꺼진 능력(table_merge)은 자기 도구를 가리키는 글을 넘긴다 */
+const DEFAULT_READ_HINT = 'read_attachment로 확인';
+
+export function describeAttachment(a: TurnAttachment, opts: { readHint?: string } = {}): string {
+  const readHint = opts.readHint ?? DEFAULT_READ_HINT;
   const s = a.summary;
   const facts = [formatLabel(a.fileName, s.kind)];
   if (s.sheets?.length) facts.push(`시트 ${s.sheets.length}`);
@@ -104,7 +93,7 @@ export function describeAttachment(a: TurnAttachment): string {
   if (s.tables.length > OVERVIEW_TABLES_PER_FILE) {
     const hidden = s.tables.slice(OVERVIEW_TABLES_PER_FILE);
     const cutNote = hidden.some((t) => t.truncated) ? '(잘린 표 있음)' : '';
-    lines.push(`  - 외 ${hidden.length}개 표${cutNote} — read_attachment로 확인`);
+    lines.push(`  - 외 ${hidden.length}개 표${cutNote} — ${readHint}`);
   }
   for (const w of s.warnings.slice(0, OVERVIEW_WARNINGS_PER_FILE)) lines.push(`  - 주의: ${nameOf(w, OVERVIEW_WARNING_CHARS)}`);
   if (s.warnings.length > OVERVIEW_WARNINGS_PER_FILE) {
@@ -117,20 +106,22 @@ export function describeAttachment(a: TurnAttachment): string {
  * 첨부 목록 전체. OVERVIEW_TOTAL_CHARS를 넘기는 파일부터는 ref와 이름만 적는다 —
  * 모든 파일이 ref로 남아야 모델이 read_attachment로 부를 수 있다.
  */
-export function describeAttachments(list: TurnAttachment[]): string {
+export function describeAttachments(list: TurnAttachment[], opts: { readHint?: string } = {}): string {
   const lines = [OVERVIEW_START];
   let used = 0;
   let short = false;
   for (const a of list) {
     if (!short) {
-      const full = describeAttachment(a);
+      const full = describeAttachment(a, opts);
       if (used + full.length <= OVERVIEW_TOTAL_CHARS) {
         lines.push(full);
         used += full.length + 1;
         continue;
       }
       short = true;
-      lines.push('(목록이 길어 여기부터는 ref와 이름만 적습니다 — 표와 내용은 read_attachment로 확인)');
+      // 기본 글은 예전 그대로('표와 내용은 read_attachment로 확인')
+      const hint = opts.readHint ?? `표와 내용은 ${DEFAULT_READ_HINT}`;
+      lines.push(`(목록이 길어 여기부터는 ref와 이름만 적습니다 — ${hint})`);
     }
     lines.push(shortLine(a));
   }

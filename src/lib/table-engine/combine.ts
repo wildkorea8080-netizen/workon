@@ -5,6 +5,7 @@
  */
 import { columnNames } from '@/lib/attachments/header';
 import type { Cell, ExtractedTable } from '@/lib/attachments/types';
+import { cut, oneLine } from '@/lib/text-clean';
 import { parseNumber, type Parsed } from './number';
 import { unitMagnitude, unitWithMagnitude } from './unit-names';
 import { columnUnitInfo, isKeyLikeName, nameDimension, normalizeUnit, type UnitSource } from './units';
@@ -27,6 +28,27 @@ function fail(message: string): never {
 
 /** 원천 안에 이미 있는 합계 행 — 다시 더하면 두 배가 된다. 누계는 합계가 아니라 값일 수 있어 기본에서 뺀다 */
 const TOTAL_LABELS = new Set(['합계', '소계', '계', '총계', '총합계', 'total', 'subtotal']);
+/**
+ * 끝이 이 낱말이면 앞에 무엇이 붙어도 합계 행이다('총무과 소계'·'국비 합계'·'[국비] 소계').
+ * 묶은 표에서 그 행이 남으면 '총무과 소계'라는 묶음이 생기고 합계 행에서 한 번 더 더해진다.
+ * 홑 '계'는 넣지 않는다 — '회계'·'설계'처럼 계로 끝나는 낱말이 흔하다(' 계'로 떨어진 것은 경고만)
+ */
+const TOTAL_SUFFIXES = ['합계', '소계', '총계', '총합계'];
+
+/** 자원 상한 — 모델이 보낸 지시가 함수 메모리를 정하지 않게(2만 행 × 200열 표 둘을 쌓으면 1GB를 넘는다) */
+export const MAX_SOURCES = 20;
+/** 거르기·묶기·집계·정렬 각각 */
+export const MAX_SPEC_ITEMS = 50;
+/** 쌓기 전 고른 표의 칸 수(행 × 열) 합 */
+export const MAX_STACK_CELLS = 2_000_000;
+
+export interface CombineLimits {
+  maxCells: number;
+}
+
+/** 오류 글에 싣는 열 이름 — 파일에서 온 글이라 한 줄로 다듬고 자른다(줄바꿈·[ ]로 지시를 흉내 내지 못하게) */
+const ERROR_NAME_CHARS = 40;
+const ERROR_NAMES_SHOWN = 50;
 const SOURCE_COLUMN = '출처';
 /** 머리글이 비어 columnNames가 붙인 이름 */
 const AUTO_NAME = /^열 \d+$/;
@@ -35,9 +57,28 @@ const MAX_ROW_TEXT = 200;
 /** 열 이름 끝의 단위 괄호: '예산(천원)'·'예산 (단위: 원)' */
 const TRAILING_UNIT = /^(.*?)\s*[(（[]\s*(?:단위\s*[:：]?\s*)?([^()（）[\]]+?)\s*[)）\]]\s*$/s;
 
-/** 공백(전각 포함)을 모두 지운다 — '소 계'와 '소계'를 같게 */
+/**
+ * 열 이름·비교용 글 다듬기: NFC, 보이지 않는 서식 글자(U+200B·U+FEFF 등 \p{Cf}) 지우기, 공백(줄바꿈·전각 포함)을 하나로 접고 앞뒤를 뗀다.
+ * 첨부 개요(oneLine)는 줄바꿈을 공백으로 보이므로 엔진도 같은 이름으로 맞춰야 모델이 본 이름으로 열을 찾는다
+ */
+function normalizeName(text: string): string {
+  return text.normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+}
+
+/** 공백(전각 포함)과 보이지 않는 글자를 모두 지운다 — '소 계'와 '소계'를 같게 */
 function squash(text: string): string {
-  return text.replace(/\s+/g, '');
+  return text.normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, '');
+}
+
+/** 오류 글의 열 이름 하나 */
+function shownName(name: unknown): string {
+  return cut(oneLine(String(name ?? '')), ERROR_NAME_CHARS);
+}
+
+/** 오류 글의 열 이름 목록 — 50개까지, 나머지는 '외 N개' */
+function nameList(names: string[]): string {
+  const shown = names.slice(0, ERROR_NAMES_SHOWN).map(shownName).join(', ');
+  return names.length > ERROR_NAMES_SHOWN ? `${shown} 외 ${names.length - ERROR_NAMES_SHOWN}개` : shown;
 }
 
 /** 합계 표기 다듬기: 공백·앞 ※*·[ ]·끝 괄호('합계(A)'·'소계(1)')를 떼고 소문자로 */
@@ -83,7 +124,23 @@ function rowText(cells: Cell[]): string {
 }
 
 function missingColumn(label: string, name: string, existing: string[]): never {
-  fail(`${label}에 "${name}" 열이 없습니다. 있는 열: ${existing.join(', ')}`);
+  fail(`${label}에 "${shownName(name)}" 열이 없습니다. 있는 열: ${nameList(existing)}`);
+}
+
+/** 합계 표기: 다듬은 글이 합계 낱말이거나 그 낱말로 끝난다 */
+function isTotalLabel(text: string): boolean {
+  const t = totalLabel(text);
+  return TOTAL_LABELS.has(t) || TOTAL_SUFFIXES.some((w) => t.endsWith(w));
+}
+
+/**
+ * 누계·' 계'로 끝나는 라벨 — 합계일 수도 값일 수도 있어 빼지 않고 알린다.
+ * 누계(1월~3월 누계)는 값으로 쓰는 표가 많고, '총무과 계'는 합계지만 '계'로 끝나는 낱말이 흔해 끝 글자만으로는 가를 수 없다
+ */
+function isCumulativeLabel(text: string): boolean {
+  if (totalLabel(text).endsWith('누계')) return true;
+  const spaced = normalizeName(text).replace(/\s*[(（][^()（）]*[)）]$/, '');
+  return /\s계$/.test(spaced);
 }
 
 interface PreparedColumn {
@@ -226,7 +283,24 @@ function labelColumns(rows: Cell[][], width: number, names: string[], caption: s
   return found;
 }
 
-function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage): PreparedSource {
+/** 다듬은 열 이름이 비면 '열 N', 겹치면 '이름 (2)' — columnNames와 같은 규칙 */
+function normalizedNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((raw, i) => {
+    const base = normalizeName(raw) || `열 ${i + 1}`;
+    let name = base;
+    for (let n = 2; used.has(name); n += 1) name = `${base} (${n})`;
+    used.add(name);
+    return name;
+  });
+}
+
+function prepareSource(
+  source: SourceTable,
+  spec: SourceSpec,
+  lineage: Lineage,
+  cumulative: Map<string, number>
+): PreparedSource {
   const { table } = source;
   const label = `${spec.file}/${spec.table}`;
   const cells = table.cells;
@@ -248,6 +322,8 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     header = { from: hr[0] - 1, to: hr[1] - 1 };
     names = columnNames(cells, table.merges, header);
   }
+  // 줄바꿈·보이지 않는 글자만 다른 이름('집행\n예산'·'집행 예산')이 다른 열로 갈리지 않게 — 키·rename·scale 조회 모두 이 이름
+  names = normalizedNames(names);
   const width = names.length;
   const bodyStart = header.to + 1;
 
@@ -277,13 +353,16 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
   }
 
   const labels = labelColumns(original, width, names, table.caption);
-  const skipWords = new Set(
-    (spec.skip_rows_matching ?? []).map((w) => squash(String(w)).toLowerCase()).filter((w) => w !== '')
-  );
+  const skipWords = [
+    ...new Set((spec.skip_rows_matching ?? []).map((w) => squash(String(w)).toLowerCase()).filter((w) => w !== '')),
+  ];
   const labelReason = (c: Cell | undefined): string | null => {
     if (typeof c !== 'string' || c.trim() === '') return null;
-    if (TOTAL_LABELS.has(totalLabel(c))) return '합계 행';
-    if (skipWords.has(squash(c).toLowerCase()) || skipWords.has(totalLabel(c))) return '지정한 글';
+    if (isTotalLabel(c)) return '합계 행';
+    // 지정한 글도 합계 표기와 같은 규칙 — 같거나 그 글로 끝나면('누계' → '상반기 누계')
+    const squashed = squash(c).toLowerCase();
+    const label = totalLabel(c);
+    if (skipWords.some((w) => squashed.endsWith(w) || label.endsWith(w))) return '지정한 글';
     return null;
   };
   // 여러 행에 병합된 합계 라벨: 원래 칸에는 첫 행에만 글이 있어, 아래 행(결산·시비 등)이 남아 두 번 더해진다
@@ -310,7 +389,9 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     rowsIn += 1;
     const rowNo = bodyStart + i + 1;
     // 첫 비지 않은 칸 + 라벨 열. 병합된 '총무과' 아래 '소계'는 원래 칸에서 첫 칸이 '소계'다
-    const reasons = [orig.find((c) => !isBlank(c)), ...labels.map((c) => orig[c])].map(labelReason);
+    const firstCol = orig.findIndex((c) => !isBlank(c));
+    const looked = [...new Set([firstCol, ...labels])];
+    const reasons = looked.map((c) => labelReason(orig[c]));
     const reason = reasons.includes('합계 행')
       ? '합계 행'
       : reasons.includes('지정한 글')
@@ -320,12 +401,17 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
       lineage.skippedRows.push({ file: spec.file, table: table.id, row: rowNo, reason, text: rowText(orig) });
       return;
     }
+    const cumulativeCol = looked.find((c) => typeof orig[c] === 'string' && isCumulativeLabel(orig[c] as string));
+    if (cumulativeCol !== undefined) {
+      const name = names[cumulativeCol] ?? '';
+      cumulative.set(name, (cumulative.get(name) ?? 0) + 1);
+    }
     rows.push({ row: rowNo, values: values[i], keys: keys[i] });
     bodyIndexes.push(i);
   });
 
   // 머리글도 값도 없는 여백 열은 버린다 — 결과에 빈 열과 onlyIn 경고만 남긴다
-  const referenced = new Set([...Object.keys(spec.rename ?? {}), ...Object.keys(spec.scale ?? {})]);
+  const referenced = new Set([...Object.keys(spec.rename ?? {}), ...Object.keys(spec.scale ?? {})].map(normalizeName));
   const columns: PreparedColumn[] = names
     .map((name, index) => ({
       original: name,
@@ -340,18 +426,20 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
       (c) => !(AUTO_NAME.test(c.original) && !referenced.has(c.original) && rows.every((r) => isBlank(r.values[c.index])))
     );
 
-  for (const [from, rawTo] of Object.entries(spec.rename ?? {})) {
+  for (const [rawFrom, rawTo] of Object.entries(spec.rename ?? {})) {
+    // 지시의 이름도 열 이름과 같은 다듬기 — 모델은 개요에서 줄바꿈이 공백으로 바뀐 이름을 본다
+    const from = normalizeName(rawFrom);
     const col = columns.find((c) => c.original === from);
     if (!col) missingColumn(label, from, columns.map((c) => c.original));
-    const to = String(rawTo ?? '').trim();
-    if (to === '') fail(`${label}의 "${from}" 열을 바꿀 이름이 비어 있습니다.`);
+    const to = normalizeName(String(rawTo ?? ''));
+    if (to === '') fail(`${label}의 "${shownName(from)}" 열을 바꿀 이름이 비어 있습니다.`);
     if (to === from) continue;
     col.name = to;
     lineage.renamed.push({ file: spec.file, from, to });
   }
   const seen = new Set<string>();
   for (const c of columns) {
-    if (seen.has(c.name)) fail(`${label}에서 이름을 바꾸면 "${c.name}" 열이 둘이 됩니다.`);
+    if (seen.has(c.name)) fail(`${label}에서 이름을 바꾸면 "${shownName(c.name)}" 열이 둘이 됩니다.`);
     seen.add(c.name);
     c.base = splitUnitName(c.name).base;
     c.key = c.name;
@@ -364,14 +452,15 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     c.unitSource = info?.source ?? null;
   }
 
-  for (const [name, factor] of Object.entries(spec.scale ?? {})) {
+  for (const [rawName, factor] of Object.entries(spec.scale ?? {})) {
+    const name = normalizeName(rawName);
     const col =
       columns.find((c) => c.name === name) ??
       columns.find((c) => c.original === name) ??
       columns.find((c) => c.base === name);
     if (!col) missingColumn(label, name, columns.map((c) => c.name));
     if (typeof factor !== 'number' || !Number.isFinite(factor) || factor <= 0) {
-      fail(`${label}의 "${name}" scale은 0보다 큰 숫자여야 합니다.`);
+      fail(`${label}의 "${shownName(name)}" scale은 0보다 큰 숫자여야 합니다.`);
     }
     col.scale = factor;
   }
@@ -464,13 +553,13 @@ function unitConflict(group: ColumnGroup, known: Slot[], prepared: PreparedSourc
     const mag = unitMagnitude(s.col.unit as string);
     return s.col.unit !== target && mag && targetMag && mag.base === targetMag.base;
   });
-  const head = `열 "${group.key}"의 단위가 원천마다 다릅니다: ${list}.`;
+  const head = `열 "${shownName(group.key)}"의 단위가 원천마다 다릅니다: ${list}.`;
   if (!other || !targetMag) fail(`${head} 서로 바꿀 수 없는 단위라 같은 열인지 확인하세요.`);
   // 숫자 예시는 돈 열에서만 — 사람 수·건수에 배율을 권하면 그대로 따라 틀린 값이 된다
   const money = targetMag.base === '원' && nameDimension(group.key) === '돈';
   if (!money) fail(`${head} scale로 맞춘 뒤 다시 계산하세요.`);
   const factor = powerOfTen((unitMagnitude(other.col.unit as string)?.exponent ?? 0) - targetMag.exponent);
-  fail(`${head} scale로 맞춘 뒤 다시 계산하세요(예: ${prepared[other.src].file}의 "${group.key}"에 ${factor}).`);
+  fail(`${head} scale로 맞춘 뒤 다시 계산하세요(예: ${prepared[other.src].file}의 "${shownName(group.key)}"에 ${factor}).`);
 }
 
 /** %·%p·배 열에서 분수 ↔ 백분율 바꿈(×100·×0.01)은 단위 이름이 그대로라 따로 허용한다 */
@@ -547,16 +636,23 @@ function warnFractionPercent(
     if (nums.every((v) => Math.abs(v) <= 1)) fraction.push(s);
     else hasPercent = true;
   }
-  if (!hasPercent) return;
+  if (!hasPercent) {
+    // 원천이 하나이거나 모두 분수면 섞임으로는 못 잡는다 — 엑셀 % 서식 칸(0.85)을 그대로 읽은 열이 흔하다
+    if (fraction.length > 0) {
+      lineage.unitWarnings.push(`열 "${name}": 값이 모두 1 이하라 분수로 적힌 것 같습니다 — 백분율이면 scale 100`);
+    }
+    return;
+  }
   for (const s of fraction) {
     lineage.unitWarnings.push(`열 "${name}": ${prepared[s.src].label} 값이 분수(0~1)로 적힌 것 같습니다 — scale 100으로 맞추세요`);
   }
 }
 
-function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
+function stack(sources: SourceTable[], spec: CombineSpec, limits: CombineLimits): Stacked {
   // 원천 옵션의 근원은 spec.sources 하나다. 순서도 지시 순서
   const wanted = spec.sources ?? [];
   if (wanted.length === 0) fail('합칠 표가 없습니다.');
+  if (wanted.length > MAX_SOURCES) fail(`표는 한 번에 ${MAX_SOURCES}개까지 합칠 수 있습니다(지정 ${wanted.length}개).`);
   const received = sources.map((s) => `${s.file}/${s.table.id}`);
   const seenSource = new Set<string>();
   const pairs = wanted.map((want) => {
@@ -569,8 +665,21 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
     return { source: found, spec: want };
   });
 
+  // 쌓으면 칸마다 값·키·읽은 결과가 생긴다 — 고른 표가 크면 쌓기 전에 멈춘다. 거르기는 쌓은 뒤라 이 크기를 줄이지 못한다
+  const cellCount = pairs.reduce((n, p) => n + p.source.table.cells.length * p.source.table.columns.length, 0);
+  if (cellCount > limits.maxCells) {
+    fail(
+      `고른 표가 너무 큽니다(칸 ${cellCount.toLocaleString('ko-KR')}개, 한 번에 ${limits.maxCells.toLocaleString('ko-KR')}칸까지). ` +
+        '표 수를 줄여 다시 계산하세요 — 표 하나가 이보다 크면 직원에게 표를 나눠 올려 달라고 전하세요.'
+    );
+  }
+
   const lineage = emptyLineage();
-  const prepared = pairs.map((p) => prepareSource(p.source, p.spec, lineage));
+  const cumulative = new Map<string, number>();
+  const prepared = pairs.map((p) => prepareSource(p.source, p.spec, lineage, cumulative));
+  for (const [column, n] of cumulative) {
+    lineage.columnWarnings.push(`"${column}"에 누계·계로 보이는 행 ${n}개가 있습니다 — 합계 행이면 skip_rows_matching으로 빼세요`);
+  }
   for (const p of prepared) {
     lineage.sources.push({
       file: p.file,
@@ -624,7 +733,7 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
       unit = resolveUnit(g, prepared, lineage);
     } else {
       const scaled = g.slots.find((s) => s.col.scale !== undefined);
-      if (scaled) fail(`${prepared[scaled.src].label}의 "${scaled.col.name}"는 숫자 열이 아니라 scale을 쓸 수 없습니다.`);
+      if (scaled) fail(`${prepared[scaled.src].label}의 "${shownName(scaled.col.name)}"는 숫자 열이 아니라 scale을 쓸 수 없습니다.`);
     }
 
     let name = g.firstName;
@@ -796,12 +905,13 @@ const AGGREGATE_OBJECT: Record<Exclude<AggregateFn, 'count'>, string> = {
  * 가운데 공백은 남긴다 — '총무 과'가 '총무과'와 같은 부서인지는 사람이 정한다(similarKeys로 알린다)
  */
 function normalizeText(v: ResultValue): string {
-  return String(v).normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+  return normalizeName(String(v));
 }
 
 function asList<T>(label: string, value: T[] | undefined): T[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) fail(`${label} 지정이 목록이 아닙니다.`);
+  if (value.length > MAX_SPEC_ITEMS) fail(`${label} 지정은 ${MAX_SPEC_ITEMS}개까지입니다(받은 ${value.length}개).`);
   return value;
 }
 
@@ -824,7 +934,7 @@ function lookupColumn(stage: string, raw: unknown, columns: ResultColumn[]): num
     matches.push(i);
   });
   if (matches.length > 1) {
-    fail(`${stage}의 "${wanted}"에 맞는 열이 여럿입니다: ${matches.map((i) => columns[i].name).join(', ')}. 정확한 이름으로 주세요.`);
+    fail(`${stage}의 "${shownName(wanted)}"에 맞는 열이 여럿입니다: ${nameList(matches.map((i) => columns[i].name))}. 정확한 이름으로 주세요.`);
   }
   return matches[0] ?? null;
 }
@@ -869,7 +979,7 @@ function rowTest(f: { column: string; op: FilterOp; value: string | number }, co
   }
   const ci = findColumn('거르기', f.column, columns);
   const col = columns[ci];
-  const label = `거르기 "${col.name} ${f.op} ${String(f.value)}"`;
+  const label = `거르기 "${shownName(col.name)} ${f.op} ${shownName(f.value)}"`;
   if ((typeof f.value !== 'string' && typeof f.value !== 'number') || normalizeText(f.value) === '') {
     fail(`${label}: 비교할 값이 비어 있습니다.`);
   }
@@ -1027,7 +1137,7 @@ function groupAndAggregate(
         else if (p.kind === 'unreadable') others += 1;
       }
       const counts = numbers > 0 ? `(숫자로 읽힌 값 ${numbers}개, 읽지 못한 값 ${others}개)` : '';
-      fail(`"${col.name}"는 숫자 열이 아니라 ${AGGREGATE_OBJECT[fn]} 낼 수 없습니다${counts}`);
+      fail(`"${shownName(col.name)}"는 숫자 열이 아니라 ${AGGREGATE_OBJECT[fn]} 낼 수 없습니다${counts}`);
     }
     const as = typeof a.as === 'string' ? a.as.trim() : '';
     return { fn, ci, name: as || `${col.name} ${AGGREGATE_LABELS[fn]}` };
@@ -1067,7 +1177,7 @@ function groupAndAggregate(
   ];
   const seen = new Set<string>();
   for (const c of resultColumns) {
-    if (seen.has(c.name)) fail(`결과 열 이름이 겹칩니다: "${c.name}". as로 다른 이름을 주세요.`);
+    if (seen.has(c.name)) fail(`결과 열 이름이 겹칩니다: "${shownName(c.name)}". as로 다른 이름을 주세요.`);
     seen.add(c.name);
   }
 
@@ -1169,8 +1279,8 @@ function sortItems(shaped: Shaped, stackedColumns: ResultColumn[], spec: Combine
       const source = lookupColumn('정렬', s?.column, stackedColumns);
       const hits = shaped.aggregateSources.filter((a) => a.source === source);
       if (source !== null && hits.length > 1) {
-        const names = hits.map((h) => shaped.columns[h.result].name).join(', ');
-        fail(`정렬의 "${normalizeText(String(s?.column ?? ''))}"에 맞는 열이 여럿입니다: ${names}. 정확한 이름으로 주세요.`);
+        const names = nameList(hits.map((h) => shaped.columns[h.result].name));
+        fail(`정렬의 "${shownName(normalizeText(String(s?.column ?? '')))}"에 맞는 열이 여럿입니다: ${names}. 정확한 이름으로 주세요.`);
       }
       if (source !== null && hits.length === 1) ci = hits[0].result;
     }
@@ -1226,14 +1336,19 @@ function guard<T>(run: () => T): T | { ok: false; error: string } {
   }
 }
 
-/** 쌓기까지만 — 행마다 키용·집계용 두 겹을 돌려준다(Task 3 단계와 시험이 쓴다) */
-export function stackTables(sources: SourceTable[], spec: CombineSpec): StackResult {
-  return guard((): StackResult => ({ ok: true, ...stack(sources, spec) }));
+function withDefaults(limits: Partial<CombineLimits>): CombineLimits {
+  return { maxCells: limits.maxCells ?? MAX_STACK_CELLS };
 }
 
-export function combineTables(sources: SourceTable[], spec: CombineSpec): CombineResult {
+/** 쌓기까지만 — 행마다 키용·집계용 두 겹을 돌려준다(Task 3 단계와 시험이 쓴다) */
+export function stackTables(sources: SourceTable[], spec: CombineSpec, limits: Partial<CombineLimits> = {}): StackResult {
+  return guard((): StackResult => ({ ok: true, ...stack(sources, spec, withDefaults(limits)) }));
+}
+
+/** limits는 시험이 작은 수로 상한을 확인하려고 받는다 — 운영 경로는 기본값 */
+export function combineTables(sources: SourceTable[], spec: CombineSpec, limits: Partial<CombineLimits> = {}): CombineResult {
   return guard((): CombineResult => {
-    const stacked = stack(sources, spec);
+    const stacked = stack(sources, spec, withDefaults(limits));
     const { columns, rows, lineage } = stacked;
     // 거르기·묶기·정렬은 키용 값(병합을 채운 값), 집계·합계 행은 집계용 값(병합 숫자는 주인 행에만)
     const tests = asList('거르기(filter)', spec.filter).map((f) => rowTest(f, columns));
