@@ -30,14 +30,20 @@ function unitFromCells(cells: (string | number | null)[]): string | null {
 /** '단위:' 머리와 앞뒤 공백을 뗀 괄호 속 글 */
 const UNIT_LABEL = /^단위\s*[:：]?\s*/;
 
+/** 단위가 여럿 나열된 표기('천원, 명')는 어느 열 것인지 알 수 없다 */
+const LIST_SEPARATOR = /[,，、·\/]/;
+
+/** 단위·수량을 뜻하는 글자. '(국비)'·'(본예산)' 같은 구분 표기와 가르는 근거 */
+const UNIT_CHARS = /[원명건톤㎡개회대천만억조%㎏㏊㎞㎥]|kg|ha|km/i;
+
 /**
- * 괄호 속 글이 단위로 보이는가 — '단위' 표기가 있거나, 숫자 없는 짧은 글('냥', '만원').
- * 이런 괄호가 있는데 모르는 단위라면 열 이름이 이미 단위를 말한 것이다.
- * 그때 캡션의 다른 단위로 넘어가면 이 열에 엉뚱한 단위가 붙는다. '(참고)'도 짧아 막지만 null은 안전한 쪽이다
+ * 괄호 속 글이 단위로 보이는가 — '단위' 표기가 있거나, 알려진 단위(별칭 포함)이거나, 단위·수량 글자가 든 글.
+ * 이런 괄호가 있는데 모르는 단위라면('(천냥)') 열 이름이 이미 단위를 말한 것이다.
+ * 그때 캡션의 다른 단위로 넘어가면 이 열에 엉뚱한 단위가 붙는다.
+ * 글자가 없는 짧은 괄호('(국비)'·'(추경)'·'(A)')는 구분 표기라 막지 않는다
  */
 function looksLikeUnit(inner: string): boolean {
-  if (UNIT_LABEL.test(inner)) return true;
-  return inner.length > 0 && inner.length <= 4 && !/\d/.test(inner);
+  return UNIT_LABEL.test(inner) || normalizeUnit(inner) !== null || UNIT_CHARS.test(inner);
 }
 
 /**
@@ -50,23 +56,27 @@ function unitFromColumnName(name: string): { unit: string | null; blocked: boole
   let unknown = false;
   for (const m of name.matchAll(/[(（\[]([^()（）\[\]]*)[)）\]]/g)) {
     const inner = m[1].trim();
-    const unit = normalizeUnit(inner.replace(UNIT_LABEL, ''));
+    const body = inner.replace(UNIT_LABEL, '');
+    if (LIST_SEPARATOR.test(body)) {
+      // 나열('천원, 명')은 어느 쪽인지 몰라 막는다. 단위가 하나도 없는 나열('국비, 시비')은 구분 표기
+      if (body.split(LIST_SEPARATOR).some((part) => normalizeUnit(part) !== null)) unknown = true;
+      continue;
+    }
+    const unit = normalizeUnit(body);
     if (unit) units.add(unit);
     else if (looksLikeUnit(inner)) unknown = true;
   }
-  if (units.size === 1) return { unit: [...units][0], blocked: false };
-  return { unit: null, blocked: units.size > 1 || unknown };
+  if (units.size === 1 && !unknown) return { unit: [...units][0], blocked: false };
+  return { unit: null, blocked: units.size > 0 || unknown };
 }
 
-/** 단위가 여럿 나열된 표기('천원, 명')는 어느 열 것인지 알 수 없다 */
-const LIST_SEPARATOR = /[,，、·\/]/;
-
-/** 단위 절 하나의 글('천원', '천 원 연도별 예산')에서 알려진 단위. 앞쪽 낱말 1~3개를 이어 본다('천 원'은 두 낱말) */
+/** 단위 절 하나의 글('천원', '천 원 연도별 예산')에서 알려진 단위. 앞쪽 낱말을 이어 본다.
+ * 긴 조합이 먼저다 — '억 명'은 '억원'(맨 '억')이 아니라 '억명'이어야 한다 */
 function resolveClause(segment: string): string | null {
   const text = segment.trim().replace(/^[:：]\s*/, '');
   if (LIST_SEPARATOR.test(text)) return null;
   const words = text.split(/\s+/);
-  for (let take = 1; take <= Math.min(3, words.length); take += 1) {
+  for (let take = Math.min(3, words.length); take >= 1; take -= 1) {
     const unit = normalizeUnit(words.slice(0, take).join(' '));
     if (unit) return unit;
   }
