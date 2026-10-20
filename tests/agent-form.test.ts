@@ -21,7 +21,7 @@ describe('설정 값', () => {
     expect(settingsFromAgent(agent as never)).toEqual({
       name: '공문 비서', description: '', icon: '📨', category: '공공기관', usage_guide: '',
       starter_prompts: '교육 안내\n자료 요청', system_prompt: '공문을 씁니다', model_id: '',
-      doc_search: false, image: true, document: false, file_read: false, connectors: ['law'],
+      doc_search: false, image: true, document: false, file_read: false, table_merge: false, connectors: ['law'],
     });
   });
 
@@ -43,6 +43,15 @@ describe('설정 값', () => {
     expect(settingsFromAgent(withFileRead as never).file_read).toBe(true);
     const body = settingsToBody(settingsFromAgent(withFileRead as never), { isLink: false });
     expect(body.capabilities).toEqual({ image: {}, file_read: {}, public_data: { connectors: ['law'] } });
+  });
+
+  it('표 합치기를 저장 값에서 읽고 그대로 보낸다', () => {
+    const withMerge = { ...agent, capabilities: { ...agent.capabilities, table_merge: {} } };
+    expect(settingsFromAgent(withMerge as never).table_merge).toBe(true);
+    const body = settingsToBody(settingsFromAgent(withMerge as never), { isLink: false });
+    expect(body.capabilities).toEqual({ image: {}, table_merge: {}, public_data: { connectors: ['law'] } });
+    const off = settingsToBody({ ...settingsFromAgent(withMerge as never), table_merge: false }, { isLink: false });
+    expect(off.capabilities).toEqual({ image: {}, public_data: { connectors: ['law'] } });
   });
 
   it('연결을 다 끄면 공공데이터 능력을 뺀다', () => {
@@ -144,7 +153,8 @@ describe('저장 안 한 수정', () => {
 describe('createCapabilities — 나만의 비서 만들기 창', () => {
   it('사진은 늘 켜고, 대화 중 파일 받기와 공공데이터는 고른 대로', async () => {
     const { createCapabilities } = await import('@/lib/agent-form');
-    expect(createCapabilities({ fileRead: true, connectors: [] })).toEqual({ image: {}, file_read: {} });
+    // 표 합치기도 첨부한 표를 쓸 뿐이라 파일 받기와 함께 켠다
+    expect(createCapabilities({ fileRead: true, connectors: [] })).toEqual({ image: {}, file_read: {}, table_merge: {} });
     expect(createCapabilities({ fileRead: false, connectors: ['law'] })).toEqual({
       image: {},
       public_data: { connectors: ['law'] },

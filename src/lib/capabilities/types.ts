@@ -63,6 +63,11 @@ export interface ToolOutcome {
   usage?: LlmUsage[];
   /** 도구가 만든 파일 — 화면 내려받기 카드와 메시지 저장으로 간다 */
   files?: GeneratedFileRef[];
+  /**
+   * 이번 결과로 AI에게 **보여 준** 숫자(표 칸·계산 결과·합계). 실행기가 턴 동안 모아
+   * 답변의 숫자와 대조한다(숫자 확인, 설계 5.4). 보여 주지 않은 행의 숫자는 넣지 않는다
+   */
+  shownValues?: number[];
 }
 
 export interface Capability {

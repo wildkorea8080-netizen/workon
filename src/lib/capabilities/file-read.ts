@@ -1,5 +1,4 @@
 // src/lib/capabilities/file-read.ts
-import { listConversationAttachments, loadExtract as loadStoredExtract } from '@/lib/attachments/store';
 import { tableAsMarkdown } from '@/lib/attachments/reader';
 import {
   OVERVIEW_NAME_CHARS,
@@ -10,8 +9,8 @@ import {
   READ_TABLE_ROWS,
   READ_TEXT_CHARS,
 } from '@/lib/attachments/limits';
-import type { AttachmentRecord } from '@/lib/attachments/store';
 import type { AttachmentExtract, AttachmentSummary } from '@/lib/attachments/types';
+import { findAttachment, loadTurnExtract } from './attachment-access';
 import type { Capability, ToolOutcome, TurnAttachment, TurnContext } from './types';
 
 /**
@@ -55,7 +54,7 @@ export const OVERVIEW_END = '[첨부 목록 끝]';
  * 줄을 깨거나 화면과 모델이 보는 글을 다르게 만들 수 있다. 한 파일·한 표가 한 줄이어야 모델이 구분한다.
  * 대괄호도 지운다 — 열 이름 '[첨부 목록 끝]'이 구분 줄을 흉내 내 목록 밖 지시처럼 보이지 않게.
  */
-function oneLine(s: string): string {
+export function oneLine(s: string): string {
   return s
     .replace(/[\t\n\r\v\f]/g, ' ')
     .replace(/[\p{Cc}\p{Cf}[\]]/gu, '')
@@ -64,7 +63,7 @@ function oneLine(s: string): string {
 }
 
 /** 글자(코드 포인트) 단위로 자른다 — 서로게이트 쌍을 반으로 가르지 않게 */
-function cut(s: string, max: number): string {
+export function cut(s: string, max: number): string {
   const chars = Array.from(s);
   return chars.length > max ? `${chars.slice(0, max).join('')}…` : s;
 }
@@ -190,7 +189,7 @@ export function createFileRead(deps: FileReadDeps): Capability {
       if (tool !== 'read_attachment') return { ok: false, text: `알 수 없는 도구입니다: ${tool}` };
 
       const ref = typeof input.file === 'string' ? input.file.trim() : '';
-      const attachment = ctx.attachments.find((a) => a.ref === ref);
+      const attachment = findAttachment(ctx, ref);
       if (!attachment) {
         const refs = ctx.attachments.map((a) => a.ref).join(', ') || '없음';
         return { ok: false, text: `없는 첨부입니다: ${ref || '(빈 값)'}. 쓸 수 있는 것: ${refs}` };
@@ -231,38 +230,7 @@ export function createFileRead(deps: FileReadDeps): Capability {
   };
 }
 
-/**
- * 본문은 ctx의 사용자·대화로 기록을 다시 찾아 불러온다(user_id 조건). ctx에 저장소 경로를 싣지 않기
- * 위해서다. 한 턴 안에서는 목록 조회도, 첨부마다의 본문 내려받기도 한 번 — ctx 객체마다 기억한다.
- * 못 불러온 것(null)은 기억하지 않는다 — 다음 읽기에서 다시 시도할 수 있게.
- */
-interface TurnCache {
-  records?: Promise<AttachmentRecord[]>;
-  extracts: Map<string, Promise<AttachmentExtract | null>>;
-}
-const turnCache = new WeakMap<TurnContext, TurnCache>();
-
-const defaultDeps: FileReadDeps = {
-  async loadExtract(ctx, attachment) {
-    let cache = turnCache.get(ctx);
-    if (!cache) {
-      cache = { extracts: new Map() };
-      turnCache.set(ctx, cache);
-    }
-    const hit = cache.extracts.get(attachment.id);
-    if (hit) return hit;
-
-    cache.records ??= listConversationAttachments(ctx.userId, ctx.conversationId);
-    const records = cache.records;
-    const pending = records.then((rows) => {
-      const row = rows.find((r) => r.id === attachment.id);
-      return row ? loadStoredExtract(row) : null;
-    });
-    cache.extracts.set(attachment.id, pending);
-    const extract = await pending;
-    if (!extract) cache.extracts.delete(attachment.id);
-    return extract;
-  },
-};
+// 본문 불러오기·한 턴 캐시는 table_merge와 함께 쓴다(attachment-access.ts)
+const defaultDeps: FileReadDeps = { loadExtract: loadTurnExtract };
 
 export const fileRead = createFileRead(defaultDeps);

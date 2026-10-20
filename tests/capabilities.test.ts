@@ -19,6 +19,11 @@ describe('능력 목록', () => {
     expect(CAPABILITIES.map((c) => c.id).sort()).toEqual([...CAPABILITY_IDS].sort());
   });
 
+  it('표 합치기(table_merge)를 저장·대화에서 안다', () => {
+    expect(normalizeCapabilities({ table_merge: { x: 1 } }, { knownConnectorIds: [] })).toEqual({ ok: true, value: { table_merge: {} } });
+    expect(activeCapabilities({ table_merge: {} }).map((c) => c.id)).toEqual(['table_merge']);
+  });
+
   it('켜진 능력만 고른다', () => {
     expect(activeCapabilities({ image: {} }).map((c) => c.id)).toEqual(['image']);
     expect(activeCapabilities({})).toEqual([]);
@@ -71,7 +76,7 @@ describe('대화할 때의 능력', () => {
 
   it('모르는 능력 id가 섞여도 나머지 능력은 켜진다 — 되돌리기 배포에서 다른 능력이 꺼지지 않게', () => {
     const caps = effectiveCapabilities(
-      { doc_search: {}, table_merge: {}, future_cap: { x: 1 } },
+      { doc_search: {}, later_cap: {}, future_cap: { x: 1 } },
       { tier: 'official', scope: { publicDataConnectors: new Set() }, knownConnectorIds: [] }
     );
     expect(caps).toEqual({ doc_search: {} });

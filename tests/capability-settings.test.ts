@@ -10,8 +10,8 @@ import {
 const known = { knownConnectorIds: ['law', 'kosis'] };
 
 describe('능력 설정 정규화', () => {
-  it('능력은 다섯이다 — S1의 셋, S2-a의 문서 만들기, S3-a의 파일 받아 읽기', () => {
-    expect([...CAPABILITY_IDS]).toEqual(['doc_search', 'public_data', 'image', 'document', 'file_read']);
+  it('능력은 여섯이다 — S1의 셋, S2-a의 문서 만들기, S3-a의 파일 받아 읽기, S3-b의 표 합치기', () => {
+    expect([...CAPABILITY_IDS]).toEqual(['doc_search', 'public_data', 'image', 'document', 'file_read', 'table_merge']);
   });
 
   it('비어 있으면 빈 설정', () => {
@@ -27,8 +27,8 @@ describe('능력 설정 정규화', () => {
   });
 
   it('모르는 능력은 거절한다', () => {
-    const r = normalizeCapabilities({ table_merge: {} }, known);
-    expect(r.ok).toBe(false);
+    const r = normalizeCapabilities({ meeting_notes: {} }, known);
+    expect(r).toEqual({ ok: false, message: '알 수 없는 능력입니다: meeting_notes' });
   });
 
   it('없는 커넥터는 거절한다', () => {

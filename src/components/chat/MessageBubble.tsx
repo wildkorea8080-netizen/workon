@@ -186,7 +186,11 @@ export default function MessageBubble({ role, content, imagePreviews, attachment
                 className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors"
               >
                 <span className="w-9 h-9 rounded-lg bg-[#003087]/10 text-[#003087] text-[11px] font-bold flex items-center justify-center flex-shrink-0">
-                  {file.file_name.toLowerCase().endsWith('.docx') ? 'DOC' : 'HWP'}
+                  {file.file_name.toLowerCase().endsWith('.xlsx')
+                    ? 'XLS'
+                    : file.file_name.toLowerCase().endsWith('.docx')
+                      ? 'DOC'
+                      : 'HWP'}
                 </span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-medium text-slate-800 truncate">{file.file_name}</span>

@@ -66,6 +66,7 @@ const ACTION_LABEL: Record<string, string> = {
   conversation_title: '대화 제목 생성',
   document_generated: '문서 파일 생성',
   file_attached: '파일 첨부',
+  table_merged: '표 합치기',
   prompt_enhance: '프롬프트 다듬기',
   create_agent: '비서 생성',
   add_forbidden_word: '금지어 추가',

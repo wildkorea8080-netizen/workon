@@ -20,6 +20,7 @@ export interface AgentSettingsValue {
   image: boolean;
   document: boolean;
   file_read: boolean;
+  table_merge: boolean;
   connectors: string[];
 }
 
@@ -70,6 +71,7 @@ export function settingsFromAgent(
     image: 'image' in caps,
     document: 'document' in caps,
     file_read: 'file_read' in caps,
+    table_merge: 'table_merge' in caps,
     connectors: connectorIdsOf(caps),
   };
 }
@@ -95,6 +97,7 @@ export function settingsToBody(value: AgentSettingsValue, opts: { isLink: boolea
       ...(value.document ? { document: {} } : {}),
       // 저장 값에서 읽어 그대로 돌려보낸다 — 빠뜨리면 다른 칸을 저장할 때 조용히 꺼진다
       ...(value.file_read ? { file_read: {} } : {}),
+      ...(value.table_merge ? { table_merge: {} } : {}),
       ...(value.connectors.length > 0 ? { public_data: { connectors: value.connectors } } : {}),
     },
   };
@@ -186,12 +189,13 @@ export function isSettingsDirty(value: AgentSettingsValue, baseline: string | nu
 /**
  * 나만의·부서 비서 만들기 창의 능력. 사진 읽기는 늘 켠다(첨부해야 쓰이므로).
  * 대화 중 파일 받기(file_read)는 창에서 고른다 — 예전에는 만들기 창에 칸이 없어
- * 만든 뒤 편집 창을 다시 열어야 켤 수 있었다.
+ * 만든 뒤 편집 창을 다시 열어야 켤 수 있었다. 표 합치기(table_merge)도 같은 칸으로 함께 켠다 —
+ * 둘 다 직원이 첨부한 파일만 쓰고, 칸을 늘리면 만들기 창이 길어진다.
  */
 export function createCapabilities(opts: { fileRead: boolean; connectors: string[] }): Record<string, unknown> {
   return {
     image: {},
-    ...(opts.fileRead ? { file_read: {} } : {}),
+    ...(opts.fileRead ? { file_read: {}, table_merge: {} } : {}),
     ...(opts.connectors.length > 0 ? { public_data: { connectors: opts.connectors } } : {}),
   };
 }
