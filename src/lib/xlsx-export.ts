@@ -24,13 +24,19 @@ export interface ResultWorkbookInput {
 const NONE = '없음';
 const MIN_WIDTH = 8;
 const MAX_WIDTH = 50;
+const MAX_CELL_CHARS = 32000;
+const MAX_DECIMALS = 4;
 
 /**
  * 엑셀이 수식으로 읽는 첫 글자(= + - @)와, 일부 프로그램이 명령으로 읽는 탭·줄바꿈 앞에 '를 붙인다.
  * 숫자는 건드리지 않는다 — 음수 -5는 글자가 아니라 number로 들어간다.
  */
 export function safeText(text: string): string {
-  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  // 홑 줄표('-')는 표에서 '값 없음'을 뜻하는 흔한 표기라 수식이 될 수 없다 — 그대로 둔다
+  if (text === '-') return text;
+  // 엑셀 한 칸은 32,767자까지다. 넘으면 파일이 열리지 않으므로 여유를 두고 자른다
+  const cut = text.length > MAX_CELL_CHARS ? text.slice(0, MAX_CELL_CHARS) + '…' : text;
+  return /^[=+\-@\t\r]/.test(cut) ? `'${cut}` : cut;
 }
 
 function safeCell(v: Cell): Cell {
@@ -50,6 +56,12 @@ function clampWidth(w: number): number {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.ceil(w)));
 }
 
+/** 소수점 아래 자릿수(끝의 0은 뗌, 최대 4) — 4자리 아래는 보여 줘도 의미가 없다 */
+function decimalPlaces(v: number): number {
+  const frac = v.toFixed(MAX_DECIMALS).split('.')[1] ?? '';
+  return frac.replace(/0+$/, '').length;
+}
+
 function kstStamp(d: Date): string {
   const k = new Date(d.getTime() + 9 * 3600 * 1000);
   const p = (n: number) => String(n).padStart(2, '0');
@@ -65,7 +77,7 @@ export async function buildResultWorkbook(input: ResultWorkbookInput): Promise<B
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   workbook.created = input.createdAt;
-  workbook.title = safeText(input.title);
+  workbook.title = input.title; // 문서 속성은 수식으로 읽히지 않는다 — 작은따옴표를 붙이면 제목이 달라진다
 
   writeResultSheet(workbook, input);
   writeLineageSheet(workbook, input);
@@ -89,19 +101,26 @@ function writeResultSheet(workbook: Workbook, input: ResultWorkbookInput) {
   const dataRows = total ? [...rows, total] : rows;
   columns.forEach((col, i) => {
     const column = ws.getColumn(i + 1);
+    // 소수 자릿수는 열 전체(합계 행 포함)에서 한 번에 정한다 — 한 열에서 3과 12.5가 다른 모양이면 읽기 어렵고,
+    // 행 순서에 따라 서식이 달라지면 같은 값이 다르게 보인다
+    let maxDec = 0;
+    if (col.numeric) {
+      for (const r of dataRows) {
+        const v = r[i];
+        if (typeof v === 'number' && Number.isFinite(v)) maxDec = Math.max(maxDec, decimalPlaces(v));
+      }
+    }
     let width = textWidth(col.name);
-    let hasFraction = false;
     for (const r of dataRows) {
       const v = r[i];
       if (typeof v === 'number' && Number.isFinite(v)) {
-        if (!Number.isInteger(v)) hasFraction = true;
-        width = Math.max(width, textWidth(fmtInt(Math.trunc(v))) + (hasFraction ? 3 : 0));
+        width = Math.max(width, textWidth(fmtInt(Math.trunc(v))) + (maxDec > 0 ? 1 + maxDec : 0));
       } else if (typeof v === 'string') {
         width = Math.max(width, textWidth(v));
       }
     }
     column.width = clampWidth(width + 2);
-    if (col.numeric) column.numFmt = hasFraction ? '#,##0.##' : '#,##0';
+    if (col.numeric) column.numFmt = maxDec > 0 ? `#,##0.${'0'.repeat(maxDec)}` : '#,##0';
   });
   // 열 서식은 머리글 칸에도 번지므로 머리글은 글자 서식으로 되돌린다
   ws.getRow(1).eachCell((c) => {

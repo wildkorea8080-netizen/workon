@@ -75,7 +75,7 @@ describe('buildResultWorkbook', () => {
     expect(ws.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
     expect(ws.getRow(1).font?.bold).toBe(true);
     expect(ws.getCell('B2').numFmt).toBe('#,##0'); // 정수 열
-    expect(ws.getCell('C2').numFmt).toBe('#,##0.##'); // 소수가 있는 열
+    expect(ws.getCell('C2').numFmt).toBe('#,##0.0'); // 소수가 있는 열 — 최대 자릿수에 맞춤
     expect(ws.getCell('A2').numFmt).not.toBe('#,##0');
     expect(ws.getRow(4).font?.bold).toBe(true);
     expect(ws.getRow(2).font?.bold).toBeFalsy();
@@ -216,6 +216,53 @@ describe('buildResultWorkbook', () => {
     };
     expect(rowOf('합계 행은 전체')).toBeLessThan(rowOf('예산.xlsx 표 1을'));
     expect(rowOf('합계 행은 전체')).toBeGreaterThan(rowOf('2026-10-22'));
+  });
+
+  it('숫자 서식은 열의 최대 소수 자릿수로 — 합계 행 포함, 행 순서와 무관', async () => {
+    const cols: ResultColumn[] = [
+      { name: '이름', unit: null, unitSource: null, numeric: false },
+      { name: 'a', unit: null, unitSource: null, numeric: true },
+      { name: 'b', unit: null, unitSource: null, numeric: true },
+      { name: 'c', unit: null, unitSource: null, numeric: true },
+    ];
+    const mk = (rows: number[][]) =>
+      buildResultWorkbook({
+        ...BASE,
+        columns: cols,
+        rows: rows.map((r) => ['x', ...r]),
+        total: ['합계', 0, 0, 0.25],
+      });
+    const ws = (await load(await mk([[12.5, 1, 3], [3, 2, 5], [5, 3, 7], [0.001234, 4, 9]]))).getWorksheet('결과')!;
+    for (const r of [2, 3, 4, 5]) expect(ws.getCell(`B${r}`).numFmt).toBe('#,##0.0000'); // 3도 3.0000
+    expect(ws.getCell('C2').numFmt).toBe('#,##0');
+    expect(ws.getCell('D2').numFmt).toBe('#,##0.00'); // 합계 행의 0.25가 열 서식을 정한다
+    const w1 = ws.getColumn(2).width!;
+    const rev = (await load(await mk([[0.001234, 1, 3], [5, 2, 5], [3, 3, 7], [12.5, 4, 9]]))).getWorksheet('결과')!;
+    expect(rev.getColumn(2).width).toBe(w1);
+    expect(rev.getCell('B2').numFmt).toBe('#,##0.0000');
+    const two = (await load(await mk([[12.5, 1, 3], [3, 2, 5]]))).getWorksheet('결과')!;
+    expect(two.getCell('B2').numFmt).toBe('#,##0.0');
+  });
+
+  it('홑 줄표는 값 없음 표시라 그대로 둔다', async () => {
+    const ws = (
+      await load(await buildResultWorkbook({ ...BASE, rows: [['-', 1, 1], ['—', 2, 1], ['-x', 3, 1]], total: null }))
+    ).getWorksheet('결과')!;
+    expect(ws.getCell('A2').value).toBe('-');
+    expect(ws.getCell('A3').value).toBe('—');
+    expect(ws.getCell('A4').value).toBe("'-x");
+  });
+
+  it('칸 글은 32,000자에서 자른다', async () => {
+    const ws = (
+      await load(await buildResultWorkbook({ ...BASE, rows: [['가'.repeat(40000), 1, 1]], total: null }))
+    ).getWorksheet('결과')!;
+    expect(ws.getCell('A2').value).toBe('가'.repeat(32000) + '…');
+  });
+
+  it('문서 속성 제목에는 작은따옴표를 붙이지 않는다', async () => {
+    const wb = await load(await buildResultWorkbook({ ...BASE, title: '=표 제목' }));
+    expect(wb.title).toBe('=표 제목');
   });
 
   it('비어 있는 항목은 없음', async () => {
