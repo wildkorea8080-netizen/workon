@@ -182,3 +182,16 @@ export function isSettingsDirty(value: AgentSettingsValue, baseline: string | nu
   if (baseline === null) return false;
   return JSON.stringify(value) !== baseline;
 }
+
+/**
+ * 나만의·부서 비서 만들기 창의 능력. 사진 읽기는 늘 켠다(첨부해야 쓰이므로).
+ * 대화 중 파일 받기(file_read)는 창에서 고른다 — 예전에는 만들기 창에 칸이 없어
+ * 만든 뒤 편집 창을 다시 열어야 켤 수 있었다.
+ */
+export function createCapabilities(opts: { fileRead: boolean; connectors: string[] }): Record<string, unknown> {
+  return {
+    image: {},
+    ...(opts.fileRead ? { file_read: {} } : {}),
+    ...(opts.connectors.length > 0 ? { public_data: { connectors: opts.connectors } } : {}),
+  };
+}

@@ -8,6 +8,7 @@ import {
   MAX_UPLOAD_SIZE_LABEL,
   MAX_AGENT_DOCUMENTS,
 } from '@/lib/file-types';
+import { createCapabilities } from '@/lib/agent-form';
 
 const EMOJI_ICONS = [
   '🤖', '📝', '📊', '📋', '📨', '💬', '📢', '🎤',
@@ -39,6 +40,8 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
   const [systemPrompt, setSystemPrompt] = useState('');
   const [enhancing, setEnhancing] = useState(false);
   const [fileCapability, setFileCapability] = useState(false);
+  // 대화 중 파일 받기(file_read). 사진처럼 직원이 붙여야만 쓰이므로 켠 채로 시작한다
+  const [readChatFiles, setReadChatFiles] = useState(true);
   // 기관이 쓰고 있는 커넥터만 내려온다(서버에서 allowedForPersonal로 표시).
   const [connectors, setConnectors] = useState<ConnectorOption[]>([]);
   const [selectedConnectors, setSelectedConnectors] = useState<string[]>([]);
@@ -110,10 +113,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
           tier,
           model_id: modelId || null,
           systemPrompt: systemPrompt.trim() || undefined,
-          capabilities: {
-            image: {},
-            ...(selectedConnectors.length > 0 ? { public_data: { connectors: selectedConnectors } } : {}),
-          },
+          capabilities: createCapabilities({ fileRead: readChatFiles, connectors: selectedConnectors }),
         }),
       });
       const result = await res.json();
@@ -273,14 +273,28 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">능력 설정</p>
             <div className="space-y-3">
 
-              {/* 파일 분석 */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
+              {/* 대화 중 파일 받기 — 대화할 때마다 붙이는 파일. 아래 '참고 문서'(미리 올려 두는 문서)와 다르다 */}
+              <div className="border border-slate-200 rounded-xl">
                 <div className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3">
                     <span className="text-xl">📎</span>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">파일 분석 능력</p>
-                      <p className="text-xs text-slate-500">첨부한 문서를 읽고 질문에 답합니다</p>
+                      <p className="text-sm font-semibold text-slate-800">대화 중 파일 받기</p>
+                      <p className="text-xs text-slate-500">대화할 때 엑셀·한글·PDF 등 파일을 붙여 물어볼 수 있습니다</p>
+                    </div>
+                  </div>
+                  <Toggle checked={readChatFiles} onChange={setReadChatFiles} />
+                </div>
+              </div>
+
+              {/* 참고 문서 — 비서가 늘 근거로 삼을 문서를 미리 올려 둔다(문서 찾기) */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">📚</span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">참고 문서 올리기</p>
+                      <p className="text-xs text-slate-500">비서가 늘 근거로 삼을 문서를 미리 올려 둡니다</p>
                     </div>
                   </div>
                   <Toggle checked={fileCapability} onChange={setFileCapability} />

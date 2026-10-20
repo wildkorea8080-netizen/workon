@@ -140,3 +140,21 @@ describe('저장 안 한 수정', () => {
     expect(isSettingsDirty(base, null)).toBe(false);
   });
 });
+
+describe('createCapabilities — 나만의 비서 만들기 창', () => {
+  it('사진은 늘 켜고, 대화 중 파일 받기와 공공데이터는 고른 대로', async () => {
+    const { createCapabilities } = await import('@/lib/agent-form');
+    expect(createCapabilities({ fileRead: true, connectors: [] })).toEqual({ image: {}, file_read: {} });
+    expect(createCapabilities({ fileRead: false, connectors: ['law'] })).toEqual({
+      image: {},
+      public_data: { connectors: ['law'] },
+    });
+  });
+
+  it('만든 값은 저장 검사(normalizeCapabilities)를 통과한다', async () => {
+    const { createCapabilities } = await import('@/lib/agent-form');
+    const { normalizeCapabilities } = await import('@/lib/capabilities/settings');
+    const r = normalizeCapabilities(createCapabilities({ fileRead: true, connectors: ['law'] }), { knownConnectorIds: ['law'] });
+    expect(r.ok).toBe(true);
+  });
+});
