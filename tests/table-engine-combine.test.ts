@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildTable } from '@/lib/attachments/header';
 import type { Cell, TableMerge } from '@/lib/attachments/types';
-import { combineTables, stackTables } from '@/lib/table-engine/combine';
+import { combineTables, roundValue, stackTables } from '@/lib/table-engine/combine';
 import type { CombineResult, SourceSpec, SourceTable } from '@/lib/table-engine/types';
 
 type Src = SourceTable & { spec: SourceSpec };
@@ -1343,6 +1343,195 @@ describe('결과 상한', () => {
     expect(r.lineage.rowCounts).toEqual({ stacked: 5001, filtered: 5001, result: 5001 });
     // 합계는 자르기 전 전체 행으로 — 보이는 행만 더하면 틀린 합계가 된다
     expect(r.total).toEqual(['합계', 5001]);
+    expect(r.lineage.notes).toEqual(['합계 행은 전체 5,001행 기준 — 표에는 5,000행만']);
     expect(ok(combine([src('a1', cells.slice(0, 5001))])).lineage.truncated).toBe(false);
+  });
+});
+
+// ── Task 3 수정 1차 ─────────────────────────────────────────
+
+describe('수정 1차 — 반올림', () => {
+  it('1234567.123 + 0.001 = 1234567.124 — 100만이 넘어도 찌꺼기가 없다', () => {
+    expect(roundValue(1234567.123 + 0.001)).toBe(1234567.124);
+    const r = ok(combine([src('a1', [['부서', '예산'], ['a', 1234567.123], ['a', 0.001]])], { aggregate: [{ column: '예산', fn: 'sum' }] }));
+    expect(r.rows).toEqual([[1234567.124]]);
+  });
+
+  it('소수 1~3자리 금액(최대 10억)의 합은 정확한 십진 합과 같다 — 2,000건', () => {
+    let seed = 7;
+    const rnd = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+    const bad: string[] = [];
+    for (let t = 0; t < 2000; t += 1) {
+      const scale = 10 ** (1 + Math.floor(rnd() * 3));
+      const mag = 10 ** (3 + Math.floor(rnd() * 7));
+      const k = 2 + Math.floor(rnd() * 29);
+      let sum = 0;
+      let exact = BigInt(0);
+      for (let i = 0; i < k; i += 1) {
+        const units = Math.round(rnd() * mag * scale);
+        sum += units / scale;
+        exact += BigInt(units);
+      }
+      const want = Number(exact) / scale;
+      if (roundValue(sum) !== want) bad.push(`${roundValue(sum)} ≠ ${want}`);
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+describe('수정 1차 — 키 열 판정(라벨 열·합계 행이 같은 함수)', () => {
+  it('구분 | 전년도 | 금년도 | 증감 (단위: 천원)은 세 열 모두 합계를 낸다', () => {
+    const r = ok(
+      combine(
+        [src('a1', [['구분', '전년도', '금년도', '증감'], ['인건비', 1000, 1200, 200], ['운영비', 500, 400, -100]], { caption: CAP_THOUSAND })],
+        { total_row: true }
+      )
+    );
+    expect(r.total).toEqual(['합계', 1500, 1600, 100]);
+  });
+
+  it('청년(명)·청소년 열은 합계를 내고, 값이 연도인 연도 열은 뺀다', () => {
+    const r = ok(
+      combine([src('a1', [['구분', '연도', '청년(명)', '청소년', '전년도'], ['a', 2024, 3, 10, 5], ['b', 2025, 5, 1, 6]])], {
+        total_row: true,
+      })
+    );
+    expect(r.total).toEqual(['합계', null, 8, 11, 11]);
+  });
+
+  it('청년 열을 명시해 더해도 경고하지 않는다', () => {
+    const r = ok(combine([src('a1', [['구분', '청년'], ['a', 3], ['b', 4]])], { aggregate: [{ column: '청년', fn: 'sum' }] }));
+    expect(r.rows).toEqual([[7]]);
+    expect(r.lineage.columnWarnings).toEqual([]);
+  });
+
+  it('측정 단위가 있으면 값이 연도 범위여도 키 열이 아니다', () => {
+    const r = ok(combine([src('a1', [['구분', '예산(억원)'], ['a', 1950], ['b', 2010]])], { total_row: true }));
+    expect(r.total).toEqual(['합계', 3960]);
+  });
+
+  it('라벨 열 찾기도 같은 판정 — 측정 단위 열은 값이 연도 범위여도 건너뛰지 않아 오른쪽 비고의 "계"는 데이터', () => {
+    const r = ok(combine([src('a1', [['구분', '예산(억원)', '비고'], ['a', 1950, '계'], ['b', 2010, null]])]));
+    expect(r.rows).toHaveLength(2);
+    expect(r.lineage.skippedRows).toEqual([]);
+  });
+
+  it('코드·번호 열은 이름만으로 키 열', () => {
+    const r = ok(combine([src('a1', [['구분', '관리번호', '예산'], ['a', 11, 1], ['b', 12, 2]])], { total_row: true }));
+    expect(r.total).toEqual(['합계', null, 3]);
+  });
+
+  it('전년도 열을 키 열로 건너뛰지 않으므로, 오른쪽 비고의 "계"는 합계 행이 아니다(쌓기 단계)', () => {
+    const r = ok(
+      combine([src('a1', [['구분', '전년도', '금년도', '비고'], ['인건비', 1000, 1200, '계'], ['운영비', 500, 400, null]])], {
+        total_row: true,
+      })
+    );
+    expect(r.rows).toHaveLength(2);
+    expect(r.lineage.skippedRows).toEqual([]);
+    expect(r.total).toEqual(['합계', 1500, 1600, null]);
+  });
+});
+
+describe('수정 1차 — 병합 숫자가 묶음·거르기로 갈릴 때', () => {
+  const MERGED: Cell[][] = [
+    ['부서', '사업', '예산'],
+    ['총무과', 'A', 100],
+    ['총무과', 'B', null],
+    ['기획과', 'C', 30],
+  ];
+  const merges = [{ row: 1, col: 2, rows: 2, cols: 1 }];
+
+  it('여러 묶음에 걸친 병합 숫자는 첫 행 묶음에만 넣고 알린다', () => {
+    const r = ok(
+      combine([src('a1', MERGED, { merges })], { group_by: ['사업'], aggregate: [{ column: '예산', fn: 'sum' }], total_row: true })
+    );
+    expect(r.rows).toEqual([
+      ['A', 100],
+      ['B', null],
+      ['C', 30],
+    ]);
+    expect(r.total).toEqual(['합계', 130]);
+    expect(r.lineage.columnWarnings).toEqual(['열 "예산": 행 2~3에 병합된 값 100을 첫 행(사업 A)에만 넣었습니다']);
+  });
+
+  it('같은 묶음 안의 병합은 알리지 않는다', () => {
+    const r = ok(combine([src('a1', MERGED, { merges })], { group_by: ['부서'], aggregate: [{ column: '예산', fn: 'sum' }] }));
+    expect(r.rows).toEqual([
+      ['총무과', 100],
+      ['기획과', 30],
+    ]);
+    expect(r.lineage.columnWarnings).toEqual([]);
+  });
+
+  it('거르기로 첫 행이 빠지면 더하지 않았다고 알린다', () => {
+    const r = ok(
+      combine([src('a1', MERGED, { merges })], {
+        filter: [{ column: '사업', op: '=', value: 'B' }],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([[null]]);
+    expect(r.lineage.columnWarnings).toEqual(['열 "예산": 행 2~3에 병합된 값 100은 첫 행이 거르기에서 빠져 더하지 않았습니다']);
+  });
+
+  it('거르기로 첫 행만 남으면 첫 행에만 넣었다고 알린다', () => {
+    const r = ok(
+      combine([src('a1', MERGED, { merges })], {
+        filter: [{ column: '사업', op: '=', value: 'A' }],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([[100]]);
+    expect(r.lineage.columnWarnings).toEqual(['열 "예산": 행 2~3에 병합된 값 100을 첫 행(행 2)에만 넣었습니다']);
+  });
+});
+
+describe('수정 1차 — 묶음 키', () => {
+  it('빈 키는 빈 묶음으로 모으고 알린다', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '사업', '예산'], [null, 'X', 100], ['총무과', 'Y', 50], ['​', 'Z', 10]])], {
+        group_by: ['부서'],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([
+      [null, 110],
+      ['총무과', 50],
+    ]);
+    expect(r.lineage.columnWarnings).toEqual(['"부서"가 빈 행 2개를 빈 묶음으로 모았습니다']);
+  });
+
+  it('보이지 않는 글자(U+200B·U+FEFF)는 지우고 묶는다', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '예산'], ['총무과​', 1], ['총무과', 2], ['﻿총무과', 4]])], {
+        group_by: ['부서'],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([['총무과', 7]]);
+    expect(r.lineage.similarKeys).toEqual([]);
+  });
+});
+
+describe('수정 1차 — 안내 문장·정렬', () => {
+  it('잘리면 notes에 합계 행 기준을 남긴다', () => {
+    const cells: Cell[][] = [['부서', '예산']];
+    for (let i = 0; i < 5003; i += 1) cells.push([`과${i}`, 1]);
+    const r = ok(combine([src('a1', cells)], { total_row: true }));
+    expect(r.lineage.notes).toEqual(['합계 행은 전체 5,003행 기준 — 표에는 5,000행만']);
+    expect(ok(combine([src('a1', BUDGET)], { total_row: true })).lineage.notes).toEqual([]);
+  });
+
+  it('원래 열 이름이 집계 결과 여럿에 맞으면 후보를 들어 실패', () => {
+    const r = combine([src('a1', BUDGET)], {
+      group_by: ['부서'],
+      aggregate: [
+        { column: '예산', fn: 'sum' },
+        { column: '예산', fn: 'avg' },
+      ],
+      sort: [{ column: '예산' }],
+    });
+    expect(r).toEqual({ ok: false, error: '정렬의 "예산"에 맞는 열이 여럿입니다: 예산 합계, 예산 평균. 정확한 이름으로 주세요.' });
   });
 });

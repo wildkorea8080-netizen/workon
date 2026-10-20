@@ -58,9 +58,12 @@ function isBlank(cell: Cell | undefined): boolean {
   return cell === null || cell === undefined || (typeof cell === 'string' && cell.trim() === '');
 }
 
-/** 곱셈 오차(1234 × 0.001 = 1.2340000000000002)가 결과·엑셀에 나오지 않게 소수 10자리에서 반올림 */
+/**
+ * 곱셈·덧셈 오차(1234 × 0.001 = 1.2340000000000002)가 결과·엑셀에 나오지 않게 소수 10자리, 다시 유효숫자 15자리로 반올림.
+ * 소수 10자리만으로는 100만이 넘는 값의 찌꺼기(1234567.1239999998)가 남는다 — double은 유효숫자 15자리까지만 믿을 수 있다
+ */
 export function roundValue(x: number): number {
-  return Number.isInteger(x) ? x : Number(x.toFixed(10));
+  return Number.isInteger(x) ? x : Number(Number(x.toFixed(10)).toPrecision(15));
 }
 
 /** 단위 괄호를 뗀 이름과 그 단위. 단위가 아닌 괄호('예산(국비)')는 이름의 일부로 둔다 */
@@ -130,10 +133,19 @@ export interface StackedRow {
   keys: ResultValue[];
 }
 
+/** 세로 병합 숫자의 위치 — 묶기·거르기가 병합 범위를 가르면 알리려고. column = 쌓은 결과 열 번호 */
+interface MergedNumber {
+  source: number;
+  row: number;
+  rowEnd: number;
+  column: number;
+}
+
 interface Stacked {
   columns: ResultColumn[];
   rows: StackedRow[];
   lineage: Lineage;
+  merged: MergedNumber[];
 }
 
 export type StackResult = ({ ok: true } & Stacked) | { ok: false; error: string };
@@ -151,6 +163,7 @@ function emptyLineage(): Lineage {
     parenthesizedNegatives: [],
     columnWarnings: [],
     similarKeys: [],
+    notes: [],
     rowCounts: { stacked: 0, filtered: 0, result: 0 },
     truncated: false,
   };
@@ -160,20 +173,24 @@ function emptyLineage(): Lineage {
 
 /** 일련번호 열 이름. 값이 1..n이어도 이름이 이렇지 않으면 일련번호로 보지 않는다 — '예산'이 1·2·3일 수도 있다 */
 const SERIAL_NAME = /^(연번|순번|번호|일련번호|no\.?)$/i;
-/** 키성 숫자 열 이름: 연도·코드·번호류 */
-const KEY_NAME = /연도|년도|년|코드|번호|순번|연번|일련|(^|[^a-z])id([^a-z]|$)/i;
+/** 이름만으로 키성인 열: 코드·번호류. 연도·년도·년은 이름만으로 정하지 않는다('전년도'는 금액, '청년'은 인원일 수 있다) */
+const CODE_NAME = /코드|번호|순번|연번|일련|(^|[^a-z])id([^a-z]|$)/i;
+/** 측정 단위가 아닌 단위 — 비율·점수·배수·기간. 그 밖의 아는 단위(원·명·건·개·톤·㎡…)가 붙은 열은 측정값이다 */
+const NON_MEASURE_UNITS = new Set(['%', '%p', '점', '배', '일', '시간', '년', '개월']);
 
 /**
- * 숫자이지만 측정값이 아니라 행을 가리키는 열(일련번호·연도·코드).
- * 이름에 숫자가 든 열('2025년', '2024년 예산')은 연도별 측정 열이라 이름 규칙에서 뺀다
+ * 숫자이지만 측정값이 아니라 행을 가리키는 열(일련번호·연도·코드). 쌓기의 라벨 열 찾기와 합계 행이 같은 판정을 쓴다.
+ * 측정 단위가 있으면 키 열이 아니다 → 일련번호·코드·번호 이름이면 키 열(이름에 숫자가 든 열은 빼고) →
+ * 값이 전부 1900~2100 정수면 키 열(연도 이름이어도 이 값 규칙을 거쳐야 한다)
  */
-function isKeyColumn(name: string, rows: Cell[][], c: number): boolean {
-  const compact = squash(name);
+function isKeyColumn(name: string, unit: string | null, values: Iterable<Cell | ResultValue>): boolean {
+  if (unit && !NON_MEASURE_UNITS.has(unit)) return false;
+  const compact = squash(splitUnitName(name).base);
   if (SERIAL_NAME.test(compact)) return true;
-  if (!/\d/.test(compact) && KEY_NAME.test(compact)) return true;
+  if (!/\d/.test(compact) && CODE_NAME.test(compact)) return true;
   let numbers = 0;
-  for (const row of rows) {
-    const p = parseNumber(row[c]);
+  for (const v of values) {
+    const p = parseNumber(v ?? null);
     if (p.kind !== 'number') continue;
     if (!Number.isInteger(p.value) || p.value < 1900 || p.value > 2100) return false;
     numbers += 1;
@@ -186,7 +203,7 @@ function isKeyColumn(name: string, rows: Cell[][], c: number): boolean {
  * 맨 앞이 연도면 라벨 열이 비어 [2025, 합계, 300]이 두 번 더해진다.
  * 측정 열 사이·오른쪽(비고 등)의 '계(추정)'·'소계(포함)'은 데이터라 보지 않는다 — 보면 데이터 행이 지워진다
  */
-function labelColumns(rows: Cell[][], width: number, names: string[]): number[] {
+function labelColumns(rows: Cell[][], width: number, names: string[], caption: string | undefined): number[] {
   const found: number[] = [];
   for (let c = 0; c < width; c += 1) {
     let nonEmpty = 0;
@@ -199,7 +216,9 @@ function labelColumns(rows: Cell[][], width: number, names: string[]): number[] 
     }
     if (nonEmpty === 0) continue;
     if (numbers * 2 > nonEmpty) {
-      if (isKeyColumn(names[c] ?? '', rows, c)) continue;
+      const cells = rows.map((row) => row[c]);
+      const unit = columnUnitInfo({ columnName: names[c] ?? '', caption, cells })?.unit ?? null;
+      if (isKeyColumn(names[c] ?? '', unit, cells)) continue;
       break;
     }
     found.push(c);
@@ -257,7 +276,7 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     }
   }
 
-  const labels = labelColumns(original, width, names);
+  const labels = labelColumns(original, width, names, table.caption);
   const skipWords = new Set(
     (spec.skip_rows_matching ?? []).map((w) => squash(String(w)).toLowerCase()).filter((w) => w !== '')
   );
@@ -672,7 +691,17 @@ function stack(sources: SourceTable[], spec: CombineSpec): Stacked {
     });
   });
   if (spec.add_source_column) columns.unshift({ name: SOURCE_COLUMN, unit: null, numeric: false });
-  return { columns, rows, lineage };
+
+  const offset = spec.add_source_column ? 1 : 0;
+  const columnOf = new Map<string, number>();
+  groups.forEach((g, gi) => g.slots.forEach((s) => columnOf.set(`${s.src}\u0000${s.col.original}`, gi + offset)));
+  const merged: MergedNumber[] = [];
+  for (const m of lineage.mergedNumbers) {
+    const source = prepared.findIndex((p) => p.file === m.file && p.table.id === m.table);
+    const column = columnOf.get(`${source}\u0000${m.column}`);
+    if (source >= 0 && column !== undefined) merged.push({ source, row: m.row, rowEnd: m.rowEnd, column });
+  }
+  return { columns, rows, lineage, merged };
 }
 
 function textValue(cell: Cell): ResultValue {
@@ -759,11 +788,11 @@ const AGGREGATE_OBJECT: Record<Exclude<AggregateFn, 'count'>, string> = {
 };
 
 /**
- * 비교·묶음용 글 다듬기: NFC, 앞뒤 공백(전각 포함) 떼고 연속 공백은 하나로.
+ * 비교·묶음용 글 다듬기: NFC, 보이지 않는 서식 글자(U+200B·U+FEFF 등 \p{Cf}) 지우기, 앞뒤 공백(전각 포함) 떼고 연속 공백은 하나로.
  * 가운데 공백은 남긴다 — '총무 과'가 '총무과'와 같은 부서인지는 사람이 정한다(similarKeys로 알린다)
  */
 function normalizeText(v: ResultValue): string {
-  return String(v).normalize('NFC').replace(/\s+/g, ' ').trim();
+  return String(v).normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
 }
 
 function asList<T>(label: string, value: T[] | undefined): T[] {
@@ -887,28 +916,15 @@ const NON_ADDITIVE_WARNINGS: Record<NonAdditive, { sum: string; avg: string }> =
 };
 
 /**
- * 단위(%·%p·배·점·년·일·개월·시간) → 이름이 비율 낱말(율·률·비중) → 키성(일련번호 이름, 연도·코드·번호 이름, 값이 전부 1900~2100 정수).
- * 키성 판정은 이름에 숫자가 있거나('2024년') 측정 낱말이 있으면('전년도 예산'·'청년 인원') 하지 않는다 —
- * '년'·'년도'가 든 측정 열을 합계에서 빼면 예산 비교표의 합계 칸이 빈다
+ * 단위(%·%p·배·점·년·일·개월·시간) → 단위 없이 이름이 비율 낱말(율·률·비율·비중) → 키 열(isKeyColumn — 쌓기의 라벨 열 찾기와 같은 판정)
  */
 function nonAdditiveKind(col: ResultColumn, values: ResultValue[]): NonAdditive | null {
   if (!col.numeric) return null;
   if (col.unit && RATIO_UNITS.has(col.unit)) return 'ratio';
   if (col.unit === '점') return 'score';
   if (col.unit && PERIOD_UNITS.has(col.unit)) return 'period';
-  const base = squash(splitUnitName(col.name).base);
-  const dimension = nameDimension(base);
-  if (dimension === '비율') return 'ratio';
-  if (SERIAL_NAME.test(base)) return 'key';
-  if (/\d/.test(base) || dimension !== null) return null;
-  if (KEY_NAME.test(base)) return 'key';
-  let numbers = 0;
-  for (const v of values) {
-    if (typeof v !== 'number') continue;
-    if (!Number.isInteger(v) || v < 1900 || v > 2100) return null;
-    numbers += 1;
-  }
-  return numbers > 0 ? 'key' : null;
+  if (!col.unit && nameDimension(splitUnitName(col.name).base) === '비율') return 'ratio';
+  return isKeyColumn(col.name, col.unit, values) ? 'key' : null;
 }
 
 function sumNumbers(values: ResultValue[]): number | null {
@@ -938,15 +954,51 @@ interface Shaped {
   aggregateSources: { source: number; result: number }[];
 }
 
-/** 묶음 키 값: 숫자 열의 숫자는 숫자로, 나머지는 다듬은 글로 — 숫자 열 2025와 글자 '2025'가 갈리지 않게 */
+/** 묶음 키 값: 숫자 열의 숫자는 숫자로, 나머지는 다듬은 글로 — 숫자 열 2025와 글자 '2025'가 갈리지 않게. 다듬어 비면 빈 칸 */
 function groupKeyPart(v: ResultValue, col: ResultColumn): string {
   if (v === null) return 'n';
   if (col.numeric && typeof v === 'number') return `d${v}`;
-  return `s${normalizeText(v)}`;
+  const text = normalizeText(v);
+  return text === '' ? 'n' : `s${text}`;
+}
+
+function formatNumber(v: number): string {
+  return v.toLocaleString('ko-KR', { maximumFractionDigits: 10 });
+}
+
+/**
+ * 세로 병합 숫자는 주인 행에만 있다. 병합이 덮는 행이 여러 묶음으로 갈리거나 거르기로 일부만 남으면
+ * 그 값은 첫 행 쪽에만 들어가거나(다른 묶음에서는 빠짐) 아예 빠진다 — 숫자는 바꾸지 않고 알린다
+ */
+function warnSplitMerges(
+  stacked: Stacked,
+  kept: Set<StackedRow>,
+  columns: Set<number>,
+  keyOf: (row: StackedRow) => string,
+  groupText: ((row: StackedRow) => string) | null
+): void {
+  const { lineage } = stacked;
+  for (const m of stacked.merged) {
+    if (!columns.has(m.column)) continue;
+    const covered = stacked.rows.filter((r) => r.source === m.source && r.row >= m.row && r.row <= m.rowEnd);
+    const owner = covered.find((r) => r.row === m.row);
+    const value = owner?.values[m.column];
+    if (!owner || typeof value !== 'number') continue;
+    const where = lineage.sources.length > 1 ? `${lineage.sources[m.source].fileName} 행` : '행';
+    const head = `열 "${stacked.columns[m.column].name}": ${where} ${m.row}~${m.rowEnd}에 병합된 값 ${formatNumber(value)}`;
+    const left = covered.filter((r) => kept.has(r));
+    if (!kept.has(owner)) {
+      if (left.length > 0) lineage.columnWarnings.push(`${head}은 첫 행이 거르기에서 빠져 더하지 않았습니다`);
+      continue;
+    }
+    const key = keyOf(owner);
+    if (left.length === covered.length && left.every((r) => keyOf(r) === key)) continue;
+    lineage.columnWarnings.push(`${head}을 첫 행(${groupText ? groupText(owner) : `행 ${m.row}`})에만 넣었습니다`);
+  }
 }
 
 function groupAndAggregate(
-  stacked: { columns: ResultColumn[]; rows: StackedRow[] },
+  stacked: Stacked,
   filtered: StackedRow[],
   spec: CombineSpec,
   lineage: Lineage
@@ -977,7 +1029,10 @@ function groupAndAggregate(
     return { fn, ci, name: as || `${col.name} ${AGGREGATE_LABELS[fn]}` };
   });
 
+  const kept = new Set(filtered);
   if (groupBy.length === 0 && aggregates.length === 0) {
+    // 쌓은 행 그대로면 거르기만 병합을 가를 수 있다
+    warnSplitMerges(stacked, kept, new Set(columns.map((_, i) => i)), () => '', null);
     return {
       columns,
       items: filtered.map((r) => ({ out: r.values, sortKeys: r.keys })),
@@ -1010,19 +1065,43 @@ function groupAndAggregate(
   // 묶기 없이 집계만이면 전체가 한 묶음 — 거른 행이 없어도 한 행(합계 null·개수 0)
   const groups = new Map<string, { labels: ResultValue[]; members: StackedRow[] }>();
   if (groupBy.length === 0) groups.set('', { labels: [], members: [] });
+  const keyOf = (row: StackedRow) => groupBy.map((ci) => groupKeyPart(row.keys[ci], columns[ci])).join('\u0000');
+  const labelsOf = (row: StackedRow) =>
+    groupBy.map((ci) => {
+      const v = row.keys[ci];
+      if (typeof v !== 'string') return v;
+      const text = normalizeText(v);
+      return text === '' ? null : text;
+    });
+  const emptyKeys = groupBy.map(() => 0);
   for (const row of filtered) {
-    const key = groupBy.length === 0 ? '' : groupBy.map((ci) => groupKeyPart(row.keys[ci], columns[ci])).join('\u0000');
+    const key = keyOf(row);
     let g = groups.get(key);
     if (!g) {
-      const labels = groupBy.map((ci) => {
-        const v = row.keys[ci];
-        return typeof v === 'string' ? normalizeText(v) : v;
-      });
-      g = { labels, members: [] };
+      g = { labels: labelsOf(row), members: [] };
       groups.set(key, g);
     }
     g.members.push(row);
+    groupBy.forEach((ci, k) => {
+      if (groupKeyPart(row.keys[ci], columns[ci]) === 'n') emptyKeys[k] += 1;
+    });
   }
+  // 빈 키 행이 한 묶음으로 모이면 '어느 부서도 아닌' 합계가 생긴다 — 원본 칸을 채울지 사람이 본다
+  groupBy.forEach((ci, k) => {
+    if (emptyKeys[k] > 0) lineage.columnWarnings.push(`"${columns[ci].name}"가 빈 행 ${emptyKeys[k]}개를 빈 묶음으로 모았습니다`);
+  });
+  warnSplitMerges(
+    stacked,
+    kept,
+    new Set(aggregates.map((a) => a.ci)),
+    keyOf,
+    groupBy.length === 0
+      ? null
+      : (row) =>
+          labelsOf(row)
+            .map((v, k) => `${columns[groupBy[k]].name} ${v ?? '(빈 칸)'}`)
+            .join(' · ')
+  );
 
   // 공백만 다른 키('총무과'·'총무 과')는 합치지 않고 알린다
   groupBy.forEach((_, k) => {
@@ -1080,6 +1159,10 @@ function sortItems(shaped: Shaped, stackedColumns: ResultColumn[], spec: Combine
     if (ci === null && shaped.fns) {
       const source = lookupColumn('정렬', s?.column, stackedColumns);
       const hits = shaped.aggregateSources.filter((a) => a.source === source);
+      if (source !== null && hits.length > 1) {
+        const names = hits.map((h) => shaped.columns[h.result].name).join(', ');
+        fail(`정렬의 "${normalizeText(String(s?.column ?? ''))}"에 맞는 열이 여럿입니다: ${names}. 정확한 이름으로 주세요.`);
+      }
       if (source !== null && hits.length === 1) ci = hits[0].result;
     }
     if (ci === null) missingColumn('정렬', normalizeText(String(s?.column ?? '')), shaped.columns.map((c) => c.name));
@@ -1152,6 +1235,11 @@ export function combineTables(sources: SourceTable[], spec: CombineSpec): Combin
     const total = spec.total_row ? totalRow(shaped, rows.map((r) => r.values)) : null;
     lineage.rowCounts = { stacked: rows.length, filtered: filtered.length, result: shaped.items.length };
     lineage.truncated = shaped.items.length > MAX_RESULT_ROWS;
+    if (lineage.truncated) {
+      const n = shaped.items.length.toLocaleString('ko-KR');
+      const cap = MAX_RESULT_ROWS.toLocaleString('ko-KR');
+      lineage.notes.push(spec.total_row ? `합계 행은 전체 ${n}행 기준 — 표에는 ${cap}행만` : `결과는 전체 ${n}행 — 표에는 ${cap}행만`);
+    }
     const out = shaped.items.slice(0, MAX_RESULT_ROWS).map((it) => it.out);
     return { ok: true, columns: shaped.columns, rows: out, total, lineage };
   });

@@ -47,7 +47,7 @@ export function describeSpec(spec: CombineSpec, fileNames: Record<string, string
   else if (aggs.length > 0) out.push(`전체 ${aggs.join(', ')}`);
 
   const sorts = list(spec.sort);
-  if (sorts.length > 0) out.push(`정렬: ${sorts.map((s) => `${s.column} ${s.desc ? '큰 순' : '작은 순'}`).join(', ')}`);
+  if (sorts.length > 0) out.push(`정렬: ${sorts.map((s) => `${s.column} ${s.desc ? '내림차순' : '오름차순'}`).join(', ')}`);
   if (spec.total_row) out.push('맨 아래 합계 행');
   return out;
 }

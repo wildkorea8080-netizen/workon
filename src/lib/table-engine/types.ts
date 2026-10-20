@@ -21,6 +21,7 @@ export interface CombineSpec {
   sources: SourceSpec[];
   filter?: { column: string; op: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'contains'; value: string | number }[];
   group_by?: string[];
+  /** count = 숫자 열에서는 숫자로 읽힌 칸 수(읽지 못한 칸은 세지 않음 — 평균의 분모와 같다), 글자 열에서는 비지 않은 칸 수 */
   aggregate?: { column: string; fn: 'sum' | 'count' | 'avg' | 'min' | 'max'; as?: string }[];
   sort?: { column: string; desc?: boolean }[];
   add_source_column?: boolean;
@@ -71,6 +72,8 @@ export interface Lineage {
   /** 열 판정 경고 — 숫자가 섞였지만 과반이 아니라 글자 열로 둔 열 등 */
   columnWarnings: string[];
   similarKeys: string[][];
+  /** 사람이 읽는 안내 문장 그대로(근거 시트·도구 결과에 싣는다) — 잘림 등 */
+  notes: string[];
   rowCounts: { stacked: number; filtered: number; result: number };
   truncated: boolean;
 }
