@@ -71,6 +71,25 @@ describe('대화 실행기의 메시지 삽입', () => {
     expect(rows[0].source_references).toEqual({ attachments: [{ id: 'att-1', file_name: '예산.xlsx' }] });
   });
 
+  it('숫자 확인 결과가 있어도 두 행의 칸 집합이 같고, 답변 행 source_references에만 싣는다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: '합계 12,345', chunks: [], links: [], files: [],
+      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1, numberCheck: { unverified: ['12,345'] },
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    expect((rows[1].source_references as Record<string, unknown>).number_check).toEqual({ unverified: ['12,345'] });
+    expect(rows[0].source_references).not.toHaveProperty('number_check');
+  });
+
+  it('숫자 확인 결과가 없으면 number_check 칸을 남기지 않는다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1, numberCheck: null,
+    });
+    expect(rows[1].source_references).not.toHaveProperty('number_check');
+  });
+
   it('저장 실패를 화면에 알린다', async () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync('src/lib/assistant/stream.ts', 'utf8');

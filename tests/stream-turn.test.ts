@@ -166,7 +166,7 @@ describe('streamTurn — 성공', () => {
     expect(writes.find((w) => w.table === 'conversations' && w.op === 'update')?.rows[0]).toEqual({ title: '여비 문의' });
     expect(events.at(-1)).toEqual({
       event: 'done',
-      data: { usage: { model: MODEL, input_tokens: 10, output_tokens: 5 }, title: '여비 문의' },
+      data: { usage: { model: MODEL, input_tokens: 10, output_tokens: 5 }, title: '여비 문의', number_check: null },
     });
   });
 
@@ -227,6 +227,94 @@ describe('streamTurn — 첨부 파일', () => {
     expect(keySet(rows[0])).toBe(keySet(rows[1]));
     expect(rows[0].source_references).toEqual({ attachments: [{ id: 'new', file_name: '예산.xlsx' }] });
     expect(rows[0].content).toBe('[첨부 파일: 예산.xlsx]\n질문');
+  });
+});
+
+describe('streamTurn — 숫자 확인', () => {
+  const schema = { type: 'object' as const, properties: {} };
+  type Outcome = { ok: boolean; text: string; shownValues?: number[] };
+
+  /** 첫 라운드에 도구들을 부르고, 둘째 라운드에 answer를 쓰는 대화 */
+  function toolTurn(calls: { tool: string; outcome: Outcome }[], answer: string, extra: Partial<PreparedTurn> = {}) {
+    const tools = calls.map((c) => ({ name: c.tool, description: '', inputSchema: schema }));
+    const capabilities = calls.map((c, i) => ({
+      id: `cap${i}`, label: '', description: '', isAvailable: () => true,
+      tools: () => [tools[i]],
+      execute: async () => c.outcome,
+    })) as never;
+    let round = 0;
+    setLlmAdapterForTests(
+      adapter({
+        stream: async function* () {
+          round += 1;
+          if (round === 1) {
+            for (const [i, c] of calls.entries()) yield { type: 'tool_use', id: `t${i}`, name: c.tool, input: {} };
+            yield { type: 'done', stopReason: 'tool_use', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          } else {
+            yield { type: 'text', text: answer };
+            yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          }
+        },
+      })
+    );
+    return turn({ capabilities, tools, ...extra });
+  }
+  const numberCheck = (events: TurnEvent[]) =>
+    (events.find((e) => e.event === 'done') as { data: { number_check: unknown } }).data.number_check;
+  const refs = (row: Record<string, unknown>) => row.source_references as Record<string, unknown>;
+
+  it('첨부 도구를 쓴 턴은 대조해 done과 답변 행에 싣는다', async () => {
+    const events = await run(toolTurn([{ tool: 'read_attachment', outcome: { ok: true, text: '표', shownValues: [100] } }], '합계 12,345'));
+    expect(numberCheck(events)).toEqual({ unverified: ['12,345'] });
+    const rows = inserted('messages');
+    expect(refs(rows[1]).number_check).toEqual({ unverified: ['12,345'] });
+    // source_references는 한 칸이라 두 행 칸 집합은 그대로다
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(refs(rows[0])).not.toHaveProperty('number_check');
+    // 답변 글은 고치지 않는다
+    expect(rows[1].content).toBe('합계 12,345');
+  });
+
+  it('보여 준 숫자와 맞으면 null이고 행에 칸을 남기지 않는다', async () => {
+    const events = await run(toolTurn([{ tool: 'combine_tables', outcome: { ok: true, text: '결과', shownValues: [12345] } }], '합계 12,345'));
+    expect(numberCheck(events)).toBeNull();
+    expect(refs(inserted('messages')[1])).not.toHaveProperty('number_check');
+  });
+
+  it('첨부 도구를 안 쓴 턴은 대조하지 않는다', async () => {
+    setLlmAdapterForTests(adapter({
+      stream: async function* () {
+        yield { type: 'text', text: '합계 12,345' };
+        yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+      },
+    }));
+    const events = await run(turn());
+    expect(numberCheck(events)).toBeNull();
+    expect(refs(inserted('messages')[1])).not.toHaveProperty('number_check');
+  });
+
+  it('첨부 도구가 실패만 했으면 대조하지 않는다', async () => {
+    const events = await run(toolTurn([{ tool: 'read_attachment', outcome: { ok: false, text: '없는 첨부입니다' } }], '합계 12,345'));
+    expect(numberCheck(events)).toBeNull();
+  });
+
+  it('첨부 도구가 아닌 도구만 쓴 턴은 대조하지 않는다', async () => {
+    const events = await run(toolTurn([{ tool: 'law_search', outcome: { ok: true, text: '법령' } }], '제12,345호'));
+    expect(numberCheck(events)).toBeNull();
+  });
+
+  it('시스템 프롬프트·질문·shownValues 없는 도구 결과 글의 숫자도 본 숫자로 친다', async () => {
+    // 개요의 행 수, 직원이 질문에 적은 금액, 다른 도구가 글로 보여 준 값은 AI가 본 숫자다
+    const base = turn();
+    const t = toolTurn(
+      [
+        { tool: 'read_attachment', outcome: { ok: true, text: '표', shownValues: [1] } },
+        { tool: 'law_search', outcome: { ok: true, text: '통계 값 33,333' } },
+      ],
+      '11,111행 중 22,222원, 33,333건, 그리고 44,444',
+      { systemPrompt: 'a1/t1 11,111행', ctx: { ...base.ctx, message: '예산 22,222원을' } }
+    );
+    expect(numberCheck(await run(t))).toEqual({ unverified: ['44,444'] });
   });
 });
 

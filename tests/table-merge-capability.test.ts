@@ -109,6 +109,8 @@ describe('combine_tables — 계산 결과', () => {
     expect(out.shownValues).toContain(total);
     expect(out.shownValues).toContain(1029);
     expect(out.shownValues).not.toContain(1030);
+    // 결과 글에 보인 행 수('외 10행'·원천 40행)도 AI가 본 숫자다
+    expect(out.shownValues).toEqual(expect.arrayContaining([10, 40]));
   });
 
   it('엔진의 안내 문장(notes)과 경고 목록을 결과 글에 싣는다', async () => {

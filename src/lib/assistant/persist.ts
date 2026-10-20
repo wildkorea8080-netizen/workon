@@ -17,6 +17,13 @@ export interface MessageRowInput {
   /** 이번 질문에 붙인 첨부. 저장소 경로는 싣지 않는다 — 화면이 이 행을 그대로 읽는다 */
   attachments: { id: string; file_name: string }[];
   agentVersion: number;
+  /** 숫자 확인 결과. 확인되지 않은 숫자가 있을 때만 답변 행에 싣는다 */
+  numberCheck?: NumberCheck | null;
+}
+
+/** 답변 숫자 중 이번 턴에 도구가 보여 준 값에서 못 찾은 것(설계 5.4) */
+export interface NumberCheck {
+  unverified: string[];
 }
 
 export function dedupeLinks(links: ToolSource[]): ToolSource[] {
@@ -58,6 +65,8 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
         })),
         links: dedupeLinks(input.links),
         files: input.files,
+        // source_references 안의 키라 두 행의 칸 집합은 그대로다. 없으면 키를 두지 않는다
+        ...(input.numberCheck?.unverified.length ? { number_check: { unverified: input.numberCheck.unverified } } : {}),
       },
       agent_version: input.agentVersion,
     },

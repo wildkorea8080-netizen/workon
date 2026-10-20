@@ -143,6 +143,13 @@ describe('파일 받아 읽기 — read_attachment', () => {
     expect(bad.text).toContain('t1');
   });
 
+  it('read_attachment: 돌려준 글의 숫자를 shownValues로 — 숫자 확인이 대조한다', async () => {
+    const t = await run(deps(), { file: 'a1', table: 't1' });
+    expect(t.shownValues).toEqual(expect.arrayContaining([100, 50, 200, 80]));
+    const body = await run(deps({ loadExtract: vi.fn(async () => ({ kind: 'document' as const, text: '집행 1,234,567원(△3.5%)', tables: [], warnings: [] })) }), { file: 'a2' });
+    expect(body.shownValues).toEqual(expect.arrayContaining([1234567, -3.5]));
+  });
+
   it('읽은 내용을 불러오지 못하면 던지지 않고 이유를 돌려준다', async () => {
     const out = await run(deps({ loadExtract: vi.fn(async () => null) }), { file: 'a1' });
     expect(out.ok).toBe(false);

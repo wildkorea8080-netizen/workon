@@ -4,6 +4,7 @@ import { describeSpec } from '@/lib/table-engine/describe';
 import { buildResultWorkbook } from '@/lib/xlsx-export';
 import { saveGeneratedFile, safeFileName, type SaveGeneratedFileInput } from '@/lib/generated-files';
 import { writeUsageLog } from '@/lib/assistant/persist';
+import { numbersIn } from '@/lib/assistant/number-check';
 import { READ_TABLE_CHARS } from '@/lib/attachments/limits';
 import type { AttachmentExtract } from '@/lib/attachments/types';
 import type { CombineSpec, Lineage, ResultColumn, ResultValue, SourceTable } from '@/lib/table-engine/types';
@@ -302,7 +303,10 @@ function renderResult(
 
   lines.push('근거:');
   lines.push(...lineageLines(lineage).map((l) => `- ${l}`));
-  return { text: lines.join('\n'), shownValues };
+  const text = lines.join('\n');
+  // 글에 보인 숫자(행 수·'외 N행'·읽지 못한 칸 수·곱한 배수)도 AI가 본 숫자다. 칸 값은 글 표기와 별도로
+  // 정확한 값으로도 넣는다 — 지수 표기('1e+21')처럼 글에서 다시 읽으면 달라지는 값이 있다
+  return { text, shownValues: [...shownValues, ...numbersIn(text)] };
 }
 
 // ── 능력 ────────────────────────────────────────────────────

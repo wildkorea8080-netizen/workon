@@ -10,7 +10,10 @@ export const HISTORY_MESSAGE_LIMIT = 20;
 export const MAX_TOOL_ROUNDS = 4;
 export const MAX_OUTPUT_TOKENS = 4096;
 
-/** SSE 이벤트. 이름과 기존 페이로드는 S1 이전과 같다. S2-a에서 tool_end에 files만 더했다 — ChatInterface가 읽는다 */
+/**
+ * SSE 이벤트. 이름과 기존 페이로드는 S1 이전과 같다. S2-a에서 tool_end에 files를, S3-b에서 done에 number_check를
+ * 더했다(첨부 도구를 쓴 턴의 확인되지 않은 숫자, 없으면 null) — ChatInterface가 읽는다
+ */
 export type TurnEvent =
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
   | { event: 'delta'; data: { text: string } }
@@ -18,7 +21,7 @@ export type TurnEvent =
   | { event: 'tool_end'; data: { name: string; ok: boolean; sources: ToolSource[]; files: GeneratedFileRef[] } }
   | { event: 'tool_limit'; data: { rounds: number } }
   | { event: 'error'; data: { message: string } }
-  | { event: 'done'; data: { usage: LlmUsage; title: string | null } };
+  | { event: 'done'; data: { usage: LlmUsage; title: string | null; number_check: { unverified: string[] } | null } };
 
 export type SendEvent = (event: TurnEvent) => void;
 

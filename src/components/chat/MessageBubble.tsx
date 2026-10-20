@@ -11,6 +11,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
 import type { RetrievedChunk } from '@/lib/db';
 import { formatFileSize } from '@/lib/file-size';
+import { NUMBER_CHECK_NOTE } from '@/lib/assistant/number-check';
 
 interface ToolLink {
   title: string;
@@ -35,10 +36,12 @@ interface MessageBubbleProps {
   links?: ToolLink[];
   /** 비서가 만든 파일 — 내려받기 카드 */
   files?: GeneratedFile[];
+  /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자(답변 글은 그대로 둔다) */
+  numberCheck?: string[];
   error?: string;
 }
 
-export default function MessageBubble({ role, content, imagePreviews, attachments, sources, links, files, error }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, imagePreviews, attachments, sources, links, files, numberCheck, error }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -168,6 +171,19 @@ export default function MessageBubble({ role, content, imagePreviews, attachment
             </div>
           )}
         </div>
+
+        {/* 숫자 확인 — '틀렸다'가 아니라 '확인되지 않았다'. 직원이 원본과 맞춰 볼 숫자를 알려 준다 */}
+        {!isUser && !error && numberCheck && numberCheck.length > 0 && (
+          <div
+            role="note"
+            className="mt-2 w-full flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs leading-relaxed"
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span className="break-words">{NUMBER_CHECK_NOTE(numberCheck)}</span>
+          </div>
+        )}
 
         {/* RAG 출처 */}
         {sources && sources.length > 0 && (

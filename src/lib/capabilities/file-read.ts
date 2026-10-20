@@ -10,6 +10,7 @@ import {
   READ_TEXT_CHARS,
 } from '@/lib/attachments/limits';
 import type { AttachmentExtract, AttachmentSummary } from '@/lib/attachments/types';
+import { numbersIn } from '@/lib/assistant/number-check';
 import { findAttachment, loadTurnExtract } from './attachment-access';
 import type { Capability, ToolOutcome, TurnAttachment, TurnContext } from './types';
 
@@ -204,6 +205,8 @@ export function createFileRead(deps: FileReadDeps): Capability {
         };
       }
 
+      // 숫자 확인: 돌려준 글에 보인 숫자가 곧 AI가 본 숫자다(보이지 않은 행은 글에 없다)
+      const shown = (text: string): ToolOutcome => ({ ok: true, text, shownValues: numbersIn(text) });
       const offset = readOffset(input.offset);
       const label = `[직원이 첨부한 파일 ${attachment.ref} ${name}의 내용]`;
       const tableId = typeof input.table === 'string' ? input.table.trim() : '';
@@ -218,14 +221,11 @@ export function createFileRead(deps: FileReadDeps): Capability {
         }
         const bodyRows = Math.max(0, table.cells.length - (table.header.to + 1));
         if (offset > 0 && offset >= bodyRows) {
-          return { ok: true, text: `${label}\n더 읽을 행이 없습니다 (본문 ${num(bodyRows)}행)` };
+          return shown(`${label}\n더 읽을 행이 없습니다 (본문 ${num(bodyRows)}행)`);
         }
-        return {
-          ok: true,
-          text: `${label}\n${tableAsMarkdown(table, { offset, limit: READ_TABLE_ROWS, maxChars: READ_TABLE_CHARS })}`,
-        };
+        return shown(`${label}\n${tableAsMarkdown(table, { offset, limit: READ_TABLE_ROWS, maxChars: READ_TABLE_CHARS })}`);
       }
-      return { ok: true, text: `${label}\n${readText(extract.text, offset)}` };
+      return shown(`${label}\n${readText(extract.text, offset)}`);
     },
   };
 }

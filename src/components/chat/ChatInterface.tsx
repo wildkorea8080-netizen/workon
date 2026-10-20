@@ -36,6 +36,8 @@ interface Message {
   links?: ToolLink[];
   /** 비서가 만든 파일 */
   files?: { id: string; file_name: string; size_bytes: number }[];
+  /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자 */
+  numberCheck?: string[];
   error?: string;
 }
 
@@ -163,6 +165,7 @@ export default function ChatInterface({
                 links?: ToolLink[];
                 files?: { id: string; file_name: string; size_bytes: number }[];
                 attachments?: { id: string; file_name: string }[];
+                number_check?: { unverified?: string[] };
               };
             }) => ({
               id: m.id,
@@ -175,6 +178,9 @@ export default function ChatInterface({
               links: m.source_references?.links,
               files: m.source_references?.files,
               attachments: m.role === 'user' ? m.source_references?.attachments : undefined,
+              numberCheck: m.role === 'assistant' && m.source_references?.number_check?.unverified?.length
+                ? m.source_references.number_check.unverified
+                : undefined,
             })
           )
         );
@@ -402,6 +408,12 @@ export default function ChatInterface({
             if (bubbleShown && collectedFiles.length) {
               patchAssistant({ files: [...collectedFiles] });
             }
+          } else if (name === 'done') {
+            // 숫자 확인은 저장 뒤에 정해져 done에만 실린다. 대조할 답이 없으면 말풍선도 없다
+            const unverified: unknown = payload.number_check?.unverified;
+            if (bubbleShown && Array.isArray(unverified) && unverified.length > 0) {
+              patchAssistant({ numberCheck: unverified.map(String) });
+            }
           } else if (name === 'error') {
             if (!bubbleShown) {
               setIsLoading(false);
@@ -562,6 +574,7 @@ export default function ChatInterface({
               sources={msg.sources}
               links={msg.links}
               files={msg.files}
+              numberCheck={msg.numberCheck}
               error={msg.error}
             />
           ))

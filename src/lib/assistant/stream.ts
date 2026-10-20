@@ -9,6 +9,7 @@ import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent }
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
+import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
 
 const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -41,6 +42,10 @@ export interface LoopResult {
   capabilityUsage: LlmUsage[];
   links: ToolSource[];
   files: GeneratedFileRef[];
+  /** 이번 턴에 도구가 AI에게 보여 준 숫자 — 숫자 확인이 답변과 대조한다 */
+  shownValues: number[];
+  /** 첨부 도구(read_attachment·combine_tables)가 한 번이라도 성공했는가. 아니면 숫자 확인을 하지 않는다 */
+  attachmentToolSucceeded: boolean;
 }
 
 export const TOOL_LIMIT_NOTICE =
@@ -78,6 +83,8 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   const capabilityUsage: LlmUsage[] = args.progress?.capabilityUsage ?? [];
   const links: ToolSource[] = [];
   const files: GeneratedFileRef[] = [];
+  const shownValues: number[] = [];
+  let attachmentToolSucceeded = false;
   const tools = args.tools.length > 0 ? args.tools : undefined;
   let text = '';
 
@@ -134,6 +141,10 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       links.push(...callLinks);
       files.push(...callFiles);
       if (outcome.usage) capabilityUsage.push(...outcome.usage);
+      // 값을 밝히지 않은 도구(법령·통계 등)는 돌려준 글의 숫자가 곧 보여 준 숫자다.
+      // 표 하나가 수만 칸이라 펼쳐 넘기지(push(...)) 않는다 — 인자 수 상한에 걸린다
+      for (const v of outcome.shownValues ?? numbersIn(outcome.text)) shownValues.push(v);
+      if (outcome.ok && NUMBER_CHECK_TOOLS.has(call.name)) attachmentToolSucceeded = true;
       send({ event: 'tool_end', data: { name: call.name, ok: outcome.ok, sources: callLinks, files: callFiles } });
       resultBlocks.push({ type: 'tool_result', tool_use_id: call.id, content: outcome.text, is_error: !outcome.ok });
     }
@@ -164,7 +175,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
     }
   }
 
-  return { text, usage, capabilityUsage, links: dedupeLinks(links), files };
+  return { text, usage, capabilityUsage, links: dedupeLinks(links), files, shownValues, attachmentToolSucceeded };
 }
 
 /** 이 턴의 사용량을 모델별로 한 행씩 기록한다. 토큰이 없으면 남기지 않는다 */
@@ -249,6 +260,15 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
     return;
   }
 
+  // 숫자 확인(설계 5.4) — 첨부 도구가 성공한 턴만. 시스템 프롬프트(첨부 개요의 행 수·참고 자료)와
+  // 직원의 질문에 적힌 숫자도 AI가 본 숫자라 함께 대조한다. 답변 글은 고치지 않는다
+  let numberCheck: { unverified: string[] } | null = null;
+  if (result.attachmentToolSucceeded) {
+    const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message));
+    const unverified = checkNumbers(result.text, shown);
+    if (unverified.length > 0) numberCheck = { unverified };
+  }
+
   const saveError = await saveMessages(
     buildMessageRows({
       conversationId: turn.conversationId,
@@ -260,6 +280,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
       files: result.files,
       attachments: turn.ctx.attachments.filter((a) => a.isNew).map((a) => ({ id: a.id, file_name: a.fileName })),
       agentVersion: turn.ctx.agentVersion,
+      numberCheck,
     })
   );
   if (saveError) {
@@ -306,5 +327,5 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
     }
   }
 
-  send({ event: 'done', data: { usage: result.usage, title } });
+  send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck } });
 }
