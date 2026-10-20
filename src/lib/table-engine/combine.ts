@@ -158,29 +158,37 @@ function emptyLineage(): Lineage {
 
 // ── 1단계: 원천 준비 ─────────────────────────────────────────────
 
-/** 앞머리 순번 열: 이름이 연번·순번·번호이거나, 값이 1부터 1씩 늘어나는 숫자 */
+/** 일련번호 열 이름. 값이 1..n이어도 이름이 이렇지 않으면 일련번호로 보지 않는다 — '예산'이 1·2·3일 수도 있다 */
 const SERIAL_NAME = /^(연번|순번|번호|일련번호|no\.?)$/i;
+/** 키성 숫자 열 이름: 연도·코드·번호류 */
+const KEY_NAME = /연도|년도|년|코드|번호|순번|연번|(^|[^a-z])id([^a-z]|$)/i;
 
-function isSerialColumn(name: string, rows: Cell[][], c: number): boolean {
-  if (SERIAL_NAME.test(squash(name))) return true;
-  const values: number[] = [];
+/**
+ * 숫자이지만 측정값이 아니라 행을 가리키는 열(일련번호·연도·코드).
+ * 이름에 숫자가 든 열('2025년', '2024년 예산')은 연도별 측정 열이라 이름 규칙에서 뺀다
+ */
+function isKeyColumn(name: string, rows: Cell[][], c: number): boolean {
+  const compact = squash(name);
+  if (SERIAL_NAME.test(compact)) return true;
+  if (!/\d/.test(compact) && KEY_NAME.test(compact)) return true;
+  let numbers = 0;
   for (const row of rows) {
     const p = parseNumber(row[c]);
-    if (p.kind === 'empty') continue;
-    if (p.kind !== 'number') return false;
-    values.push(p.value);
+    if (p.kind !== 'number') continue;
+    if (!Number.isInteger(p.value) || p.value < 1900 || p.value > 2100) return false;
+    numbers += 1;
   }
-  return values.length >= 2 && values.every((v, i) => v === i + 1);
+  return numbers > 0;
 }
 
 /**
- * 합계 표기를 찾을 라벨 열 = 첫 숫자 열 왼쪽의 글자 열(앞의 순번 열은 건너뜀).
- * 숫자 열 오른쪽(비고 등)의 '계(추정)'·'소계(포함)'은 데이터라 보지 않는다 — 보면 데이터 행이 지워진다
+ * 합계 표기를 찾을 라벨 열 = 첫 측정 열 왼쪽의 글자 열. 키성 숫자 열(연도·코드·일련번호)은 측정 열이 아니라 건너뛴다 —
+ * 맨 앞이 연도면 라벨 열이 비어 [2025, 합계, 300]이 두 번 더해진다.
+ * 측정 열 사이·오른쪽(비고 등)의 '계(추정)'·'소계(포함)'은 데이터라 보지 않는다 — 보면 데이터 행이 지워진다
  */
 function labelColumns(rows: Cell[][], width: number, names: string[]): number[] {
-  const start = width > 0 && isSerialColumn(names[0], rows, 0) ? 1 : 0;
   const found: number[] = [];
-  for (let c = start; c < width; c += 1) {
+  for (let c = 0; c < width; c += 1) {
     let nonEmpty = 0;
     let numbers = 0;
     for (const row of rows) {
@@ -190,7 +198,10 @@ function labelColumns(rows: Cell[][], width: number, names: string[]): number[] 
       if (p.kind === 'number') numbers += 1;
     }
     if (nonEmpty === 0) continue;
-    if (numbers * 2 > nonEmpty) break;
+    if (numbers * 2 > nonEmpty) {
+      if (isKeyColumn(names[c] ?? '', rows, c)) continue;
+      break;
+    }
     found.push(c);
   }
   return found;
@@ -267,6 +278,8 @@ function prepareSource(source: SourceTable, spec: SourceSpec, lineage: Lineage):
     const reason = labelReason(owner);
     if (!reason) continue;
     for (let r = at; r < Math.min(at + m.rows, original.length); r += 1) {
+      // 병합 안인데 그 칸에 제 글이 있으면 병합 정보가 어긋난 것 — 칸의 글을 믿고 거기서 멈춘다(데이터 행을 지우지 않게)
+      if (r > at && !isBlank(original[r][m.col])) break;
       if (!coveredReason.has(r)) coveredReason.set(r, reason);
     }
   }
