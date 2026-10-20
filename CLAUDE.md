@@ -91,7 +91,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 789개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 799개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -322,6 +322,11 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 | `tool_end` | `{ name, ok, sources, files }` | 도구 실행 완료 |
 | `tool_limit` | `{ rounds }` | 툴 라운드 상한 도달 |
 | `done` | `{ usage, title }` | 저장 완료 후 |
+
+**`error` 이벤트에는 원문을 싣지 않습니다.** AI 어댑터는 `LlmApiError`(상태·원문)를 던지고, 실행기가 `friendlyLlmMessage`(`src/lib/llm/errors.ts`)로
+한국어 안내만 보냅니다 — 결제·키 문제(크레딧 부족·401·403·키 미설정)는 "기관 관리자에게 문의", 요청 몰림(429·529·overloaded)은 "잠시 뒤 다시".
+원문은 `system_logs`(category `api`)에 남기고 결제·키 문제는 `critical`이라 슈퍼관리자 로그에서 바로 보입니다. 예전에는 Anthropic 원문
+("credit balance is too low…")이 직원 화면에 그대로 떴습니다. 스캔 판독이 들어가는 `/api/upload`도 AI 오류는 같은 안내를 씁니다.
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
 클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).
@@ -688,7 +693,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-17 기준 789개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-20 기준 799개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
