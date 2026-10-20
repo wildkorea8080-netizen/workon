@@ -8,7 +8,14 @@ describe('normalizeUnit', () => {
     ['kg', 'kg'], ['KG', 'kg'], ['ha', 'ha'], ['㎡', '㎡'], ['천　원', '천원'],
   ])('%s → %s', (raw, out) => expect(normalizeUnit(raw)).toBe(out));
 
-  it.each(['', '  ', '만원', '달러', '천', '단위', '원원', '12원'])('모르는 단위: %j', (raw) => {
+  it.each([
+    ['만원', '만원'], ['천만원', '천만원'], ['십억원', '십억원'], ['백억 원', '백억원'], ['천명', '천명'], ['만 명', '만명'],
+    ['천톤', '천톤'], ['천㎡', '천㎡'], ['대', '대'], ['가구', '가구'], ['천가구', '천가구'], ['%p', '%p'], ['km', 'km'],
+    ['Km', 'km'], ['KM', 'km'], ['㎞', 'km'], ['㎏', 'kg'], ['㏊', 'ha'], ['㎥', '㎥'], ['일', '일'], ['시간', '시간'],
+    ['년', '년'], ['개월', '개월'], ['점', '점'], ['배', '배'], ['억', '억원'], ['조', '조원'],
+  ])('합성·별칭 %s → %s', (raw, out) => expect(normalizeUnit(raw)).toBe(out));
+
+  it.each(['', '  ', '달러', '천', '만', '십억', '단위', '원원', '12원', '냥', '억명원'])('모르는 단위: %j', (raw) => {
     expect(normalizeUnit(raw)).toBeNull();
   });
 });
@@ -37,7 +44,27 @@ describe('columnUnit', () => {
     expect(columnUnit({ columnName: '예산 [백만원]', cells: [] })).toBe('백만원');
     expect(columnUnit({ columnName: '예산 / 본예산(천원)', cells: [] })).toBe('천원');
     expect(columnUnit({ columnName: '비고(참고) (명)', cells: [] })).toBe('명');
+    expect(columnUnit({ columnName: '예산(천원)(명)', cells: [] })).toBeNull(); // 서로 다른 단위 둘
     expect(columnUnit({ columnName: '구분(가)', cells: [] })).toBeNull();
+  });
+
+  it('머리글에 단위로 보이는 괄호가 있는데 모르는 단위면 캡션으로 넘어가지 않는다', () => {
+    expect(columnUnit({ columnName: '예산(만원)', caption: '(단위: 천원)', cells: [] })).toBe('만원');
+    expect(columnUnit({ columnName: '예산(냥)', caption: '(단위: 천원)', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '예산(단위: 냥)', caption: '(단위: 천원)', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '예산(단위 냥)', caption: '(단위: 천원)', cells: [] })).toBeNull();
+    // 숫자·긴 글이 든 괄호는 단위로 보지 않는다
+    expect(columnUnit({ columnName: '예산(2025년 기준 본예산)', caption: '(단위: 천원)', cells: [] })).toBe('천원');
+    expect(columnUnit({ columnName: '예산', caption: '(단위: 천원)', cells: [] })).toBe('천원');
+  });
+
+  it('캡션에 단위 절이 둘 이상이면 null, 문장 속 단위는 절이 아니다', () => {
+    expect(columnUnit({ columnName: '예산', caption: '(단위: 천원) (단위: 명)', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '예산', caption: '(단위: 천원) (단위 : 천원)', cells: [] })).toBe('천원');
+    expect(columnUnit({ columnName: '예산', caption: '단위 건 처리 현황', cells: [] })).toBeNull();
+    expect(columnUnit({ columnName: '예산', caption: '(단위 천원)', cells: [] })).toBe('천원');
+    expect(columnUnit({ columnName: '예산', caption: '(단위: 천원) <표 2>', cells: [] })).toBe('천원');
+    expect(columnUnit({ columnName: '예산', caption: '(단위: 천원) 단위 건 처리', cells: [] })).toBe('천원');
   });
 
   it('캡션: 단위 표기 꼴 여럿, 단위 앞뒤 글', () => {

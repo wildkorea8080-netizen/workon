@@ -7,16 +7,16 @@ import { normalizeUnit } from './unit-names';
 
 export type Parsed =
   | { kind: 'empty' }
-  | { kind: 'number'; value: number; unit?: string; percent?: boolean }
+  | { kind: 'number'; value: number; unit?: string; percent?: boolean; parenthesized?: true }
   | { kind: 'unreadable'; text: string };
 
 /** 값 없음 표시. 공공기관 표는 0 대신 '-'를 쓴다 */
-const EMPTY_MARK = /^[-—–]$/;
+const EMPTY_MARK = /^[-—–－―‐‑‒−]$/;
 /** 천 단위 쉼표는 3자리씩, 쉼표가 없으면 자릿수 자유. 앞자리 0·부호·지수·소수점만 있는 꼴은 거절 */
 const BODY = /^(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)$/;
 /** 숫자(또는 닫는 괄호)로 끝나는 몸통 + 뒤에 붙은 글. 뒤의 글이 단위 후보 */
 const SPLIT_TAIL = /^(.*[\d)])\s*([^\d)]*)$/s;
-const NEG_PREFIX = /^[△▲\-−]\s*/;
+const NEG_PREFIX = /^[△▲\-−－]\s*/;
 const WON_SIGN = /^[₩￦]\s*/;
 
 type Peeled = { rest: string; unit: string | null } | null;
@@ -48,6 +48,7 @@ export function parseNumber(cell: string | number | null): Parsed {
   if (s === '' || EMPTY_MARK.test(s)) return { kind: 'empty' };
 
   let negative = false;
+  let parenthesized = false;
   let unit: string | null = null;
 
   // 1) 뒤에 붙은 단위: '1,234원', '(1,234)원'
@@ -59,6 +60,7 @@ export function parseNumber(cell: string | number | null): Parsed {
   // 2) 괄호 음수(회계식): '(1,234)'. 안쪽에 단위가 있는 '(1,234원)'도 받되, 바깥·안쪽 둘 다 있으면 거절
   if (s.startsWith('(') && s.endsWith(')')) {
     negative = true;
+    parenthesized = true;
     s = s.slice(1, -1).trim();
     const inner = peelUnit(s);
     if (!inner || (inner.unit && unit)) return unreadable(cell);
@@ -87,12 +89,16 @@ export function parseNumber(cell: string | number | null): Parsed {
   }
 
   // 4) 숫자 본문. 앞자리 0('007')은 코드·번호라 값으로 치지 않는다 — S3-a가 CSV 코드 칸을 글자로 지킨 이유와 같다
-  if (!BODY.test(s) || /^0\d/.test(s)) return unreadable(cell);
+  if (!BODY.test(s) || /^0[\d,]/.test(s)) return unreadable(cell);
   const magnitude = Number(s.replace(/,/g, ''));
   // 2^53을 넘으면 더하기가 조용히 어긋난다
   if (!Number.isFinite(magnitude) || magnitude > Number.MAX_SAFE_INTEGER) return unreadable(cell);
 
   const value = negative && magnitude !== 0 ? -magnitude : magnitude;
-  if (!unit) return { kind: 'number', value };
-  return unit === '%' ? { kind: 'number', value, unit, percent: true } : { kind: 'number', value, unit };
+  const out: Extract<Parsed, { kind: 'number' }> = { kind: 'number', value };
+  if (unit) out.unit = unit;
+  if (unit === '%') out.percent = true;
+  // '(1,234)'가 음수 표기인지 부연 괄호인지는 칸만 봐서는 모른다 — 합산 쪽이 경고하도록 표시를 남긴다
+  if (parenthesized) out.parenthesized = true;
+  return out;
 }
