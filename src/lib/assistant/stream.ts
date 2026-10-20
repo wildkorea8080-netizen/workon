@@ -7,6 +7,10 @@ import type { Capability, TurnContext, ToolOutcome, GeneratedFileRef } from '@/l
 import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
+import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
+import { logSystem } from '@/lib/logger';
+
+const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
 
 /**
  * 호출한 쪽이 소유하는 누적 사용량. 루프가 도중에 던져도 이미 쓴 토큰이
@@ -227,7 +231,21 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
     console.error('[assistant] streaming error:', error);
     // 이미 끝난 라운드와 능력이 쓴 토큰은 청구 대상이다. 던졌다고 지우면 기록이 빠진다.
     await logChatUsage(turn, [progress.usage, ...progress.capabilityUsage], { aborted: true });
-    send({ event: 'error', data: { message: error instanceof Error ? error.message : '응답 생성 중 오류가 발생했습니다.' } });
+    // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
+    // 크레딧·키 문제는 직원이 기다려도 풀리지 않으므로 슈퍼관리자 로그에서 바로 보이게 critical로 둔다.
+    const kind = error instanceof LlmApiError ? llmErrorKind(error) : null;
+    await logSystem({
+      level: kind === 'unavailable' ? 'critical' : 'error',
+      category: 'api',
+      message: kind === 'unavailable' ? 'AI 서비스 사용 불가(결제·키 확인 필요)' : 'AI 응답 생성 실패',
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+        status: error instanceof LlmApiError ? error.status : null,
+        model: turn.modelId,
+      },
+      orgId: turn.ctx.organizationId,
+    });
+    send({ event: 'error', data: { message: friendlyLlmMessage(error) ?? GENERIC_TURN_ERROR } });
     return;
   }
 

@@ -1,6 +1,7 @@
 // src/lib/llm/anthropic.ts
 import { ANTHROPIC_API_KEY } from '@/lib/config';
 import type { LlmAdapter, LlmRequest, LlmStreamEvent, LlmUsage, LlmCompletion } from './types';
+import { LlmApiError } from './errors';
 
 /** 이 저장소에서 Anthropic 주소가 나오는 곳은 여기뿐이다 (tests/llm-boundary.test.ts) */
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
@@ -33,14 +34,12 @@ export function toAnthropicBody(req: LlmRequest, stream: boolean): Record<string
 }
 
 async function apiError(response: Response): Promise<Error> {
-  const detail = await response.json().catch(() => ({}));
-  return new Error(
-    `Claude API 오류: ${response.status} - ${(detail as { error?: { message?: string } }).error?.message || '알 수 없는 오류'}`
-  );
+  const detail = (await response.json().catch(() => ({}))) as { error?: { message?: string; type?: string } };
+  return new LlmApiError(response.status, detail.error?.message || '알 수 없는 오류', detail.error?.type);
 }
 
 function requireKey() {
-  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY가 설정되지 않았습니다.');
+  if (!ANTHROPIC_API_KEY) throw new LlmApiError(null, 'ANTHROPIC_API_KEY가 설정되지 않았습니다.', 'missing_key');
 }
 
 /**
@@ -121,7 +120,7 @@ export async function* parseAnthropicStream(
             stopReason = parsed.delta?.stop_reason ?? stopReason;
             break;
           case 'error':
-            throw new Error(`Claude API 오류: ${parsed.error?.message ?? '알 수 없는 오류'}`);
+            throw new LlmApiError(null, parsed.error?.message ?? '알 수 없는 오류', parsed.error?.type);
         }
       }
     }

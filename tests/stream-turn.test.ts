@@ -38,6 +38,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
 });
 
 import { setLlmAdapterForTests } from '@/lib/llm';
+import { LlmApiError, LLM_MESSAGES } from '@/lib/llm/errors';
 import type { LlmAdapter, LlmStreamEvent } from '@/lib/llm/types';
 import { streamTurn } from '@/lib/assistant/stream';
 import { storedUserContent, buildUserContent } from '@/lib/assistant/prompt';
@@ -246,7 +247,31 @@ describe('streamTurn — 실패', () => {
     expect(chat).toHaveLength(1);
     expect(details(chat[0])).toMatchObject({ aborted: true, model: MODEL, input_tokens: 8, output_tokens: 4 });
     expect(inserted('messages')).toHaveLength(0);
-    expect(events.at(-1)).toEqual({ event: 'error', data: { message: '연결 오류' } });
+    // AI 오류가 아닌 내부 예외 원문도 직원에게 보이지 않는다
+    expect(events.at(-1)).toEqual({
+      event: 'error',
+      data: { message: '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.' },
+    });
+    expect(inserted('system_logs')[0]).toMatchObject({ level: 'error', category: 'api', org_id: 'o' });
+  });
+
+  it('크레딧 부족 같은 AI 오류는 원문 대신 관리자 문의 안내, 원문은 critical 운영 기록에', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setLlmAdapterForTests(
+      adapter({
+        // eslint-disable-next-line require-yield
+        stream: async function* () {
+          throw new LlmApiError(400, 'Your credit balance is too low to access the Anthropic API.');
+        },
+      })
+    );
+    const events = await run(turn());
+    const last = events.at(-1) as { event: string; data: { message: string } };
+    expect(last).toEqual({ event: 'error', data: { message: LLM_MESSAGES.unavailable } });
+    expect(last.data.message).not.toMatch(/credit/i);
+    const log = inserted('system_logs')[0];
+    expect(log).toMatchObject({ level: 'critical', category: 'api', org_id: 'o' });
+    expect(JSON.stringify(log.details)).toContain('credit balance');
   });
 
   it('보내기가 던져도(연결 끊김) 저장과 기록은 계속된다', async () => {

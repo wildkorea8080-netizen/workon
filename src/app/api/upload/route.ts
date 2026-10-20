@@ -18,6 +18,7 @@ import { loadAgentAccess, recordAgentEvent, enableAgentCapability } from '@/lib/
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
 import { resolveModelForDepartment } from '@/lib/model-policy';
+import { friendlyLlmMessage } from '@/lib/llm/errors';
 
 // 크기·개수 상한은 file-types.ts 한 곳에 있다. 화면과 서버가 서로 다른
 // 숫자를 들고 있어 안내와 실제가 어긋난 적이 있다.
@@ -230,7 +231,8 @@ export async function POST(request: Request) {
   } catch (procErr: any) {
     console.error('[upload] 문서 처리 실패:', procErr.message);
     return NextResponse.json<ApiResponse<null>>(
-      { ok: false, error: { message: `문서 처리 중 오류가 발생했습니다: ${procErr.message}` } },
+      // 스캔 판독(AI) 실패 원문은 결제·키 사정을 드러내므로 안내로 바꾼다. 파서 오류는 한국어 이유 그대로
+      { ok: false, error: { message: friendlyLlmMessage(procErr) ?? `문서 처리 중 오류가 발생했습니다: ${procErr.message}` } },
       { status: 500 }
     );
   }
