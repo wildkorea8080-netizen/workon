@@ -80,3 +80,20 @@ describe('안내 문구', () => {
   it('대조를 켜는 도구는 첨부 도구 둘', () =>
     expect([...NUMBER_CHECK_TOOLS].sort()).toEqual(['combine_tables', 'read_attachment']));
 });
+
+describe('최종 수정 — 소제목 번호·두 자리 연도 날짜(I5)', () => {
+  it('줄머리 소제목 번호(1.1·2.3.1·- 1.2.)는 대조하지 않는다', () => {
+    expect(checkNumbers('## 1.1 개요\n### 2.3 세부', [])).toEqual([]);
+    expect(checkNumbers('2.3.1 추진 경과\n- 1.2. 세부 내용\n  3.4 기타', [])).toEqual([]);
+  });
+  it('줄 가운데의 소수와 단위가 붙은 줄머리 숫자는 그대로 대조한다', () => {
+    expect(checkNumbers('평균 1.5배 늘었고\n1.2억 원이 들었다', [])).toEqual(['1.5', '1.2']);
+  });
+  it('두 자리 연도 날짜(26.10.21)는 대조하지 않는다', () => {
+    expect(checkNumbers('작성일 26.10.21', [])).toEqual([]);
+    expect(checkNumbers('작성일 26.10.21 기준, 합계 1,500.5', [1500.5])).toEqual([]);
+  });
+  it('달·날 범위를 벗어나면 날짜가 아니다', () => {
+    expect(checkNumbers('비율 12.13.40 항목', [])).toEqual(['12.13']);
+  });
+});
