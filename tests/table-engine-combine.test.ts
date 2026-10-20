@@ -850,3 +850,499 @@ describe('수정 3차 — 키성 열 판정 갈래', () => {
     expect(r.rows.map((row) => row[0])).toEqual(['총무과', '기획과']);
   });
 });
+
+// ── Task 3: 거르기·묶기·집계·정렬·합계 행 ─────────────────────────
+
+const BUDGET: Cell[][] = [
+  ['부서', '예산'],
+  ['총무과', 100],
+  ['총무과', 200],
+  ['기획과', 50],
+];
+
+describe('묶기·집계', () => {
+  it('부서 기준 묶어 합계·개수, 합계 행', () => {
+    const r = ok(
+      combine([src('a1', BUDGET)], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '예산', fn: 'count' },
+        ],
+        total_row: true,
+      })
+    );
+    expect(r.columns).toEqual([
+      { name: '부서', unit: null, numeric: false },
+      { name: '예산 합계', unit: null, numeric: true },
+      { name: '예산 개수', unit: null, numeric: true },
+    ]);
+    expect(r.rows).toEqual([
+      ['총무과', 300, 2],
+      ['기획과', 50, 1],
+    ]);
+    expect(r.total).toEqual(['합계', 350, null]);
+    expect(r.lineage.rowCounts).toEqual({ stacked: 3, filtered: 3, result: 2 });
+  });
+
+  it('읽지 못한 칸은 합계에서 빠진다(0으로 치지 않음)', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '예산'], ['총무과', 100], ['총무과', '미제출'], ['총무과', 50]])], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '예산', fn: 'avg' },
+          { column: '예산', fn: 'count' },
+        ],
+      })
+    );
+    expect(r.rows).toEqual([['총무과', 150, 75, 2]]);
+    expect(r.lineage.unreadable).toHaveLength(1);
+  });
+
+  it('묶음 키는 앞뒤·전각 공백만 다듬고, 가운데 공백은 다른 키 + 비슷한 키 경고', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [['부서', '예산'], ['총무과', 100], ['총무과　', 10], [' 총무과 ', 1]]),
+          src('a2', [['부서', '예산'], ['총무 과', 1000], ['기획　　과', 5], ['기획 과', 7]]),
+        ],
+        { group_by: ['부서'], aggregate: [{ column: '예산', fn: 'sum' }] }
+      )
+    );
+    expect(r.rows).toEqual([
+      ['총무과', 111],
+      ['총무 과', 1000],
+      ['기획 과', 12],
+    ]);
+    expect(r.lineage.similarKeys).toEqual([['총무과', '총무 과']]);
+  });
+
+  it('조합형(NFD) 글자도 같은 키로 묶는다', () => {
+    const nfd = '총무과'.normalize('NFD');
+    const r = ok(
+      combine([src('a1', [['부서', '예산'], ['총무과', 1], [nfd, 2]])], {
+        group_by: ['부서'],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([['총무과', 3]]);
+  });
+
+  it('결과 열 이름은 as 또는 "열 함수", 단위는 원래 열 단위(개수는 없음)', () => {
+    const r = ok(
+      combine([src('a1', BUDGET, { caption: CAP_THOUSAND })], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '예산', fn: 'sum', as: '총예산' },
+          { column: '예산', fn: 'avg' },
+          { column: '예산', fn: 'min' },
+          { column: '예산', fn: 'max' },
+          { column: '예산', fn: 'count' },
+        ],
+      })
+    );
+    expect(r.columns).toEqual([
+      { name: '부서', unit: null, numeric: false },
+      { name: '총예산', unit: '천원', numeric: true },
+      { name: '예산(천원) 평균', unit: '천원', numeric: true },
+      { name: '예산(천원) 최소', unit: '천원', numeric: true },
+      { name: '예산(천원) 최대', unit: '천원', numeric: true },
+      { name: '예산(천원) 개수', unit: null, numeric: true },
+    ]);
+    expect(r.rows).toEqual([
+      ['총무과', 300, 150, 100, 200, 2],
+      ['기획과', 50, 50, 50, 50, 1],
+    ]);
+  });
+
+  it('단위 괄호를 뗀 이름으로도 열을 찾는다', () => {
+    const r = ok(
+      combine([src('a1', BUDGET, { caption: CAP_THOUSAND })], {
+        filter: [{ column: '예산', op: '>', value: 60 }],
+        aggregate: [{ column: '예산', fn: 'sum' }],
+      })
+    );
+    expect(r.rows).toEqual([[300]]);
+  });
+
+  it('지시가 붙인 단위가 열 단위와 다르면 그 열로 맞추지 않는다', () => {
+    const r = combine([src('a1', BUDGET, { caption: CAP_THOUSAND })], { aggregate: [{ column: '예산(원)', fn: 'sum' }] });
+    expect(r).toEqual({ ok: false, error: '집계에 "예산(원)" 열이 없습니다. 있는 열: 부서, 예산(천원)' });
+  });
+
+  it('뗀 이름이 여러 열에 맞으면 실패', () => {
+    const r = combine([src('a1', [['부서', '인원(명)', '인원(%)'], ['총무과', 3, 50]])], {
+      aggregate: [{ column: '인원', fn: 'sum' }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('여럿');
+  });
+
+  it('묶기 없이 집계만 있으면 한 행, 행이 없으면 합계는 null·개수는 0', () => {
+    const r = ok(
+      combine([src('a1', BUDGET)], {
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '부서', fn: 'count' },
+        ],
+      })
+    );
+    expect(r.columns.map((c) => c.name)).toEqual(['예산 합계', '부서 개수']);
+    expect(r.rows).toEqual([[350, 3]]);
+    const empty = ok(
+      combine([src('a1', BUDGET)], {
+        filter: [{ column: '부서', op: '=', value: '없는과' }],
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '예산', fn: 'count' },
+        ],
+      })
+    );
+    expect(empty.rows).toEqual([[null, 0]]);
+    expect(empty.lineage.rowCounts).toEqual({ stacked: 3, filtered: 0, result: 1 });
+  });
+
+  it('묶기 없이 집계도 없으면 쌓은 행 그대로, 묶기만 있으면 서로 다른 키', () => {
+    expect(ok(combine([src('a1', BUDGET)])).rows).toEqual(BUDGET.slice(1));
+    expect(ok(combine([src('a1', BUDGET)], { group_by: ['부서'] })).rows).toEqual([['총무과'], ['기획과']]);
+  });
+
+  it('병합된 숫자는 묶어도 한 번만, 병합된 부서·연도 칸은 아래 행도 같은 키로', () => {
+    const r = ok(
+      combine(
+        [
+          src(
+            'a1',
+            [
+              ['연도', '부서', '팀', '예산'],
+              [2025, '총무과', 'A팀', 100],
+              [null, null, 'B팀', null],
+              [2026, '기획과', 'C팀', 30],
+            ],
+            {
+              merges: [
+                { row: 1, col: 0, rows: 2, cols: 1 },
+                { row: 1, col: 1, rows: 2, cols: 1 },
+                { row: 1, col: 3, rows: 2, cols: 1 },
+              ],
+            }
+          ),
+        ],
+        {
+          group_by: ['연도', '부서'],
+          aggregate: [
+            { column: '예산', fn: 'sum' },
+            { column: '팀', fn: 'count' },
+          ],
+        }
+      )
+    );
+    expect(r.rows).toEqual([
+      [2025, '총무과', 100, 2],
+      [2026, '기획과', 30, 1],
+    ]);
+  });
+
+  it('글자 열 합계는 실패', () => {
+    const r = combine([src('a1', BUDGET)], { aggregate: [{ column: '부서', fn: 'sum' }] });
+    expect(r).toEqual({ ok: false, error: '"부서"는 숫자 열이 아니라 합계를 낼 수 없습니다' });
+    const avg = combine([src('a1', BUDGET)], { aggregate: [{ column: '부서', fn: 'avg' }] });
+    expect(avg).toEqual({ ok: false, error: '"부서"는 숫자 열이 아니라 평균을 낼 수 없습니다' });
+  });
+
+  it('읽지 못한 값이 많아 글자 열로 둔 열의 합계는 실패하고 개수를 알린다', () => {
+    const r = combine([src('a1', [['부서', '예산'], ['총무과', 100], ['기획과', '미제출'], ['인사과', '검토중']])], {
+      aggregate: [{ column: '예산', fn: 'sum' }],
+    });
+    expect(r).toEqual({
+      ok: false,
+      error: '"예산"는 숫자 열이 아니라 합계를 낼 수 없습니다(숫자로 읽힌 값 1개, 읽지 못한 값 2개)',
+    });
+  });
+
+  it('비율 열을 명시해 더하면 계산하되 경고, 평균은 단순 평균 경고', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '집행률(%)'], ['총무과', 50], ['총무과', 70]])], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '집행률(%)', fn: 'sum' },
+          { column: '집행률(%)', fn: 'avg' },
+        ],
+      })
+    );
+    expect(r.rows).toEqual([['총무과', 120, 60]]);
+    expect(r.lineage.columnWarnings).toEqual([
+      '열 "집행률(%)": 비율을 더했습니다 — 합계가 의미 없을 수 있습니다',
+      '열 "집행률(%)": 비율의 단순 평균입니다 — 가중 평균이 아닙니다',
+    ]);
+  });
+
+  it('연도 열을 명시해 더하면 경고한다', () => {
+    const r = ok(
+      combine([src('a1', [['연도', '예산'], [2024, 1], [2025, 2]])], { aggregate: [{ column: '연도', fn: 'sum' }] })
+    );
+    expect(r.rows).toEqual([[4049]]);
+    expect(r.lineage.columnWarnings).toEqual([
+      '열 "연도": 연도·코드·번호로 보이는 열을 더했습니다 — 합계가 의미 없을 수 있습니다',
+    ]);
+  });
+
+  it('모르는 집계 함수·결과 열 이름 겹침은 실패', () => {
+    const bad = combine([src('a1', BUDGET)], { aggregate: [{ column: '예산', fn: 'median' }] });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('median');
+    const dup = combine([src('a1', BUDGET)], {
+      group_by: ['부서'],
+      aggregate: [{ column: '예산', fn: 'sum', as: '부서' }],
+    });
+    expect(dup.ok).toBe(false);
+    if (!dup.ok) expect(dup.error).toContain('"부서"');
+  });
+});
+
+describe('거르기', () => {
+  const TABLE: Cell[][] = [
+    ['구분', '부서', '예산'],
+    ['사업비', '총무과', 100],
+    ['인건비', '총무과', 1000],
+    ['사업비', '기획과', 50],
+    ['기타 사업비', '기획과', '미제출'],
+  ];
+
+  it('거르기: 숫자 비교·contains', () => {
+    const big = ok(combine([src('a1', TABLE)], { filter: [{ column: '예산', op: '>=', value: '100' }] }));
+    expect(big.rows.map((r) => r[2])).toEqual([100, 1000]);
+    expect(big.lineage.rowCounts).toEqual({ stacked: 4, filtered: 2, result: 2 });
+    // 글자 '1,000'도 숫자로 읽어 비교 — 글자 비교면 '1,000' < '50'
+    const lt = ok(combine([src('a1', TABLE)], { filter: [{ column: '예산', op: '<', value: '1,000' }] }));
+    expect(lt.rows.map((r) => r[2])).toEqual([100, 50]);
+    const has = ok(combine([src('a1', TABLE)], { filter: [{ column: '구분', op: 'contains', value: '사업' }] }));
+    expect(has.rows.map((r) => r[0])).toEqual(['사업비', '사업비', '기타 사업비']);
+    const eq = ok(
+      combine([src('a1', TABLE)], {
+        filter: [
+          { column: '구분', op: '=', value: ' 사업비 ' },
+          { column: '부서', op: '!=', value: '기획과' },
+        ],
+      })
+    );
+    expect(eq.rows).toEqual([['사업비', '총무과', 100]]);
+  });
+
+  it('없는 열이면 실제 열 목록과 함께 실패', () => {
+    const r = combine([src('a1', TABLE)], { filter: [{ column: '부서명', op: '=', value: '총무과' }] });
+    expect(r).toEqual({ ok: false, error: '거르기에 "부서명" 열이 없습니다. 있는 열: 구분, 부서, 예산' });
+  });
+
+  it('모르는 비교 기호는 실패, 숫자 열을 글자로 크기 비교하면 실패', () => {
+    const op = combine([src('a1', TABLE)], { filter: [{ column: '예산', op: '~', value: 1 }] });
+    expect(op.ok).toBe(false);
+    const text = combine([src('a1', TABLE)], { filter: [{ column: '예산', op: '>', value: '많음' }] });
+    expect(text.ok).toBe(false);
+    if (!text.ok) expect(text.error).toContain('숫자');
+  });
+
+  it('거르기 값의 단위가 열 단위와 다르면 실패 — 1억원을 1로 비교하지 않는다', () => {
+    const r = combine([src('a1', BUDGET, { caption: CAP_THOUSAND })], { filter: [{ column: '예산', op: '>=', value: '1억원' }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('단위');
+    const same = ok(combine([src('a1', BUDGET, { caption: CAP_THOUSAND })], { filter: [{ column: '예산', op: '>=', value: '100천원' }] }));
+    expect(same.rows.map((row) => row[1])).toEqual([100, 200]);
+  });
+
+  it('병합된 연도(숫자) 칸 아래 행도 거르기에 걸린다 — 집계용 값은 비어 있어도', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [['연도', '분기', '예산'], [2025, '1분기', 10], [null, '2분기', 20], [2026, '1분기', 30]], {
+            merges: [{ row: 1, col: 0, rows: 2, cols: 1 }],
+          }),
+        ],
+        { filter: [{ column: '연도', op: '=', value: 2025 }], aggregate: [{ column: '예산', fn: 'sum' }] }
+      )
+    );
+    expect(r.rows).toEqual([[30]]);
+  });
+
+  it('빈 칸은 != 에만 걸린다', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '구분', '예산'], ['총무과', '사업비', 1], ['기획과', null, 2]])], {
+        filter: [{ column: '구분', op: '!=', value: '사업비' }],
+      })
+    );
+    expect(r.rows).toEqual([['기획과', null, 2]]);
+  });
+
+  it('병합된 부서 칸 아래 행도 거르기에 걸린다(키용 행)', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [['부서', '예산'], ['총무과', 100], [null, 20], ['기획과', 5]], {
+            merges: [{ row: 1, col: 0, rows: 2, cols: 1 }],
+          }),
+        ],
+        { filter: [{ column: '부서', op: '=', value: '총무과' }], aggregate: [{ column: '예산', fn: 'sum' }] }
+      )
+    );
+    expect(r.rows).toEqual([[120]]);
+  });
+});
+
+describe('정렬', () => {
+  const ROWS: Cell[][] = [['부서', '예산'], ['총무과', 100], ['기획과', null], ['인사과', 1000], ['감사과', 50]];
+
+  it('정렬: 숫자 큰 순, null은 뒤', () => {
+    const r = ok(combine([src('a1', ROWS)], { sort: [{ column: '예산', desc: true }] }));
+    expect(r.rows.map((row) => row[0])).toEqual(['인사과', '총무과', '감사과', '기획과']);
+    const asc = ok(combine([src('a1', ROWS)], { sort: [{ column: '예산' }] }));
+    expect(asc.rows.map((row) => row[0])).toEqual(['감사과', '총무과', '인사과', '기획과']);
+  });
+
+  it('여러 기준, 글자는 가나다순', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '예산'], ['총무과', 1], ['기획과', 2], ['감사과', 1], ['기획과', 1]])], {
+        sort: [{ column: '부서' }, { column: '예산', desc: true }],
+      })
+    );
+    expect(r.rows).toEqual([
+      ['감사과', 1],
+      ['기획과', 2],
+      ['기획과', 1],
+      ['총무과', 1],
+    ]);
+  });
+
+  it('집계 결과 열 이름으로, 또는 원래 열 이름으로 정렬한다', () => {
+    const spec = { group_by: ['부서'], aggregate: [{ column: '예산', fn: 'sum' }] };
+    const byResult = ok(combine([src('a1', BUDGET)], { ...spec, sort: [{ column: '예산 합계' }] }));
+    expect(byResult.rows).toEqual([
+      ['기획과', 50],
+      ['총무과', 300],
+    ]);
+    const bySource = ok(combine([src('a1', BUDGET)], { ...spec, sort: [{ column: '예산' }] }));
+    expect(bySource.rows).toEqual(byResult.rows);
+  });
+});
+
+describe('합계 행', () => {
+  it('집계 없이: 숫자 열을 더하되 연도·번호·비율 열은 빼고, 첫 글자 열에 합계', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [
+            ['연번', '연도', '부서', '2024년', '예산', '집행률(%)', '사업코드'],
+            [1, 2024, '총무과', 10, 100, 50, 1001],
+            [2, 2025, '기획과', 20, 200, 70, 1002],
+          ]),
+        ],
+        { total_row: true }
+      )
+    );
+    expect(r.total).toEqual([null, null, '합계', 30, 300, null, null]);
+  });
+
+  it('집계 없이: 값이 전부 연도인 열, 단위가 년·일·점인 열은 더하지 않는다', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [
+            ['부서', '기준', '근속', '휴가', '평가', '인원'],
+            ['총무과', 2024, '3년', '2일', '80점', 5],
+            ['기획과', 2025, '4년', '1일', '90점', 3],
+          ]),
+        ],
+        { total_row: true }
+      )
+    );
+    expect(r.total).toEqual(['합계', null, null, null, null, 8]);
+  });
+
+  it('집계 없이: 단위가 없어도 이름이 비율(…률·비중)이면 더하지 않는다', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '예산', '집행률', '비중'], ['총무과', 10, 50, 30], ['기획과', 20, 70, 40]])], {
+        total_row: true,
+      })
+    );
+    expect(r.total).toEqual(['합계', 30, null, null]);
+  });
+
+  it('집계 없이: 이름에 연도 낱말이 있어도 측정 낱말이 있으면 더한다 — 전년도 예산', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '전년도 예산', '금년도 예산'], ['총무과', 10, 20], ['기획과', 1, 2]])], {
+        total_row: true,
+      })
+    );
+    expect(r.total).toEqual(['합계', 11, 22]);
+  });
+
+  it('집계했으면 합계 열만 더하고 개수·평균·최소·최대는 null', () => {
+    const r = ok(
+      combine([src('a1', BUDGET)], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '예산', fn: 'avg' },
+          { column: '예산', fn: 'min' },
+          { column: '예산', fn: 'max' },
+          { column: '예산', fn: 'count' },
+        ],
+        total_row: true,
+      })
+    );
+    expect(r.total).toEqual(['합계', 350, null, null, null, null]);
+  });
+
+  it('병합된 숫자는 합계 행에서도 한 번만', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [['부서', '팀', '예산'], ['총무과', 'A팀', 100], [null, 'B팀', null], ['기획과', 'C팀', 30]], {
+            merges: [{ row: 1, col: 2, rows: 2, cols: 1 }],
+          }),
+        ],
+        { total_row: true }
+      )
+    );
+    expect(r.total).toEqual(['합계', null, 130]);
+  });
+
+  it('0.1 + 0.2 = 0.3', () => {
+    const r = ok(
+      combine([src('a1', [['부서', '예산'], ['총무과', 0.1], ['총무과', 0.2], ['기획과', 0.7]])], {
+        group_by: ['부서'],
+        aggregate: [
+          { column: '예산', fn: 'sum' },
+          { column: '예산', fn: 'avg' },
+        ],
+        total_row: true,
+      })
+    );
+    expect(r.rows).toEqual([
+      ['총무과', 0.3, 0.15],
+      ['기획과', 0.7, 0.7],
+    ]);
+    expect(r.total).toEqual(['합계', 1, null]);
+    const plain = ok(combine([src('a1', [['부서', '예산'], ['총무과', 0.1], ['기획과', 0.2]])], { total_row: true }));
+    expect(plain.total).toEqual(['합계', 0.3]);
+  });
+
+  it('total_row가 없으면 null', () => {
+    const r = ok(combine([src('a1', BUDGET)], { group_by: ['부서'], aggregate: [{ column: '예산', fn: 'sum' }] }));
+    expect(r.total).toBeNull();
+  });
+});
+
+describe('결과 상한', () => {
+  it('5,000행 초과는 자르고 truncated', () => {
+    const cells: Cell[][] = [['부서', '예산']];
+    for (let i = 0; i < 5001; i += 1) cells.push([`과${i}`, 1]);
+    const r = ok(combine([src('a1', cells)], { total_row: true, sort: [{ column: '부서' }] }));
+    expect(r.rows).toHaveLength(5000);
+    expect(r.lineage.truncated).toBe(true);
+    expect(r.lineage.rowCounts).toEqual({ stacked: 5001, filtered: 5001, result: 5001 });
+    // 합계는 자르기 전 전체 행으로 — 보이는 행만 더하면 틀린 합계가 된다
+    expect(r.total).toEqual(['합계', 5001]);
+    expect(ok(combine([src('a1', cells.slice(0, 5001))])).lineage.truncated).toBe(false);
+  });
+});

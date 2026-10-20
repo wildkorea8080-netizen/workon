@@ -1,5 +1,5 @@
 /**
- * 표 합치기. 단계: 원천 준비 → 쌓기 → [거르기 → 묶기·집계 → 정렬 → 합계 행(Task 3)].
+ * 표 합치기. 단계: 원천 준비 → 쌓기 → 거르기 → 묶기·집계 → 정렬 → 합계 행.
  * 원칙은 "그럴듯하지만 틀린 합계를 내지 않는다" — 의심스러우면 값을 빼고 근거에 남기거나 실패한다.
  * 이미 있는 합계 행을 다시 더하는 것, 단위가 다른 열을 섞는 것, 읽지 못한 칸을 0으로 치는 것이 막을 대상이다.
  */
@@ -161,7 +161,7 @@ function emptyLineage(): Lineage {
 /** 일련번호 열 이름. 값이 1..n이어도 이름이 이렇지 않으면 일련번호로 보지 않는다 — '예산'이 1·2·3일 수도 있다 */
 const SERIAL_NAME = /^(연번|순번|번호|일련번호|no\.?)$/i;
 /** 키성 숫자 열 이름: 연도·코드·번호류 */
-const KEY_NAME = /연도|년도|년|코드|번호|순번|연번|(^|[^a-z])id([^a-z]|$)/i;
+const KEY_NAME = /연도|년도|년|코드|번호|순번|연번|일련|(^|[^a-z])id([^a-z]|$)/i;
 
 /**
  * 숫자이지만 측정값이 아니라 행을 가리키는 열(일련번호·연도·코드).
@@ -733,6 +733,396 @@ function numericValues(slot: Slot, source: PreparedSource, lineage: Lineage): Re
   return out;
 }
 
+// ── 3단계: 거르기 → 묶기·집계 → 정렬 → 합계 행 ─────────────────────
+
+/** 결과 상한 — 넘으면 자르고 truncated. 합계 행은 자르기 전 전체로 낸다 */
+export const MAX_RESULT_ROWS = 5000;
+
+type FilterOp = NonNullable<CombineSpec['filter']>[number]['op'];
+type AggregateFn = NonNullable<CombineSpec['aggregate']>[number]['fn'];
+
+const FILTER_OPS: readonly FilterOp[] = ['=', '!=', '>', '>=', '<', '<=', 'contains'];
+const ORDER_OPS = new Set<FilterOp>(['>', '>=', '<', '<=']);
+/** 결과 열 이름 '{열} 합계'와 지시 문장(describe.ts)이 같은 낱말을 쓴다 */
+export const AGGREGATE_LABELS: Record<AggregateFn, string> = {
+  sum: '합계',
+  count: '개수',
+  avg: '평균',
+  min: '최소',
+  max: '최대',
+};
+const AGGREGATE_OBJECT: Record<Exclude<AggregateFn, 'count'>, string> = {
+  sum: '합계를',
+  avg: '평균을',
+  min: '최솟값을',
+  max: '최댓값을',
+};
+
+/**
+ * 비교·묶음용 글 다듬기: NFC, 앞뒤 공백(전각 포함) 떼고 연속 공백은 하나로.
+ * 가운데 공백은 남긴다 — '총무 과'가 '총무과'와 같은 부서인지는 사람이 정한다(similarKeys로 알린다)
+ */
+function normalizeText(v: ResultValue): string {
+  return String(v).normalize('NFC').replace(/\s+/g, ' ').trim();
+}
+
+function asList<T>(label: string, value: T[] | undefined): T[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) fail(`${label} 지정이 목록이 아닙니다.`);
+  return value;
+}
+
+/**
+ * 지시의 열 이름 → 결과 열 번호. 정확히 같은 이름 → 단위 괄호를 뗀 이름('예산' → '예산(천원)') 순.
+ * 지시가 단위를 붙였는데 열 단위와 다르면('예산(원)' ↔ '예산(천원)') 맞추지 않는다 — 다른 단위 열을 조용히 고르지 않게.
+ * 뗀 이름이 여럿에 맞으면 실패. 없으면 null
+ */
+function lookupColumn(stage: string, raw: unknown, columns: ResultColumn[]): number | null {
+  const wanted = normalizeText(String(raw ?? ''));
+  const names = columns.map((c) => normalizeText(c.name));
+  const exact = names.indexOf(wanted);
+  if (exact >= 0) return exact;
+  const want = splitUnitName(wanted);
+  const matches: number[] = [];
+  columns.forEach((c, i) => {
+    const have = splitUnitName(names[i]);
+    if (have.base !== want.base) return;
+    if (want.unit && want.unit !== (have.unit ?? c.unit)) return;
+    matches.push(i);
+  });
+  if (matches.length > 1) {
+    fail(`${stage}의 "${wanted}"에 맞는 열이 여럿입니다: ${matches.map((i) => columns[i].name).join(', ')}. 정확한 이름으로 주세요.`);
+  }
+  return matches[0] ?? null;
+}
+
+function findColumn(stage: string, raw: unknown, columns: ResultColumn[]): number {
+  const i = lookupColumn(stage, raw, columns);
+  if (i === null) missingColumn(stage, normalizeText(String(raw ?? '')), columns.map((c) => c.name));
+  return i;
+}
+
+function compareNumbers(a: number, op: FilterOp, b: number): boolean {
+  switch (op) {
+    case '=':
+      return a === b;
+    case '!=':
+      return a !== b;
+    case '>':
+      return a > b;
+    case '>=':
+      return a >= b;
+    case '<':
+      return a < b;
+    default:
+      return a <= b;
+  }
+}
+
+function compareTexts(a: string, op: FilterOp, b: string): boolean {
+  if (op === '=') return a === b;
+  if (op === '!=') return a !== b;
+  return compareNumbers(a.localeCompare(b, 'ko', { numeric: true }), op, 0);
+}
+
+/**
+ * 조건 하나를 행 검사로. 키용 값(세로 병합을 채운 값)을 본다 — 병합된 '총무과' 아래 행도 걸리게.
+ * 숫자로 읽히는 값끼리는 숫자로 비교한다('1,000' < '50'이 되지 않게). 숫자 열에서 숫자로 못 읽은 칸은 크기 비교에 걸리지 않는다
+ */
+function rowTest(f: { column: string; op: FilterOp; value: string | number }, columns: ResultColumn[]) {
+  if (!f || typeof f !== 'object') fail('거르기 조건이 맞지 않습니다. { column, op, value }로 주세요.');
+  if (!FILTER_OPS.includes(f.op)) {
+    fail(`거르기의 비교 "${String(f.op)}"는 쓸 수 없습니다. 쓸 수 있는 것: ${FILTER_OPS.join(' ')}`);
+  }
+  const ci = findColumn('거르기', f.column, columns);
+  const col = columns[ci];
+  const label = `거르기 "${col.name} ${f.op} ${String(f.value)}"`;
+  if ((typeof f.value !== 'string' && typeof f.value !== 'number') || normalizeText(f.value) === '') {
+    fail(`${label}: 비교할 값이 비어 있습니다.`);
+  }
+  const text = normalizeText(f.value);
+  const parsed = parseNumber(f.value);
+  const target = parsed.kind === 'number' ? parsed.value : null;
+  // '1억원'을 원 열과 비교하면 1과 비교하게 된다 — 단위를 바꿔 주지 않고 거절한다
+  if (parsed.kind === 'number' && parsed.unit && parsed.unit !== col.unit) {
+    fail(`${label}: 값의 단위(${parsed.unit})가 열 단위(${col.unit ?? '모름'})와 다릅니다. 열 단위로 적어 주세요.`);
+  }
+  if (col.numeric && ORDER_OPS.has(f.op) && target === null) {
+    fail(`${label}: 숫자 열은 숫자와 크기를 비교합니다.`);
+  }
+
+  if (f.op === 'contains') {
+    const needle = text.toLowerCase();
+    return (row: StackedRow) => row.keys[ci] !== null && normalizeText(row.keys[ci]).toLowerCase().includes(needle);
+  }
+  return (row: StackedRow): boolean => {
+    const v = row.keys[ci];
+    if (v === null) return f.op === '!=';
+    if (col.numeric) {
+      if (typeof v === 'number') return target === null ? f.op === '!=' : compareNumbers(v, f.op, target);
+      // 숫자 열의 읽지 못한 칸('미제출')·단위가 다른 칸: 글로 같은지만 본다
+      return ORDER_OPS.has(f.op) ? false : compareTexts(normalizeText(v), f.op, text);
+    }
+    if (ORDER_OPS.has(f.op) && target !== null) {
+      const p = parseNumber(v);
+      if (p.kind === 'number' && !p.unit) return compareNumbers(p.value, f.op, target);
+    }
+    return compareTexts(normalizeText(v), f.op, text);
+  };
+}
+
+/** 더하면 뜻이 없는 숫자 열의 종류 — 집계 없는 합계 행에서 빼고, 명시한 합계·평균에는 경고를 남긴다 */
+type NonAdditive = 'ratio' | 'score' | 'period' | 'key';
+
+const PERIOD_UNITS = new Set(['년', '일', '개월', '시간']);
+
+const NON_ADDITIVE_WARNINGS: Record<NonAdditive, { sum: string; avg: string }> = {
+  ratio: { sum: '비율을 더했습니다 — 합계가 의미 없을 수 있습니다', avg: '비율의 단순 평균입니다 — 가중 평균이 아닙니다' },
+  score: { sum: '점수를 더했습니다 — 합계가 의미 없을 수 있습니다', avg: '점수의 단순 평균입니다 — 가중 평균이 아닙니다' },
+  period: { sum: '기간을 더했습니다 — 합계가 의미 없을 수 있습니다', avg: '기간의 단순 평균입니다 — 가중 평균이 아닙니다' },
+  key: {
+    sum: '연도·코드·번호로 보이는 열을 더했습니다 — 합계가 의미 없을 수 있습니다',
+    avg: '연도·코드·번호로 보이는 열의 평균입니다 — 평균이 의미 없을 수 있습니다',
+  },
+};
+
+/**
+ * 단위(%·%p·배·점·년·일·개월·시간) → 이름이 비율 낱말(율·률·비중) → 키성(일련번호 이름, 연도·코드·번호 이름, 값이 전부 1900~2100 정수).
+ * 키성 판정은 이름에 숫자가 있거나('2024년') 측정 낱말이 있으면('전년도 예산'·'청년 인원') 하지 않는다 —
+ * '년'·'년도'가 든 측정 열을 합계에서 빼면 예산 비교표의 합계 칸이 빈다
+ */
+function nonAdditiveKind(col: ResultColumn, values: ResultValue[]): NonAdditive | null {
+  if (!col.numeric) return null;
+  if (col.unit && RATIO_UNITS.has(col.unit)) return 'ratio';
+  if (col.unit === '점') return 'score';
+  if (col.unit && PERIOD_UNITS.has(col.unit)) return 'period';
+  const base = squash(splitUnitName(col.name).base);
+  const dimension = nameDimension(base);
+  if (dimension === '비율') return 'ratio';
+  if (SERIAL_NAME.test(base)) return 'key';
+  if (/\d/.test(base) || dimension !== null) return null;
+  if (KEY_NAME.test(base)) return 'key';
+  let numbers = 0;
+  for (const v of values) {
+    if (typeof v !== 'number') continue;
+    if (!Number.isInteger(v) || v < 1900 || v > 2100) return null;
+    numbers += 1;
+  }
+  return numbers > 0 ? 'key' : null;
+}
+
+function sumNumbers(values: ResultValue[]): number | null {
+  let total = 0;
+  let n = 0;
+  for (const v of values) {
+    if (typeof v !== 'number') continue;
+    total += v;
+    n += 1;
+  }
+  return n === 0 ? null : roundValue(total);
+}
+
+interface ResultItem {
+  /** 결과에 나가는 값 */
+  out: ResultValue[];
+  /** 정렬에 쓰는 값 — 쌓은 행 그대로면 키용, 집계한 행이면 out과 같다 */
+  sortKeys: ResultValue[];
+}
+
+interface Shaped {
+  columns: ResultColumn[];
+  items: ResultItem[];
+  /** 결과 열마다 집계 함수(묶음 열·집계 없음은 null) */
+  fns: (AggregateFn | null)[] | null;
+  /** 정렬에서 원래 열 이름 → 그 열의 집계 결과 열 */
+  aggregateSources: { source: number; result: number }[];
+}
+
+/** 묶음 키 값: 숫자 열의 숫자는 숫자로, 나머지는 다듬은 글로 — 숫자 열 2025와 글자 '2025'가 갈리지 않게 */
+function groupKeyPart(v: ResultValue, col: ResultColumn): string {
+  if (v === null) return 'n';
+  if (col.numeric && typeof v === 'number') return `d${v}`;
+  return `s${normalizeText(v)}`;
+}
+
+function groupAndAggregate(
+  stacked: { columns: ResultColumn[]; rows: StackedRow[] },
+  filtered: StackedRow[],
+  spec: CombineSpec,
+  lineage: Lineage
+): Shaped {
+  const { columns } = stacked;
+  const groupBy = asList('묶기(group_by)', spec.group_by).map((name) => findColumn('묶기', name, columns));
+  const aggregates = asList('집계(aggregate)', spec.aggregate).map((a) => {
+    if (!a || typeof a !== 'object') fail('집계 지정이 맞지 않습니다. { column, fn }으로 주세요.');
+    const fn = a.fn;
+    if (!Object.prototype.hasOwnProperty.call(AGGREGATE_LABELS, fn)) {
+      fail(`집계 함수 "${String(fn)}"는 쓸 수 없습니다. 쓸 수 있는 것: ${Object.keys(AGGREGATE_LABELS).join(', ')}`);
+    }
+    const ci = findColumn('집계', a.column, columns);
+    const col = columns[ci];
+    if (fn !== 'count' && !col.numeric) {
+      // 대부분 읽지 못해 글자 열로 둔 열이면 그 수를 알린다 — 열을 고치거나 원본을 확인할 근거
+      let numbers = 0;
+      let others = 0;
+      for (const r of stacked.rows) {
+        const p = parseNumber(r.values[ci]);
+        if (p.kind === 'number') numbers += 1;
+        else if (p.kind === 'unreadable') others += 1;
+      }
+      const counts = numbers > 0 ? `(숫자로 읽힌 값 ${numbers}개, 읽지 못한 값 ${others}개)` : '';
+      fail(`"${col.name}"는 숫자 열이 아니라 ${AGGREGATE_OBJECT[fn]} 낼 수 없습니다${counts}`);
+    }
+    const as = typeof a.as === 'string' ? a.as.trim() : '';
+    return { fn, ci, name: as || `${col.name} ${AGGREGATE_LABELS[fn]}` };
+  });
+
+  if (groupBy.length === 0 && aggregates.length === 0) {
+    return {
+      columns,
+      items: filtered.map((r) => ({ out: r.values, sortKeys: r.keys })),
+      fns: null,
+      aggregateSources: [],
+    };
+  }
+
+  // 명시한 합계·평균이 더하면 뜻 없는 열이면 계산은 하되 알린다 — AI가 고른 계산이라 막지는 않는다
+  const warned = new Set<string>();
+  for (const a of aggregates) {
+    if (a.fn !== 'sum' && a.fn !== 'avg') continue;
+    const kind = nonAdditiveKind(columns[a.ci], stacked.rows.map((r) => r.values[a.ci]));
+    if (!kind) continue;
+    const message = `열 "${columns[a.ci].name}": ${NON_ADDITIVE_WARNINGS[kind][a.fn]}`;
+    if (!warned.has(message)) lineage.columnWarnings.push(message);
+    warned.add(message);
+  }
+
+  const resultColumns: ResultColumn[] = [
+    ...groupBy.map((ci) => ({ ...columns[ci] })),
+    ...aggregates.map((a) => ({ name: a.name, unit: a.fn === 'count' ? null : columns[a.ci].unit, numeric: true })),
+  ];
+  const seen = new Set<string>();
+  for (const c of resultColumns) {
+    if (seen.has(c.name)) fail(`결과 열 이름이 겹칩니다: "${c.name}". as로 다른 이름을 주세요.`);
+    seen.add(c.name);
+  }
+
+  // 묶기 없이 집계만이면 전체가 한 묶음 — 거른 행이 없어도 한 행(합계 null·개수 0)
+  const groups = new Map<string, { labels: ResultValue[]; members: StackedRow[] }>();
+  if (groupBy.length === 0) groups.set('', { labels: [], members: [] });
+  for (const row of filtered) {
+    const key = groupBy.length === 0 ? '' : groupBy.map((ci) => groupKeyPart(row.keys[ci], columns[ci])).join('\u0000');
+    let g = groups.get(key);
+    if (!g) {
+      const labels = groupBy.map((ci) => {
+        const v = row.keys[ci];
+        return typeof v === 'string' ? normalizeText(v) : v;
+      });
+      g = { labels, members: [] };
+      groups.set(key, g);
+    }
+    g.members.push(row);
+  }
+
+  // 공백만 다른 키('총무과'·'총무 과')는 합치지 않고 알린다
+  groupBy.forEach((_, k) => {
+    const buckets = new Map<string, string[]>();
+    for (const g of groups.values()) {
+      const label = g.labels[k];
+      if (typeof label !== 'string') continue;
+      const list = buckets.get(squash(label)) ?? [];
+      if (!list.includes(label)) list.push(label);
+      buckets.set(squash(label), list);
+    }
+    for (const list of buckets.values()) if (list.length > 1) lineage.similarKeys.push(list);
+  });
+
+  const items: ResultItem[] = [];
+  for (const g of groups.values()) {
+    const out: ResultValue[] = [...g.labels];
+    for (const a of aggregates) {
+      // 집계용 값: 병합된 숫자는 주인 행에만 있어 한 번만 센다. null(빈 칸·읽지 못함)은 빼고 계산
+      const values = g.members.map((r) => r.values[a.ci]);
+      const numbers = values.filter((v): v is number => typeof v === 'number');
+      if (a.fn === 'count') {
+        out.push(columns[a.ci].numeric ? numbers.length : values.filter((v) => v !== null).length);
+      } else if (numbers.length === 0) {
+        out.push(null);
+      } else if (a.fn === 'sum') {
+        out.push(sumNumbers(numbers));
+      } else if (a.fn === 'avg') {
+        out.push(roundValue(numbers.reduce((s, v) => s + v, 0) / numbers.length));
+      } else {
+        out.push(numbers.reduce((m, v) => (a.fn === 'min' ? Math.min(m, v) : Math.max(m, v))));
+      }
+    }
+    items.push({ out, sortKeys: out });
+  }
+
+  return {
+    columns: resultColumns,
+    items,
+    fns: [...groupBy.map(() => null), ...aggregates.map((a) => a.fn)],
+    aggregateSources: aggregates.map((a, k) => ({ source: a.ci, result: groupBy.length + k })),
+  };
+}
+
+/** 정렬 순위: 같은 칸끼리 비교하고, 숫자 열의 글(읽지 못한 칸)은 숫자 뒤, null은 맨 뒤(큰 순이어도) */
+function sortTier(v: ResultValue, numeric: boolean): number {
+  if (v === null) return 2;
+  return numeric && typeof v !== 'number' ? 1 : 0;
+}
+
+function sortItems(shaped: Shaped, stackedColumns: ResultColumn[], spec: CombineSpec): void {
+  const keys = asList('정렬(sort)', spec.sort).map((s) => {
+    let ci = lookupColumn('정렬', s?.column, shaped.columns);
+    // 집계했으면 원래 열 이름('예산')도 그 열의 집계 결과가 하나뿐이면 받아 준다
+    if (ci === null && shaped.fns) {
+      const source = lookupColumn('정렬', s?.column, stackedColumns);
+      const hits = shaped.aggregateSources.filter((a) => a.source === source);
+      if (source !== null && hits.length === 1) ci = hits[0].result;
+    }
+    if (ci === null) missingColumn('정렬', normalizeText(String(s?.column ?? '')), shaped.columns.map((c) => c.name));
+    return { ci, numeric: shaped.columns[ci].numeric, desc: s.desc === true };
+  });
+  if (keys.length === 0) return;
+  shaped.items.sort((x, y) => {
+    for (const k of keys) {
+      const a = x.sortKeys[k.ci];
+      const b = y.sortKeys[k.ci];
+      const ta = sortTier(a, k.numeric);
+      const tb = sortTier(b, k.numeric);
+      if (ta !== tb) return ta - tb;
+      if (ta === 2) continue;
+      const c =
+        typeof a === 'number' && typeof b === 'number'
+          ? a - b
+          : normalizeText(a).localeCompare(normalizeText(b), 'ko', { numeric: true });
+      if (c !== 0) return k.desc ? -c : c;
+    }
+    return 0;
+  });
+}
+
+/**
+ * 합계 행. 집계했으면 sum 집계 열만 더한다(개수·평균·최소·최대의 합은 뜻이 없다).
+ * 집계 없이는 숫자 열을 더하되 비율·기간·점수·연도·코드·번호 열은 뺀다. '합계'는 첫 글자 열, 없으면 더하지 않은 첫 열
+ */
+function totalRow(shaped: Shaped, allValues: ResultValue[][]): ResultValue[] {
+  const { columns, items, fns } = shaped;
+  const total: ResultValue[] = columns.map((col, j) => {
+    const values = items.map((it) => it.out[j]);
+    if (fns) return fns[j] === 'sum' ? sumNumbers(values) : null;
+    if (!col.numeric || nonAdditiveKind(col, allValues.map((row) => row[j]))) return null;
+    return sumNumbers(values);
+  });
+  const summed = (j: number) => (fns ? fns[j] === 'sum' : total[j] !== null);
+  let label = columns.findIndex((c, j) => !c.numeric && !summed(j));
+  if (label < 0) label = columns.findIndex((_, j) => !summed(j) && (!fns || fns[j] === null));
+  if (label >= 0) total[label] = '합계';
+  return total;
+}
+
 // ── 입구 ────────────────────────────────────────────────────
 
 function guard<T>(run: () => T): T | { ok: false; error: string } {
@@ -751,10 +1141,18 @@ export function stackTables(sources: SourceTable[], spec: CombineSpec): StackRes
 
 export function combineTables(sources: SourceTable[], spec: CombineSpec): CombineResult {
   return guard((): CombineResult => {
-    const { columns, rows, lineage } = stack(sources, spec);
-
-    // Task 3: 거르기(keys) → 묶기(keys)·집계(values) → 정렬(keys) → 합계 행(values)이 여기 이어진다
-    lineage.rowCounts = { stacked: rows.length, filtered: rows.length, result: rows.length };
-    return { ok: true, columns, rows: rows.map((r) => r.values), total: null, lineage };
+    const stacked = stack(sources, spec);
+    const { columns, rows, lineage } = stacked;
+    // 거르기·묶기·정렬은 키용 값(병합을 채운 값), 집계·합계 행은 집계용 값(병합 숫자는 주인 행에만)
+    const tests = asList('거르기(filter)', spec.filter).map((f) => rowTest(f, columns));
+    const filtered = rows.filter((r) => tests.every((t) => t(r)));
+    const shaped = groupAndAggregate(stacked, filtered, spec, lineage);
+    sortItems(shaped, columns, spec);
+    // 합계는 자르기 전 전체로 — 보이는 행만 더하면 원본 합계와 다른 값이 합계로 나간다
+    const total = spec.total_row ? totalRow(shaped, rows.map((r) => r.values)) : null;
+    lineage.rowCounts = { stacked: rows.length, filtered: filtered.length, result: shaped.items.length };
+    lineage.truncated = shaped.items.length > MAX_RESULT_ROWS;
+    const out = shaped.items.slice(0, MAX_RESULT_ROWS).map((it) => it.out);
+    return { ok: true, columns: shaped.columns, rows: out, total, lineage };
   });
 }
