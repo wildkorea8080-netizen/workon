@@ -4,8 +4,8 @@
  * 파일을 서버 함수로 보내지 않는 이유는 Vercel 요청 본문 상한(4.5MB) 때문이다(설계 4.1).
  * 여기 검사(형식·크기)는 표시일 뿐이고 서버가 다시 본다.
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config-public';
+import { storageClient } from '@/lib/browser-storage';
 import { MAX_ATTACHMENT_BYTES, attachmentExtension, refusedFormatMessage } from './limits';
 import type { AttachmentRow } from './types';
 
@@ -16,15 +16,6 @@ const NETWORK_ERROR = '네트워크 오류가 발생했습니다. 다시 시도�
 const UPLOAD_ERROR = '파일을 올리지 못했습니다. 다시 시도해 주세요.';
 
 const MISSING_CONFIG = '파일 올리기 설정이 없습니다. 관리자에게 문의하세요.';
-
-let client: SupabaseClient | null = null;
-/** 올리기는 서명된 주소(토큰)가 허락하므로 로그인 세션이 필요 없다. 브라우저에서 처음 쓸 때 만든다 */
-function storageClient(): SupabaseClient {
-  if (!client) {
-    client = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, { auth: { persistSession: false } });
-  }
-  return client;
-}
 
 async function postJson(url: string, body: unknown) {
   const res = await fetch(url, {

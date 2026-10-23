@@ -56,6 +56,9 @@ describe('화면 코드는 config.ts를 가져오지 않는다', () => {
       'src/lib/attachments/limits.ts',
       'src/lib/attachments/types.ts',
       'src/lib/file-size.ts',
+      'src/lib/browser-storage.ts',
+      'src/lib/document-upload-client.ts',
+      'src/lib/file-types.ts',
     ]) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(IMPORTS_SERVER_CONFIG);
     }

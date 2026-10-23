@@ -9,6 +9,7 @@ import {
   MAX_AGENT_DOCUMENTS,
 } from '@/lib/file-types';
 import { createCapabilities } from '@/lib/agent-form';
+import { uploadReferenceDocument, startReading } from '@/lib/document-upload-client';
 
 const EMOJI_ICONS = [
   '🤖', '📝', '📊', '📋', '📨', '💬', '📢', '🎤',
@@ -63,6 +64,14 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
     fetch('/api/models').then(r => r.json()).then(r => { if (r.ok) setModels(r.data ?? []); }).catch(() => {});
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 비서를 만든 뒤 파일 올리기가 일부 실패하면 창이 남는다 — 다시 누를 때 비서를 또 만들지 않도록 기억한다
+  const createdAgentId = useRef<string | null>(null);
+
+  // 비서를 이미 만들었다면 닫을 때 목록을 다시 불러오도록 onCreated를 거친다(onCreated가 창도 닫는다)
+  const handleClose = () => {
+    if (createdAgentId.current) onCreated(tier);
+    else onClose();
+  };
 
   const handleEnhance = async () => {
     if (!systemPrompt.trim() || enhancing) return;
@@ -103,30 +112,44 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/agents/personal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          icon,
-          category,
-          tier,
-          model_id: modelId || null,
-          systemPrompt: systemPrompt.trim() || undefined,
-          capabilities: createCapabilities({ fileRead: readChatFiles, connectors: selectedConnectors }),
-        }),
-      });
-      const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message);
-
-      const agentId: string = result.data.id;
+      // 파일 올리기만 실패해 다시 누른 경우에는 비서를 또 만들지 않는다
+      let agentId = createdAgentId.current;
+      if (!agentId) {
+        const res = await fetch('/api/agents/personal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            icon,
+            category,
+            tier,
+            model_id: modelId || null,
+            systemPrompt: systemPrompt.trim() || undefined,
+            capabilities: createCapabilities({ fileRead: readChatFiles, connectors: selectedConnectors }),
+          }),
+        });
+        const result = await res.json();
+        if (!result.ok) throw new Error(result.error?.message);
+        agentId = result.data.id as string;
+        createdAgentId.current = agentId;
+      }
 
       if (fileCapability && files.length > 0) {
+        const failed: { file: File; message: string }[] = [];
         for (const file of files) {
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('agentId', agentId);
-          await fetch('/api/upload', { method: 'POST', body: fd });
+          const uploaded = await uploadReferenceDocument(file, { agentIds: [agentId] });
+          if (uploaded.ok) startReading(uploaded.documentIds);
+          else failed.push({ file, message: uploaded.message });
+        }
+        if (failed.length > 0) {
+          // 비서는 이미 만들어졌다. 창을 닫지 않고 실패한 파일만 남겨 다시 올릴 수 있게 한다
+          setFiles(failed.map((f) => f.file));
+          setError(
+            `비서는 만들어졌지만 일부 문서를 올리지 못했습니다: ${failed
+              .map((f) => `${f.file.name}(${f.message})`)
+              .join(', ')}. 남은 파일을 다시 올리거나 창을 닫아 주세요.`
+          );
+          return;
         }
       }
 
@@ -147,7 +170,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
           <h2 className="text-lg font-bold text-slate-900">나만의 비서 만들기</h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -419,7 +442,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
         <div className="flex gap-3 px-6 py-4 border-t border-slate-100 flex-shrink-0">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 transition-colors"
           >
             취소

@@ -1,15 +1,42 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UPLOAD_ACCEPT_ATTRIBUTE,
   UPLOAD_FORMATS_LABEL,
   MAX_UPLOAD_SIZE_LABEL,
 } from '@/lib/file-types';
 import type { Document, Agent } from '@/lib/db';
+import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
+
+/** 목록 응답은 오래 멈춘 읽는 중 행 하나에 kick: true를 달아 준다(서버는 응답 뒤 일을 이어 가지 못한다) */
+type DocumentRow = Document & { kick?: boolean };
+
+/** 읽는 중인 문서가 있으면 이 간격으로 목록을 다시 부른다 */
+const POLL_INTERVAL_MS = 5_000;
+
+/** 읽기 상태 칩. ready·NULL(옛 문서)은 표시 없음 */
+function ReadStatusChip({ doc }: { doc: DocumentRow }) {
+  switch (doc.noda_status) {
+    case 'reading':
+      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-100 text-blue-800">읽는 중</span>;
+    case 'failed':
+      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">읽기 실패</span>;
+    case 'unreadable':
+      return (
+        <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">
+          읽지 못함{doc.noda_reason ? ` — ${doc.noda_reason}` : ''}
+        </span>
+      );
+    case 'deleting':
+      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-amber-100 text-amber-800">삭제 대기</span>;
+    default:
+      return null;
+  }
+}
 
 export default function DocumentsManager() {
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -22,16 +49,48 @@ export default function DocumentsManager() {
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState<DocumentUploadStage | null>(null);
   const [dragging, setDragging] = useState(false);
   // 비서 추가 모달
   const [assignModal, setAssignModal] = useState<Document | null>(null);
   const [assignIds, setAssignIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
 
+  // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
+  const kickedRef = useRef<Set<string>>(new Set());
+
+  /** 목록 행에 kick이 있으면 그 문서의 읽기를 이 화면에서 한 번만 다시 건다 */
+  const applyDocuments = useCallback((rows: DocumentRow[]) => {
+    setDocuments(rows);
+    for (const row of rows) {
+      if (row.kick && !kickedRef.current.has(row.id)) {
+        kickedRef.current.add(row.id);
+        startReading([row.id]);
+      }
+    }
+  }, []);
+
+  /** 목록만 다시 부른다. 실패해도 조용히 넘어간다(다음 호출이 맞춘다) */
+  const refreshDocuments = useCallback(async () => {
+    try {
+      const result = await (await fetch('/api/documents')).json();
+      if (result.ok) applyDocuments(result.data);
+    } catch {
+      // 다음 주기에 다시 부른다
+    }
+  }, [applyDocuments]);
+
   useEffect(() => {
     loadData();
   }, []);
+
+  // 읽는 중인 문서가 있는 동안만 5초마다 목록을 다시 부른다. 없으면 멈추고, 화면을 떠나도 멈춘다
+  const hasReading = documents.some((d) => d.noda_status === 'reading');
+  useEffect(() => {
+    if (!hasReading) return;
+    const timer = setInterval(refreshDocuments, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [hasReading, refreshDocuments]);
 
   const loadData = async () => {
     try {
@@ -44,7 +103,7 @@ export default function DocumentsManager() {
         docsResponse.json(),
       ]);
       if (agentsResult.ok) setAgents(agentsResult.data);
-      if (docsResult.ok) setDocuments(docsResult.data);
+      if (docsResult.ok) applyDocuments(docsResult.data);
     } catch (err) {
       setErrorMessage('데이터 로드 중 오류가 발생했습니다.');
     } finally {
@@ -68,8 +127,9 @@ export default function DocumentsManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setStatusMessage(`${result.data.added}개 비서에 문서가 추가됐습니다.`);
+      setStatusMessage(`${result.data.added}개 비서에 문서가 추가됐습니다. 읽는 중입니다 — 다 읽으면 비서가 찾을 수 있습니다.`);
       setAssignModal(null);
+      startReading(result.data.documentIds ?? []);
       loadData();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '추가 중 오류가 발생했습니다.');
@@ -92,7 +152,18 @@ export default function DocumentsManager() {
       setDocuments((prev) => prev.filter((d) => d.id !== documentId));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
+      // 보관소에서 못 지운 경우(502) 행이 '삭제 대기'로 바뀌었다 — 목록을 다시 불러 보인다
+      refreshDocuments();
     }
+  };
+
+  const handleRetry = (documentId: string) => {
+    startReading([documentId], { retry: true });
+    // 서버가 읽는 중으로 바꾸기 전에 목록을 부르면 '읽기 실패'가 다시 보여 5초 맞추기가 시작되지 못한다.
+    // 먼저 읽는 중으로 보이고, 5초마다 부르는 목록이 서버 상태에 맞춘다
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === documentId ? { ...d, noda_status: 'reading' as const, noda_reason: null } : d))
+    );
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -111,31 +182,32 @@ export default function DocumentsManager() {
     }
 
     setUploading(true);
-    setUploadProgress(0);
-    const formData = new FormData();
-    formData.append('file', uploadForm.file);
-    uploadForm.agentIds.forEach(id => formData.append('agentIds', id));
-    if (uploadForm.title) formData.append('title', uploadForm.title);
-    formData.append('visibility', uploadForm.visibility);
-
+    setUploadStage('uploading');
     try {
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
-      const result = await response.json();
-      if (!result.ok) throw new Error(result.error?.message || '업로드 실패');
-
-      const count = result.data?.count ?? 1;
-      setStatusMessage(
-        count > 1
-          ? `문서가 ${count}개 비서에 등록됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
-          : `문서 업로드 및 처리가 완료됐습니다.${result.data?.warning ? ' ⚠️ ' + result.data.warning : ''}`
+      const result = await uploadReferenceDocument(
+        uploadForm.file,
+        {
+          agentIds: uploadForm.agentIds,
+          title: uploadForm.title.trim() || undefined,
+          visibility: uploadForm.visibility,
+        },
+        setUploadStage
       );
+      if (!result.ok) {
+        setErrorMessage(result.message);
+        return;
+      }
+
+      // 읽기는 기다리지 않고 건다 — 목록이 '읽는 중'을 보여 주고 다 읽으면 바뀐다
+      startReading(result.documentIds);
+      setStatusMessage('문서를 올렸습니다. 읽는 중입니다 — 다 읽으면 비서가 찾을 수 있습니다.');
       setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization' });
-      setUploadProgress(0);
       loadData();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
     } finally {
       setUploading(false);
+      setUploadStage(null);
     }
   };
 
@@ -337,8 +409,7 @@ export default function DocumentsManager() {
                       {dragging ? '파일을 놓으세요' : '클릭 또는 드래그앤드롭'}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {UPLOAD_FORMATS_LABEL} (최대 {MAX_UPLOAD_SIZE_LABEL}) · 스캔 PDF는 자동 판독합니다
-                    </p>
+                      {UPLOAD_FORMATS_LABEL} (최대 {MAX_UPLOAD_SIZE_LABEL})                    </p>
                     {/* 검색은 문서 전체가 아니라 **청크(문단) 단위**로 걸린다.
                         그래서 질문에 쓰일 만한 표현이 문서 안에 있어야 찾아온다.
                         규정 원문만 올리면 "출장비 얼마예요" 같은 실제 질문과
@@ -362,18 +433,9 @@ export default function DocumentsManager() {
           </div>
 
           {uploading && (
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-600">업로드 중...</span>
-                <span className="text-sm font-medium text-slate-900">{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-slate-200 rounded-full h-2">
-                <div
-                  className="bg-slate-900 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
-              </div>
-            </div>
+            <p className="text-sm text-slate-600">
+              {uploadStage === 'registering' ? '문서를 등록하는 중...' : '파일을 올리는 중...'}
+            </p>
           )}
 
           <button
@@ -429,10 +491,20 @@ export default function DocumentsManager() {
                           ? `🤖 ${agents.find(a => a.id === doc.agent_id)?.name ?? '에이전트 연결'}`
                           : '미연결'}
                       </span>
+                      <ReadStatusChip doc={doc} />
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+                  {doc.noda_status === 'failed' && (
+                    <button
+                      onClick={() => handleRetry(doc.id)}
+                      className="px-2.5 py-1.5 text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 rounded-md transition-colors"
+                      title="문서 읽기를 다시 시도"
+                    >
+                      다시 시도
+                    </button>
+                  )}
                   <button
                     onClick={() => openAssignModal(doc)}
                     className="px-2.5 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
