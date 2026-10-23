@@ -46,3 +46,7 @@ export const LAW_API_OC = process.env.LAW_API_OC ?? 'test';
 export const KOSIS_API_KEY = getEnv('KOSIS_API_KEY', false);
 export const G2B_API_KEY = getEnv('G2B_API_KEY', false);
 export const DART_API_KEY = getEnv('DART_API_KEY', false);
+
+// NODA 문서 읽기 서비스 — 참고 문서의 읽기·검색. 키가 없으면 빌드는 되고 호출할 때 NodaError('missing_key')가 난다
+export const NODA_API_URL = process.env.NODA_API_URL || 'https://api.readlayer.kr';
+export const NODA_API_KEY = getEnv('NODA_API_KEY', false);
