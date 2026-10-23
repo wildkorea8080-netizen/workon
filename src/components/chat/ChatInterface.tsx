@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
+import { isNearBottom } from './scroll-follow';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
 import type { Agent, RetrievedChunk } from '@/lib/db';
@@ -127,6 +128,8 @@ export default function ChatInterface({
   // 보낼 때마다 올려 대화의 첨부 목록을 다시 불러오게 한다
   const [attachmentsRefresh, setAttachmentsRefresh] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  /** 맨 아래를 따라 내릴지 — 사용자가 위로 올려 읽으면 false */
+  const followRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
   // 문서를 불러오지 못해 거절된 요청 - 안내의 '다시 묻기'가 이 요청을 그대로 다시 보낸다
@@ -143,8 +146,11 @@ export default function ChatInterface({
       .catch(() => {});
   }, []);
 
+  // 답이 흘러나오는 동안 맨 아래를 따라가는 것은 사용자가 맨 아래 근처에 있을 때뿐이다.
+  // 글자 조각마다 무조건 내리면 참고 자료·출처 때문에 위로 밀린 답을 올려 읽을 수 없다(2026-10-23).
+  // 새 질문을 보내거나 다른 대화를 열면 다시 따라간다.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (followRef.current) messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages]);
 
   useEffect(() => {
@@ -158,6 +164,7 @@ export default function ChatInterface({
   useEffect(() => {
     if (conversationId === prevConvIdRef.current) return;
     prevConvIdRef.current = conversationId;
+    followRef.current = true;
 
     if (!conversationId) {
       setMessages([]);
@@ -312,6 +319,7 @@ export default function ChatInterface({
     };
 
     // 거절 안내가 남아 있으면 치운다 - 새 질문 뒤에 옛 요청이 다시 나가지 않게
+    followRef.current = true;
     setMessages(prev => [...prev.filter(m => !m.refusal), userMsg]);
     setInputMessage('');
     // 미리보기 URL은 말풍선이 계속 쓰므로 여기서 revoke 하지 않는다
@@ -336,6 +344,7 @@ export default function ChatInterface({
     const req = refusedRequestRef.current;
     if (!req || isLoading) return;
     refusedRequestRef.current = null;
+    followRef.current = true;
     setMessages(prev => prev.filter(m => !m.refusal));
     await sendTurn(req, [], skipDocuments);
   };
@@ -570,7 +579,12 @@ export default function ChatInterface({
       </div>
 
       {/* 메시지 영역 */}
-      <div className="flex-1 overflow-y-auto px-5 pt-3 pb-5 space-y-1 bg-[#F5F7FA]">
+      <div
+        className="flex-1 overflow-y-auto px-5 pt-3 pb-5 space-y-1 bg-[#F5F7FA]"
+        onScroll={(e) => {
+          followRef.current = isNearBottom(e.currentTarget);
+        }}
+      >
         {loadingConv ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-5 h-5 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
