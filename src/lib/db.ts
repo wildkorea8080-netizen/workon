@@ -71,6 +71,12 @@ export type Agent = {
   updated_at: string;
 };
 
+/**
+ * NODA 읽기 상태(0031). NULL = 옮기기 전 문서.
+ * failed = 다시 시도 가능, unreadable = NODA가 못 읽음(다시 해도 같음), deleting = NODA 삭제 실패.
+ */
+export type NodaStatus = 'reading' | 'ready' | 'failed' | 'unreadable' | 'deleting';
+
 export type Document = {
   id: string;
   department_id: string;
@@ -84,6 +90,13 @@ export type Document = {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  noda_status: NodaStatus | null;
+  noda_reason: string | null;
+  noda_filename: string | null;
+  noda_doc_id: string | null;
+  noda_read_started_at: string | null;
+  noda_last_attempt_at: string | null;
+  noda_read_at: string | null;
 };
 
 export type Conversation = {
