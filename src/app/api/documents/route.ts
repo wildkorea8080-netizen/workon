@@ -116,17 +116,20 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ ok: false, error: { message: '이 문서를 지울 권한이 없습니다.' } }, { status: 403 });
     }
 
-    // 순서: NODA → DB 행 → 저장소 원본. NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 남고
-    // 그 조각이 이 비서의 대화에 계속 섞인다. 그래서 NODA가 먼저 성공해야 행을 지운다.
+    // 순서: NODA → DB 행 → 저장소 원본. NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 남고,
+    // 그 조각이 근거로 오는 턴은 근거 없이 답하게 된다(문서 찾기가 고아를 알아보고 버린 뒤 지운다 — 판정 H).
+    // 그래서 NODA가 먼저 성공해야 행을 지운다.
     // NODA에 간 적 없는 옛 행(noda_status NULL)은 건너뛴다. 이미 없는 사본(404)은 지운 것과 같다.
     if (doc.agent_id && doc.noda_filename && doc.noda_status) {
+      let nodaFailed = false;
       let nodaError: unknown = null;
       try {
         await noda.deleteDocument(nodaTenant(doc.agent_id), doc.noda_filename);
       } catch (e) {
+        nodaFailed = true;
         nodaError = e;
       }
-      if (nodaError) {
+      if (nodaFailed) {
         // 지우는 중임을 남긴다 — 읽기 라우트가 이 행을 되살리지 않고, 다시 지우면 같은 길을 다시 탄다.
         const { error: markError } = await supabaseAdmin
           .from('documents')

@@ -4,7 +4,9 @@ import {
   createDocSearch,
   docSearchAddendum,
   sourcesToChunks,
+  isCleanMatch,
   searchAgentDocuments,
+  ORPHAN_DELETE_WAIT_MS,
   DOCUMENTS_UNAVAILABLE_CODE,
   DOCUMENTS_UNAVAILABLE_MESSAGE,
   type AgentDocument,
@@ -38,13 +40,23 @@ function deps(over: Partial<DocSearchDeps> = {}) {
     sources: [src()],
     dropped: 2,
   }));
+  const findDocuments = vi.fn(async (_ids: string[]): Promise<{ id: string; agent_id: string | null }[]> => []);
+  const deleteOrphan = vi.fn(async (_agentId: string, _filename: string) => {});
   const d: DocSearchDeps = {
     documentsOf: async () => [ready()],
     fetchContext,
+    findDocuments,
+    deleteOrphan,
     log,
     ...over,
   };
-  return { d, log: (d.log ?? log) as typeof log, fetchContext: (d.fetchContext as typeof fetchContext) };
+  return {
+    d,
+    log: (d.log ?? log) as typeof log,
+    fetchContext: d.fetchContext as typeof fetchContext,
+    findDocuments: d.findDocuments as typeof findDocuments,
+    deleteOrphan: d.deleteOrphan as typeof deleteOrphan,
+  };
 }
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
@@ -68,39 +80,46 @@ describe('sourcesToChunks', () => {
         { n: 2, chunk_id: 'c2', doc_id: 'd2', filename: `${id}__표.csv`, anchors: [{ page: 0, cell_range: '표.csv!A3:D20' }], similarity: 0.83 },
       ],
       [{ id, title: '여비 규정', file_name: '규정.hwp', noda_status: 'ready' }]
-    )!;
+    ).chunks;
     expect(chunks[0]).toMatchObject({ documentId: id, documentTitle: '여비 규정', chunkIndex: 0, page: 12, section: '제3장 › 여비', ocr: true, similarity: 0.86 });
     expect(chunks[1]).toMatchObject({ page: null, cellRange: '표.csv!A3:D20', ocr: false });
   });
 
-  it('이 비서 행이 없는 조각이 섞이면 null(근거 전체를 버림)', () => {
-    expect(sourcesToChunks([src(), src({ n: 2, filename: `${id2}__남의.hwp` })], [ready()])).toBeNull();
+  it('이 비서 행이 없는 조각·문서 id를 못 읽는 조각은 따로 모은다(근거 전체를 버릴 근거)', () => {
+    const m = sourcesToChunks([src(), src({ n: 2, filename: `${id2}__남의.hwp` })], [ready()]);
+    expect(isCleanMatch(m)).toBe(false);
+    expect(m.unknown).toEqual([{ documentId: id2, filename: `${id2}__남의.hwp` }]);
     // 문서 id 앞부분이 없는 이름도 이 비서의 것인지 알 수 없다
-    expect(sourcesToChunks([src(), src({ n: 2, filename: '규정.hwp' })], [ready()])).toBeNull();
+    const m2 = sourcesToChunks([src(), src({ n: 2, filename: '규정.hwp' })], [ready()]);
+    expect(isCleanMatch(m2)).toBe(false);
+    expect(m2.unparsable).toEqual(['규정.hwp']);
   });
 
   it('deleting 행의 조각은 남긴다', () => {
-    const chunks = sourcesToChunks([src()], [ready({ noda_status: 'deleting' })]);
-    expect(chunks).toHaveLength(1);
+    const m = sourcesToChunks([src()], [ready({ noda_status: 'deleting' })]);
+    expect(isCleanMatch(m)).toBe(true);
+    expect(m.chunks).toHaveLength(1);
   });
 
   it('이 비서의 행이지만 ready·deleting이 아니면 조용히 뺀다(실패한 행도 NODA 사본이 있을 수 있음)', () => {
     for (const status of ['reading', 'failed', 'unreadable', null] as const) {
-      const chunks = sourcesToChunks([src(), src({ n: 2, filename: `${id2}__예전.hwp` })], [ready(), ready({ id: id2, noda_status: status })]);
-      expect(chunks?.map((c) => c.documentId)).toEqual([id]);
+      const m = sourcesToChunks([src(), src({ n: 2, filename: `${id2}__예전.hwp` })], [ready(), ready({ id: id2, noda_status: status })]);
+      expect(isCleanMatch(m)).toBe(true);
+      expect(m.chunks.map((c) => c.documentId)).toEqual([id]);
     }
   });
 
-  it('형식이 깨진 조각은 조용히 건너뛴다', () => {
-    const chunks = sourcesToChunks([src(), null, 'x', { n: 3 }] as unknown as NodaSource[], [ready()]);
-    expect(chunks).toHaveLength(1);
+  it('형식이 깨진 조각은 센다 — 확인할 수 없으니 근거를 버릴 근거', () => {
+    const m = sourcesToChunks([src(), null, 'x', { n: 3 }] as unknown as NodaSource[], [ready()]);
+    expect(m.malformed).toBe(3);
+    expect(isCleanMatch(m)).toBe(false);
   });
 
   it('제목이 없으면 원래 파일 이름, 칸 주소·절의 문서 id 앞부분은 뗀다', () => {
     const [c] = sourcesToChunks(
       [src({ outline: `${id}__규정.hwp › 제1장`, anchors: [{ page: 0, cell_range: `${id}__표.csv!A1` }] })],
       [ready({ title: null })]
-    )!;
+    ).chunks;
     expect(c.documentTitle).toBe('규정.hwp');
     expect(c.cellRange).toBe('표.csv!A1');
     expect(c.section).toBe('규정.hwp › 제1장');
@@ -179,21 +198,106 @@ describe('doc_search prepare', () => {
     expect(out.dropped).toBe(5);
   });
 
-  it('prepare: 섞인 근거는 [문서 검색 결과 없음] + system_logs critical', async () => {
-    const { d, log } = deps({
-      fetchContext: async () => ({
-        context: `[1] ${id}__규정.hwp\n일비\n[2] ${id2}__남의.hwp\n남의 글`,
-        sources: [src(), src({ n: 2, filename: `${id2}__남의.hwp` })],
-        dropped: 0,
-      }),
-    });
+  const mixed = (filename: string) => async (): Promise<NodaContextResult> => ({
+    context: `[1] ${id}__규정.hwp\n일비\n[2] ${filename}\n남의 글`,
+    sources: [src(), src({ n: 2, filename })],
+    dropped: 0,
+  });
+
+  it('prepare: 다른 비서의 행이 있는 조각(섞임)은 [문서 검색 결과 없음] + critical(security), 사본은 건드리지 않음', async () => {
+    const { d, log, findDocuments, deleteOrphan } = deps({ fetchContext: mixed(`${id2}__남의.hwp`) });
+    findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
     const out = await turn(d);
+    expect(findDocuments).toHaveBeenCalledTimes(1);
+    expect(findDocuments).toHaveBeenCalledWith([id2]);
     expect(out.systemAddendum).toContain('[문서 검색 결과 없음]');
     expect(out.systemAddendum).not.toContain('남의 글');
     expect(out.chunks).toEqual([]);
     expect(log).toHaveBeenCalledWith(
-      expect.objectContaining({ level: 'critical', details: { agent_id: AGENT, source_count: 2 }, orgId: 'org' })
+      expect.objectContaining({
+        level: 'critical',
+        category: 'security',
+        details: { agent_id: AGENT, source_count: 2, foreign_count: 1 },
+        orgId: 'org',
+      })
     );
+    expect(deleteOrphan).not.toHaveBeenCalled();
+  });
+
+  it('prepare: 어디에도 행이 없는 조각(고아)은 근거 없이 + 사본 지우기 + warning(critical 아님)', async () => {
+    const { d, log, deleteOrphan } = deps({ fetchContext: mixed(`${id2}__지운.hwp`) });
+    const out = await turn(d);
+    expect(out.chunks).toEqual([]);
+    expect(out.systemAddendum).toContain('[문서 검색 결과 없음]');
+    expect(out.systemAddendum).not.toContain('남의 글');
+    expect(deleteOrphan).toHaveBeenCalledWith(AGENT, `${id2}__지운.hwp`);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ level: 'warning', details: expect.objectContaining({ orphan_count: 1, orphan_document_ids: [id2] }) })
+    );
+    expect(log.mock.calls.some((c) => (c as unknown as [{ level: string }])[0].level === 'critical')).toBe(false);
+    // 운영 기록에 파일 이름을 남기지 않는다
+    expect(JSON.stringify(log.mock.calls)).not.toContain('지운.hwp');
+  });
+
+  it('prepare: 문서 id를 못 읽는 조각도 고아 — 사본을 지우고 warning', async () => {
+    const { d, log, deleteOrphan, findDocuments } = deps({ fetchContext: mixed('이름만.hwp') });
+    const out = await turn(d);
+    expect(out.chunks).toEqual([]);
+    expect(findDocuments).not.toHaveBeenCalled();
+    expect(deleteOrphan).toHaveBeenCalledWith(AGENT, '이름만.hwp');
+    expect(log.mock.calls.map((c) => (c as unknown as [{ level: string }])[0].level)).toEqual(['warning']);
+  });
+
+  it('prepare: 고아 사본 지우기가 실패해도 던지지 않고 기록만', async () => {
+    const { d, log } = deps({
+      fetchContext: mixed(`${id2}__지운.hwp`),
+      deleteOrphan: async () => { throw new NodaError('NODA 503', 'http', 503); },
+    });
+    const out = await turn(d);
+    expect(out.chunks).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ level: 'warning', message: expect.stringContaining('지우지 못함') }));
+  });
+
+  it('prepare: 고아 사본 지우기가 오래 걸려도 답을 오래 붙잡지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const { d } = deps({
+        fetchContext: mixed(`${id2}__지운.hwp`),
+        deleteOrphan: () => new Promise<void>(() => {}), // 끝나지 않음
+      });
+      const p = turn(d);
+      await vi.advanceTimersByTimeAsync(ORPHAN_DELETE_WAIT_MS + 10);
+      const out = await p;
+      expect(out.chunks).toEqual([]);
+      expect(ORPHAN_DELETE_WAIT_MS).toBeLessThanOrEqual(2_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prepare: 형식이 깨진 조각은 근거 없이 + warning', async () => {
+    const { d, log, deleteOrphan } = deps({
+      fetchContext: async () => ({
+        context: `[1] ${id}__규정.hwp\n일비`,
+        sources: [src(), { n: 2 } as unknown as NodaSource],
+        dropped: 0,
+      }),
+    });
+    const out = await turn(d);
+    expect(out.chunks).toEqual([]);
+    expect(out.systemAddendum).toContain('[문서 검색 결과 없음]');
+    expect(deleteOrphan).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ level: 'warning', details: expect.objectContaining({ malformed_count: 1 }) }));
+  });
+
+  it('prepare: 조각의 문서를 확인하지 못하면 근거 없이, 사본은 건드리지 않음', async () => {
+    const { d, deleteOrphan } = deps({
+      fetchContext: mixed(`${id2}__지운.hwp`),
+      findDocuments: async () => { throw new Error('db down'); },
+    });
+    const out = await turn(d);
+    expect(out.chunks).toEqual([]);
+    expect(deleteOrphan).not.toHaveBeenCalled();
   });
 
   it('prepare: skip이면 일반 답변 안내와 documentsSkipped', async () => {
@@ -225,18 +329,20 @@ describe('docSearchAddendum', () => {
 describe('searchAgentDocuments (rag-test)', () => {
   it('조각과 뺀 수를 돌려준다', async () => {
     const { d } = deps();
-    expect(await searchAgentDocuments(AGENT, 'q', d)).toMatchObject({ chunks: [{ documentId: id }], dropped: 2 });
+    expect(await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org' }, d)).toMatchObject({ chunks: [{ documentId: id }], dropped: 2 });
   });
 
   it('ready 문서가 없으면 NODA를 부르지 않는다', async () => {
     const { d, fetchContext } = deps({ documentsOf: async () => [] });
-    expect(await searchAgentDocuments(AGENT, 'q', d)).toEqual({ chunks: [], dropped: 0 });
+    expect(await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org' }, d)).toEqual({ chunks: [], dropped: 0 });
     expect(fetchContext).not.toHaveBeenCalled();
   });
 
-  it('섞인 근거는 빈 조각', async () => {
-    const { d } = deps({ fetchContext: async () => ({ context: 'x', sources: [src({ filename: `${id2}__남.hwp` })], dropped: 0 }) });
-    expect((await searchAgentDocuments(AGENT, 'q', d)).chunks).toEqual([]);
+  it('섞인 근거는 빈 조각 — critical 기록에 기관 id가 실린다', async () => {
+    const { d, log, findDocuments } = deps({ fetchContext: async () => ({ context: 'x', sources: [src({ filename: `${id2}__남.hwp` })], dropped: 0 }) });
+    findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
+    expect((await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org-1' }, d)).chunks).toEqual([]);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ level: 'critical', category: 'security', orgId: 'org-1' }));
   });
 });
 

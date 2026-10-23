@@ -12,7 +12,7 @@ import { uploadReferenceDocument, startReading, type DocumentUploadStage } from 
 /** 목록 응답은 오래 멈춘 읽는 중 행 하나에 kick: true를 달아 준다(서버는 응답 뒤 일을 이어 가지 못한다) */
 type DocumentRow = Document & { kick?: boolean };
 
-/** 읽는 중인 문서가 있으면 이 간격으로 목록을 다시 부른다 */
+/** 읽는 중인 문서가 있으면 앞 응답을 받은 뒤 이만큼 쉬고 목록을 다시 부른다 */
 const POLL_INTERVAL_MS = 5_000;
 
 /** 읽기 상태 칩. ready·NULL(옛 문서)은 표시 없음 */
@@ -21,7 +21,11 @@ function ReadStatusChip({ doc }: { doc: DocumentRow }) {
     case 'reading':
       return <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-100 text-blue-800">읽는 중</span>;
     case 'failed':
-      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">읽기 실패</span>;
+      return (
+        <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">
+          읽기 실패{doc.noda_reason ? ` — ${doc.noda_reason}` : ''}
+        </span>
+      );
     case 'unreadable':
       return (
         <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">
@@ -58,6 +62,8 @@ export default function DocumentsManager() {
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
+  // 목록 요청 순번. 늦게 온 옛 응답이 새 요청·'다시 시도'로 바꾼 화면을 덮지 않게 한다
+  const listSeqRef = useRef(0);
 
   /** 목록 행에 kick이 있으면 그 문서의 읽기를 이 화면에서 한 번만 다시 건다 */
   const applyDocuments = useCallback((rows: DocumentRow[]) => {
@@ -70,10 +76,12 @@ export default function DocumentsManager() {
     }
   }, []);
 
-  /** 목록만 다시 부른다. 실패해도 조용히 넘어간다(다음 호출이 맞춘다) */
+  /** 목록만 다시 부른다. 실패해도 조용히 넘어간다(다음 호출이 맞춘다). 더 새 요청이 나갔으면 이 응답은 버린다 */
   const refreshDocuments = useCallback(async () => {
+    const seq = ++listSeqRef.current;
     try {
       const result = await (await fetch('/api/documents')).json();
+      if (seq !== listSeqRef.current) return;
       if (result.ok) applyDocuments(result.data);
     } catch {
       // 다음 주기에 다시 부른다
@@ -84,15 +92,26 @@ export default function DocumentsManager() {
     loadData();
   }, []);
 
-  // 읽는 중인 문서가 있는 동안만 5초마다 목록을 다시 부른다. 없으면 멈추고, 화면을 떠나도 멈춘다
+  // 읽는 중인 문서가 있는 동안만 목록을 다시 부른다. 없으면 멈추고, 화면을 떠나도 멈춘다.
+  // 앞 응답을 받은 뒤에 다음을 예약한다(setInterval이면 NODA가 느릴 때 요청이 겹쳐 쌓인다)
   const hasReading = documents.some((d) => d.noda_status === 'reading');
   useEffect(() => {
     if (!hasReading) return;
-    const timer = setInterval(refreshDocuments, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      await refreshDocuments();
+      if (!stopped) timer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+    timer = setTimeout(tick, POLL_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [hasReading, refreshDocuments]);
 
   const loadData = async () => {
+    const seq = ++listSeqRef.current;
     try {
       const [agentsResponse, docsResponse] = await Promise.all([
         fetch('/api/agents'),
@@ -103,7 +122,7 @@ export default function DocumentsManager() {
         docsResponse.json(),
       ]);
       if (agentsResult.ok) setAgents(agentsResult.data);
-      if (docsResult.ok) applyDocuments(docsResult.data);
+      if (docsResult.ok && seq === listSeqRef.current) applyDocuments(docsResult.data);
     } catch (err) {
       setErrorMessage('데이터 로드 중 오류가 발생했습니다.');
     } finally {
@@ -149,6 +168,7 @@ export default function DocumentsManager() {
       });
       const result = await response.json();
       if (!result.ok) throw new Error(result.error?.message || '삭제 실패');
+      listSeqRef.current++; // 지우기 전에 나간 목록 응답이 지운 행을 되살리지 않게
       setDocuments((prev) => prev.filter((d) => d.id !== documentId));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
@@ -159,6 +179,8 @@ export default function DocumentsManager() {
 
   const handleRetry = (documentId: string) => {
     startReading([documentId], { retry: true });
+    // 이미 나가 있는 목록 요청의 응답('읽기 실패')이 아래 표시를 덮지 않게 버린다
+    listSeqRef.current++;
     // 서버가 읽는 중으로 바꾸기 전에 목록을 부르면 '읽기 실패'가 다시 보여 5초 맞추기가 시작되지 못한다.
     // 먼저 읽는 중으로 보이고, 5초마다 부르는 목록이 서버 상태에 맞춘다
     setDocuments((prev) =>

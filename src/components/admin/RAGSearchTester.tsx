@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import type { Agent } from '@/lib/db';
+import type { Agent, RetrievedChunk } from '@/lib/db';
+import { sourceLocationLabel } from '@/components/chat/source-label';
 
 interface RAGTestProps {
   agents?: Agent[];
@@ -11,7 +12,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
   const [agents, setAgents] = useState<Agent[]>(initialAgents || []);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<RetrievedChunk[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingAgents, setLoadingAgents] = useState(!initialAgents);
@@ -145,20 +146,27 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
                   <div className="font-medium text-slate-900">
                     📄 {chunk.documentTitle || '문서'}
                   </div>
+                  {/* 대화 화면 출처와 같은 위치 줄(쪽·칸 주소·절) */}
                   <div className="text-xs text-slate-500 mt-1">
-                    청크 #{chunk.chunkIndex || 0}
+                    {sourceLocationLabel(chunk)}
+                    {chunk.ocr ? ' · 스캔 판독' : ''}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-blue-600">
-                    유사도: {((chunk.similarity || 0) * 100).toFixed(1)}%
+                {chunk.similarity > 0 && (
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-blue-600">
+                      유사도: {(chunk.similarity * 100).toFixed(1)}%
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
-              <div className="text-sm text-slate-700 bg-white p-3 rounded border border-slate-200 line-clamp-3">
-                {chunk.text || '내용 없음'}
-              </div>
+              {/* NODA 조각은 글을 따로 주지 않는다(빈 글) — 빈 상자를 그리지 않는다 */}
+              {chunk.text?.trim() && (
+                <div className="text-sm text-slate-700 bg-white p-3 rounded border border-slate-200 line-clamp-3">
+                  {chunk.text}
+                </div>
+              )}
             </div>
           ))}
         </div>

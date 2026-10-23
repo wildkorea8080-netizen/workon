@@ -3,6 +3,8 @@ import {
   READ_GIVE_UP_MS,
   READ_KICK_AFTER_MS,
   READ_TIMEOUT_REASON,
+  RECONCILE_BUDGET_MS,
+  RECONCILE_LIST_TIMEOUT_MS,
   decideReadState,
   readDocument,
   reconcileReading,
@@ -91,6 +93,9 @@ interface World {
   uploads: { tenant: string; filename: string; bytes: Uint8Array }[];
   deletes: { tenant: string; filename: string }[];
   listCalls: string[];
+  listOpts: unknown[];
+  /** 목록 호출 한 번이 시계를 얼마나 보내는지(느린 NODA 흉내) */
+  listDelayMs: number;
   logs: Record<string, unknown>[];
   clock: { t: number };
   upload: () => Promise<NodaUploadResult>;
@@ -123,6 +128,8 @@ function makeWorld(docs: StoredDocument[] = [doc()]): { w: World; deps: ReadingD
     uploads: [],
     deletes: [],
     listCalls: [],
+    listOpts: [],
+    listDelayMs: 0,
     logs: [],
     clock: { t: 1_000_000 },
     upload: async () => ({
@@ -166,8 +173,10 @@ function makeWorld(docs: StoredDocument[] = [doc()]): { w: World; deps: ReadingD
         w.uploads.push(input);
         return w.upload();
       },
-      async listDocuments(tenant) {
+      async listDocuments(tenant, opts) {
         w.listCalls.push(tenant);
+        w.listOpts.push(opts);
+        w.clock.t += w.listDelayMs;
         const v = w.lists.get(tenant) ?? listing([]);
         if (v instanceof Error) throw v;
         return v;
@@ -278,6 +287,47 @@ describe('readDocument', () => {
     expect(log.category).toBe('api');
     expect(log.details).toEqual({ document_id: DOC, code: 'http', status: 503 });
     expect(JSON.stringify(w.logs)).not.toContain('예산'); // 파일 이름을 남기지 않는다
+  });
+
+  it('NodaError로 끝났는데 그 사이 행이 지워졌으면 NODA 사본을 지운다(고아를 남기지 않음)', async () => {
+    const { w, deps } = makeWorld();
+    w.upload = async () => {
+      w.docs.delete(DOC);
+      throw new NodaError('NODA 503', 'http', 503);
+    };
+    const out = await readDocument(DOC, {}, deps);
+    expect(out).toEqual({ status: 'not_found' });
+    expect(w.deletes).toEqual([{ tenant: nodaTenant(AGENT), filename: nodaFilename(DOC, '예산(최종).PDF') }]);
+  });
+
+  it('NodaError + 행 사라짐 + 사본 지우기도 실패해도 던지지 않는다', async () => {
+    const { w, deps } = makeWorld();
+    w.deleteError = new NodaError('NODA 503', 'http', 503);
+    w.upload = async () => {
+      w.docs.delete(DOC);
+      throw new NodaError('NODA 503', 'http', 503);
+    };
+    await expect(readDocument(DOC, {}, deps)).resolves.toEqual({ status: 'not_found' });
+  });
+
+  it.each([401, 403])('NODA %i(키 문제)는 운영 기록 critical', async (status) => {
+    const { w, deps } = makeWorld();
+    w.upload = async () => {
+      throw new NodaError(`NODA ${status}`, 'http', status);
+    };
+    await readDocument(DOC, {}, deps);
+    expect((w.logs[0] as { level: string }).level).toBe('critical');
+  });
+
+  it('NODA가 알려 준 이유에서 문서 id 앞부분을 떼고 저장한다', async () => {
+    const { w, deps } = makeWorld();
+    w.upload = async () => ({
+      tenant: '', filename: '', bytes: 3, stored: true, doc_id: null, readable: false,
+      reason: `${DOC}__예산(최종).PDF: 암호가 걸린 문서입니다`, chunks: 0,
+    });
+    const out = await readDocument(DOC, {}, deps);
+    expect(out.reason).toBe('예산(최종).PDF: 암호가 걸린 문서입니다');
+    expect(w.docs.get(DOC)!.noda_reason).toBe('예산(최종).PDF: 암호가 걸린 문서입니다');
   });
 
   it('원본이 20MB를 넘으면 NODA로 보내지 않고 unreadable', async () => {
@@ -428,6 +478,34 @@ describe('reconcileReading', () => {
     expect(w.listCalls).toHaveLength(5);
     expect(new Set(w.listCalls).size).toBe(5);
     expect(out).toHaveLength(7);
+  });
+
+  it('목록은 다시 시도 없이 짧은 시간 제한으로 부른다(NODA 장애 중 화면이 멈추지 않게)', async () => {
+    const { w, deps } = makeWorld([doc({ noda_filename: 'A' })]);
+    await reconcileReading([...w.docs.values()], deps);
+    expect(w.listOpts).toHaveLength(1);
+    const opts = w.listOpts[0] as { retry: boolean; timeoutMs: number };
+    expect(opts.retry).toBe(false);
+    expect(opts.timeoutMs).toBeLessThanOrEqual(RECONCILE_LIST_TIMEOUT_MS);
+    expect(RECONCILE_LIST_TIMEOUT_MS).toBeLessThanOrEqual(5_000);
+  });
+
+  it('전체 예산을 넘기면 남은 보관함은 보지 않는다 — 그 행은 그대로', async () => {
+    const docs: StoredDocument[] = [];
+    for (let i = 0; i < 4; i++) {
+      const agent = `${i}1111111-2222-4333-8444-555555555555`;
+      docs.push(doc({ id: `d${i}`, agent_id: agent, noda_filename: `F${i}`, noda_read_started_at: iso(1_000_000 - 1000) }));
+    }
+    const { w, deps } = makeWorld(docs);
+    w.listDelayMs = 3_000; // 느린 NODA
+    const out = await reconcileReading([...w.docs.values()], deps);
+    expect(RECONCILE_BUDGET_MS).toBeLessThanOrEqual(6_000);
+    expect(w.listCalls.length).toBeLessThan(4);
+    expect(w.listCalls.length).toBeGreaterThanOrEqual(1);
+    // 남은 시간보다 긴 시간 제한을 주지 않는다
+    for (const o of w.listOpts as { timeoutMs: number }[]) expect(o.timeoutMs).toBeLessThanOrEqual(RECONCILE_BUDGET_MS);
+    expect(out).toHaveLength(4);
+    expect(out.every((r) => r.noda_status === 'reading')).toBe(true);
   });
 
   it('처리한 보관함의 행은 한 줄로 이어 쓴다 — 같은 보관함 여러 행이 목록 한 번을 쓴다', async () => {

@@ -13,7 +13,8 @@ export interface SourceLocationInput {
   cellRange?: string | null;
   section?: string | null;
   chunkIndex: number;
-  similarity: number;
+  /** NODA 조각은 유사도가 없을 수 있다(0·없음) */
+  similarity?: number | null;
 }
 
 function clean(value: string | null | undefined): string {
@@ -23,6 +24,7 @@ function clean(value: string | null | undefined): string {
 /**
  * 출처 위치 줄. 쪽이 있으면 `p.12 · 제3장 › 여비`, 칸 주소면 `표.csv!A3:D20`,
  * 절만 있으면 절, 셋 다 없으면(옛 메시지) 옛 표시 `청크 N • 유사도: X%`.
+ * 유사도가 0이거나 없으면(위치 없는 NODA 조각) `청크 N`만 — '유사도: 0.0%'는 틀린 정보처럼 보인다.
  */
 export function sourceLocationLabel(c: SourceLocationInput): string {
   const section = clean(c.section);
@@ -32,5 +34,9 @@ export function sourceLocationLabel(c: SourceLocationInput): string {
   const cellRange = clean(c.cellRange);
   if (cellRange) return cellRange;
   if (section) return section;
-  return `청크 ${c.chunkIndex + 1} • 유사도: ${(c.similarity * 100).toFixed(1)}%`;
+  const similarity = c.similarity;
+  if (typeof similarity !== 'number' || !Number.isFinite(similarity) || similarity <= 0) {
+    return `청크 ${c.chunkIndex + 1}`;
+  }
+  return `청크 ${c.chunkIndex + 1} • 유사도: ${(similarity * 100).toFixed(1)}%`;
 }

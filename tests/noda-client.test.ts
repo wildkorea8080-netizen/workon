@@ -261,6 +261,47 @@ describe('NODA 클라이언트', () => {
     expect(e2.message).not.toContain(KEY);
   });
 
+  it('시도 한 번의 시간 제한: /context 8초, 그 밖 30초, 업로드 300초', async () => {
+    const timeout = Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    const f = (async () => {
+      throw timeout;
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    expect((await noda.getContext({ tenant: 't', query: 'q' }).catch((e) => e)).message).toContain('(8초)');
+    expect((await noda.listDocuments('t').catch((e) => e)).message).toContain('(30초)');
+    expect((await noda.deleteDocument('t', 'f').catch((e) => e)).message).toContain('(30초)');
+    expect(
+      (await noda.uploadDocument({ tenant: 't', filename: 'f', bytes: new Uint8Array() }).catch((e) => e)).message,
+    ).toContain('(300초)');
+  });
+
+  it('listDocuments(retry:false)는 한 번만 부르고, timeoutMs를 따른다', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ error: 'busy' }, 503));
+    const { noda, clock } = client(fetchMock as unknown as typeof fetch);
+    const err = await noda.listDocuments('t', { retry: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(NodaError);
+    expect(err.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(clock.sleeps).toEqual([]);
+
+    const timeout = Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    const g = (async () => {
+      throw timeout;
+    }) as unknown as typeof fetch;
+    const e2 = await client(g).noda.listDocuments('t', { retry: false, timeoutMs: 4_000 }).catch((e) => e);
+    expect(e2.message).toContain('(4초)');
+  });
+
+  it('Retry-After: 0이어도 1초는 기다린다(서버를 몰아치지 않게)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json({}, 429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(json({ documents: [] }));
+    const { noda, clock } = client(fetchMock as unknown as typeof fetch);
+    await noda.listDocuments('t');
+    expect(clock.sleeps).toEqual([1000]);
+  });
+
   it('오류 글은 본문 앞 200자만', async () => {
     const f = (async () => new Response('x'.repeat(5000), { status: 400 })) as unknown as typeof fetch;
     const err = await client(f).noda.listDocuments('t').catch((e) => e);

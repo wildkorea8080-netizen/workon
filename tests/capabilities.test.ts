@@ -121,6 +121,8 @@ describe('참고 문서 찾기', () => {
         sources: [{ n: 1, chunk_id: 'c1', doc_id: 'x', filename: `${doc.id}__여비규정.hwp`, similarity: 0.9 }],
         dropped: 0,
       }),
+      findDocuments: async () => [],
+      deleteOrphan: async () => {},
       log: async () => {},
     });
     const pre = await cap.preflight!({ organizationId: 'org', agentId: 'a', message: '여비 규정', skipDocuments: false });

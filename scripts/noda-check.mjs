@@ -8,7 +8,7 @@
  * 실제 NODA 서버를 호출한다. 키(NODA_API_KEY)는 .env.local에서 읽고 **출력하지 않는다**.
  * 하나라도 FAIL이면 종료 코드 1. WARN(엉뚱한 질문·쪽/출처 정보)은 종료 코드에 넣지 않는다(`--strict`면 FAIL).
  *
- * 배포 전 순서(CLAUDE.md): 키 넣기 → noda:check -- --roundtrip → 마이그레이션 0031 → noda:migrate → 푸시.
+ * 배포 순서(CLAUDE.md): 키 넣기 → noda:check -- --roundtrip → 마이그레이션 0031 → 푸시(배포 확인) → noda:migrate.
  */
 import { existsSync, readFileSync } from 'fs';
 

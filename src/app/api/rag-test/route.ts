@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await searchAgentDocuments(agent.id, query);
+    // 기관 id를 넘겨 섞임(critical) 운영 기록이 어느 기관의 일인지 남게 한다
+    const result = await searchAgentDocuments({ agentId: agent.id, query, organizationId: agent.organization_id ?? null });
 
     return NextResponse.json(
       {

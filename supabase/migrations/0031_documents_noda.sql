@@ -4,10 +4,11 @@
 --
 -- 설계: docs/superpowers/specs/2026-10-21-s4-noda-document-layer-design.md 4·9절
 --
--- 배포 순서: 이 파일 → `npm run noda:migrate`(기존 문서를 NODA로 옮김) → S4-a 코드.
+-- 배포 순서: 이 파일 → S4-a 코드 푸시(배포 확인) → `npm run noda:migrate`(기존 문서를 NODA로 옮김).
 -- **코드 배포 전에 적용**한다 — 코드가 이 칸들을 읽고 쓴다. 이 파일은 사용자가 직접 적용한다.
+-- 옮기기는 새 코드가 돈 뒤에 한다 — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아 고아가 남는다.
 --
--- noda_status NULL = 옮기기 전 문서(옛 Voyage 임베딩으로 찾는다). 새 문서는 항상 값이 있다.
+-- noda_status NULL = 옮기기 전 문서(대화 근거로 쓰이지 않는다 — noda:migrate가 옮긴다). 새 문서는 항상 값이 있다.
 --   reading     NODA가 읽는 중(또는 아직 보내지 못함)
 --   ready       읽기 끝 — 대화에서 근거로 쓴다
 --   failed      읽기 실패 — 직원이 '다시 시도'할 수 있다(원본은 저장소에 남아 있다)

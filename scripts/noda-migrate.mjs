@@ -4,7 +4,11 @@
  *   npm run noda:migrate              -- 옮기기 전(noda_status NULL) 문서를 차례로 NODA에 읽힌다
  *   npm run noda:migrate -- --dry-run -- 대상 수만 보기
  *
- * 마이그레이션 0031이 먼저 적용돼 있어야 하고, NODA_API_KEY가 .env.local에 있어야 한다.
+ * 배포 순서(CLAUDE.md): 마이그레이션 0031 → 코드 푸시(배포 확인) → 이 스크립트.
+ * 새 코드가 돈 뒤에 옮긴다 — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면
+ * 배포 전까지 지운 문서가 NODA에 고아로 남는다. 푸시 뒤 이 스크립트까지는 옛 문서(noda_status NULL)가
+ * 근거로 쓰이지 않으니(비서는 문서 없이 답함) 바로 이어서 돌린다.
+ * NODA_API_KEY가 .env.local에 있어야 한다.
  * 여러 번 돌려도 안전하다 — 이미 옮긴 문서(noda_status가 있는 행)는 대상이 아니다.
  * 읽지 못한 문서(failed)는 문서 화면의 '다시 시도'로 다시 읽힌다.
  *
@@ -96,9 +100,10 @@ async function main() {
       tally[outcome.status] = (tally[outcome.status] ?? 0) + 1;
       // NODA가 준 이유에는 파일 이름이 섞일 수 있어 찍지 않는다 — 이유는 DB·문서 화면에 있다
       console.log(`${label} · ${outcome.status} · ${STATUS_LABELS[outcome.status] ?? '확인 필요'}`);
-    } catch (e) {
+    } catch {
       tally.error = (tally.error ?? 0) + 1;
-      console.log(`${label} · 오류 · ${e instanceof Error ? e.message : String(e)}`);
+      // 오류 글은 찍지 않는다 — DB·NODA 오류 글에 파일 이름·경로가 섞일 수 있다(NODA 호출 실패는 system_logs에 남는다)
+      console.log(`${label} · 오류 · 이 문서를 옮기지 못했습니다 — 다시 실행하세요`);
     }
   }
 
@@ -109,7 +114,7 @@ async function main() {
       "\n'reading'은 NODA 호출이 닿지 않은 문서입니다 — 문서 화면을 열면 이어서 읽습니다. 'failed'·'unreadable'은 이유를 보고 문서 화면에서 다시 시도하세요.",
     );
   }
-  // reading·busy는 아직 끝나지 않은 문서라 다음 단계(코드 배포) 전에 확인이 필요하다
+  // reading·busy는 아직 끝나지 않은 문서라 운영자가 확인해야 한다(문서 화면을 열면 이어서 읽는다)
   if (tally.error || tally.reading || tally.busy) process.exit(1);
 }
 

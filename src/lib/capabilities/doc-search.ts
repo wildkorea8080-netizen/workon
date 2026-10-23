@@ -20,7 +20,12 @@ import type { Capability, PreflightResult } from './types';
  * - **NODA를 부르지 못하면 답하지 않는다**(preflight에서 거절 — 대화를 만들기 전). 근거 없는 답이
  *   근거 있는 답처럼 보이는 것이 공공기관에서 가장 위험하다. 직원은 '문서 없이 일반 답변 받기'로 다시 보낼 수 있다
  * - `ready` 문서가 없는 비서는 NODA를 부르지 않는다(판정 R6) — NODA 장애 중에도 평소처럼 답한다
- * - 근거는 **이 비서의 행**과 맞춰 본다(판정 R5). 이 비서 행이 없는 조각이 하나라도 섞이면 근거 전체를 버린다
+ * - 근거는 **이 비서의 행**과 맞춰 본다(판정 R5). 이 비서 행이 없는 조각이 하나라도 섞이면 근거 전체를 버린다.
+ *   그 조각의 문서 id를 documents 전체에서 한 번 더 찾아 가른다(판정 H):
+ *   - 다른 비서의 행이 있다 → **섞임**(버그·보관함 혼선). 운영 기록 critical(security)
+ *   - 행이 어디에도 없다(또는 문서 id를 읽지 못함) → **고아**(지워진 문서의 NODA 사본). 이번 턴은 근거 없이,
+ *     NODA 사본은 지운다(짧게만 기다리고 실패는 기록만). 운영 기록 warning
+ *   - 형식이 깨진 원소 → 확인할 수 없으니 이번 턴은 근거 없이. 운영 기록 warning
  */
 
 export const DOCUMENTS_UNAVAILABLE_MESSAGE = '참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요';
@@ -37,6 +42,10 @@ export interface AgentDocument {
 export interface DocSearchDeps {
   documentsOf(agentId: string): Promise<AgentDocument[]>;
   fetchContext(agentId: string, query: string): Promise<NodaContextResult>;
+  /** 문서 id로 행을 찾는다(어느 비서든, 한 번의 조회) — 이 비서 행이 아닌 근거가 남의 것인지 지워진 것인지 가른다 */
+  findDocuments(ids: string[]): Promise<{ id: string; agent_id: string | null }[]>;
+  /** 이 비서 보관함의 NODA 고아 사본을 지운다. 던질 수 있다 — 부르는 쪽이 잡는다 */
+  deleteOrphan(agentId: string, filename: string): Promise<void>;
   /** 운영 기록(system_logs). 기본은 logSystem */
   log?: typeof logSystem;
 }
@@ -54,8 +63,21 @@ const defaultDeps: DocSearchDeps = {
     // 보관함 이름은 서버가 비서 id로만 만든다
     return noda.getContext({ tenant: nodaTenant(agentId), query });
   },
+  async findDocuments(ids) {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabaseAdmin.from('documents').select('id, agent_id').in('id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as { id: string; agent_id: string | null }[];
+  },
+  async deleteOrphan(agentId, filename) {
+    // 보관함은 이 비서의 것만 — 근거를 돌려준 바로 그 보관함이다
+    await noda.deleteDocument(nodaTenant(agentId), filename);
+  },
   log: logSystem,
 };
+
+/** 고아 사본 지우기를 기다리는 최대 시간 — 답이 이보다 늦어지지 않게. 넘기면 지우기는 뒤에서 이어 간다 */
+export const ORPHAN_DELETE_WAIT_MS = 1_500;
 
 /** NODA 근거가 조각이 되는 행 상태 — `deleting`은 지우는 중이라 아직 이 비서의 문서다 */
 const CITABLE: ReadonlySet<NodaStatus | null> = new Set<NodaStatus | null>(['ready', 'deleting']);
@@ -72,21 +94,49 @@ function sectionOf(outline: NodaSource['outline']): string | null {
   return typeof outline === 'string' && outline.trim() ? stripNodaPrefixes(outline) : null;
 }
 
+/** 근거를 이 비서의 행과 맞춘 결과 */
+export interface SourceMatch {
+  /** 이 비서의 `ready`·`deleting` 행과 맞은 조각 */
+  chunks: RetrievedChunk[];
+  /** 문서 id는 읽었지만 이 비서의 행이 없는 근거 */
+  unknown: { documentId: string; filename: string }[];
+  /** 문서 id 앞부분이 없는 파일 이름 */
+  unparsable: string[];
+  /** 형식이 깨진 원소 수(객체가 아니거나 `filename`이 글이 아님) */
+  malformed: number;
+}
+
+/** 맞지 않은 근거가 하나도 없으면 true */
+export function isCleanMatch(m: SourceMatch): boolean {
+  return m.unknown.length === 0 && m.unparsable.length === 0 && m.malformed === 0;
+}
+
 /**
  * NODA 근거(`sources`)를 화면 출처로. 이 비서의 행과 맞춰 본다:
  * - `ready`·`deleting` 행의 조각 → 조각
  * - 이 비서의 행이지만 다른 상태(읽는 중·실패·못 읽음·옛 문서) → 조용히 뺀다(실패한 행도 NODA 사본이 남아 있을 수 있다)
- * - 이 비서의 행이 없거나 문서 id를 읽지 못하는 조각이 **하나라도** 있으면 null — 근거 전체를 버린다(버그·보관함 혼선)
- * - 형식이 깨진 원소(객체가 아니거나 `filename`이 글이 아님)는 건너뛴다
+ * - 이 비서의 행이 없는 조각·문서 id를 읽지 못하는 조각·형식이 깨진 원소는 따로 모은다 —
+ *   **하나라도** 있으면 근거 전체를 버린다(`matchedChunks`가 섞임·고아를 가른다)
  */
-export function sourcesToChunks(sources: NodaSource[], docs: AgentDocument[]): RetrievedChunk[] | null {
+export function sourcesToChunks(sources: NodaSource[], docs: AgentDocument[]): SourceMatch {
   const byId = new Map(docs.map((d) => [d.id.toLowerCase(), d]));
-  const chunks: RetrievedChunk[] = [];
+  const match: SourceMatch = { chunks: [], unknown: [], unparsable: [], malformed: 0 };
+  const chunks = match.chunks;
   for (const source of sources) {
-    if (!source || typeof source !== 'object' || typeof source.filename !== 'string') continue;
+    if (!source || typeof source !== 'object' || typeof source.filename !== 'string') {
+      match.malformed += 1;
+      continue;
+    }
     const docId = documentIdFromNodaFilename(source.filename);
-    const doc = docId ? byId.get(docId) : undefined;
-    if (!doc) return null;
+    if (!docId) {
+      match.unparsable.push(source.filename);
+      continue;
+    }
+    const doc = byId.get(docId);
+    if (!doc) {
+      match.unknown.push({ documentId: docId, filename: source.filename });
+      continue;
+    }
     if (!CITABLE.has(doc.noda_status)) continue;
 
     const anchors = Array.isArray(source.anchors) ? source.anchors.filter((a) => a && typeof a === 'object') : [];
@@ -105,7 +155,7 @@ export function sourcesToChunks(sources: NodaSource[], docs: AgentDocument[]): R
       ocr: extractors.some((e) => typeof e === 'string' && /ocr/i.test(e)),
     });
   }
-  return chunks;
+  return match;
 }
 
 const CITATION_RULES = [
@@ -166,35 +216,128 @@ type DocSearchCarry =
   | { skipped: true }
   | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult };
 
-/** 근거를 이 비서의 행과 맞춘다. 섞였으면 운영 기록 critical을 남기고 빈 근거로 */
+type MatchInput = { agentId: string; organizationId: string | null };
+
+/**
+ * 근거를 이 비서의 행과 맞춘다. 맞지 않은 조각이 하나라도 있으면 빈 근거로(판정 R5·H):
+ * - 다른 비서의 행이 있는 조각 → 섞임. critical(security). NODA 사본은 건드리지 않는다(조사할 수 있게)
+ * - 어디에도 행이 없는 조각·문서 id를 읽지 못한 조각 → 고아. NODA 사본을 지우고(짧게만 기다림) warning
+ * - 형식이 깨진 원소 → 확인할 수 없음. warning
+ * 운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수만).
+ */
 async function matchedChunks(
   deps: DocSearchDeps,
-  input: { agentId: string; organizationId: string | null },
+  input: MatchInput,
   result: NodaContextResult,
   docs: AgentDocument[]
 ): Promise<RetrievedChunk[]> {
-  const chunks = sourcesToChunks(result.sources, docs);
-  if (chunks) return chunks;
-  await (deps.log ?? logSystem)({
-    level: 'critical',
-    category: 'security',
-    message: '문서 찾기 근거에 이 비서의 문서가 아닌 조각이 섞여 근거를 버림',
-    details: { agent_id: input.agentId, source_count: result.sources.length },
-    orgId: input.organizationId,
-  });
+  const log = deps.log ?? logSystem;
+  const match = sourcesToChunks(result.sources, docs);
+  if (isCleanMatch(match)) return match.chunks;
+
+  const base = { agent_id: input.agentId, source_count: result.sources.length };
+
+  let owners: { id: string; agent_id: string | null }[] = [];
+  if (match.unknown.length > 0) {
+    try {
+      owners = await deps.findDocuments(Array.from(new Set(match.unknown.map((u) => u.documentId))));
+    } catch (error) {
+      // 남의 것인지 지워진 것인지 모른다 — 근거 없이 답하고 사본은 건드리지 않는다
+      await log({
+        level: 'error',
+        category: 'database',
+        message: '문서 찾기 근거의 문서를 확인하지 못해 근거를 버림',
+        details: { ...base, error: error instanceof Error ? error.message : String(error) },
+        orgId: input.organizationId,
+      });
+      return [];
+    }
+  }
+
+  const foreign = owners.filter((o) => o.agent_id !== input.agentId);
+  if (foreign.length > 0) {
+    await log({
+      level: 'critical',
+      category: 'security',
+      message: '문서 찾기 근거에 이 비서의 문서가 아닌 조각이 섞여 근거를 버림',
+      details: { ...base, foreign_count: foreign.length },
+      orgId: input.organizationId,
+    });
+    return [];
+  }
+
+  const found = new Set(owners.map((o) => o.id.toLowerCase()));
+  const orphanIds = match.unknown.filter((u) => !found.has(u.documentId));
+  const orphanNames = Array.from(new Set([...orphanIds.map((u) => u.filename), ...match.unparsable]));
+  if (orphanNames.length > 0) {
+    await log({
+      level: 'warning',
+      category: 'api',
+      message: '문서 찾기 근거에 지워진 문서의 NODA 사본이 있어 근거를 버리고 사본을 지움',
+      details: {
+        ...base,
+        orphan_count: orphanNames.length,
+        orphan_document_ids: Array.from(new Set(orphanIds.map((u) => u.documentId))),
+      },
+      orgId: input.organizationId,
+    });
+    await deleteOrphans(deps, input, orphanNames);
+  }
+  if (match.malformed > 0) {
+    await log({
+      level: 'warning',
+      category: 'api',
+      message: '문서 찾기 근거에 형식이 깨진 조각이 있어 근거를 버림',
+      details: { ...base, malformed_count: match.malformed },
+      orgId: input.organizationId,
+    });
+  }
   return [];
+}
+
+/** 고아 사본을 지운다. 실패는 기록만 하고, 답이 늦어지지 않게 `ORPHAN_DELETE_WAIT_MS`까지만 기다린다 */
+async function deleteOrphans(deps: DocSearchDeps, input: MatchInput, filenames: string[]): Promise<void> {
+  const log = deps.log ?? logSystem;
+  const all = Promise.all(
+    filenames.map((filename) =>
+      Promise.resolve()
+        .then(() => deps.deleteOrphan(input.agentId, filename))
+        .catch((error: unknown) =>
+          log({
+            level: 'warning',
+            category: 'api',
+            message: '문서 찾기 근거의 NODA 고아 사본을 지우지 못함',
+            details: {
+              agent_id: input.agentId,
+              code: error instanceof NodaError ? error.code : 'unknown',
+              status: error instanceof NodaError ? error.status : null,
+            },
+            orgId: input.organizationId,
+          }).catch(() => {})
+        )
+    )
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const wait = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ORPHAN_DELETE_WAIT_MS);
+  });
+  try {
+    await Promise.race([all, wait]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** 관리자 검색 시험(rag-test)용 — 대화와 같은 규칙으로 찾는다. NODA 실패는 던진다 */
 export async function searchAgentDocuments(
-  agentId: string,
-  query: string,
+  input: { agentId: string; query: string; organizationId: string | null },
   deps: DocSearchDeps = defaultDeps
 ): Promise<{ chunks: RetrievedChunk[]; dropped: number }> {
+  const { agentId, query, organizationId } = input;
   const docs = await deps.documentsOf(agentId);
   if (!hasReady(docs)) return { chunks: [], dropped: 0 };
   const result = await deps.fetchContext(agentId, query);
-  const chunks = await matchedChunks(deps, { agentId, organizationId: null }, result, docs);
+  const chunks = await matchedChunks(deps, { agentId, organizationId }, result, docs);
   return { chunks, dropped: result.dropped };
 }
 

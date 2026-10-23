@@ -176,24 +176,16 @@ describe('startReading', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keepalive로 문서마다 읽기 라우트를 차례로 부른다', async () => {
+  it('keepalive로 문서마다 읽기 라우트를 한꺼번에 부른다 — 앞 읽기가 끝나기를 기다리지 않는다', async () => {
     const order: string[] = [];
-    let release: (() => void) | null = null;
+    // 어느 호출도 끝나지 않는다 — 화면을 떠나 앞 요청이 끊겨도 뒤 문서의 읽기가 이미 나가 있어야 한다
     fetchMock.mockImplementation((url: string) => {
       order.push(url);
-      // 첫 호출이 끝나기 전에는 두 번째가 나가지 않는다 — 차례로
-      return new Promise((resolve) => {
-        const done = () => resolve(jsonResponse({ ok: true, data: { status: 'reading' } }));
-        if (order.length === 1) release = done;
-        else done();
-      });
+      return new Promise(() => {});
     });
 
-    startReading(['d1', 'd2']);
-    await Promise.resolve();
-    expect(order).toEqual(['/api/documents/d1/read']);
-    release!();
-    await vi.waitFor(() => expect(order).toEqual(['/api/documents/d1/read', '/api/documents/d2/read']));
+    startReading(['d1', 'd2', 'd3']);
+    expect(order).toEqual(['/api/documents/d1/read', '/api/documents/d2/read', '/api/documents/d3/read']);
 
     for (const [, init] of fetchMock.mock.calls) {
       expect(init.method).toBe('POST');
@@ -212,6 +204,14 @@ describe('startReading', () => {
   it('호출이 실패해도 던지지 않고 다음 문서를 이어 부른다', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network')).mockResolvedValue(jsonResponse({ ok: true, data: {} }));
     expect(() => startReading(['d1', 'd2'])).not.toThrow();
+    // fetch가 곧바로 던져도(keepalive 본문 상한 등) 나머지는 나간다
+    fetchMock.mockReset();
+    fetchMock.mockImplementationOnce(() => { throw new TypeError('keepalive quota'); }).mockResolvedValue(jsonResponse({ ok: true, data: {} }));
+    expect(() => startReading(['x1', 'x2'])).not.toThrow();
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/documents/x1/read', '/api/documents/x2/read']);
+    fetchMock.mockReset();
+    fetchMock.mockRejectedValueOnce(new Error('network')).mockResolvedValue(jsonResponse({ ok: true, data: {} }));
+    startReading(['d1', 'd2']);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1][0]).toBe('/api/documents/d2/read');
   });

@@ -101,6 +101,12 @@ describe('DELETE /api/documents', () => {
     expect(del).toContain('markError');
   });
 
+  it('NODA 실패는 따로 둔 참거짓 표시로 가른다 — 던진 값이 비어도(throw undefined) 행을 지우지 않게', () => {
+    expect(del).toContain('nodaFailed = true');
+    expect(del).toContain('if (nodaFailed)');
+    expect(del).not.toMatch(/if \(nodaError\)/);
+  });
+
   it('권한 판정은 그대로다', () => {
     expect(del).toContain('canDeleteAgent(');
     expect(del).toContain('actor.managedDepartmentIds.includes(doc.department_id)');

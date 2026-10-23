@@ -41,6 +41,8 @@ import {
   checkUploadFile,
   checkUploadTargets,
   documentStoragePath,
+  isOrganizationSuspended,
+  ORG_SUSPENDED_UPLOAD_MESSAGE,
   parseDocumentStoragePath,
 } from '@/lib/document-upload';
 
@@ -88,6 +90,17 @@ describe('checkUploadFile', () => {
     expect(checkUploadFile({ fileName: '-a.pdf', size: 1, mimeType: '' })).toMatchObject({
       message: '유효하지 않은 파일명입니다.',
     });
+  });
+
+  it('확장자가 허용 형식이어야 한다 — MIME만 맞아도 안 된다(NODA는 확장자로 읽는 방식을 정한다)', () => {
+    for (const fileName of ['문서', '문서.', 'report.pdf.bin']) {
+      expect(checkUploadFile({ fileName, size: 10, mimeType: 'application/pdf' })).toMatchObject({
+        ok: false,
+        status: 415,
+        message: expect.stringContaining('지원되지 않는 파일 형식입니다.'),
+      });
+    }
+    expect(checkUploadFile({ fileName: '규정.PDF', size: 10, mimeType: '' })).toEqual({ ok: true, ext: 'pdf' });
   });
 
   it('크기는 정수여야 한다', () => {
@@ -232,4 +245,32 @@ describe('라우트 원본', () => {
   it('옛 업로드 라우트는 없다', () => {
     expect(() => readFileSync('src/app/api/upload/route.ts', 'utf8')).toThrow();
   });
+});
+
+describe('정지된 기관은 문서를 올리지 못한다 (판정 D)', () => {
+  it('status가 suspended면 true, 그 밖·기관 없음·조회 실패는 false(checkTokenLimit과 같이 막지 않음)', async () => {
+    expect(await isOrganizationSuspended(ORG, async () => 'suspended')).toBe(true);
+    expect(await isOrganizationSuspended(ORG, async () => 'active')).toBe(false);
+    expect(await isOrganizationSuspended(ORG, async () => null)).toBe(false);
+    expect(await isOrganizationSuspended(null, async () => 'suspended')).toBe(false);
+    expect(await isOrganizationSuspended(ORG, async () => { throw new Error('db down'); })).toBe(false);
+  });
+
+  it('문구는 정한 그대로', () => {
+    expect(ORG_SUSPENDED_UPLOAD_MESSAGE).toBe('기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.');
+  });
+
+  it.each(['src/app/api/documents/upload-url/route.ts', 'src/app/api/documents/confirm/route.ts'])(
+    '%s는 기관 정지를 보고 403으로 거절한다 — 주소 발급·행 만들기 전에',
+    (path) => {
+      const route = readFileSync(path, 'utf8');
+      const at = route.indexOf('isOrganizationSuspended(actor.organizationId)');
+      expect(at).toBeGreaterThan(-1);
+      expect(route).toMatch(/isOrganizationSuspended\(actor\.organizationId\)\)\s*\{?\s*return jsonError\(ORG_SUSPENDED_UPLOAD_MESSAGE, 403\)/);
+      for (const later of ['createSignedUploadUrl(', ".from('documents').insert("]) {
+        const i = route.indexOf(later);
+        if (i > -1) expect(at).toBeLessThan(i);
+      }
+    }
+  );
 });

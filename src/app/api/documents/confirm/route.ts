@@ -12,6 +12,8 @@ import {
   buildNewDocumentRows,
   checkUploadFile,
   checkUploadTargets,
+  isOrganizationSuspended,
+  ORG_SUSPENDED_UPLOAD_MESSAGE,
   parseDocumentStoragePath,
 } from '@/lib/document-upload';
 
@@ -62,6 +64,9 @@ export async function POST(request: NextRequest) {
 
     const actor = await getActorScope(session);
     if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+
+    // 정지된 기관은 문서를 올리지 못한다(판정 D) — 기관 상태만 본다
+    if (await isOrganizationSuspended(actor.organizationId)) return jsonError(ORG_SUSPENDED_UPLOAD_MESSAGE, 403);
 
     let body: {
       storage_path?: unknown;

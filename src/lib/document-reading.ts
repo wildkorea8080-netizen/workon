@@ -2,7 +2,15 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_SIZE_LABEL } from '@/lib/file-types';
-import { noda, nodaFilename, nodaTenant, NodaError, type NodaClient, type NodaListing } from '@/lib/noda';
+import {
+  noda,
+  nodaFilename,
+  nodaTenant,
+  stripNodaPrefixes,
+  NodaError,
+  type NodaClient,
+  type NodaListing,
+} from '@/lib/noda';
 import type { NodaStatus } from '@/lib/db';
 
 /**
@@ -27,6 +35,15 @@ export const READ_GIVE_UP_MS = 600_000;
 export const READ_TIMEOUT_REASON = '읽기가 너무 오래 걸려 멈췄습니다. 다시 시도해 주세요.';
 /** 한 번의 맞추기가 NODA 목록을 부르는 보관함 수 — 문서 목록 응답이 느려지지 않게 */
 export const MAX_TENANTS_PER_RECONCILE = 5;
+/**
+ * 맞추기에서 NODA 목록 한 번의 시간 제한 — 다시 시도하지 않는다.
+ * NODA 장애 중에 문서 목록 화면이 재시도 창(10초) × 보관함 수만큼 멈추면 안 된다
+ */
+export const RECONCILE_LIST_TIMEOUT_MS = 4_000;
+/** 한 번의 맞추기가 NODA 목록에 쓰는 전체 시간. 넘기면 남은 보관함은 다음 목록 때 본다 */
+export const RECONCILE_BUDGET_MS = 5_000;
+/** 남은 예산이 이보다 적으면 목록을 더 부르지 않는다(거의 확실히 시간 초과다) */
+const MIN_LIST_TIMEOUT_MS = 1_000;
 /** NODA가 알려 준 읽지 못한 이유를 저장하는 길이 */
 const MAX_REASON_CHARS = 200;
 const UNREADABLE_DEFAULT_REASON = '이 문서를 읽을 수 없습니다.';
@@ -186,11 +203,15 @@ export function decideReadState(row: ReadingRow, listing: NodaListing, now: numb
 
 export type ReadOutcome = { status: NodaStatus | 'not_found' | 'busy'; reason?: string | null };
 
-/** 파일 이름·본문은 남기지 않는다 — 문서 id와 오류 종류만 */
+/**
+ * 파일 이름·본문은 남기지 않는다 — 문서 id와 오류 종류만.
+ * 401·403은 키가 틀렸다는 뜻이라 모든 읽기가 멈춘다 — 운영자가 바로 보게 critical
+ */
 async function logNodaError(deps: ReadingDeps, err: unknown, documentId?: string): Promise<void> {
   const nodaErr = err instanceof NodaError ? err : null;
+  const keyProblem = nodaErr?.status === 401 || nodaErr?.status === 403;
   await deps.log({
-    level: 'warning',
+    level: keyProblem ? 'critical' : 'warning',
     category: 'api',
     message: 'NODA 문서 읽기 호출 실패',
     details: {
@@ -241,6 +262,15 @@ export async function readDocument(
   const filename = row.noda_filename ?? nodaFilename(row.id, row.file_name);
   const finishedAt = () => new Date(deps.now()).toISOString();
 
+  /** 읽는 도중 행이 지워졌을 때 NODA에 남았을 수 있는 사본을 지운다(던지지 않는다) */
+  async function dropOrphanCopy(): Promise<void> {
+    try {
+      await deps.noda.deleteDocument(tenant, filename);
+    } catch (err) {
+      await logNodaError(deps, err, documentId);
+    }
+  }
+
   /** 읽기 결과를 쓴다. 이미 달라진 행이면 덮지 않고 지금 상태를 돌려준다 */
   async function conclude(patch: FinishPatch, sentToNoda: boolean): Promise<ReadOutcome> {
     if (await store.finish(documentId, patch)) {
@@ -249,13 +279,7 @@ export async function readDocument(
     const after = await store.getRow(documentId);
     if (!after) {
       // 읽는 도중 지워짐 — NODA에 사본이 생겼다면 지운다
-      if (sentToNoda) {
-        try {
-          await deps.noda.deleteDocument(tenant, filename);
-        } catch (err) {
-          await logNodaError(deps, err, documentId);
-        }
-      }
+      if (sentToNoda) await dropOrphanCopy();
       return { status: 'not_found' };
     }
     return current(after);
@@ -282,7 +306,12 @@ export async function readDocument(
     if (!(err instanceof NodaError)) throw err;
     await logNodaError(deps, err, documentId);
     const after = await store.getRow(documentId);
-    return after ? current(after) : { status: 'not_found' };
+    if (!after) {
+      // 실패로 끝났어도 NODA가 받아 둔 사본이 있을 수 있다(응답만 끊긴 경우) — 404면 조용히 끝난다
+      await dropOrphanCopy();
+      return { status: 'not_found' };
+    }
+    return current(after);
   }
 
   if (result.readable) {
@@ -291,7 +320,9 @@ export async function readDocument(
       true,
     );
   }
-  const reason = (result.reason ?? '').trim().slice(0, MAX_REASON_CHARS) || UNREADABLE_DEFAULT_REASON;
+  // NODA 이유 글에 파일 이름(`{문서 id}__…`)이 섞여 오면 화면에 앞부분이 보이지 않게 뗀다
+  const reason =
+    stripNodaPrefixes(result.reason ?? '').trim().slice(0, MAX_REASON_CHARS) || UNREADABLE_DEFAULT_REASON;
   return conclude({ noda_status: 'unreadable', noda_reason: reason }, result.stored);
 }
 
@@ -299,6 +330,8 @@ export async function readDocument(
  * 문서 목록을 열 때 `reading` 행을 NODA 목록과 맞춘다.
  *
  * - 보관함(비서)마다 목록을 한 번만 부르고, 한 번에 5개 보관함까지 본다.
+ * - 목록은 **다시 시도 없이** 짧은 시간 제한(4초)으로 부르고, 전체 5초를 넘기면 남은 보관함은 건너뛴다 —
+ *   NODA 장애 중에 문서 목록 화면이 멈추지 않게. 건너뛴 행은 그대로 두고 다음 목록 때 본다.
  * - 끝났으면 `ready`, 10분 지나도 안 오면 `failed`로 행에 쓴다(조건부 — 그 사이 바뀐 행은 덮지 않는다).
  * - 다시 걸 대상(kick)은 **가장 오래된 하나**에만 `kick: true`를 단다 — 서버는 응답 뒤 일을 이어 가지 못하므로
  *   목록을 받은 화면이 읽기 라우트를 부른다(중복은 차지가 막는다).
@@ -319,10 +352,16 @@ export async function reconcileReading<T extends ReadingRow>(
   const replaced = new Map<string, T & { kick?: true }>();
   let kickCandidate: T | null = null;
 
+  const begin = deps.now();
   for (const [agentId, group] of Array.from(byTenant).slice(0, MAX_TENANTS_PER_RECONCILE)) {
+    const remaining = RECONCILE_BUDGET_MS - (deps.now() - begin);
+    if (remaining < MIN_LIST_TIMEOUT_MS) break;
     let listing: NodaListing;
     try {
-      listing = await deps.noda.listDocuments(nodaTenant(agentId));
+      listing = await deps.noda.listDocuments(nodaTenant(agentId), {
+        retry: false,
+        timeoutMs: Math.min(RECONCILE_LIST_TIMEOUT_MS, remaining),
+      });
     } catch (err) {
       await logNodaError(deps, err);
       continue;

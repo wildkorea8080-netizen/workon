@@ -42,6 +42,10 @@ export const NODA_CONTEXT_BUDGET = 4000;
 const UPLOAD_TIMEOUT_MS = 300_000;
 /** 그 밖 호출 한 번의 시간 제한 */
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** `/context` 한 번의 시간 제한 — 대화가 이만큼 넘게 멈추면 안 된다(설계 "10초쯤") */
+const CONTEXT_TIMEOUT_MS = 8_000;
+/** 재시도 사이 최소 대기 — `Retry-After: 0`이 와도 서버를 몰아치지 않는다 */
+const MIN_RETRY_WAIT_MS = 1_000;
 /** 업로드 재시도 창 */
 const UPLOAD_RETRY_WINDOW_MS = 60_000;
 /** 그 밖 호출 재시도 창(`/context` 포함 — 대화가 오래 멈추면 안 된다) */
@@ -154,7 +158,11 @@ export interface NodaContextResult {
 
 export interface NodaClient {
   uploadDocument(input: { tenant: string; filename: string; bytes: Uint8Array }): Promise<NodaUploadResult>;
-  listDocuments(tenant: string): Promise<NodaListing>;
+  /**
+   * `retry: false`면 한 번만 부른다(문서 목록 맞추기 — 화면이 NODA 장애에 오래 묶이지 않게).
+   * `timeoutMs`는 그 한 번의 시간 제한(기본 30초)
+   */
+  listDocuments(tenant: string, opts?: { retry?: boolean; timeoutMs?: number }): Promise<NodaListing>;
   /** 404(이미 없음)는 `{ deleted: false }`로 끝난다 — 던지지 않는다 */
   deleteDocument(tenant: string, filename: string): Promise<{ deleted: boolean }>;
   getContext(input: { tenant: string; query: string }): Promise<NodaContextResult>;
@@ -209,7 +217,7 @@ export function createNodaClient(deps: {
         return await attempt();
       } catch (err) {
         if (!isRetryable(err)) throw err;
-        const wait = err.retryAfterMs ?? intervalMs;
+        const wait = Math.max(MIN_RETRY_WAIT_MS, err.retryAfterMs ?? intervalMs);
         if (now() - start + wait > windowMs) throw err;
         await sleep(wait);
       }
@@ -308,24 +316,23 @@ export function createNodaClient(deps: {
       );
     },
 
-    async listDocuments(tenant) {
-      return withRetry(
-        async () => {
-          const res = await request('GET', '/documents', { query: { tenant }, timeoutMs: DEFAULT_TIMEOUT_MS });
-          const b = await readJson(res);
-          const documents = (Array.isArray(b.documents) ? b.documents : [])
-            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
-            .map((d) => ({
-              filename: String(d.filename ?? ''),
-              ...(typeof d.doc_id === 'string' ? { doc_id: d.doc_id } : {}),
-            }));
-          const receiving = (Array.isArray(b.receiving) ? b.receiving : [])
-            .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
-            .map((d) => ({ filename: String(d.filename ?? ''), seconds: Number(d.seconds ?? 0) || 0 }));
-          return { documents, receiving };
-        },
-        { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
-      );
+    async listDocuments(tenant, opts = {}) {
+      const once = async (): Promise<NodaListing> => {
+        const res = await request('GET', '/documents', { query: { tenant }, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+        const b = await readJson(res);
+        const documents = (Array.isArray(b.documents) ? b.documents : [])
+          .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
+          .map((d) => ({
+            filename: String(d.filename ?? ''),
+            ...(typeof d.doc_id === 'string' ? { doc_id: d.doc_id } : {}),
+          }));
+        const receiving = (Array.isArray(b.receiving) ? b.receiving : [])
+          .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
+          .map((d) => ({ filename: String(d.filename ?? ''), seconds: Number(d.seconds ?? 0) || 0 }));
+        return { documents, receiving };
+      };
+      if (opts.retry === false) return once();
+      return withRetry(once, { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS });
     },
 
     async deleteDocument(tenant, filename) {
@@ -355,7 +362,7 @@ export function createNodaClient(deps: {
               budget: NODA_CONTEXT_BUDGET,
               min_similarity: NODA_MIN_SIMILARITY,
             }),
-            timeoutMs: DEFAULT_TIMEOUT_MS,
+            timeoutMs: CONTEXT_TIMEOUT_MS,
           });
           const b = await readJson(res);
           return {

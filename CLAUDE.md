@@ -98,7 +98,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1317개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1343개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -171,7 +171,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 0028 | 옛 칸(`agents.is_personal`·`enabled_connectors`)과 맞춤 트리거·함수 제거, `v_organization_summary`를 `tier <> 'personal' AND deleted_at IS NULL`로 재작성, 승인 판 도장은 `trg_agents_stamp_approval_version`으로 따로 남김. **코드 배포 확인 뒤 적용** |
 | 0029 | 생성 파일(`generated_files`) — 비서가 만든 파일 기록 · 기관 채움 트리거. **코드 배포 전에 적용** |
 | 0030 | 채팅 첨부(`chat_attachments`) — 원본·읽은 내용 경로와 요약, 기관 채움 트리거, `CHECK (ready ⇔ extract_path)`. **코드 배포 전에 적용** (코드가 이 표에 쓴다) |
-| 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다), **그 뒤 `npm run noda:migrate`**로 기존 문서를 옮기고 코드를 배포 |
+| 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다). 순서는 **0031 → 코드 푸시(배포 확인) → `npm run noda:migrate`** — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면 고아가 남는다 |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -247,17 +247,27 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 - **시계가 둘이다.** `noda_read_started_at`은 '이번 읽기 시작'(확인·다시 시도 때만 찍음, 10분 포기 `READ_GIVE_UP_MS`의 기준),
   `noda_last_attempt_at`은 'NODA에 보낸 마지막 때'(2분 다시 걸기 `READ_KICK_AFTER_MS`와 중복 차지의 기준). 판정 기준 값은 `decideReadState` 한 곳
 - **같은 문서가 동시에 걸려도 NODA 업로드는 한 번**이다 — `readDocument`가 조건부 갱신(`claim`)으로 차지한다(두 번째는 `busy`).
-  읽는 도중 문서가 지워졌으면(행 없음) NODA 사본을 지워 고아를 남기지 않는다
+  읽는 도중 문서가 지워졌으면(행 없음) NODA 사본을 지워 고아를 남기지 않는다 — NODA 호출이 실패(NodaError)로 끝난 경우에도(응답만 끊기고 사본은 생겼을 수 있다).
+  NODA가 준 읽지 못한 이유(`noda_reason`)는 `{문서 id}__` 앞부분을 떼고 저장한다. NODA 401·403(키 문제)은 운영 기록 critical
 - **'다시 걸기'는 서버가 못 한다**(Vercel은 응답 뒤 일을 이어 가지 못함). `GET /api/documents`가 `reading` 행을 NODA 목록과 맞추고(`reconcileReading`: `receiving`을 먼저 본 뒤 `documents`),
   끝났으면 `ready`, 10분이 지나도 안 오면 `failed`(`읽기가 너무 오래 걸려 멈췄습니다. 다시 시도해 주세요.`)로 쓴다. 2분 넘게 멈춘 행 **최대 하나**에 `kick: true`를 달고,
   그 목록을 받은 화면이 읽기 라우트를 부른다. 상태 조회 전용 라우트는 없다(목록이 맞추기를 한다). 한 번에 보관함 5개까지만 본다.
-  **알려진 공백**: 아무도 목록을 열지 않으면 멈춘 행은 다음에 목록을 열 때까지 `reading`이다(클라우드 서버로 옮기면 예약 작업으로 바꾼다)
+  맞추기의 NODA 목록은 **다시 시도 없이** 한 번에 4초(`RECONCILE_LIST_TIMEOUT_MS`), 전체 5초(`RECONCILE_BUDGET_MS`)까지만 쓴다 — NODA 장애 중에
+  문서 화면이 재시도 창 × 보관함 수만큼 멈추지 않게. 넘기면 남은 보관함의 행은 그대로 두고 다음 목록 때 본다.
+  화면(`DocumentsManager`)은 앞 응답을 받은 뒤에 다음 목록을 예약하고(`setTimeout` 사슬 — `setInterval`이면 느린 응답이 겹쳐 쌓인다), 늦게 온 옛 응답은 버린다(요청 순번 — '다시 시도'가 덮이지 않게)
+  **알려진 공백**: 아무도 목록을 열지 않으면 멈춘 행은 다음에 목록을 열 때까지 `reading`이다(클라우드 서버로 옮기면 예약 작업으로 바꾼다).
+  특히 **나만의 비서·부서 비서의 문서는 부서 공개(`department`)로 저장돼 관리자의 문서 목록에 안 나올 수 있어**, 목록의 다시 걸기가 영영 닿지 않을 수 있다.
+  그래서 올린 화면의 `startReading`은 문서마다 읽기 요청을 **한꺼번에**(각각 `keepalive`) 보낸다 — 차례로 보내면 화면을 떠날 때 뒤 문서의 요청이 아예 나가지 않는다.
+  주인이 자기 문서의 읽기 상태를 보는 화면은 후속 작업이다
 - 새 문서의 `summary`는 NULL, `metadata`는 `{}`, `embedding`은 NULL이다 — 요약·색인은 NODA가 한다. 직접 올리기 상한·형식·개수·위험한 이름 검사는 `document-upload.ts`(발급·확인 두 곳)가 하고
   크기·개수 상수는 `file-types.ts` 한 곳에만 둔다. 예전 `/api/upload`는 지웠다(그 경로의 스캔 판독(Anthropic)과 `usage_logs.action='document_ocr'` 기록은 함께 사라졌다 — OCR은 NODA가 한다)
 - **삭제 순서: NODA → DB 행 → 저장소 원본.** NODA 삭제가 실패하면 행을 `deleting`으로 남기고 `문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.`(502)를 돌려준다 —
-  NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 되어 그 조각이 대화에 계속 섞인다. NODA의 404(이미 없음)는 지운 것으로 센다. NODA에 간 적 없는 옛 행(`NULL`)은 NODA 삭제를 건너뛴다
+  NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 되고, 그 조각이 근거로 오는 턴은 근거 없이 답하게 된다(문서 찾기가 고아를 알아보고 근거를 버린 뒤 사본을 지운다 — 아래 '참고 문서 찾기').
+  NODA의 404(이미 없음)는 지운 것으로 센다. NODA에 간 적 없는 옛 행(`NULL`)은 NODA 삭제를 건너뛴다
 - **NODA에서 지우면 사본·색인·캐시는 즉시 사라지지만, NODA의 일일 백업에는 최대 7일 남는다.** 보안 심사 자료(서비스 정의서 6절·8.5절)에도 그렇게 적는다
 - **옛 문서(`noda_status` NULL)는 `npm run noda:migrate` 전까지 대화에서 찾지 못한다.** `ready` 문서가 없는 비서는 NODA를 부르지 않고 평소처럼 답한다
+- **정지된 기관(`organizations.status='suspended'`)은 문서를 올리지 못한다** — 주소 발급·확인 두 곳이 403 `기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.`
+  (기관 상태만 본다 — 토큰 예산과는 상관없다. 조회 실패는 `checkTokenLimit`처럼 막지 않는다). 형식은 **확장자로만** 가른다(MIME만 맞는 파일은 415) — NODA가 확장자로 읽는 방식을 정한다
 
 ### NODA 배포 순서 (S4-a)
 
@@ -267,8 +277,11 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 2. `npm run noda:check -- --roundtrip` — 전부 OK인지. `llm.external`이 참이면 **FAIL**이다 — 운영 서버에 바깥 LLM 연결이 남아 있으니 보안 자료에 '바깥 연결 없음'을 쓰지 말 것.
    배포 전 한 번: 큰 문서(45MB 브로슈어)를 올리고 호출을 일찍 끊은 뒤 NODA 목록에서 `receiving` → `documents`로 옮겨 가는지 본다(함수 시간 제한을 넘겨도 NODA가 읽기를 끝낸다는 전제)
 3. 마이그레이션 0031 적용(`npm run db:migrate -- 0031`) — **코드 배포 전**
-4. `npm run noda:migrate` — 기존 문서를 NODA로(`--dry-run`으로 대상 수 먼저). 비서 없는 문서는 건너뛴다. 오류·`reading`이 남으면 문서 화면을 열어 이어 읽힌다
-5. 코드 푸시(배포) → 문서 화면에서 올리기·읽는 중·삭제, 대화에서 근거·쪽 번호·엉뚱한 질문의 '근거 없음'을 확인
+4. 코드 푸시(배포 확인)
+5. 곧바로 `npm run noda:migrate` — 기존 문서를 NODA로(`--dry-run`으로 대상 수 먼저). 비서 없는 문서는 건너뛴다. 오류·`reading`이 남으면 문서 화면을 열어 이어 읽힌다.
+   **푸시 뒤에 돌린다** — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면 배포 전까지 지운 문서가 NODA에 고아로 남는다.
+   푸시와 이 단계 사이에는 옛 문서가 근거로 쓰이지 않으니(비서는 문서 없이 답함) 사이를 짧게 둔다
+6. 문서 화면에서 올리기·읽는 중·삭제, 대화에서 근거·쪽 번호·엉뚱한 질문의 '근거 없음'을 확인
 
 > **S4-b까지 남은 옛 길**: 아래 '스캔 PDF'·'표 문서'·'발표자료' 절은 예전 업로드 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)의 설명이다.
 > S4-a부터 새 업로드는 이 길을 타지 않는다. `document-processor.ts`·`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(스캔 판독)와 `VOYAGE_API_KEY`는 코드에 남아 있고 **S4-b에서 지운다**.
@@ -759,7 +772,8 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 ### 참고 문서 찾기 (S4-a)
 
 문서 찾기는 `doc_search` 능력(`src/lib/capabilities/doc-search.ts`)이 질문마다 NODA `/context`를 불러 한다(`budget` 4000, `min_similarity` **0.80**, 상수 `NODA_MIN_SIMILARITY`).
-`search_agent_chunks`·Voyage 임베딩은 더 쓰지 않는다. 부서 전체 검색(`/api/qna`)은 S1-b에서 걷어냈고 S4-b(NODA)에서 다시 정한다.
+`search_agent_chunks`·Voyage 임베딩은 더 쓰지 않는다. 부서 전체 검색(`/api/qna`)은 S1-b에서 걷어냈고, 설계상 S4 범위 밖이다(S5 이후에 다시 정한다).
+`/context` 한 번의 시간 제한은 8초다(재시도 창 10초 · 간격 2.5초, `Retry-After`가 0이어도 1초는 쉰다).
 (`search_document_chunks`·`search_agent_chunks` RPC는 DB에 남아 있다.)
 
 **'관련 문서 없음'은 두 겹으로 가린다.** 뜻 검색은 엉뚱한 질문에도 가장 가까운 조각을 돌려주므로 하한이 없으면 요리 질문에도 문서 조각이 근거로 붙는다.
@@ -783,9 +797,15 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 
 **근거는 이 비서의 행과 맞춰 봅니다**(`sourcesToChunks`). NODA 파일 이름 앞의 `{document_id}__`로 `documents` 행을 찾아:
 `ready`·`deleting` 행의 조각은 출처가 되고, 이 비서의 행이지만 다른 상태(읽는 중·실패·못 읽음)인 조각은 출처에서만 조용히 뺀다(근거 글은 남긴다 — 같은 비서가 올린 내용이라 격리에는 영향이 없다).
-**이 비서의 행이 없는 조각이 하나라도 섞이면 근거 전체를 버리고** '근거 없음'으로 가며 `system_logs`에 critical(`security`)을 남긴다 — 보관함 혼선·버그 신호다.
+**이 비서의 행이 없는 조각이 하나라도 있으면 그 턴은 근거 전체를 버리고** '근거 없음'으로 간다. 그 조각의 문서 id를 `documents` 전체에서 한 번 더 찾아(한 번의 조회) 가른다(판정 H):
+- **다른 비서의 행이 있다 → 섞임**(보관함 혼선·버그 신호). `system_logs` critical(`security`). NODA 사본은 조사할 수 있게 건드리지 않는다
+- **행이 어디에도 없다(또는 문서 id 앞부분이 없다) → 고아**(지워진 문서의 NODA 사본). 지운 내용이라 근거로 쓰지 않고, 이 비서 보관함의 사본을 지운다
+  (`ORPHAN_DELETE_WAIT_MS` 1.5초까지만 기다리고 실패는 기록만 — 답을 늦추지 않는다). `system_logs` warning(critical 아님 — 거짓 경보를 내지 않게)
+- **형식이 깨진 조각**(`filename`이 글이 아님) → 확인할 수 없으니 근거 없이. warning
+- 문서 확인 조회가 실패하면 근거 없이 답하고 사본은 건드리지 않는다. 운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수만)
 출처 표시는 쪽이 있으면 `p.12 · 제3장 › 여비`, 칸 주소면 `표.csv!A3:D20`, 절만 있으면 절(`source-label.ts`). 근거 글자(`text`)는 화면 출처 조각에 싣지 않는다.
-관리자 `/api/rag-test`도 같은 규칙(`searchAgentDocuments`)으로 찾는다.
+관리자 `/api/rag-test`도 같은 규칙(`searchAgentDocuments`)으로 찾고, 비서의 기관 id를 넘겨 운영 기록에 기관이 남는다. 검색 시험 화면도 같은 위치 줄(`sourceLocationLabel`)을 쓴다.
+위치(쪽·칸·절)도 유사도도 없는 조각은 `청크 N`만 보인다(`유사도: 0.0%`를 보이지 않는다).
 
 **검색 결과가 없으면 모델에게 그 사실을 알려야 합니다.** 예전에는 빈 결과일 때
 프롬프트에 아무것도 넣지 않아서, 모델이 문서가 있다는 것조차 모른 채 일반
@@ -908,7 +928,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-23 기준 1317개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-23 기준 1343개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -952,14 +972,14 @@ MAIL_FROM=
    | `capability-settings.test.ts` | 능력 설정 정규화(**능력 여섯** — S1 셋·문서 만들기·파일 받아 읽기·표 합치기, 모르는 능력·없는 커넥터 거절), 기관 범위(공식 비서가 켠 커넥터만) |
    | `number-check.test.ts` | **숫자 확인** — 표기 차이·반올림 일치·절댓값 비교, 원본에 없는 숫자 표시(최대 10개·중복 없음), 4자리 미만 정수·연도·날짜·시각·전화·id·범위 제외, **줄머리 소제목 번호·두 자리 연도 날짜 제외**(달·날 범위 밖·단위 낱말이 뒤따르면 대조), 소수는 대조, 말풍선 안내(`done`·`source_references.number_check`), 정해 둔 문구·대조를 켜는 도구 둘 |
 
-   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82 |
-   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한), 조건부 갱신 조건 |
-   | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재** |
-   | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·실패해도 이어 부름) |
-   | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음) |
-   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각이 섞이면 근거 전체 버림**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·섞이면 critical 기록), 인용 규칙 추가 줄, `rag.ts` 미사용 |
+   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82 |
+   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건 |
+   | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재**, 형식은 확장자로만(MIME만 맞으면 415), **정지된 기관은 발급·확인 두 곳에서 403** |
+   | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·**한꺼번에 보냄**·실패해도·곧바로 던져도 나머지를 보냄) |
+   | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, NODA 실패는 따로 둔 참거짓 표시로 가름, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음) |
+   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각·문서 id를 못 읽는 조각·형식이 깨진 조각을 따로 모음**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·**섞임은 critical(security)·고아는 근거 없이 + 사본 삭제 + warning·형식 깨짐은 근거 없이**·지우기 실패·오래 걸려도 답을 붙잡지 않음), rag-test 기록에 기관 id, 인용 규칙 추가 줄, `rag.ts` 미사용 |
    | `prepare-preflight.test.ts` | 대화 준비 — NODA를 못 부르면 **대화·첨부 묶기 전에** 503, `skip_documents`가 정확히 `true`일 때만 건너뜀, `ready` 없는 비서는 장애 중에도 평소처럼, 문서 찾기 꺼진 비서는 무관 |
-   | `chat-documents-ui.test.ts` | 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시), NODA 파일 이름 앞부분은 화면에 안 보임 |
+   | `chat-documents-ui.test.ts` | 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시·**위치도 유사도도 없으면 `청크 N`만**), NODA 파일 이름 앞부분은 화면에 안 보임, 문서 화면 원본(목록은 앞 응답 뒤에 예약·늦은 응답 버림·실패 칩 이유), 검색 시험 화면 위치 줄 |
 
    변이 테스트로 실제로 무는지 확인했습니다 — (옛 RAG) 임계값을 0.72로 되돌리면 실패합니다.
 
@@ -1013,7 +1033,7 @@ MAIL_FROM=
 ### 🟡 알려진 불일치
 
 - **부서 전체 검색 없음**: `/api/qna`(`search_document_chunks`)를 S1-b에서 걷어냈다.
-  부서 전체 검색은 S4-b(NODA)에서 다시 정한다. 지금 문서 찾기는 `/api/chat`의
+  부서 전체 검색은 설계상 S4 범위 밖이다(S5 이후에 다시 정한다). 지금 문서 찾기는 `/api/chat`의
   비서(NODA 보관함) 단위 `/context` 하나다.
 - **과금 파이프라인 부분 구현**: `usage_logs`에 토큰·모델·원가(USD/원)가
   기록되고 예산 소진 판정도 동작합니다. 다만 `billing_logs` 월 집계와

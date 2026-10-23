@@ -1,6 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import {
-  ALLOWED_UPLOAD_MIME_TYPES,
   UPLOAD_FORMATS_LABEL,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_SIZE_LABEL,
@@ -24,6 +23,36 @@ import { startReadingFields } from '@/lib/document-reading';
 
 /** 서명 주소 발급 뒤 확인을 받는 시간. 서명 주소는 2시간 살아 있어 짧게 끊는다 */
 export const DOCUMENT_CONFIRM_WINDOW_MS = 600_000;
+
+export const ORG_SUSPENDED_UPLOAD_MESSAGE = '기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.';
+
+async function organizationStatus(organizationId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('organizations')
+    .select('status')
+    .eq('id', organizationId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { status?: string | null } | null)?.status ?? null;
+}
+
+/**
+ * 기관이 정지(`status='suspended'`)됐는지 (판정 D). 주소 발급·확인 두 곳이 본다.
+ * 기관 상태만 본다 — 토큰 예산은 문서 올리기와 상관없다.
+ * `checkTokenLimit`과 같이 기관이 없거나 조회가 실패하면 막지 않는다(조회 오류로 업무가 멈추지 않게).
+ */
+export async function isOrganizationSuspended(
+  organizationId: string | null,
+  lookup: (organizationId: string) => Promise<string | null> = organizationStatus,
+): Promise<boolean> {
+  if (!organizationId) return false;
+  try {
+    return (await lookup(organizationId)) === 'suspended';
+  } catch (error) {
+    console.error('[document-upload] 기관 상태 조회 실패:', error instanceof Error ? error.message : error);
+    return false;
+  }
+}
 
 const DANGEROUS_FILENAME_PATTERNS = [
   /\.\./, // 디렉토리 트래버설
@@ -52,7 +81,8 @@ export type UploadFileCheck =
 
 /** 파일 이름·크기·형식 검사. 순서와 문구는 예전 업로드 라우트와 같다 */
 export function checkUploadFile(input: { fileName: string; size: number; mimeType: string }): UploadFileCheck {
-  const { fileName, size, mimeType } = input;
+  // mimeType은 받기만 하고 판정에 쓰지 않는다(아래 설명)
+  const { fileName, size } = input;
   if (typeof fileName !== 'string' || fileName.length === 0) {
     return { ok: false, status: 400, message: '유효하지 않은 파일명입니다.' };
   }
@@ -60,7 +90,9 @@ export function checkUploadFile(input: { fileName: string; size: number; mimeTyp
     return { ok: false, status: 400, message: '파일 크기가 올바르지 않습니다.' };
   }
 
-  if (!hasAllowedUploadExtension(fileName) && !(ALLOWED_UPLOAD_MIME_TYPES as readonly string[]).includes(mimeType)) {
+  // 확장자로만 판정한다. MIME은 브라우저가 붙인 신고값이고, NODA는 확장자로 읽는 방식을 정하며
+  // 저장소 경로(documentStoragePath)도 허용 확장자를 요구한다 — MIME만 맞는 파일은 여기서 415로 끝낸다
+  if (!hasAllowedUploadExtension(fileName)) {
     return {
       ok: false,
       status: 415,

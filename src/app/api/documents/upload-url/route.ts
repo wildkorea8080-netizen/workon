@@ -5,7 +5,13 @@ import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSecurityEvent } from '@/lib/filter';
-import { checkUploadFile, checkUploadTargets, documentStoragePath } from '@/lib/document-upload';
+import {
+  checkUploadFile,
+  checkUploadTargets,
+  documentStoragePath,
+  isOrganizationSuspended,
+  ORG_SUSPENDED_UPLOAD_MESSAGE,
+} from '@/lib/document-upload';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +32,9 @@ export async function POST(request: NextRequest) {
     // 소속을 모르면 거절한다 — 추측해서 배정하지 않는다(CLAUDE.md 구조적 위험 0)
     const actor = await getActorScope(session);
     if (!actor) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+
+    // 정지된 기관은 문서를 올리지 못한다(판정 D) — 기관 상태만 본다
+    if (await isOrganizationSuspended(actor.organizationId)) return jsonError(ORG_SUSPENDED_UPLOAD_MESSAGE, 403);
 
     let body: { file_name?: unknown; size?: unknown; file_type?: unknown; agent_ids?: unknown };
     try {
