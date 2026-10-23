@@ -47,7 +47,7 @@ describe('대화 실행기의 메시지 삽입', () => {
   it('두 행이 같은 키를 갖는다', async () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({
-      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1, documentsSkipped: false,
     });
     expect(hasUniformKeys(rows)).toBe(true);
     expect(rows[0]).toHaveProperty('source_references');
@@ -57,7 +57,7 @@ describe('대화 실행기의 메시지 삽입', () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     return buildMessageRows({
       conversationId: 'c', userId: 'u', userContent: '[첨부 파일: 예산.xlsx]\nq', assistantText: 'a', chunks: [], links: [], files: [],
-      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1,
+      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1, documentsSkipped: false,
     });
   };
 
@@ -75,7 +75,7 @@ describe('대화 실행기의 메시지 삽입', () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({
       conversationId: 'c', userId: 'u', userContent: 'q', assistantText: '합계 12,345', chunks: [], links: [], files: [],
-      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1, numberCheck: { unverified: ['12,345'] },
+      attachments: [{ id: 'att-1', file_name: '예산.xlsx' }], agentVersion: 1, documentsSkipped: false, numberCheck: { unverified: ['12,345'] },
     });
     expect(hasUniformKeys(rows)).toBe(true);
     expect((rows[1].source_references as Record<string, unknown>).number_check).toEqual({ unverified: ['12,345'] });
@@ -85,9 +85,41 @@ describe('대화 실행기의 메시지 삽입', () => {
   it('숫자 확인 결과가 없으면 number_check 칸을 남기지 않는다', async () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({
-      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1, numberCheck: null,
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1, documentsSkipped: false, numberCheck: null,
     });
     expect(rows[1].source_references).not.toHaveProperty('number_check');
+  });
+
+  it('문서 없이 답한 턴이면 답변 행에 documents_skipped, 두 행 칸 집합은 같다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
+      documentsSkipped: true,
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    expect((rows[1].source_references as Record<string, unknown>).documents_skipped).toBe(true);
+    expect(rows[0].source_references).not.toHaveProperty('documents_skipped');
+  });
+
+  it('문서를 찾은 턴이면 documents_skipped 칸을 남기지 않는다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
+      documentsSkipped: false,
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    expect(rows[1].source_references).not.toHaveProperty('documents_skipped');
+  });
+
+  it('조각의 쪽·칸·절·스캔 판독을 저장한다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', links: [], files: [], attachments: [], agentVersion: 1, documentsSkipped: false,
+      chunks: [{ documentId: 'd', documentTitle: '규정', chunkIndex: 0, text: '', similarity: 0.86, page: 12, cellRange: null, section: '제3장 › 여비', ocr: true }],
+    });
+    expect((rows[1].source_references as { chunks: unknown[] }).chunks).toEqual([
+      { documentId: 'd', documentTitle: '규정', chunkIndex: 0, similarity: 0.86, page: 12, cellRange: null, section: '제3장 › 여비', ocr: true },
+    ]);
   });
 
   it('저장 실패를 화면에 알린다', async () => {
@@ -102,7 +134,7 @@ describe('대화 실행기의 메시지 삽입', () => {
     // 프리셋마다 적지 않고 여기 한 곳에 두는 이유: 이 실패는 특정 비서의
     // 문제가 아니라 문서를 근거로 답하는 모든 경로에서 생긴다.
     const { docSearchAddendum } = await import('@/lib/capabilities/doc-search');
-    const text = docSearchAddendum([{ documentId: 'd', chunkIndex: 0, text: 't', similarity: 0.5 }], true)!;
+    const text = docSearchAddendum({ context: '[1] 규정\nt', chunks: [{ documentId: 'd', chunkIndex: 0, text: 't', similarity: 0.5 }], hasDocuments: true, skipped: false })!;
     expect(text).toContain('참고 자료:');
     expect(text).toContain('자료 인용 규칙');
     expect(text).toContain('단위');

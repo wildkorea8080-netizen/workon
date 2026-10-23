@@ -52,7 +52,7 @@ const attachments: TurnAttachment[] = [
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
   organizationId: 'org', departmentId: 'dept', userId: 'u1', agentId: 'agent', agentVersion: 1,
-  capabilities: { file_read: {} }, message: '요약해줘', conversationId: 'conv', attachments, ...over,
+  capabilities: { file_read: {} }, message: '요약해줘', conversationId: 'conv', attachments, preflight: {}, skipDocuments: false, ...over,
 });
 
 const table: ExtractedTable = {

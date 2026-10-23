@@ -11,6 +11,7 @@ import { getAllowedModelIds, resolveModel } from '@/lib/model-policy';
 import { connectorCatalog } from '@/lib/connectors';
 import { activeCapabilities, effectiveCapabilities, toolsFor } from '@/lib/capabilities';
 import type { TurnContext, PrepareResult, TurnAttachment } from '@/lib/capabilities/types';
+import type { CapabilityId } from '@/lib/capabilities/settings';
 import {
   bindAttachments,
   checkAttachable,
@@ -52,6 +53,8 @@ async function discardNewConversation(conversationId: string, userId: string): P
  */
 export async function prepareTurn(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome> {
   const { agent_id, message, conversation_id, images, attachment_ids } = body;
+  // '문서 없이 일반 답변 받기'. 정확히 true일 때만 — 다른 값으로 문서 찾기가 꺼지면 안 된다
+  const skipDocuments = body.skip_documents === true;
 
   if (typeof agent_id !== 'string' || !agent_id) return reject('에이전트 ID는 필수입니다.', 400);
   if (typeof message !== 'string' || !message.trim()) return reject('메시지는 필수입니다.', 400);
@@ -111,6 +114,16 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       blockedWords: filterResult.blockedWords,
       blockedPatterns: filterResult.blockedPatterns,
     });
+  }
+
+  // ── 능력 preflight ── 대화를 만들기 전에(판정 R4). 참고 문서를 불러오지 못하면 여기서 거절해
+  // 빈 대화가 쌓이거나 새 대화의 첨부가 묶였다 지워지지 않게 한다
+  const preflight: Partial<Record<CapabilityId, unknown>> = {};
+  for (const cap of capabilities) {
+    if (!cap.preflight) continue;
+    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments });
+    if (!result.ok) return reject(result.message, result.status, { code: result.code });
+    if (result.carry !== undefined) preflight[cap.id] = result.carry;
   }
 
   // ── 대화 ──
@@ -200,12 +213,15 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     message,
     conversationId,
     attachments,
+    preflight,
+    skipDocuments,
   };
 
   const prepared: PrepareResult[] = await Promise.all(
     capabilities.map((cap) => (cap.prepare ? cap.prepare(ctx) : Promise.resolve({} as PrepareResult)))
   );
   const chunks: RetrievedChunk[] = prepared.flatMap((p) => p.chunks ?? []);
+  const dropped = prepared.find((p) => typeof p.dropped === 'number')?.dropped;
   const { tools } = toolsFor(capabilities, ctx);
 
   return {
@@ -221,6 +237,8 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       conversationId,
       isNewConversation,
       chunks,
+      documentsSkipped: prepared.some((p) => p.documentsSkipped === true),
+      docDropped: dropped ?? null,
       storedUserContent: storedUserContent(
         message,
         attachedImages.length,

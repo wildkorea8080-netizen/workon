@@ -38,13 +38,35 @@ export interface TurnContext {
   conversationId: string;
   /** 이 대화의 첨부. 파일을 받는 능력이 꺼져 있으면 빈 배열(조회하지 않는다) */
   attachments: TurnAttachment[];
+  /** 능력별 preflight가 넘긴 값(`PreflightResult.carry`). prepare가 이어 쓴다 */
+  preflight: Partial<Record<CapabilityId, unknown>>;
+  /** 직원이 '문서 없이 일반 답변 받기'를 골랐다(요청 본문 `skip_documents === true`). 그 한 번만이다 */
+  skipDocuments: boolean;
 }
+
+/** 대화를 만들기 **전에** 능력이 할 일(판정 R4) — 거절될 요청으로 빈 대화가 쌓이지 않게 */
+export interface PreflightInput {
+  organizationId: string;
+  agentId: string;
+  message: string;
+  skipDocuments: boolean;
+}
+
+/**
+ * 거절이면 실행기가 JSON으로 답한다(`code`는 응답의 `error.code` — 화면이 버튼을 고른다).
+ * `carry`는 `TurnContext.preflight[능력 id]`로 prepare에 간다
+ */
+export type PreflightResult = { ok: true; carry?: unknown } | { ok: false; status: number; message: string; code: string };
 
 export interface PrepareResult {
   /** 시스템 프롬프트 뒤에 붙일 글 */
   systemAddendum?: string;
   /** 화면 출처 표시(SourceCitation)와 messages.source_references.chunks로 간다 */
   chunks?: RetrievedChunk[];
+  /** 문서 찾기에서 유사도 하한으로 뺀 조각 수(NODA `dropped`). 사용 기록 `details.doc_dropped`로 간다 */
+  dropped?: number;
+  /** 이번 턴은 참고 문서 없이 답한다 — 답변 행 `source_references.documents_skipped` */
+  documentsSkipped?: boolean;
 }
 
 /** 도구가 만든 파일. 화면(tool_end)과 메시지 저장(source_references.files)으로 간다 */
@@ -80,6 +102,8 @@ export interface Capability {
   acceptsFiles?: boolean;
   /** 쓸 준비가 됐는가(키 등). false면 켜져 있어도 빠진다 */
   isAvailable(): boolean;
+  /** 대화를 만들기 전에 부른다. 거절하면 대화·첨부 묶기 없이 끝난다 */
+  preflight?(input: PreflightInput): Promise<PreflightResult>;
   prepare?(ctx: TurnContext): Promise<PrepareResult>;
   tools?(ctx: TurnContext): LlmTool[];
   /** 던져도 된다 — 실행기가 받아 실패 결과로 바꾼다 */

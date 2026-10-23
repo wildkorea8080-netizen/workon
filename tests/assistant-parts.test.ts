@@ -72,6 +72,7 @@ describe('메시지 저장 행', () => {
     files: [{ id: 'f', file_name: 'a.hwpx', size_bytes: 1 }],
     attachments: [],
     agentVersion: 7,
+    documentsSkipped: false,
   });
 
   it('두 행의 키 집합이 같다', () => {

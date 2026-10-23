@@ -168,8 +168,17 @@ export type RetrievedChunk = {
   documentId: string;
   documentTitle?: string;
   chunkIndex: number;
+  /** NODA 근거(S4-a)는 조각 글을 따로 주지 않아 빈 글이다 — 글은 `/context`의 근거 묶음에 있다 */
   text: string;
   similarity: number;
+  /** 쪽(NODA `anchors[].page`). 엑셀·CSV는 쪽이 없어 null이고 `cellRange`를 쓴다. 옛 메시지에는 없다 */
+  page?: number | null;
+  /** 칸 주소(`표.csv!A3:D20`) */
+  cellRange?: string | null;
+  /** 절(NODA `outline`을 ` › `로 이음) */
+  section?: string | null;
+  /** 스캔 판독(OCR)으로 읽은 조각 — 원문과 다르게 읽혔을 수 있다 */
+  ocr?: boolean;
 };
 
 export type RetrievalResult = {

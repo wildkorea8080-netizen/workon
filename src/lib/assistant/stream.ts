@@ -192,6 +192,8 @@ async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Recor
         agent_id: turn.ctx.agentId,
         agent_version: turn.ctx.agentVersion,
         chunks_retrieved: turn.chunks.length,
+        // 유사도 하한(0.80)을 다시 정할 근거. 질문 원문은 남기지 않는다(설계 5절)
+        doc_dropped: turn.docDropped,
         model_substituted: turn.modelSubstituted,
         ...extra,
       }),
@@ -281,6 +283,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
       attachments: turn.ctx.attachments.filter((a) => a.isNew).map((a) => ({ id: a.id, file_name: a.fileName })),
       agentVersion: turn.ctx.agentVersion,
       numberCheck,
+      documentsSkipped: turn.documentsSkipped,
     })
   );
   if (saveError) {

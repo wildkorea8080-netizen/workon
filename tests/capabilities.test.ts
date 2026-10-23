@@ -8,7 +8,7 @@ import type { RetrievedChunk } from '@/lib/db';
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
   organizationId: 'org', departmentId: 'dept', userId: 'u', agentId: 'a', agentVersion: 1, conversationId: 'c', attachments: [],
-  capabilities: {}, message: '여비 규정', ...over,
+  capabilities: {}, message: '여비 규정', preflight: {}, skipDocuments: false, ...over,
 });
 
 const chunk: RetrievedChunk = { documentId: 'd1', documentTitle: '여비규정', chunkIndex: 0, text: '국내 출장 일비 2만원', similarity: 0.45 };
@@ -94,35 +94,39 @@ describe('대화할 때의 능력', () => {
 });
 
 describe('참고 문서 찾기', () => {
+  // NODA 근거·preflight·섞인 근거는 tests/doc-search-noda.test.ts가 본다
   it('찾으면 자료와 인용 규칙을 함께 붙인다', () => {
-    const text = docSearchAddendum([chunk], true)!;
+    const text = docSearchAddendum({ context: '[1] 여비규정.hwp p.3\n국내 출장 일비 2만원', chunks: [chunk], hasDocuments: true, skipped: false })!;
     expect(text).toContain('참고 자료:');
-    expect(text).toContain('[참고 자료: 여비규정]');
+    expect(text).toContain('국내 출장 일비 2만원');
     expect(text).toContain('[자료 인용 규칙]');
     // 단위를 임의로 붙이지 말라는 지침이 핵심이다
     expect(text).toContain('자료에 없는 단위');
   });
 
   it('문서는 있는데 못 찾으면 근거 없음을 밝히게 한다', () => {
-    expect(docSearchAddendum([], true)).toContain('[문서 검색 결과 없음]');
+    expect(docSearchAddendum({ context: '', chunks: [], hasDocuments: true, skipped: false })).toContain('[문서 검색 결과 없음]');
   });
 
   it('문서가 없으면 아무것도 붙이지 않는다', () => {
-    expect(docSearchAddendum([], false)).toBeUndefined();
-  });
-
-  it('검색이 실패해도 대화는 이어진다', async () => {
-    const cap = createDocSearch({
-      retrieve: async () => { throw new Error('임베딩 실패'); },
-      hasDocuments: async () => true,
-    });
-    const result = await cap.prepare!(ctx());
-    expect(result.chunks).toEqual([]);
-    expect(result.systemAddendum).toContain('[문서 검색 결과 없음]');
+    expect(docSearchAddendum({ context: null, chunks: [], hasDocuments: false, skipped: false })).toBeUndefined();
   });
 
   it('찾은 조각을 출처로 돌려준다', async () => {
-    const cap = createDocSearch({ retrieve: async () => [chunk], hasDocuments: async () => true });
-    expect((await cap.prepare!(ctx())).chunks).toEqual([chunk]);
+    const doc = { id: '11111111-2222-4333-8444-555555555555', title: '여비규정', file_name: '여비규정.hwp', noda_status: 'ready' as const };
+    const cap = createDocSearch({
+      documentsOf: async () => [doc],
+      fetchContext: async () => ({
+        context: `[1] ${doc.id}__여비규정.hwp\n국내 출장 일비 2만원`,
+        sources: [{ n: 1, chunk_id: 'c1', doc_id: 'x', filename: `${doc.id}__여비규정.hwp`, similarity: 0.9 }],
+        dropped: 0,
+      }),
+      log: async () => {},
+    });
+    const pre = await cap.preflight!({ organizationId: 'org', agentId: 'a', message: '여비 규정', skipDocuments: false });
+    expect(pre.ok).toBe(true);
+    if (!pre.ok) return;
+    const out = await cap.prepare!(ctx({ preflight: { doc_search: pre.carry } }));
+    expect(out.chunks).toMatchObject([{ documentId: doc.id, documentTitle: '여비규정', similarity: 0.9 }]);
   });
 });

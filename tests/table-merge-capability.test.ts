@@ -56,7 +56,7 @@ const attachments: TurnAttachment[] = [
 
 const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
   organizationId: 'org', departmentId: 'dept', userId: 'u1', agentId: 'agent', agentVersion: 1,
-  capabilities: { table_merge: {} }, message: '합쳐줘', conversationId: 'conv', attachments, ...over,
+  capabilities: { table_merge: {} }, message: '합쳐줘', conversationId: 'conv', attachments, preflight: {}, skipDocuments: false, ...over,
 });
 
 function deps(over: Partial<TableMergeDeps> = {}): TableMergeDeps & {

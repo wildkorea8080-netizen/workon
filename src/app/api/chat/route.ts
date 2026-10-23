@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { jsonError } from '@/lib/agent-route-helpers';
 import { prepareTurn } from '@/lib/assistant/prepare';
@@ -20,7 +20,15 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json()) as Record<string, unknown>;
     const prepared = await prepareTurn(session, body);
-    if (!prepared.ok) return jsonError(prepared.message, prepared.status, prepared.details);
+    if (!prepared.ok) {
+      // 능력 preflight 거절(참고 문서를 불러오지 못함 등)은 화면이 버튼을 고르도록 error.code에 싣는다.
+      // 다른 거절은 지금 모양({ message, details }) 그대로
+      const code = prepared.details?.code;
+      if (typeof code === 'string') {
+        return NextResponse.json({ ok: false, error: { message: prepared.message, code } }, { status: prepared.status });
+      }
+      return jsonError(prepared.message, prepared.status, prepared.details);
+    }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({

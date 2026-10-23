@@ -9,7 +9,7 @@ import { buildDocx, wp } from './fixtures/docx';
 
 const ctx: TurnContext = {
   organizationId: 'org', departmentId: 'dept', userId: 'u1', agentId: 'agent-1', agentVersion: 3,
-  capabilities: { document: {} }, message: '회의록 만들어줘', conversationId: 'conv-1', attachments: [],
+  capabilities: { document: {} }, message: '회의록 만들어줘', conversationId: 'conv-1', attachments: [], preflight: {}, skipDocuments: false,
 };
 
 async function deps(over: Partial<DocumentDeps> = {}) {

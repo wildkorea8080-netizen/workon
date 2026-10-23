@@ -37,6 +37,10 @@ export interface PreparedTurn {
   conversationId: string;
   isNewConversation: boolean;
   chunks: RetrievedChunk[];
+  /** '문서 없이 일반 답변 받기'로 답한 턴 — 답변 행 `source_references.documents_skipped` */
+  documentsSkipped: boolean;
+  /** 문서 찾기에서 유사도 하한으로 뺀 조각 수(NODA `dropped`). NODA를 부르지 않았으면 null. 사용 기록 `details.doc_dropped` */
+  docDropped: number | null;
   /** 메시지 행에 저장할 사용자 내용(사진 표시 + 질문) */
   storedUserContent: string;
 }

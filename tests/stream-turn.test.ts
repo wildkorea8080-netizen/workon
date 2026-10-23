@@ -50,7 +50,7 @@ const IMAGE_DATA = 'SU1BR0VCWVRFU19TSE9VTERfTk9UX0JFX1NUT1JFRA==';
 function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
   return {
     ctx: {
-      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문', conversationId: 'c1', attachments: [],
+      organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 7, capabilities: {}, message: '질문', conversationId: 'c1', attachments: [], preflight: {}, skipDocuments: false,
     },
     modelId: MODEL,
     modelSubstituted: false,
@@ -62,6 +62,8 @@ function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
     isNewConversation: true,
     chunks: [],
     storedUserContent: '질문',
+    documentsSkipped: false,
+    docDropped: null,
     ...overrides,
   };
 }
@@ -153,6 +155,25 @@ describe('streamTurn — 성공', () => {
     expect(details(chat[0])).toMatchObject({ model: MODEL, input_tokens: 10, output_tokens: 5, agent_version: 7 });
     expect(details(chat[0]).cost_krw).toEqual(expect.any(Number));
     expect(details(chat[0])).not.toHaveProperty('aborted');
+  });
+
+  it('대화 사용 기록에 문서 찾기에서 뺀 조각 수(doc_dropped)를 남긴다 — 없으면 null', async () => {
+    setLlmAdapterForTests(adapter());
+    await run(turn({ docDropped: 3 }));
+    expect(details(inserted('usage_logs').find((r) => r.action === 'chat_message')!).doc_dropped).toBe(3);
+    writes.length = 0;
+    await run(turn());
+    const d = details(inserted('usage_logs').find((r) => r.action === 'chat_message')!);
+    expect(d).toHaveProperty('doc_dropped');
+    expect(d.doc_dropped).toBeNull();
+  });
+
+  it('문서 없이 답한 턴은 답변 행에 documents_skipped를 남긴다', async () => {
+    setLlmAdapterForTests(adapter());
+    await run(turn({ documentsSkipped: true }));
+    const rows = inserted('messages');
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect((rows[1].source_references as Record<string, unknown>).documents_skipped).toBe(true);
   });
 
   it('새 대화면 제목 생성도 이번 턴 모델로 기록하고 제목을 바꾼다', async () => {

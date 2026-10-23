@@ -29,7 +29,7 @@ const done = (stopReason: string, input = 10, output = 5): LlmStreamEvent => ({
 const toolCall = (id: string): LlmStreamEvent => ({ type: 'tool_use', id, name: 'law_search', input: { q: '여비' } });
 
 const ctx: TurnContext = {
-  organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 1, capabilities: {}, message: 'q', conversationId: 'c', attachments: [],
+  organizationId: 'o', departmentId: 'd', userId: 'u', agentId: 'a', agentVersion: 1, capabilities: {}, message: 'q', conversationId: 'c', attachments: [], preflight: {}, skipDocuments: false,
 };
 
 function lawCapability(execute: Capability['execute']): Capability {

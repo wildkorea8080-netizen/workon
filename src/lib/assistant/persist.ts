@@ -19,6 +19,8 @@ export interface MessageRowInput {
   agentVersion: number;
   /** 숫자 확인 결과. 확인되지 않은 숫자가 있을 때만 답변 행에 싣는다 */
   numberCheck?: NumberCheck | null;
+  /** 참고 문서 없이 답한 턴. 참일 때만 답변 행에 `documents_skipped: true`를 싣는다(지난 대화에서도 표시) */
+  documentsSkipped: boolean;
 }
 
 /** 답변 숫자 중 이번 턴에 도구가 보여 준 값에서 못 찾은 것(설계 5.4) */
@@ -62,11 +64,17 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           documentTitle: c.documentTitle,
           chunkIndex: c.chunkIndex,
           similarity: c.similarity,
+          // NODA 근거의 위치(S4-a). 옛 조각에는 없어 JSON에서 빠진다
+          page: c.page,
+          cellRange: c.cellRange,
+          section: c.section,
+          ocr: c.ocr,
         })),
         links: dedupeLinks(input.links),
         files: input.files,
         // source_references 안의 키라 두 행의 칸 집합은 그대로다. 없으면 키를 두지 않는다
         ...(input.numberCheck?.unverified.length ? { number_check: { unverified: input.numberCheck.unverified } } : {}),
+        ...(input.documentsSkipped ? { documents_skipped: true } : {}),
       },
       agent_version: input.agentVersion,
     },
