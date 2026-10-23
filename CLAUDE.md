@@ -19,13 +19,13 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 |---|---|
 | Frontend | Next.js 14 (App Router) + React 18 + TypeScript + Tailwind CSS |
 | Auth | NextAuth.js 4 (Credentials) — Supabase Auth도 signup에서 일부 사용 |
-| DB | Supabase PostgreSQL + pgvector (임베딩 저장) |
+| DB | Supabase PostgreSQL (+ pgvector — 옛 임베딩 저장, S4-b까지 남음) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
 | AI/LLM | Claude API — AI 연결부 `src/lib/llm/` (어댑터: `anthropic.ts`), 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
 | 문서 읽기·검색 | **NODA(국내)** — 참고 문서의 읽기·OCR·검색(S4-a). 임베딩 Voyage AI(`voyage-3`)는 옛 업로드 경로용으로 S4-b까지 남음 |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
-| 문서 파싱 | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
+| 문서 파싱 (옛 업로드 경로 — 첨부·양식에 일부 쓰임, 정리는 S4-b) | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
@@ -38,7 +38,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 97개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 99개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
 │   ├── my/stats/         # 내 사용현황
@@ -114,7 +114,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 ---
 
-## API 구조 (97개 라우트)
+## API 구조 (99개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -378,7 +378,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 **`error` 이벤트에는 원문을 싣지 않습니다.** AI 어댑터는 `LlmApiError`(상태·원문)를 던지고, 실행기가 `friendlyLlmMessage`(`src/lib/llm/errors.ts`)로
 한국어 안내만 보냅니다 — 결제·키 문제(크레딧 부족·401·403·키 미설정)는 "기관 관리자에게 문의", 요청 몰림(429·529·overloaded)은 "잠시 뒤 다시".
 원문은 `system_logs`(category `api`)에 남기고 결제·키 문제는 `critical`이라 슈퍼관리자 로그에서 바로 보입니다. 예전에는 Anthropic 원문
-("credit balance is too low…")이 직원 화면에 그대로 떴습니다. 
+("credit balance is too low…")이 직원 화면에 그대로 떴습니다.
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
 클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).

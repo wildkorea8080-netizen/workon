@@ -31,9 +31,24 @@ for (const k of ['NEXTAUTH_URL', 'NEXTAUTH_SECRET', 'VOYAGE_API_KEY', 'ANTHROPIC
 
 const dryRun = process.argv.includes('--dry-run');
 
+if (!dryRun && !process.env.NODA_API_KEY) {
+  console.error('NODA_API_KEY가 없습니다 — .env.local에 넣은 뒤 다시 실행하세요.');
+  process.exit(1);
+}
+
 const { supabaseAdmin } = await import('../src/lib/supabaseAdmin.ts');
 const { nodaFilename } = await import('../src/lib/noda.ts');
 const { readDocument, startReadingFields } = await import('../src/lib/document-reading.ts');
+
+const STATUS_LABELS = {
+  ready: '읽기 끝',
+  unreadable: '읽을 수 없는 문서 — 이유는 문서 화면에서',
+  failed: '읽기 실패 — 문서 화면에서 다시 시도',
+  reading: 'NODA 호출이 닿지 않음 — 문서 화면을 열면 이어서 읽음',
+  busy: '다른 곳에서 읽는 중',
+  deleting: '삭제 대기',
+  not_found: '문서를 찾을 수 없음',
+};
 
 const short = (id) => String(id).slice(0, 8);
 
@@ -79,7 +94,8 @@ async function main() {
 
       const outcome = await readDocument(t.id);
       tally[outcome.status] = (tally[outcome.status] ?? 0) + 1;
-      console.log(`${label} · ${outcome.status}${outcome.reason ? ` · ${outcome.reason}` : ''}`);
+      // NODA가 준 이유에는 파일 이름이 섞일 수 있어 찍지 않는다 — 이유는 DB·문서 화면에 있다
+      console.log(`${label} · ${outcome.status} · ${STATUS_LABELS[outcome.status] ?? '확인 필요'}`);
     } catch (e) {
       tally.error = (tally.error ?? 0) + 1;
       console.log(`${label} · 오류 · ${e instanceof Error ? e.message : String(e)}`);
@@ -93,7 +109,8 @@ async function main() {
       "\n'reading'은 NODA 호출이 닿지 않은 문서입니다 — 문서 화면을 열면 이어서 읽습니다. 'failed'·'unreadable'은 이유를 보고 문서 화면에서 다시 시도하세요.",
     );
   }
-  if (tally.error) process.exit(1);
+  // reading·busy는 아직 끝나지 않은 문서라 다음 단계(코드 배포) 전에 확인이 필요하다
+  if (tally.error || tally.reading || tally.busy) process.exit(1);
 }
 
 main().catch((e) => {
