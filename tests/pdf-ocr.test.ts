@@ -67,13 +67,7 @@ describe('스캔 판독은 AI 연결부를 거친다', () => {
 });
 
 describe('스캔 판독은 기관의 모델 정책을 따른다', () => {
-  it('업로드 라우트가 정책으로 모델을 정해 판독에 넘긴다', async () => {
-    const { readFileSync } = await import('fs');
-    const route = readFileSync('src/app/api/upload/route.ts', 'utf8');
-    expect(route).toContain('resolveModelForDepartment(');
-    expect(route).toContain('{ ocrModel }');
-  });
-
+  // 업로드 경로에는 판독이 없다(S4-a — 읽기는 NODA). 판독 함수 테스트는 S4-b가 pdf-ocr.ts를 지울 때까지 둔다
   it('판독 함수는 모델을 인자로 받아 연결부에 넘긴다', async () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync('src/lib/pdf-ocr.ts', 'utf8');

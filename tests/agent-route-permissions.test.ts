@@ -7,7 +7,8 @@ import { readFileSync, existsSync } from 'fs';
  * route-auth.test.ts와 같은 방식이다. 한 핸들러에만 검사를 넣고 다른
  * 핸들러를 빠뜨리는 실수가 forbidden-words에서 실제로 있었다.
  */
-const PERMISSION_CALL = /can(Edit|Delete|Use)Agent|canPromoteToDepartment|canRequestOfficial|canApproveOfficial/;
+// checkUploadTargets는 고른 비서 전부에 canEditAgent를 거는 묶음이다(아래 '업로드는 고른 비서 전부를 검사한다'가 안을 본다)
+const PERMISSION_CALL = /can(Edit|Delete|Use)Agent|canPromoteToDepartment|canRequestOfficial|canApproveOfficial|checkUploadTargets\(/;
 
 /** [파일, 확인할 핸들러] */
 const MUTATING: [string, string[]][] = [
@@ -21,7 +22,9 @@ const MUTATING: [string, string[]][] = [
   ['src/app/api/agents/[id]/templates/[templateId]/route.ts', ['DELETE']],
   ['src/app/api/admin/agents/[id]/approve/route.ts', ['POST']],
   ['src/app/api/admin/agents/[id]/reject/route.ts', ['POST']],
-  ['src/app/api/upload/route.ts', ['POST']],
+  ['src/app/api/documents/upload-url/route.ts', ['POST']],
+  ['src/app/api/documents/confirm/route.ts', ['POST']],
+  ['src/app/api/documents/[id]/read/route.ts', ['POST']],
   ['src/app/api/documents/route.ts', ['DELETE']],
   ['src/app/api/documents/assign/route.ts', ['POST']],
 ];
@@ -49,9 +52,14 @@ describe('비서 변경 라우트의 권한 판정', () => {
 
   it('업로드는 고른 비서 전부를 검사한다', () => {
     // 예전에는 첫 번째 비서만 검사해 나머지 비서에 권한 없이 문서가 붙었다
-    const src = readFileSync('src/app/api/upload/route.ts', 'utf8');
+    // 발급·확인 두 라우트가 같은 검사(checkUploadTargets)를 거친다
+    const src = readFileSync('src/lib/document-upload.ts', 'utf8');
     expect(src).not.toContain('agentIds[0]');
     expect(src).toMatch(/for \(const \w+ of agentIds\)/);
+    expect(src).toContain('canEditAgent');
+    for (const file of ['upload-url', 'confirm']) {
+      expect(readFileSync(`src/app/api/documents/${file}/route.ts`, 'utf8'), file).toContain('checkUploadTargets(');
+    }
   });
 
   it('문서 지우기는 비서를 지울 수 있는 사람만', () => {

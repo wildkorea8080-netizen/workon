@@ -70,9 +70,9 @@ describe('사용 방법·시작 예시 파싱', () => {
 
 describe('업로드 상한은 한 곳에만', () => {
   it('서버가 개수를 판정한다', () => {
-    // 상한이 화면에만 있었다. /api/upload에 개수 검사가 아예 없어
+    // 상한이 화면에만 있었다. /api/upload에 개수 검사가 아예 없어(지금은 document-upload.ts)
     // 화면을 거치지 않으면 얼마든지 붙일 수 있었다.
-    const upload = readFileSync('src/app/api/upload/route.ts', 'utf8');
+    const upload = readFileSync('src/lib/document-upload.ts', 'utf8');
     expect(upload).toContain('MAX_AGENT_DOCUMENTS');
     expect(upload).toContain("from('documents')");
   });
@@ -80,7 +80,7 @@ describe('업로드 상한은 한 곳에만', () => {
   it('선택한 비서 전부를 본다', () => {
     // 문서는 비서마다 한 행씩 들어간다. 첫 번째만 검사하면 나머지는
     // 상한을 넘겨 쌓인다.
-    const upload = readFileSync('src/app/api/upload/route.ts', 'utf8');
+    const upload = readFileSync('src/lib/document-upload.ts', 'utf8');
     // import 줄이 아니라 실제 검사 지점을 본다
     const at = upload.indexOf('const full = agentIds.filter');
     expect(at, '문서 수 검사를 찾지 못했다').toBeGreaterThan(-1);
@@ -93,7 +93,7 @@ describe('업로드 상한은 한 곳에만', () => {
     // 화면은 10MB, 서버는 20MB로 갈라져 안내와 실제가 어긋났었다
     for (const file of [
       'src/components/chat/CreateAgentModal.tsx',
-      'src/app/api/upload/route.ts',
+      'src/lib/document-upload.ts',
     ]) {
       const src = readFileSync(file, 'utf8');
       expect(src, file).not.toMatch(/const MAX_FILE_SIZE\s*=/);

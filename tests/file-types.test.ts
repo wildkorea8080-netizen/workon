@@ -49,7 +49,7 @@ describe('파생 값', () => {
 
 describe('목록이 한 곳에만 있는가', () => {
   const FILES = [
-    'src/app/api/upload/route.ts',
+    'src/lib/document-upload.ts',
     'src/components/admin/DocumentsManager.tsx',
     'src/components/chat/CreateAgentModal.tsx',
     'src/components/admin/SettingsManager.tsx',
