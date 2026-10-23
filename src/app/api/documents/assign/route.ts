@@ -82,8 +82,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: { message: '선택한 비서들은 이미 이 문서가 등록되어 있습니다.' } }, { status: 409 });
     }
 
-    // 새 연결 레코드 생성 (storage_path, metadata, embedding 공유). 행마다 키 집합이 같다.
-    const newRows = newAgentIds.map((id) => buildAssignedDocumentRow(src, targets.get(id)!));
+    // 새 연결 레코드 생성: 저장소 파일은 공유하고, 읽기는 비서마다 새로 한다(새 id·NODA 파일 이름·reading).
+    // 행마다 키 집합이 같다. 읽기 호출은 화면이 목록을 열 때 시작한다(맞추기·kick).
+    const now = new Date();
+    const newRows = newAgentIds.map((id) => buildAssignedDocumentRow(src, targets.get(id)!, crypto.randomUUID(), now));
 
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from('documents')
@@ -99,7 +101,7 @@ export async function POST(request: NextRequest) {
       await enableAgentCapability(id, 'doc_search', session.user.id);
     }
 
-    return NextResponse.json({ ok: true, data: { added: inserted?.length ?? 0 } });
+    return NextResponse.json({ ok: true, data: { added: inserted?.length ?? 0, documentIds: (inserted ?? []).map((r: { id: string }) => r.id) } });
   } catch (err: any) {
     console.error('[documents/assign]', err);
     return NextResponse.json({ ok: false, error: { message: err.message } }, { status: 500 });

@@ -2,11 +2,13 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import type { ActorScope, AgentAccessInfo } from '@/lib/agent-permissions';
+import { nodaFilename } from '@/lib/noda';
+import { startReadingFields } from '@/lib/document-reading';
 
 /** "다른 비서에도 연결"이 원본에서 읽는 칸. AssignSourceDocument와 함께 고친다. */
 export const ASSIGN_SOURCE_COLUMNS =
   'id, department_id, organization_id, visibility, uploaded_by, storage_path, ' +
-  'file_name, file_type, title, summary, metadata, embedding';
+  'file_name, file_type, title';
 
 export interface AssignSourceDocument {
   id: string;
@@ -18,9 +20,6 @@ export interface AssignSourceDocument {
   file_name: string;
   file_type: string | null;
   title: string | null;
-  summary: string | null;
-  metadata: unknown;
-  embedding: unknown;
 }
 
 /**
@@ -40,19 +39,25 @@ export function canReadDocument(
 }
 
 /**
- * 원본 문서를 다른 비서에 붙일 때 새로 넣을 행. 업로드 라우트와 같은 공개 규칙:
+ * 원본 문서를 다른 비서에 붙일 때 새로 넣을 행. 업로드와 같은 공개 규칙:
  * 공식 비서는 원본의 부서·공개 범위를 따르고, 부서·나만의 비서는 그 비서의
- * 부서 안에 둔다(문서 목록과 Q&A 검색은 비서 단계가 아니라 visibility로 거른다).
+ * 부서 안에 둔다(문서 목록과 검색은 비서 단계가 아니라 visibility로 거른다).
+ *
+ * 읽기는 비서(보관함)마다 따로다 — 새 id·그 id로 만든 NODA 파일 이름·`reading`으로 시작하고,
+ * 읽은 내용(summary·metadata·embedding)은 가져오지 않는다. 같은 저장소 파일을 새 보관함에 다시 읽힌다.
  *
  * **모든 행의 키 집합이 같다.** 다르면 PostgREST 배치 insert가 빠진 칸에
  * NULL을 넣는다(CLAUDE.md). organization_id는 트리거(0016)가 채운다.
  */
 export function buildAssignedDocumentRow(
   src: AssignSourceDocument,
-  target: AgentAccessInfo
+  target: AgentAccessInfo,
+  id: string,
+  now: Date
 ): Record<string, unknown> {
   const official = target.tier === 'official';
   return {
+    id,
     department_id: official ? src.department_id : target.department_id,
     visibility: official ? src.visibility : 'department',
     uploaded_by: src.uploaded_by,
@@ -61,9 +66,11 @@ export function buildAssignedDocumentRow(
     file_name: src.file_name,
     file_type: src.file_type,
     title: src.title,
-    summary: src.summary,
-    metadata: src.metadata,
-    embedding: src.embedding,
+    summary: null,
+    metadata: {},
+    embedding: null,
+    noda_filename: nodaFilename(id, src.file_name),
+    ...startReadingFields(now),
   };
 }
 

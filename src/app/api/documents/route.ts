@@ -6,6 +6,11 @@ import { getActorScope } from '@/lib/actor-scope';
 import { canDeleteAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
+import { noda, nodaTenant } from '@/lib/noda';
+import { reconcileReading } from '@/lib/document-reading';
+import { logSystem } from '@/lib/logger';
+
+const NODA_DELETE_FAILED_MESSAGE = '문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -31,7 +36,10 @@ export async function GET(_request: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at')
+      .select(
+        'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
+          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at'
+      )
       .or(visibleFilter)
       .order('created_at', { ascending: false });
 
@@ -42,7 +50,23 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: data || [] });
+    // 읽는 중인 행만 NODA와 맞춘다(방금 조회한 범위 안의 행만). 맞추기 실패는 목록을 막지 않는다.
+    // 맞추기는 noda_status를 바꾸므로, 실패하면 맞추기 전 값 그대로 내려보낸다.
+    let rows = (data ?? []) as unknown as Array<Record<string, any> & Parameters<typeof reconcileReading>[0][number]>;
+    try {
+      rows = await reconcileReading(rows);
+    } catch (reconcileError) {
+      await logSystem({
+        level: 'warning',
+        category: 'database',
+        message: '문서 읽기 상태 맞추기 실패 — 맞추기 전 목록을 그대로 보냄',
+        details: { error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError) },
+      });
+    }
+
+    // 보관함 파일 이름(`{id}__…`)은 서버 안에서만 쓴다 — 화면에는 내보내지 않는다.
+    const out = rows.map(({ noda_filename, noda_read_started_at, noda_last_attempt_at, ...rest }) => rest);
+    return NextResponse.json({ ok: true, data: out });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
@@ -70,7 +94,7 @@ export async function DELETE(request: NextRequest) {
 
     const { data: doc } = await supabaseAdmin
       .from('documents')
-      .select('id, storage_path, agent_id, department_id, file_name')
+      .select('id, storage_path, agent_id, department_id, file_name, noda_filename, noda_status')
       .eq('id', documentId)
       .maybeSingle();
 
@@ -90,6 +114,32 @@ export async function DELETE(request: NextRequest) {
     }
     if (!allowed) {
       return NextResponse.json({ ok: false, error: { message: '이 문서를 지울 권한이 없습니다.' } }, { status: 403 });
+    }
+
+    // 순서: NODA → DB 행 → 저장소 원본. NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 남고
+    // 그 조각이 이 비서의 대화에 계속 섞인다. 그래서 NODA가 먼저 성공해야 행을 지운다.
+    // NODA에 간 적 없는 옛 행(noda_status NULL)은 건너뛴다. 이미 없는 사본(404)은 지운 것과 같다.
+    if (doc.agent_id && doc.noda_filename && doc.noda_status) {
+      let nodaFailed = false;
+      try {
+        await noda.deleteDocument(nodaTenant(doc.agent_id), doc.noda_filename);
+      } catch (nodaError) {
+        nodaFailed = true;
+        await logSystem({
+          level: 'error',
+          category: 'api',
+          message: 'NODA 문서 삭제 실패 — 행을 deleting으로 남김',
+          details: {
+            document_id: doc.id,
+            error: nodaError instanceof Error ? nodaError.message : String(nodaError),
+          },
+        });
+      }
+      if (nodaFailed) {
+        // 지우는 중임을 남긴다 — 읽기 라우트가 이 행을 되살리지 않고, 다시 지우면 같은 길을 다시 탄다.
+        await supabaseAdmin.from('documents').update({ noda_status: 'deleting' }).eq('id', documentId);
+        return NextResponse.json({ ok: false, error: { message: NODA_DELETE_FAILED_MESSAGE } }, { status: 502 });
+      }
     }
 
     const { error } = await supabaseAdmin.from('documents').delete().eq('id', documentId);

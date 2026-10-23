@@ -46,10 +46,8 @@ const source: AssignSourceDocument = {
   file_name: '여비규정.pdf',
   file_type: 'application/pdf',
   title: '여비규정',
-  summary: '요약',
-  metadata: { chunk_count: 1, chunks: [] },
-  embedding: null,
 };
+const NOW = new Date('2026-10-23T00:00:00.000Z');
 
 describe('원본 문서를 볼 수 있는가 (문서 목록과 같은 기준)', () => {
   it('같은 기관 전체 공개 문서는 본다', () => {
@@ -81,36 +79,40 @@ describe('새 문서 행 (업로드와 같은 공개 규칙)', () => {
   const keys = (row: Record<string, unknown>) => Object.keys(row).sort();
 
   it('공식 비서는 원본의 부서·공개 범위를 따른다', () => {
-    const row = buildAssignedDocumentRow({ ...source, visibility: 'department', department_id: 'TOP' }, target({ id: 'off' }));
+    const row = buildAssignedDocumentRow({ ...source, visibility: 'department', department_id: 'TOP' }, target({ id: 'off' }), 'id-x', NOW);
     expect(row).toMatchObject({ agent_id: 'off', department_id: 'TOP', visibility: 'department' });
-    expect(buildAssignedDocumentRow(source, target({ id: 'off' }))).toMatchObject({ department_id: 'TOP', visibility: 'organization' });
+    expect(buildAssignedDocumentRow(source, target({ id: 'off' }), 'id-x', NOW)).toMatchObject({ department_id: 'TOP', visibility: 'organization' });
   });
 
   it('부서·나만의 비서는 그 비서의 부서 안에 둔다', () => {
     // 기관 전체 공개 문서를 부서 비서에 붙여도 새 행은 그 부서 안에 머문다 —
     // 문서 목록과 Q&A 검색은 비서 단계가 아니라 visibility로 거른다
     for (const tier of ['department', 'personal'] as const) {
-      const row = buildAssignedDocumentRow(source, target({ id: tier, tier, department_id: 'BUDGET' }));
+      const row = buildAssignedDocumentRow(source, target({ id: tier, tier, department_id: 'BUDGET' }), `id-${tier}`, NOW);
       expect(row).toMatchObject({ agent_id: tier, department_id: 'BUDGET', visibility: 'department' });
     }
   });
 
   it('모든 행이 같은 키 집합이다 (PostgREST 배치 규칙)', () => {
     const rows = [
-      buildAssignedDocumentRow(source, target({ id: 'off' })),
-      buildAssignedDocumentRow(source, target({ id: 'dep', tier: 'department' })),
-      buildAssignedDocumentRow(source, target({ id: 'per', tier: 'personal' })),
+      buildAssignedDocumentRow(source, target({ id: 'off' }), 'id-x', NOW),
+      buildAssignedDocumentRow(source, target({ id: 'dep', tier: 'department' }), 'id-dep', NOW),
+      buildAssignedDocumentRow(source, target({ id: 'per', tier: 'personal' }), 'id-per', NOW),
     ];
     expect(new Set(rows.map((r) => keys(r).join(','))).size).toBe(1);
     expect(keys(rows[0])).toContain('visibility');
-    expect(keys(rows[0])).not.toContain('id');
+    expect(keys(rows[0])).toContain('id'); // 비서마다 새 id — NODA 파일 이름이 id로 만들어진다
     expect(keys(rows[0])).not.toContain('organization_id'); // 트리거가 채운다
   });
 
   it('원본 조회는 필요한 칸만 고른다', () => {
     expect(ASSIGN_SOURCE_COLUMNS).not.toContain('*');
-    for (const col of ['organization_id', 'visibility', 'metadata', 'embedding', 'storage_path']) {
+    for (const col of ['organization_id', 'visibility', 'storage_path']) {
       expect(ASSIGN_SOURCE_COLUMNS).toContain(col);
+    }
+    // 읽은 내용은 가져오지 않는다 — 읽기는 비서(보관함)마다 NODA가 새로 한다
+    for (const col of ['metadata', 'embedding', 'summary']) {
+      expect(ASSIGN_SOURCE_COLUMNS).not.toContain(col);
     }
   });
 });
