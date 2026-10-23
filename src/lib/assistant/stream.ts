@@ -52,6 +52,14 @@ export const TOOL_LIMIT_NOTICE =
   '[중요] 도구 호출 한도에 도달해 더 이상 도구를 사용할 수 없습니다. 앞으로 무엇을 하겠다는 예고는 하지 마세요. ' +
   '지금까지 확보한 자료만으로 답변을 완성하되, 자료가 부족하면 무엇이 부족한지와 사용자가 무엇을 다시 물으면 되는지를 알려주세요.';
 
+/**
+ * 도구 결과 뒤에 모델이 글 없이 턴을 끝냈을 때 한 번 보내는 이어 쓰기 요청.
+ * 같은 요청을 그대로 다시 보내면 모델은 이미 끝났다고 보고 또 빈 답을 낸다 — 새 사용자 메시지로 요청해야 한다
+ * (Anthropic 문서 'Empty responses with end_turn').
+ */
+export const ANSWER_AFTER_TOOLS_NOTICE =
+  '지금까지 도구로 확보한 자료로 처음 질문에 대한 답변을 작성해 주세요. 더 조회하겠다는 예고 없이 답변만 써 주세요.';
+
 export const TRUNCATED_TOOL_NOTICE =
   '작성할 내용이 길어 한 번에 파일로 만들지 못했습니다. 항목 분량을 줄이거나 나눠서 만들어 달라고 말씀해 주세요. ' +
   '대화에 쓴 초안이 있으면 그 글을 복사해 쓸 수 있습니다.';
@@ -87,6 +95,36 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   let attachmentToolSucceeded = false;
   const tools = args.tools.length > 0 ? args.tools : undefined;
   let text = '';
+  let toolsRan = false;
+
+  /**
+   * 도구 없이 답만 받는 마지막 호출. 요청은 시스템 지시만이 아니라 **도구 결과 뒤 사용자 메시지**로도 보낸다 —
+   * 도구 결과 바로 뒤에서 tool_choice=none으로만 부르면 모델이 글 없이 end_turn을 낸다(실측 2026-10-23: Sonnet 4.6,
+   * 법령 조회 4회 뒤 8토큰 빈 답 → 사용자 메시지를 붙이자 2,496자 답). 도구 정의는 유지한다 — 빼면 이력의 tool_use
+   * 블록 때문에 400이다. 돌려준 글은 화면(delta)과 저장에 그대로 간다.
+   */
+  const answerWithoutTools = async (userNotice: string, systemExtra?: string): Promise<string> => {
+    messages.push({ role: 'user', content: userNotice });
+    let answer = '';
+    for await (const event of streamChat({
+      model: args.modelId,
+      system: systemExtra ? `${args.systemPrompt}\n\n${systemExtra}` : args.systemPrompt,
+      messages,
+      maxTokens: MAX_OUTPUT_TOKENS,
+      tools,
+      toolChoice: 'none',
+    })) {
+      if (event.type === 'text') {
+        answer += event.text;
+        text += event.text;
+        send({ event: 'delta', data: { text: event.text } });
+      } else if (event.type === 'done') {
+        usage.input_tokens += event.usage.input_tokens;
+        usage.output_tokens += event.usage.output_tokens;
+      }
+    }
+    return answer;
+  };
 
   for (let round = 0; round < args.maxRounds; round++) {
     const calls: { id: string; name: string; input: Record<string, unknown> }[] = [];
@@ -124,7 +162,14 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       break;
     }
 
-    if (stopReason !== 'tool_use' || calls.length === 0) break;
+    if (stopReason !== 'tool_use' || calls.length === 0) {
+      // 도구 결과를 받고도 글 없이 끝났다 — 사용자는 "찾아볼게요" 같은 도입부만 받는다. 한 번만 이어 쓰기를 요청한다
+      if (toolsRan && !roundText.trim()) {
+        console.warn('[assistant] 도구 결과 뒤 빈 답 — 이어 쓰기 요청');
+        await answerWithoutTools(ANSWER_AFTER_TOOLS_NOTICE);
+      }
+      break;
+    }
 
     // 모델이 만든 턴을 그대로 이력에 더한다 (글 + tool_use 블록)
     const assistantBlocks: LlmContentBlock[] = [];
@@ -149,29 +194,14 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       resultBlocks.push({ type: 'tool_result', tool_use_id: call.id, content: outcome.text, is_error: !outcome.ok });
     }
     messages.push({ role: 'user', content: resultBlocks });
+    toolsRan = true;
 
     if (round === args.maxRounds - 1) {
       // 상한에 걸렸다. 그냥 끝내면 방금 받은 도구 결과를 모델에 돌려주지 못해
-      // 사용자는 "찾아볼게요" 같은 도입부만 받는다. 도구 정의는 유지한 채
-      // tool_choice='none'으로 한 번 더 불러 답을 마무리시킨다.
+      // 사용자는 "찾아볼게요" 같은 도입부만 받는다. 도구 없이 한 번 더 불러 답을 마무리시킨다.
       console.warn('[assistant] 도구 라운드 상한 도달 — tool_choice=none으로 마무리');
       send({ event: 'tool_limit', data: { rounds: args.maxRounds } });
-      for await (const event of streamChat({
-        model: args.modelId,
-        system: `${args.systemPrompt}\n\n${TOOL_LIMIT_NOTICE}`,
-        messages,
-        maxTokens: MAX_OUTPUT_TOKENS,
-        tools,
-        toolChoice: 'none',
-      })) {
-        if (event.type === 'text') {
-          text += event.text;
-          send({ event: 'delta', data: { text: event.text } });
-        } else if (event.type === 'done') {
-          usage.input_tokens += event.usage.input_tokens;
-          usage.output_tokens += event.usage.output_tokens;
-        }
-      }
+      await answerWithoutTools(TOOL_LIMIT_NOTICE, TOOL_LIMIT_NOTICE);
     }
   }
 

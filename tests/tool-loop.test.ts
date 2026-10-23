@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { setLlmAdapterForTests } from '@/lib/llm';
 import type { LlmAdapter, LlmRequest, LlmStreamEvent } from '@/lib/llm/types';
-import { runToolLoop, TOOL_LIMIT_NOTICE, TRUNCATED_TOOL_NOTICE, type LoopProgress } from '@/lib/assistant/stream';
+import { runToolLoop, TOOL_LIMIT_NOTICE, TRUNCATED_TOOL_NOTICE, ANSWER_AFTER_TOOLS_NOTICE, type LoopProgress } from '@/lib/assistant/stream';
 import type { Capability, TurnContext } from '@/lib/capabilities/types';
 import type { TurnEvent } from '@/lib/assistant/types';
 
@@ -122,6 +122,55 @@ describe('도구 루프', () => {
     expect(last.system).toContain(TOOL_LIMIT_NOTICE);
     expect(events.some((e) => e.event === 'tool_limit')).toBe(true);
     expect(result.text).toBe('마무리');
+  });
+
+  it('상한 마무리 요청은 도구 결과 뒤 사용자 메시지로도 보낸다 — 시스템 지시만으로는 빈 답이 온다', async () => {
+    // 실측(2026-10-23): 도구 결과 바로 뒤에서 tool_choice=none으로 부르면 Sonnet 4.6이 글 없이 end_turn(8토큰)을 냈다.
+    // 같은 자리에 사용자 메시지로 마무리를 요청하자 2,496자 답이 왔다(Anthropic 문서 'Empty responses with end_turn')
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: '조문' }))]]);
+    const adapter = scripted([[toolCall('t'), done('tool_use')], [{ type: 'text', text: '답' }, done('end_turn')]]);
+    await run(adapter, owners, 1);
+    const last = adapter.requests.at(-1)!;
+    expect(last.toolChoice).toBe('none');
+    expect(last.messages.at(-1)).toEqual({ role: 'user', content: TOOL_LIMIT_NOTICE });
+    // 도구 결과는 그 앞에 그대로 남는다
+    expect(JSON.stringify(last.messages.at(-2))).toContain('tool_result');
+  });
+
+  it('도구를 쓴 뒤 글 없이 끝나면 한 번 이어 쓰기를 요청한다', async () => {
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: '조문' }))]]);
+    const adapter = scripted([
+      [{ type: 'text', text: '찾아보겠습니다.' }, toolCall('t'), done('tool_use')],
+      [done('end_turn', 10, 2)],
+      [{ type: 'text', text: '답입니다' }, done('end_turn')],
+    ]);
+    const { result } = await run(adapter, owners);
+    expect(adapter.requests).toHaveLength(3);
+    const last = adapter.requests.at(-1)!;
+    expect(last.toolChoice).toBe('none');
+    expect(last.messages.at(-1)).toEqual({ role: 'user', content: ANSWER_AFTER_TOOLS_NOTICE });
+    expect(result.text).toBe('찾아보겠습니다.답입니다');
+    expect(result.usage.input_tokens).toBe(30);
+  });
+
+  it('이어 쓰기도 비면 더 부르지 않는다', async () => {
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: '조문' }))]]);
+    const adapter = scripted([[toolCall('t'), done('tool_use')], [done('end_turn')], [done('end_turn')], [done('end_turn')]]);
+    await run(adapter, owners);
+    expect(adapter.requests).toHaveLength(3);
+  });
+
+  it('상한 마무리가 비어도 한 번만 부른다', async () => {
+    const owners = new Map([['law_search', lawCapability(async () => ({ ok: true, text: '조문' }))]]);
+    const adapter = scripted([[toolCall('t'), done('tool_use')], [done('end_turn')], [done('end_turn')]]);
+    await run(adapter, owners, 1);
+    expect(adapter.requests).toHaveLength(2);
+  });
+
+  it('도구를 안 쓴 턴의 빈 답은 다시 부르지 않는다', async () => {
+    const adapter = scripted([[done('end_turn')], [{ type: 'text', text: '답' }, done('end_turn')]]);
+    await run(adapter, new Map());
+    expect(adapter.requests).toHaveLength(1);
   });
 
   it('출력 상한으로 도구 호출이 잘리면 실행하지 않고 안내 문구를 남긴다', async () => {
