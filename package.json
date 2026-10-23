@@ -17,7 +17,9 @@
     "isolation:check": "tsx scripts/isolation-check.mjs",
     "db:migrate": "tsx scripts/db-migrate.mjs",
     "db:test-agents": "tsx scripts/db-test-agents.mjs",
-    "seed:agents": "tsx scripts/seed-agents.mjs"
+    "seed:agents": "tsx scripts/seed-agents.mjs",
+    "noda:migrate": "tsx scripts/noda-migrate.mjs",
+    "noda:check": "tsx scripts/noda-check.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",

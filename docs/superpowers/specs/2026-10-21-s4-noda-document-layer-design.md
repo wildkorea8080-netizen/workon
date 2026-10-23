@@ -70,12 +70,12 @@ Vercel 함수 안에서 끝까지 기다리면 시간 제한에 걸린다. 그�
 ② POST /api/documents/{id}/read  (화면이 ① 직후 부름, maxDuration 300)
      Supabase 원본 → NODA POST /documents/upload?tenant={보관함}&replace=1 (X-Filename)
      → readable이면 'ready' + 쪽 수·OCR 여부 / readable:false면 'failed' + reason
-③ 화면은 '읽는 중' 칩을 보이고 몇 초마다 상태를 본다(GET /api/documents/{id})
+③ 화면은 '읽는 중' 칩을 보이고 몇 초마다 **문서 목록**(GET /api/documents)을 다시 부른다 — 목록이 상태 맞추기를 한다(상태 조회 전용 라우트는 두지 않는다, 구현 판정 R2)
 ```
 
 - **항상 `replace=1`로 보낸다.** 시간 제한으로 끊겨도 NODA는 넣기를 끝냈을 수 있다. 그냥 다시 보내면 409다. 같은 파일이면 NODA가 다시 읽지 않아 빠르다
 - 502·503·429(`Retry-After` 따름)는 **몇 초 간격으로 1분쯤 저절로 다시 보낸다**
-- ② 함수가 시간 제한으로 끊긴 경우: 상태 조회(③)가 NODA `GET /documents?tenant=`로 맞춘다(NODA는 끝냈을 수 있다). 목록은 읽기를 기다리지 않고 바로 답하며(운영자 확인), 상태는 셋으로 갈린다:
+- ② 함수가 시간 제한으로 끊긴 경우: 문서 목록(③)이 `reading` 행을 NODA `GET /documents?tenant=`로 맞춘다(보관함마다 한 번, 한 번에 5개 보관함까지)(NODA는 끝냈을 수 있다). 목록은 읽기를 기다리지 않고 바로 답하며(운영자 확인), 상태는 셋으로 갈린다:
 
   | NODA 목록 | WORKON |
   |---|---|
@@ -88,12 +88,15 @@ Vercel 함수 안에서 끝까지 기다리면 시간 제한에 걸린다. 그�
 - **함수 시간 제한**: ②는 `maxDuration 300`을 선언한다. 지금 배포 환경이 이보다 짧게 끊어도(Vercel 요금제·설정에 따라 60초) 위 맞추기와 다시 걸기로
   결국 끝난다 — **NODA가 호출자가 끊긴 뒤에도 읽기를 마친다는 전제**에서. 이 전제는 S4-a 실서버 확인에서 큰 문서(45MB 브로슈어)로 잰다.
   운영을 Vercel에서 클라우드 서버로 옮기면(계획됨) 이 제한 자체가 없어진다
-- **②를 화면만 믿지 않는다.** 만들기 창은 올린 뒤 바로 닫히고 탭이 닫히면 ②가 불리지 않는다. 문서 목록·상태 조회가 '읽는 중'인 채
-  일정 시간(예: 2분)이 지난 행을 보면 서버가 ②를 다시 건다(기관당 한 번에 하나). NODA가 서버 전체에서 한 번에 둘만 읽으므로(`max_parallel: 2`)
-  남의 긴 읽기 뒤에 기다릴 수 있다 — 그래서 '읽는 중'을 **최대 10분**까지 유지하고, 그 뒤에야 버튼을 보인다
+- **②를 화면만 믿지 않는다.** 만들기 창은 올린 뒤 바로 닫히고 탭이 닫히면 ②가 불리지 않는다. 문서 목록이 '읽는 중'인 채 2분(`READ_KICK_AFTER_MS`, 마지막으로 NODA에 보낸 때 기준)이
+  지난 행을 보면 ②를 다시 건다. 다만 **서버가 직접 걸지 못한다**(Vercel은 응답 뒤 일을 이어 가지 못함) — 목록 응답이 가장 오래된 행 **하나**에 `kick: true`를 달고,
+  그 목록을 받은 화면이 읽기 라우트를 부른다. 중복은 읽기 라우트의 조건부 갱신(차지)이 막아 NODA 업로드는 한 번이다(구현 판정 R3).
+  **알려진 공백**: 아무도 목록을 열지 않으면 멈춘 행은 다음에 열 때까지 `reading`이다(클라우드 서버로 옮기면 예약 작업으로 바꾼다).
+  NODA가 서버 전체에서 한 번에 둘만 읽으므로(`max_parallel: 2`) 남의 긴 읽기 뒤에 기다릴 수 있다 — 그래서 '읽는 중'을 **최대 10분**(`READ_GIVE_UP_MS`, 이번 읽기 시작 기준)까지 유지하고,
+  그 뒤 `failed`(`읽기가 너무 오래 걸려 멈췄습니다. 다시 시도해 주세요.`)로 바꿔 버튼을 보인다
 - 그래도 안 되면 **'읽기 실패 — 다시 시도' 버튼**. 누르면 ②를 다시 부른다 — 원본은 Supabase에서 서버끼리 보낸다. **직원이 파일을 다시 고르지 않는다**
 - NODA 클라이언트 시간 제한 **5분**
-- `readable:false`(암호 걸린 파일 등)는 '읽지 못함 — {reason}'. 다시 시도해도 같으므로 버튼 대신 안내
+- `readable:false`(암호 걸린 파일 등)는 `unreadable`(구현에서 `failed`와 갈랐다 — R1)로 '읽지 못함 — {reason}'. 다시 시도해도 같으므로 버튼 대신 안내
 - 업로드 응답에는 쪽 수·OCR 여부가 없다(`{tenant, filename, bytes, stored, doc_id, readable, reason, chunks, cache_purged}`).
   그래서 문서 단위 '스캔 판독' 표시는 두지 않고, **근거 조각 단위**로 `/context`의 `extractors`에 `ocr`가 있으면 출처에 '스캔 판독' 배지를 단다 — 설계자 판단
 - **형식**: WORKON이 받는 참고 문서 형식(`file-types.ts`)을 **바꾸지 않고 그대로** 보낸다. NODA는 `.txt`(줄 하나 = 문단 하나)·`.csv`(엑셀 시트와 같은 규칙,
@@ -103,8 +106,8 @@ Vercel 함수 안에서 끝까지 기다리면 시간 제한에 걸린다. 그�
 - **여러 비서에 붙이기**(`/api/documents/assign`)는 지금 행을 복사한다. 비서별 보관함이므로 복사한 행마다 그 비서 보관함으로 새로 읽기(②)를 건다
 - 비서 없는 문서(`agent_id` NULL)는 보관함이 없다 — NODA로 보내지 않는다(대화에서 찾을 수도 없다)
 
-**스캔 판독 비용이 사라진다**: 지금 `/api/upload`는 스캔 PDF를 Anthropic으로 판독하며 토큰을 쓰고 `document_ocr` 사용 기록을 남긴다.
-NODA가 서버 안에서 판독하므로 이 경로와 기록을 걷어 낸다(과거 기록은 그대로).
+**스캔 판독 비용이 사라진다**: (S4-a 전) `/api/upload`는 스캔 PDF를 Anthropic으로 판독하며 토큰을 쓰고 `document_ocr` 사용 기록을 남긴다.
+NODA가 서버 안에서 판독하므로 이 경로와 기록은 S4-a에서 걷어 냈다(`/api/upload` 삭제, 과거 기록은 그대로).
 
 ## 5. 대화 — 근거 없이 답하지 않기
 
@@ -148,6 +151,9 @@ NODA POST /context { tenant: 비서 보관함, query: 질문, budget: 4000(기�
 - 쪽은 `anchors[].page`(엑셀은 0이고 `cell_range`를 쓴다, 한글 표는 시작 쪽만), 절은 `outline`
 - `/context`는 문서를 읽지 않아 빠르고 업로드에 막히지 않는다(운영자 확인). 실패는 재배포·재시작 약 10초뿐이다
 - '문서 없이 일반 답변'은 그 한 번만이다. 답변에 '참고 문서 없이 답함' 표시를 남긴다(저장 내용에도)
+- **구현에서 정한 것**(S4-a): ① 거절은 대화를 만들기 **전**에 한다 — 능력의 `preflight` 단계(R4). ② 근거는 DB에서 **이 비서의 행**과 맞춰 본다(R5): `ready`·`deleting` 행의 조각은 출처가 되고,
+  이 비서의 행이지만 다른 상태(읽는 중·실패·못 읽음)인 조각은 출처에서만 조용히 뺀다(근거 글은 남긴다 — 같은 비서가 올린 내용이라 격리에 영향이 없고, 문서 하나를 다시 읽는 중에 유효한 답까지 숨기지 않으려는 것).
+  이 비서의 행이 **없는** 조각이 하나라도 섞이면 근거 전체를 버리고 운영 기록 critical을 남긴다. ③ `ready` 문서가 없는 비서는 NODA를 부르지 않는다(R6)
 
 ### 5.1 검증 — S3-b 숫자 확인과 하나로
 
@@ -185,7 +191,7 @@ S3-a 첨부 읽기(`attachments/reader.ts`)가 '스캔 문서(글자 층이 없�
 
 ## 8. 기존 문서 옮기기와 Voyage 걷어 내기
 
-- 지금 문서는 2건이다. `scripts/migrate-to-noda.mjs`가 문서마다 Supabase 원본 → NODA 업로드(4절과 같은 함수) → 상태 기록
+- 지금 문서는 2건이다. `npm run noda:migrate`(`scripts/noda-migrate.mjs`)가 `noda_status`가 NULL인 문서마다 행을 읽는 중으로 바꾸고 `readDocument`(4절과 같은 함수)로 NODA에 읽힌다(`--dry-run`은 대상 수만, 출력은 id 앞 8자·상태·이유뿐)
 - 옮긴 뒤: `search_agent_chunks`·Voyage 호출(`embeddings.ts`·`rag.ts`)·`document-processor.ts`의 임베딩·`VOYAGE_API_KEY` 필수 해제·`pdf-ocr.ts`(업로드 경로)를 걷어 낸다
 - `documents.metadata.chunks[].embedding`·`documents.embedding`은 옮긴 것을 확인한 뒤 비우는 마이그레이션(되돌릴 수 없으므로 마지막)
 - `search_agent_chunks`·`search_document_chunks` RPC는 DB에서 지우지 않는다(되돌리기 대비, 나중에 정리)
@@ -196,8 +202,8 @@ S3-a 첨부 읽기(`attachments/reader.ts`)가 '스캔 문서(글자 층이 없�
 |---|---|
 | `config.ts` | `NODA_API_URL`(기본 `https://api.readlayer.kr`) · `NODA_API_KEY` — **사용자가 `.env.local`·Vercel에 직접 넣는다**(채팅에 붙여 넣지 않음) |
 | `src/lib/noda.ts` | fetch 클라이언트: Bearer · `X-Filename` 퍼센트 인코딩 · 5분 제한 · 502/503/429 재시도(`Retry-After`) · 보관함 이름은 비서 id로만 |
-| 마이그레이션 0031 | `documents`에 `noda_status`(`reading`·`ready`·`failed`·`deleting`) · `noda_reason` · `noda_filename` · `noda_doc_id` · `noda_read_started_at`(다시 걸기 판정) · `noda_read_at` |
-| `/health` | 배포 확인용 스크립트(`npm run noda:check`)가 `search.vectors`가 참인지 본다 — 꺼지면 낱말 검색으로 돌며 켜진 것처럼 보인다. **`llm.external`이 참이면 실패로 알린다** — 운영자가 OpenAI 키를 빼기 전에 보안 자료를 '바깥 연결 없음'으로 쓰지 않게 |
+| 마이그레이션 0031 | `documents`에 `noda_status`(`reading`·`ready`·`failed`(다시 시도 가능)·`unreadable`(NODA `readable:false` — 다시 해도 같음)·`deleting`, `NULL` = 옮기기 전) · `noda_reason` · `noda_filename`(유일) · `noda_doc_id` · `noda_read_started_at`('이번 읽기 시작' — 확인·다시 시도 때만, 10분 포기 판정) · `noda_last_attempt_at`('NODA에 보낸 마지막 때' — 2분 다시 걸기 판정·중복 차지) · `noda_read_at` (구현 판정 R1) |
+| `/health` | 배포 확인용 스크립트(`npm run noda:check`, `-- --roundtrip`이면 올리기·찾기·삭제 왕복까지)가 `search.vectors`가 참인지 본다 — 꺼지면 낱말 검색으로 돌며 켜진 것처럼 보인다. **`llm.external`이 참이면 실패로 알린다** — 운영자가 OpenAI 키를 빼기 전에 보안 자료를 '바깥 연결 없음'으로 쓰지 않게 |
 
 ## 10. 단계 (S2·S3처럼 나눔)
 

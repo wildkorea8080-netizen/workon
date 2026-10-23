@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-10-21  
+**최종 업데이트**: 2026-10-23  
 **분석 기준**: 코드베이스 전수 확인
 (`next build` + `tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증)
 
@@ -22,14 +22,14 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 | DB | Supabase PostgreSQL + pgvector (임베딩 저장) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
 | AI/LLM | Claude API — AI 연결부 `src/lib/llm/` (어댑터: `anthropic.ts`), 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
-| 임베딩 | Voyage AI (`voyage-3`) |
+| 문서 읽기·검색 | **NODA(국내)** — 참고 문서의 읽기·OCR·검색(S4-a). 임베딩 Voyage AI(`voyage-3`)는 옛 업로드 경로용으로 S4-b까지 남음 |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
 | 문서 파싱 | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
-> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`llm/anthropic.ts`, `embeddings.ts`, `mailer.ts`).
+> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`llm/anthropic.ts`, `noda.ts`, `embeddings.ts`, `mailer.ts`).
 
 ---
 
@@ -66,15 +66,19 @@ src/
 │   ├── config-public.ts  # 화면에서도 읽는 NEXT_PUBLIC_ 값만 (config.ts가 버킷 이름을 다시 내보냄)
 │   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
-│   ├── document-processor.ts # PDF/DOCX/TXT 파싱 + 청킹 + 임베딩
-│   ├── embeddings.ts     # Voyage AI 래퍼
+│   ├── noda.ts           # NODA 클라이언트 — 올리기·목록·삭제·/context·/health, 보관함·파일 이름 규칙, 하한 0.80, 재시도
+│   ├── document-reading.ts # 문서 읽기 상태 전이(readDocument·reconcileReading·decideReadState)
+│   ├── document-upload.ts  # 직접 올리기 검사·행 만들기(주소 발급·확인이 함께 씀)
+│   ├── document-upload-client.ts # 화면용 올리기(주소 → 저장소 직접 → 확인 → 읽기 걸기)
+│   ├── document-processor.ts # (옛) PDF/DOCX/TXT 파싱 + 청킹 + 임베딩 — S4-b에서 지움
+│   ├── embeddings.ts     # (옛) Voyage AI 래퍼 — S4-b에서 지움
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
 │   ├── connectors/       # 공공 데이터 커넥터 (MCP 형식 툴 정의)
 │   ├── forbidden-words.ts # 금지어 DB 조회
 │   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 + 표 복원 (자체 구현)
 │   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
 │   ├── plans.ts          # 요금제 정의
-│   ├── rag.ts            # pgvector RPC 검색 (search_agent_chunks)
+│   ├── rag.ts            # (옛) pgvector RPC 검색 (search_agent_chunks) — 대화는 더 쓰지 않음, S4-b에서 지움
 │   ├── usage-limit.ts    # 기관 상태 + 월 토큰 한도 검사
 │   ├── logger.ts
 │   ├── supabase.ts       # 클라이언트 Supabase (anon key)
@@ -94,12 +98,14 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1184개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1317개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
+| `npm run noda:check` | NODA `/health` — `search.vectors`가 참이어야 하고 `llm.external`이 참이면 **실패**('바깥 연결 없음' 확인). `-- --roundtrip`이면 보관함 `workon-check`에 작은 글을 올려 근거·쪽/출처 → 엉뚱한 질문의 빈 근거 → 삭제까지 | 아니오 (키 필요) |
+| `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘. `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
 `db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
@@ -117,7 +123,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/attachments/*` (채팅 첨부 — 올리기 주소·확인·목록·삭제), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
-| 기관 관리자 | `/api/upload`, `/api/documents/*`, `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
+| 기관 관리자 | `/api/documents/*`(올리기 주소 발급 `upload-url`·확인 `confirm`·붙이기 `assign`·읽기 `[id]/read`·목록·삭제), `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
 
@@ -165,6 +171,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 0028 | 옛 칸(`agents.is_personal`·`enabled_connectors`)과 맞춤 트리거·함수 제거, `v_organization_summary`를 `tier <> 'personal' AND deleted_at IS NULL`로 재작성, 승인 판 도장은 `trg_agents_stamp_approval_version`으로 따로 남김. **코드 배포 확인 뒤 적용** |
 | 0029 | 생성 파일(`generated_files`) — 비서가 만든 파일 기록 · 기관 채움 트리거. **코드 배포 전에 적용** |
 | 0030 | 채팅 첨부(`chat_attachments`) — 원본·읽은 내용 경로와 요약, 기관 채움 트리거, `CHECK (ready ⇔ extract_path)`. **코드 배포 전에 적용** (코드가 이 표에 쓴다) |
+| 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다), **그 뒤 `npm run noda:migrate`**로 기존 문서를 옮기고 코드를 배포 |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -217,13 +224,56 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ## RAG 파이프라인
 
-### 문서 업로드 시
+### 문서 업로드 시 (S4-a — NODA)
+
+참고 문서의 읽기·OCR·검색은 **NODA(국내 문서 읽기 서비스, `https://api.readlayer.kr`)** 가 한다.
+WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐이다 (`src/lib/noda.ts`·`document-reading.ts`·`document-upload.ts`).
+
 ```
-파일 업로드 → extractText (pdf-parse / mammoth / hwp.ts / spreadsheet.ts / pptx.ts)
-→ [PDF에 텍스트 레이어가 없으면 Claude로 스캔 판독 → pdf-ocr.ts]
-→ chunkText (800단어, 100 겹침)
-→ getEmbeddings (Voyage AI voyage-3) → DB 저장 (metadata JSONB에 chunks 배열)
+브라우저 → POST /api/documents/upload-url (검사 + 서명 주소 발급)
+→ 저장소(documents 버킷)에 직접 올림 (document-upload-client.ts)
+→ POST /api/documents/confirm (검사 다시 + 행 만들기: noda_status='reading', summary NULL, metadata {}, embedding NULL)
+→ 화면이 문서마다 POST /api/documents/{id}/read (서버가 저장소 원본을 NODA에 보냄, replace=1)
+→ NODA가 읽기·OCR·색인을 끝내고 응답 → readable이면 ready, 아니면 unreadable(이유 저장)
 ```
+
+- **보관함 = 비서.** NODA 보관함 이름은 `workon-a{비서 id에서 하이픈 뺀 32자}`이고 **서버가 비서 id로만 만든다**(`nodaTenant`가 uuid가 아니면 던진다).
+  요청값으로 보관함·파일 이름을 받지 않는다. 같은 문서를 여러 비서에 붙이면(`assign`) 비서마다 행·NODA 사본이 따로 생긴다
+- **NODA 파일 이름 = `{document_id}__{원래 파일 이름}`**(`noda_filename`, 유일). 원래 확장자를 **그대로** 둔다 — NODA가 `.txt`·`.csv`·`.tsv`를 확장자로 가려 읽는다.
+  `X-Filename`은 `encodeURIComponent`로 보낸다. **이 앞부분(`{uuid}__`)은 모델이 보는 글과 화면에 나오면 안 된다**(`stripNodaPrefixes`, 화면은 `source-label.ts`가 한 번 더 뗀다).
+  문서 목록 응답에도 `noda_filename`·시각 칸은 싣지 않는다
+- **읽기 상태(`noda_status`)**: `reading`(읽는 중·아직 못 보냄) · `ready`(대화에서 근거로 씀) · `failed`(다시 시도 가능 — 원본은 저장소에 있다) ·
+  `unreadable`(NODA가 `readable:false` — 다시 해도 같다) · `deleting`(NODA 삭제 실패, 다시 지우기를 기다림) · `NULL`(옮기기 전 문서)
+- **시계가 둘이다.** `noda_read_started_at`은 '이번 읽기 시작'(확인·다시 시도 때만 찍음, 10분 포기 `READ_GIVE_UP_MS`의 기준),
+  `noda_last_attempt_at`은 'NODA에 보낸 마지막 때'(2분 다시 걸기 `READ_KICK_AFTER_MS`와 중복 차지의 기준). 판정 기준 값은 `decideReadState` 한 곳
+- **같은 문서가 동시에 걸려도 NODA 업로드는 한 번**이다 — `readDocument`가 조건부 갱신(`claim`)으로 차지한다(두 번째는 `busy`).
+  읽는 도중 문서가 지워졌으면(행 없음) NODA 사본을 지워 고아를 남기지 않는다
+- **'다시 걸기'는 서버가 못 한다**(Vercel은 응답 뒤 일을 이어 가지 못함). `GET /api/documents`가 `reading` 행을 NODA 목록과 맞추고(`reconcileReading`: `receiving`을 먼저 본 뒤 `documents`),
+  끝났으면 `ready`, 10분이 지나도 안 오면 `failed`(`읽기가 너무 오래 걸려 멈췄습니다. 다시 시도해 주세요.`)로 쓴다. 2분 넘게 멈춘 행 **최대 하나**에 `kick: true`를 달고,
+  그 목록을 받은 화면이 읽기 라우트를 부른다. 상태 조회 전용 라우트는 없다(목록이 맞추기를 한다). 한 번에 보관함 5개까지만 본다.
+  **알려진 공백**: 아무도 목록을 열지 않으면 멈춘 행은 다음에 목록을 열 때까지 `reading`이다(클라우드 서버로 옮기면 예약 작업으로 바꾼다)
+- 새 문서의 `summary`는 NULL, `metadata`는 `{}`, `embedding`은 NULL이다 — 요약·색인은 NODA가 한다. 직접 올리기 상한·형식·개수·위험한 이름 검사는 `document-upload.ts`(발급·확인 두 곳)가 하고
+  크기·개수 상수는 `file-types.ts` 한 곳에만 둔다. 예전 `/api/upload`는 지웠다(그 경로의 스캔 판독(Anthropic)과 `usage_logs.action='document_ocr'` 기록은 함께 사라졌다 — OCR은 NODA가 한다)
+- **삭제 순서: NODA → DB 행 → 저장소 원본.** NODA 삭제가 실패하면 행을 `deleting`으로 남기고 `문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.`(502)를 돌려준다 —
+  NODA 사본을 남긴 채 행을 지우면 찾을 수 없는 고아가 되어 그 조각이 대화에 계속 섞인다. NODA의 404(이미 없음)는 지운 것으로 센다. NODA에 간 적 없는 옛 행(`NULL`)은 NODA 삭제를 건너뛴다
+- **NODA에서 지우면 사본·색인·캐시는 즉시 사라지지만, NODA의 일일 백업에는 최대 7일 남는다.** 보안 심사 자료(서비스 정의서 6절·8.5절)에도 그렇게 적는다
+- **옛 문서(`noda_status` NULL)는 `npm run noda:migrate` 전까지 대화에서 찾지 못한다.** `ready` 문서가 없는 비서는 NODA를 부르지 않고 평소처럼 답한다
+
+### NODA 배포 순서 (S4-a)
+
+사용자가 직접 한다(스크립트는 실서버용이라 단위 테스트가 없다 — 빌드·타입으로만 확인한다).
+
+1. `.env.local`과 Vercel에 `NODA_API_KEY`(필요하면 `NODA_API_URL`)를 넣는다
+2. `npm run noda:check -- --roundtrip` — 전부 OK인지. `llm.external`이 참이면 **FAIL**이다 — 운영 서버에 바깥 LLM 연결이 남아 있으니 보안 자료에 '바깥 연결 없음'을 쓰지 말 것.
+   배포 전 한 번: 큰 문서(45MB 브로슈어)를 올리고 호출을 일찍 끊은 뒤 NODA 목록에서 `receiving` → `documents`로 옮겨 가는지 본다(함수 시간 제한을 넘겨도 NODA가 읽기를 끝낸다는 전제)
+3. 마이그레이션 0031 적용(`npm run db:migrate -- 0031`) — **코드 배포 전**
+4. `npm run noda:migrate` — 기존 문서를 NODA로(`--dry-run`으로 대상 수 먼저). 비서 없는 문서는 건너뛴다. 오류·`reading`이 남으면 문서 화면을 열어 이어 읽힌다
+5. 코드 푸시(배포) → 문서 화면에서 올리기·읽는 중·삭제, 대화에서 근거·쪽 번호·엉뚱한 질문의 '근거 없음'을 확인
+
+> **S4-b까지 남은 옛 길**: 아래 '스캔 PDF'·'표 문서'·'발표자료' 절은 예전 업로드 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)의 설명이다.
+> S4-a부터 새 업로드는 이 길을 타지 않는다. `document-processor.ts`·`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(스캔 판독)와 `VOYAGE_API_KEY`는 코드에 남아 있고 **S4-b에서 지운다**.
+> 단 `attachments/reader.ts`가 `pdf-ocr.ts`의 `isLikelyScanned`를 쓰므로 그 함수는 옮기거나 남겨야 한다. `spreadsheet.ts`·`hwp.ts`·`pptx.ts`는 첨부·양식 채우기 쪽 쓰임을 확인한 뒤 정한다.
+> 채팅 첨부(S3-a)는 별개의 경로(`attachments/`)이고 NODA를 거치지 않는다.
 
 **스캔 PDF는 Claude가 직접 읽습니다** (`src/lib/pdf-ocr.ts`).
 공공기관은 옛 공문·결재문서·붙임이 스캔본인 경우가 많은데, 텍스트 레이어가
@@ -302,12 +352,11 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 ```
 질문 → prepareTurn: 한도 → 비서 조회 → 권한(canUseAgent) → 능력 결정(기관 범위)
-     → 사진·금지어 → 대화·이력 20개 → 모델(비서 모델, 기관 허용 밖이면 대체) → 능력 prepare(문서 찾기)
+     → 사진·금지어 → 능력 preflight(문서 찾기 — 대화를 만들기 전에 NODA를 불러 못 부르면 거절) → 대화·이력 20개 → 모델(비서 모델, 기관 허용 밖이면 대체) → 능력 prepare(문서 찾기)
 → streamTurn: 도구 루프(켜진 능력의 도구만) → 메시지 저장(판 번호) → 사용 기록(모델별) → 제목
 ```
 
-문서 찾기(`search_agent_chunks` RPC, threshold 0.25, top-5)는 `doc_search` 능력의
-`prepare` 단계가 합니다. 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`·`document`·`file_read`·`table_merge`
+문서 찾기는 `doc_search` 능력이 합니다 — **NODA `/context`**(`budget` 4000, `min_similarity` 0.80)로 근거를 찾는다(아래 '참고 문서 찾기 (S4-a)'). 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`·`document`·`file_read`·`table_merge`
 여섯이고, 비서에 켜진 능력의 도구와 프롬프트 조각만 대화에 들어옵니다.
 
 **모르는 능력 id는 대화에서는 건너뛰고 저장에서는 거절합니다.** `effectiveCapabilities`는 목록에 없는 id만 떼고 나머지를 켭니다 —
@@ -329,7 +378,7 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 **`error` 이벤트에는 원문을 싣지 않습니다.** AI 어댑터는 `LlmApiError`(상태·원문)를 던지고, 실행기가 `friendlyLlmMessage`(`src/lib/llm/errors.ts`)로
 한국어 안내만 보냅니다 — 결제·키 문제(크레딧 부족·401·403·키 미설정)는 "기관 관리자에게 문의", 요청 몰림(429·529·overloaded)은 "잠시 뒤 다시".
 원문은 `system_logs`(category `api`)에 남기고 결제·키 문제는 `critical`이라 슈퍼관리자 로그에서 바로 보입니다. 예전에는 Anthropic 원문
-("credit balance is too low…")이 직원 화면에 그대로 떴습니다. 스캔 판독이 들어가는 `/api/upload`도 AI 오류는 같은 안내를 씁니다.
+("credit balance is too low…")이 직원 화면에 그대로 떴습니다. 
 
 스트림 시작 **전** 실패(인증·권한·한도 초과 등)는 기존대로 JSON `{ ok: false }`로 반환됩니다.
 클라이언트는 `content-type`으로 둘을 구분합니다 (`ChatInterface.tsx` 참조).
@@ -707,34 +756,48 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
   AI가 시스템 프롬프트나 질문에서 옮긴 숫자는 지어낸 숫자가 아니기 때문입니다. **지난 답변의 숫자는 포함하지 않습니다** — 지난 답이 틀렸다면 그 숫자를 다시 쓰는 것을 '확인됨'으로 통과시키게 됩니다
 - **알려진 한계**: ① **4자리 미만 정수 비율('22%')은 대조되지 않습니다** — 대신 `TABLE_MERGE_GUIDE`가 '결과에 없는 숫자는 직접 계산한 값이라고 밝히라'고 지시합니다 ② **억·만 표기**('1.2억')는 1.2로 읽혀 원본 값(120,000,000)과 맞지 않아 오탐으로 걸립니다('3만 명'은 4자리 미만 정수라 아예 대조 밖) ③ **모델이 계산한 차이·비율**은 걸릴 수 있습니다(오탐 — 문구가 '확인되지 않음'인 이유) ④ `1588-1234`·YYYYMMDD·URL 숫자는 오탐이 날 수 있습니다 ⑤ 줄머리에서 공백 뒤에 단위 낱말이 아닌 글이 오는 소수('- 3.5 증가')는 소제목 번호로 보여 대조하지 않습니다
 
-### 부서 전체 검색
+### 참고 문서 찾기 (S4-a)
 
-`/api/qna`와 함께 S1-b에서 걷어냈다. 부서 전체 검색은 S4(NODA)에서 다시 정한다.
-(`search_document_chunks` RPC는 DB에 남아 있다.)
+문서 찾기는 `doc_search` 능력(`src/lib/capabilities/doc-search.ts`)이 질문마다 NODA `/context`를 불러 한다(`budget` 4000, `min_similarity` **0.80**, 상수 `NODA_MIN_SIMILARITY`).
+`search_agent_chunks`·Voyage 임베딩은 더 쓰지 않는다. 부서 전체 검색(`/api/qna`)은 S1-b에서 걷어냈고 S4-b(NODA)에서 다시 정한다.
+(`search_document_chunks`·`search_agent_chunks` RPC는 DB에 남아 있다.)
 
-**유사도 임계값은 실측으로 정합니다.** 한때 0.72였는데 그 값으로는 **어떤 문서도
-통과한 적이 없었습니다.** voyage-3의 한국어 유사도 분포를 실측한 결과
-(2026-08-19, 공문 HWP 1건):
+**'관련 문서 없음'은 두 겹으로 가린다.** 뜻 검색은 엉뚱한 질문에도 가장 가까운 조각을 돌려주므로 하한이 없으면 요리 질문에도 문서 조각이 근거로 붙는다.
+① **유사도 하한 0.80** — NODA 운영자 실측(정답 있는 질문 391개·엉뚱한 질문 480개, 2026-10):
 
-| 구분 | 유사도 |
-|---|---|
-| 관련 질문 | 0.41 ~ 0.49 |
-| 무관 질문 (요리·코딩·날씨) | 0.02 ~ 0.11 |
+| 하한 | 정답 있는 질문의 근거가 남음 | (사람이 쓴 질문만) | 엉뚱한 질문이 걸러짐 |
+|---|---|---|---|
+| 0.80 | 99% | 91% | 53% |
+| 0.81 | 97% | 89% | 78% |
+| 0.82 | 94% | 83% | 94% |
 
-임계값은 "관련도 하한"이 아니라 **"아무것도 관련 없을 때 빈 결과를 주기 위한
-바닥"**입니다. 순위 선별은 top-k(`MATCH_COUNT`)가 합니다. 바꿀 때는 감이 아니라
-관련/무관 질문을 각각 몇 개 측정해 분리 구간을 확인하세요 (`src/lib/rag.ts`).
+0.80을 고른 이유는 진짜 근거를 잃는 쪽이 더 비싸기 때문이다(근거가 있는데 "없다"고 답하면 직원이 문서를 다시 찾아야 한다). 바꿀 때는 감이 아니라 관련/무관 질문을 다시 재서 정하고,
+`tests/noda-client.test.ts`가 0.80~0.82 구간을 고정한다. ② **인용 규칙의 추가 줄** — `- 참고 자료에 질문의 답이 없으면 지어내지 말고 "문서에서 찾지 못했습니다"라고 답하세요.`
+(하한을 넘은 엉뚱한 질문의 남은 47%는 이 모델 판단이 맡는다).
+
+**NODA를 못 부르면 답하지 않습니다.** 근거 없는 답이 근거 있는 답처럼 보이는 것이 공공기관에서 가장 위험하다. 능력의 `preflight` 단계가 **대화를 만들기 전에** NODA를 불러
+(`ready` 문서가 있는 비서만 — `/context` 재시도 창 10초) 실패하면 503 `{ ok:false, error:{ message:'참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요', code:'documents_unavailable' } }`로 거절한다
+(빈 대화가 쌓이지 않고 새 대화의 첨부가 묶였다 지워지지 않게). 화면은 `다시 묻기`와 `문서 없이 일반 답변 받기` 두 단추를 붙이고, 후자는 `skip_documents: true`로 같은 요청을 다시 보낸다.
+이때 프롬프트는 '기관 자료에 근거하지 않는다고 첫머리에 밝히라'고 지시하고, 답변 행 `source_references.documents_skipped: true`와 말풍선 `참고 문서 없이 답함` 표시가 지난 대화에서도 남는다.
+`ready` 문서가 없는(또는 문서가 하나도 없는) 비서는 **NODA를 부르지 않으므로** NODA 장애 중에도 평소처럼 답한다. 문서 행을 읽지 못해도 근거를 맞춰 볼 수 없으니 같은 거절로 닫는다.
+
+**근거는 이 비서의 행과 맞춰 봅니다**(`sourcesToChunks`). NODA 파일 이름 앞의 `{document_id}__`로 `documents` 행을 찾아:
+`ready`·`deleting` 행의 조각은 출처가 되고, 이 비서의 행이지만 다른 상태(읽는 중·실패·못 읽음)인 조각은 출처에서만 조용히 뺀다(근거 글은 남긴다 — 같은 비서가 올린 내용이라 격리에는 영향이 없다).
+**이 비서의 행이 없는 조각이 하나라도 섞이면 근거 전체를 버리고** '근거 없음'으로 가며 `system_logs`에 critical(`security`)을 남긴다 — 보관함 혼선·버그 신호다.
+출처 표시는 쪽이 있으면 `p.12 · 제3장 › 여비`, 칸 주소면 `표.csv!A3:D20`, 절만 있으면 절(`source-label.ts`). 근거 글자(`text`)는 화면 출처 조각에 싣지 않는다.
+관리자 `/api/rag-test`도 같은 규칙(`searchAgentDocuments`)으로 찾는다.
 
 **검색 결과가 없으면 모델에게 그 사실을 알려야 합니다.** 예전에는 빈 결과일 때
 프롬프트에 아무것도 넣지 않아서, 모델이 문서가 있다는 것조차 모른 채 일반
 지식으로 그럴듯하게 답했습니다. 공공기관에서는 근거 없는 답이 근거 있는 답처럼
-보이는 것이 가장 위험합니다. `doc_search` 능력(`prompt.ts`가 조립)이 세 경우를 구분합니다:
+보이는 것이 가장 위험합니다. `doc_search` 능력(`docSearchAddendum`)이 네 경우를 구분합니다:
 
 | 상황 | 프롬프트 |
 |---|---|
-| 청크 찾음 | 참고 자료 + **자료 인용 규칙** |
-| 문서는 있는데 못 찾음 | `[문서 검색 결과 없음]` + 근거 없음을 밝히도록 지시 |
-| 연결된 문서 자체가 없음 | 비서 프롬프트만 |
+| 근거를 찾음 | 참고 자료 + **자료 인용 규칙**(위 ②줄 포함) |
+| 문서는 있는데 못 찾음(하한에 다 걸림·근거 버림) | `[문서 검색 결과 없음]` + 근거 없음을 밝히도록 지시 |
+| 연결된 문서 자체가 없음(또는 `ready`가 없음) | 비서 프롬프트만 |
+| 직원이 '문서 없이 일반 답변'을 고름 | `[참고 문서 없이 답함]` + 기관 자료에 근거하지 않음을 밝히도록 지시 |
 
 **자료를 붙일 때는 인용 규칙도 함께 넣습니다.** 수치를 그대로 옮길 것,
 **자료에 없는 단위를 임의로 붙이지 말 것**, 표의 값은 항목명과 함께 쓸 것,
@@ -790,7 +853,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXTAUTH_URL=
 NEXTAUTH_SECRET=
-VOYAGE_API_KEY=
+VOYAGE_API_KEY=                   # 옛 업로드 경로용 — S4-b에서 없앤다
 ANTHROPIC_API_KEY=
 
 # 슈퍼관리자 포털
@@ -802,6 +865,10 @@ ENCRYPTION_KEY=
 NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET=documents
 NEXT_PUBLIC_APP_NAME=WORKON
 NEXT_PUBLIC_APP_URL=              # 미설정 시 NEXTAUTH_URL로 폴백
+
+# 선택 (NODA 문서 읽기 서비스) — 키가 없으면 빌드는 되고 문서 올리기·읽기·찾기 때 NodaError('missing_key')
+NODA_API_URL=                     # 비우면 https://api.readlayer.kr
+NODA_API_KEY=
 
 # 선택 (메일 발송) — 둘 다 있어야 자동 발송, 없으면 링크 수동 전달로 폴백
 RESEND_API_KEY=
@@ -841,7 +908,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-21 기준 1184개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-23 기준 1317개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -850,7 +917,7 @@ MAIL_FROM=
    | `model-policy.test.ts` | 정책 밖 모델 대체, **과거 정산 소급 방지** |
    | `agent-catalog.test.ts` | 링크형 `javascript:`·`data:` 차단, 유형 전환 시 주소 처리 |
    | `spreadsheet.test.ts` | 열 머리글 대응, 수식→결과값, BOM·파이프 |
-   | `pdf-ocr.test.ts` | 스캔 판정, **RAG 임계값이 실측 분리 구간 안에 있는지** |
+   | `pdf-ocr.test.ts` | 스캔 판정, (옛 `rag.ts`의) RAG 임계값이 실측 분리 구간 안에 있는지 — 둘 다 S4-b에서 코드와 함께 지움. NODA 하한은 `noda-client.test.ts`가 고정 |
    | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입, 숫자 확인 결과가 있어도 두 행의 칸 집합이 같음(답변 행 `source_references`에만 싣고 없으면 칸을 남기지 않음) |
    | `file-types.test.ts` | 허용 형식이 한 곳에만 정의돼 있는지 |
    | `route-auth.test.ts` | **모든 API 핸들러의 인증·관리자 검사 누락** |
@@ -858,7 +925,7 @@ MAIL_FROM=
    | `chat-images.test.ts` | 첨부 상한·base64 검사, **요청 본문 상한과의 관계** |
    | `llm-anthropic.test.ts` | MCP 도구 → Anthropic 형식 변환, 쪼개진 `input_json_delta` 조립, 스트림 중 오류 전달 |
    | `llm-boundary.test.ts` | **Anthropic 호출이 `src/lib/llm/` 밖에 없는지**, 예외 목록의 이유, 옛 `claude.ts` 부재 |
-   | `capabilities.test.ts` | 능력 여섯·도구 이름 중복, 기관 범위로 거른 능력, 문서 찾기 3경우(자료·근거 없음·문서 없음), **모르는 능력 id는 대화에서 건너뛰고 저장에서는 거절** |
+   | `capabilities.test.ts` | 능력 여섯·도구 이름 중복, 기관 범위로 거른 능력, 문서 찾기 4경우(자료·근거 없음·문서 없음·일반 답변), **모르는 능력 id는 대화에서 건너뛰고 저장에서는 거절** |
    | `assistant-parts.test.ts` | 시스템 프롬프트 조립, 사진·첨부 파일 순서와 저장 표시, 이력 다듬기, 메시지 저장 행 키 일치·판 번호, 모델별 사용량 |
    | `tool-loop.test.ts` | 도구 루프 라운드 누적, 상한 시 `tool_choice=none` 마무리, 꺼낸 적 없는 도구 거부, 도중 실패 시 쓴 토큰 보존 |
    | `doc-fill-slots.test.ts` | 번호 제목 9급 판정(날짜·'1.5배'·기호만 있는 글·문장형 글머리 제외), 자리 표시 글자 판정, 항목명 다듬기, 개조식 글머리(○●-–)는 영역을 열지 않음 |
@@ -885,7 +952,16 @@ MAIL_FROM=
    | `capability-settings.test.ts` | 능력 설정 정규화(**능력 여섯** — S1 셋·문서 만들기·파일 받아 읽기·표 합치기, 모르는 능력·없는 커넥터 거절), 기관 범위(공식 비서가 켠 커넥터만) |
    | `number-check.test.ts` | **숫자 확인** — 표기 차이·반올림 일치·절댓값 비교, 원본에 없는 숫자 표시(최대 10개·중복 없음), 4자리 미만 정수·연도·날짜·시각·전화·id·범위 제외, **줄머리 소제목 번호·두 자리 연도 날짜 제외**(달·날 범위 밖·단위 낱말이 뒤따르면 대조), 소수는 대조, 말풍선 안내(`done`·`source_references.number_check`), 정해 둔 문구·대조를 켜는 도구 둘 |
 
-   변이 테스트로 실제로 무는지 확인했습니다 — 임계값을 0.72로 되돌리면 실패합니다.
+   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82 |
+   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한), 조건부 갱신 조건 |
+   | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재** |
+   | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·실패해도 이어 부름) |
+   | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음) |
+   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각이 섞이면 근거 전체 버림**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·섞이면 critical 기록), 인용 규칙 추가 줄, `rag.ts` 미사용 |
+   | `prepare-preflight.test.ts` | 대화 준비 — NODA를 못 부르면 **대화·첨부 묶기 전에** 503, `skip_documents`가 정확히 `true`일 때만 건너뜀, `ready` 없는 비서는 장애 중에도 평소처럼, 문서 찾기 꺼진 비서는 무관 |
+   | `chat-documents-ui.test.ts` | 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시), NODA 파일 이름 앞부분은 화면에 안 보임 |
+
+   변이 테스트로 실제로 무는지 확인했습니다 — (옛 RAG) 임계값을 0.72로 되돌리면 실패합니다.
 
    `route-auth.test.ts`는 `src/app/api`의 라우트 파일을 전부 읽어 핸들러마다
    인증 호출이 있는지 봅니다. 공개해도 되는 라우트는 **이유와 함께** 목록에
@@ -937,8 +1013,8 @@ MAIL_FROM=
 ### 🟡 알려진 불일치
 
 - **부서 전체 검색 없음**: `/api/qna`(`search_document_chunks`)를 S1-b에서 걷어냈다.
-  부서 전체 검색은 S4(NODA)에서 다시 정한다. 지금 RAG는 `/api/chat`의
-  에이전트 단위 검색(`search_agent_chunks`) 하나다.
+  부서 전체 검색은 S4-b(NODA)에서 다시 정한다. 지금 문서 찾기는 `/api/chat`의
+  비서(NODA 보관함) 단위 `/context` 하나다.
 - **과금 파이프라인 부분 구현**: `usage_logs`에 토큰·모델·원가(USD/원)가
   기록되고 예산 소진 판정도 동작합니다. 다만 `billing_logs` 월 집계와
   청구서 생성은 미구현입니다.
@@ -1207,7 +1283,7 @@ details: {
 
 **토큰을 쓰는 라우트는 `resolveModelForDepartment()`를 거쳐야 합니다.**
 각자 기관을 조회해 정책을 적용하면 한 곳만 빠뜨려도 그 경로가 정책 밖으로
-샙니다. 현재 `/api/enhance-prompt`·`/api/upload`(스캔 판독)가 `resolveModelForDepartment()`를 쓰고,
+샙니다. 현재 `/api/enhance-prompt`가 `resolveModelForDepartment()`를 쓰고(예전 `/api/upload` 스캔 판독은 S4-a에서 NODA로 넘어가며 사라졌다),
 `/api/chat`은 대화 실행기(`assistant/prepare.ts`)가 비서 모델과 기관 허용 목록으로 `resolveModel()`을 부릅니다.
 
 화면에서 거르는 것은 표시일 뿐이고 실제 제한은 서버에서 겁니다
@@ -1472,7 +1548,7 @@ ENCRYPTION_KEY=          # API 키 AES-256 암호화 키 (64자 hex)
 
 ### 기관 관리자 포털 (/admin) — BM-01~13
 - ✅ 비서 관리: 공식/승인대기/반려 3탭, 승인 처리
-- ✅ 문서 업로드: PDF/DOCX/TXT 파싱 + Voyage AI 임베딩
+- ✅ 문서 업로드: 저장소 직접 올리기 + NODA가 읽기·OCR·검색 (S4-a, 2026-10 — 처음에는 PDF/DOCX/TXT 파싱 + Voyage AI 임베딩이었음)
 - ✅ 사용자 관리: 초대 링크 + CSV 일괄 등록 + 임시 비밀번호
 - ✅ 사용량 통계, 보안 설정(금지어)
 

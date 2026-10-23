@@ -1,0 +1,102 @@
+/**
+ * 기존 참고 문서를 NODA로 옮긴다 (S4-a).
+ *
+ *   npm run noda:migrate              -- 옮기기 전(noda_status NULL) 문서를 차례로 NODA에 읽힌다
+ *   npm run noda:migrate -- --dry-run -- 대상 수만 보기
+ *
+ * 마이그레이션 0031이 먼저 적용돼 있어야 하고, NODA_API_KEY가 .env.local에 있어야 한다.
+ * 여러 번 돌려도 안전하다 — 이미 옮긴 문서(noda_status가 있는 행)는 대상이 아니다.
+ * 읽지 못한 문서(failed)는 문서 화면의 '다시 시도'로 다시 읽힌다.
+ *
+ * 비서가 없는 문서(agent_id NULL)는 NODA 보관함(= 비서)이 없어 건너뛴다. 세어서 알려 줄 뿐이다.
+ *
+ * 출력에는 키·DATABASE_URL·파일 이름을 싣지 않는다. 문서는 id 앞 8자로만 가리킨다.
+ */
+import { existsSync, readFileSync } from 'fs';
+
+if (existsSync('.env.local')) {
+  for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
+    const eq = line.indexOf('=');
+    if (eq > 0 && !line.trimStart().startsWith('#')) {
+      const k = line.slice(0, eq).trim();
+      if (!process.env[k]) process.env[k] = line.slice(eq + 1).trim();
+    }
+  }
+}
+// config.ts가 import 시점에 필수 환경변수를 검사한다. 이 스크립트에는 없어도 되는 것들을 채운다.
+// (Supabase 값은 채우지 않는다 — 진짜 DB에 써야 하므로 .env.local에 있어야 한다.)
+for (const k of ['NEXTAUTH_URL', 'NEXTAUTH_SECRET', 'VOYAGE_API_KEY', 'ANTHROPIC_API_KEY']) {
+  if (!process.env[k]) process.env[k] = 'noda-migrate-placeholder';
+}
+
+const dryRun = process.argv.includes('--dry-run');
+
+const { supabaseAdmin } = await import('../src/lib/supabaseAdmin.ts');
+const { nodaFilename } = await import('../src/lib/noda.ts');
+const { readDocument, startReadingFields } = await import('../src/lib/document-reading.ts');
+
+const short = (id) => String(id).slice(0, 8);
+
+async function main() {
+  const { data: targets, error } = await supabaseAdmin
+    .from('documents')
+    .select('id, agent_id, file_name, created_at')
+    .not('agent_id', 'is', null)
+    .is('noda_status', null)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`문서 조회 실패: ${error.message}`);
+
+  const { count: noAgent, error: countError } = await supabaseAdmin
+    .from('documents')
+    .select('id', { count: 'exact', head: true })
+    .is('agent_id', null)
+    .is('noda_status', null);
+  if (countError) throw new Error(`비서 없는 문서 수 조회 실패: ${countError.message}`);
+
+  console.log(`옮길 문서 ${targets.length}건 · 비서 없음 — 건너뜀 ${noAgent ?? 0}건`);
+  if (dryRun) {
+    console.log('(--dry-run — 아무것도 바꾸지 않았습니다)');
+    return;
+  }
+
+  const tally = {};
+  for (const t of targets) {
+    const label = short(t.id);
+    try {
+      // 읽는 중으로 바꾼다 — 조건부(noda_status NULL)라 다른 곳에서 먼저 옮긴 행은 건드리지 않는다
+      const { data: claimed, error: updateError } = await supabaseAdmin
+        .from('documents')
+        .update({ noda_filename: nodaFilename(t.id, t.file_name), ...startReadingFields(new Date()) })
+        .eq('id', t.id)
+        .is('noda_status', null)
+        .select('id');
+      if (updateError) throw new Error(`행 갱신 실패: ${updateError.message}`);
+      if (!claimed || claimed.length === 0) {
+        console.log(`${label} · 건너뜀 · 이미 옮겨졌습니다`);
+        tally.skipped = (tally.skipped ?? 0) + 1;
+        continue;
+      }
+
+      const outcome = await readDocument(t.id);
+      tally[outcome.status] = (tally[outcome.status] ?? 0) + 1;
+      console.log(`${label} · ${outcome.status}${outcome.reason ? ` · ${outcome.reason}` : ''}`);
+    } catch (e) {
+      tally.error = (tally.error ?? 0) + 1;
+      console.log(`${label} · 오류 · ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  console.log(`\n===== 결과 =====`);
+  for (const [status, n] of Object.entries(tally)) console.log(`  ${status.padEnd(12)} ${n}건`);
+  if (tally.reading || tally.busy || tally.error || tally.failed) {
+    console.log(
+      "\n'reading'은 NODA 호출이 닿지 않은 문서입니다 — 문서 화면을 열면 이어서 읽습니다. 'failed'·'unreadable'은 이유를 보고 문서 화면에서 다시 시도하세요.",
+    );
+  }
+  if (tally.error) process.exit(1);
+}
+
+main().catch((e) => {
+  console.error('실패:', e instanceof Error ? e.message : String(e));
+  process.exit(1);
+});
