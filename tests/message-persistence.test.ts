@@ -122,6 +122,17 @@ describe('대화 실행기의 메시지 삽입', () => {
     ]);
   });
 
+  it('근거 원문과 NODA 번호를 저장한다 — 지난 대화에서도 근거 창을 열 수 있게', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: '구성한다 [2]', links: [], files: [], attachments: [], agentVersion: 1, documentsSkipped: false,
+      chunks: [{ documentId: 'd', documentTitle: '규정', chunkIndex: 0, n: 2, text: '제7조 ② 위원 25명', similarity: 0.86, page: 43 }],
+    });
+    const [saved] = (rows[1].source_references as { chunks: Record<string, unknown>[] }).chunks;
+    expect(saved.n).toBe(2);
+    expect(saved.text).toBe('제7조 ② 위원 25명');
+  });
+
   it('저장 실패를 화면에 알린다', async () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync('src/lib/assistant/stream.ts', 'utf8');

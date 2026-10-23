@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import SourceCitation from './SourceCitation';
+import { linkCitations, citationNumber, sourceNumber } from './source-label';
 import type { RetrievedChunk } from '@/lib/db';
 import { formatFileSize } from '@/lib/file-size';
 import { NUMBER_CHECK_NOTE } from '@/lib/assistant/number-check';
@@ -46,15 +47,20 @@ interface MessageBubbleProps {
   refusalDisabled?: boolean;
   onRetry?: () => void;
   onSkipDocuments?: () => void;
+  /** 출처 칩·답변 속 [n]을 누르면 오른쪽 근거 창을 연다 */
+  onOpenSource?: (source: RetrievedChunk) => void;
   error?: string;
 }
 
 export default function MessageBubble({
   role, content, imagePreviews, attachments, sources, links, files, numberCheck,
-  documentsSkipped, refusal, refusalDisabled, onRetry, onSkipDocuments, error,
+  documentsSkipped, refusal, refusalDisabled, onRetry, onSkipDocuments, onOpenSource, error,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
+  // 답변 속 [n] → 근거 창 단추. 출처에 있는 번호만 바꾸고 저장된 글은 그대로 둔다
+  const sourceByNumber = new Map((sources ?? []).map((s) => [sourceNumber(s), s] as const));
+  const shownContent = !isUser && sourceByNumber.size > 0 ? linkCitations(content, new Set(sourceByNumber.keys())) : content;
 
   const handleCopy = async () => {
     try {
@@ -197,15 +203,31 @@ export default function MessageBubble({
                   td: ({ children }) => (
                     <td className="px-3 py-2 align-top border-b border-slate-100 text-slate-700">{children}</td>
                   ),
-                  a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noopener noreferrer"
-                      className="text-[#003087] underline underline-offset-2 hover:text-[#002070]">
-                      {children}
-                    </a>
-                  ),
+                  a: ({ href, children }) => {
+                    const cite = citationNumber(href);
+                    const source = cite !== null ? sourceByNumber.get(cite) : undefined;
+                    if (source) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => onOpenSource?.(source)}
+                          title="근거 보기"
+                          className="inline-flex items-center align-baseline mx-0.5 px-1 rounded bg-[#003087]/10 text-[#003087] text-[11px] font-semibold leading-4 hover:bg-[#003087]/20 no-underline"
+                        >
+                          {children}
+                        </button>
+                      );
+                    }
+                    return (
+                      <a href={href} target="_blank" rel="noopener noreferrer"
+                        className="text-[#003087] underline underline-offset-2 hover:text-[#002070]">
+                        {children}
+                      </a>
+                    );
+                  },
                 }}
               >
-                {content}
+                {shownContent}
               </ReactMarkdown>
             </div>
           )}
@@ -227,7 +249,7 @@ export default function MessageBubble({
         {/* RAG 출처 */}
         {sources && sources.length > 0 && (
           <div className="mt-2 w-full">
-            <SourceCitation sources={sources} />
+            <SourceCitation sources={sources} onOpen={onOpenSource} />
           </div>
         )}
 

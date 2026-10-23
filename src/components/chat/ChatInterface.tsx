@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import { isNearBottom } from './scroll-follow';
+import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
 import type { Agent, RetrievedChunk } from '@/lib/db';
@@ -130,6 +131,9 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   /** 맨 아래를 따라 내릴지 — 사용자가 위로 올려 읽으면 false */
   const followRef = useRef(true);
+  /** 오른쪽 근거 창에 연 근거. 다른 대화를 열면 닫는다 */
+  const [openSource, setOpenSource] = useState<RetrievedChunk | null>(null);
+  const closeSource = useCallback(() => setOpenSource(null), []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
   // 문서를 불러오지 못해 거절된 요청 - 안내의 '다시 묻기'가 이 요청을 그대로 다시 보낸다
@@ -165,6 +169,7 @@ export default function ChatInterface({
     if (conversationId === prevConvIdRef.current) return;
     prevConvIdRef.current = conversationId;
     followRef.current = true;
+    setOpenSource(null);
 
     if (!conversationId) {
       setMessages([]);
@@ -660,6 +665,7 @@ export default function ChatInterface({
               refusalDisabled={isLoading}
               onRetry={() => void resendRefused(false)}
               onSkipDocuments={() => void resendRefused(true)}
+              onOpenSource={setOpenSource}
               error={msg.error}
             />
           ))
@@ -834,6 +840,7 @@ export default function ChatInterface({
             생성 결과를 그대로 결재에 올리면 안 된다는 것을 화면이 계속 알려야 한다. */}
         <p className="text-[11px] text-slate-400 mt-1 text-center px-4">{branding.aiNotice}</p>
       </div>
+      <SourcePanel source={openSource} onClose={closeSource} />
     </div>
   );
 }

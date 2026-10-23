@@ -91,9 +91,10 @@ describe('메시지 저장 행', () => {
     expect(rows.every((r) => r.agent_version === 7)).toBe(true);
   });
 
-  it('출처에는 조각 본문을 싣지 않는다', () => {
+  it('출처에 근거 원문을 싣는다 — 지난 대화에서도 오른쪽 근거 창을 열 수 있게(2026-10-23, 근거마다 최대 2,000자로 잘라 온 글)', () => {
+    // 예전에는 본문을 싣지 않았다. 근거 창이 생기면서 바꿨다 — 기관 자기 문서의 발췌이고 자기 DB에만 남는다
     const refs = rows[1].source_references as { chunks: Record<string, unknown>[] };
-    expect(refs.chunks[0]).not.toHaveProperty('text');
+    expect(refs.chunks[0].text).toBe('본문');
   });
 });
 

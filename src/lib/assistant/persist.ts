@@ -64,6 +64,9 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           documentTitle: c.documentTitle,
           chunkIndex: c.chunkIndex,
           similarity: c.similarity,
+          // 근거 창(2026-10-23) — 답변 속 [n]과 잇는 번호, 창에 보일 원문(근거마다 최대 2,000자). 없으면 JSON에서 빠진다
+          n: c.n,
+          ...(c.text ? { text: c.text } : {}),
           // NODA 근거의 위치(S4-a). 옛 조각에는 없어 JSON에서 빠진다
           page: c.page,
           cellRange: c.cellRange,

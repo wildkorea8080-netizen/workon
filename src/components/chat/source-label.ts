@@ -8,6 +8,46 @@ export function stripNodaPrefixes(text: string): string {
   return text.replace(NODA_PREFIX, '');
 }
 
+/** 답변 속 `[n]`을 근거 창 단추로 바꿀 때 쓰는 링크 주소 앞부분 — 화면 밖으로 나가는 주소가 아니다 */
+export const CITE_HREF_PREFIX = '#cite-';
+
+const CITE_MARK = /\[(\d{1,3})\](?!\()/g;
+
+function linkPlain(text: string, valid: ReadonlySet<number>): string {
+  return text.replace(CITE_MARK, (mark, n: string) => (valid.has(Number(n)) ? `[${n}](${CITE_HREF_PREFIX}${n})` : mark));
+}
+
+/**
+ * 답변 마크다운의 `[n]`(출처에 있는 번호만)을 링크로 바꿔, 눌러서 그 근거 창을 열게 한다.
+ * 이미 링크인 `[1](…)`과 코드(``` 블록·`인라인`) 안은 건드리지 않는다. 저장된 답변 글은 그대로다 — 그릴 때만 바꾼다.
+ */
+export function linkCitations(markdown: string, valid: ReadonlySet<number>): string {
+  if (valid.size === 0) return markdown;
+  return markdown
+    .split(/(```[\s\S]*?```)/)
+    .map((block, i) =>
+      i % 2 === 1
+        ? block
+        : block
+            .split(/(`[^`\n]*`)/)
+            .map((part, j) => (j % 2 === 1 ? part : linkPlain(part, valid)))
+            .join('')
+    )
+    .join('');
+}
+
+/** `linkCitations`가 만든 링크 주소에서 번호를 읽는다. 다른 주소면 null */
+export function citationNumber(href: string | undefined): number | null {
+  if (!href || !href.startsWith(CITE_HREF_PREFIX)) return null;
+  const n = Number(href.slice(CITE_HREF_PREFIX.length));
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** 출처 번호 — NODA 근거 묶음의 `[n]`(답변 속 번호와 같음). 옛 메시지는 받은 순서(chunkIndex + 1) */
+export function sourceNumber(c: { n?: number; chunkIndex: number }): number {
+  return typeof c.n === 'number' && Number.isFinite(c.n) ? c.n : c.chunkIndex + 1;
+}
+
 export interface SourceLocationInput {
   page?: number | null;
   cellRange?: string | null;

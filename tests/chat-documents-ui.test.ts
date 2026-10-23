@@ -1,4 +1,28 @@
 import { describe, it, expect } from 'vitest';
+import { linkCitations, CITE_HREF_PREFIX, citationNumber } from '@/components/chat/source-label';
+
+describe('답변 속 [n]을 근거 창 단추로 (2026-10-23)', () => {
+  const valid = new Set([1, 2]);
+  it('출처에 있는 번호만 바꾼다', () => {
+    expect(linkCitations('구성한다 [1]. 위원장은 총리 [2][3].', valid)).toBe(
+      `구성한다 [1](${CITE_HREF_PREFIX}1). 위원장은 총리 [2](${CITE_HREF_PREFIX}2)[3].`
+    );
+  });
+  it('이미 링크인 [1](…)은 건드리지 않는다', () => {
+    expect(linkCitations('[1](https://law.go.kr) 참조', valid)).toBe('[1](https://law.go.kr) 참조');
+  });
+  it('코드 안의 [1]은 건드리지 않는다', () => {
+    const md = '값 [1]\n```\narr[1]\n```\n끝 `x[2]`';
+    expect(linkCitations(md, valid)).toBe(`값 [1](${CITE_HREF_PREFIX}1)\n\`\`\`\narr[1]\n\`\`\`\n끝 \`x[2]\``);
+  });
+  it('출처가 없으면 그대로', () => {
+    expect(linkCitations('a [1]', new Set())).toBe('a [1]');
+  });
+  it('링크 주소에서 번호를 읽는다', () => {
+    expect(citationNumber(`${CITE_HREF_PREFIX}2`)).toBe(2);
+    expect(citationNumber('https://x')).toBeNull();
+  });
+});
 import { sourceLocationLabel, stripNodaPrefixes } from '@/components/chat/source-label';
 
 const ID = '123e4567-e89b-12d3-a456-426614174000';
@@ -60,5 +84,27 @@ describe('관리 화면 원본 (문서·검색 시험)', () => {
     expect(src).toContain('sourceLocationLabel(chunk)');
     expect(src).not.toContain('내용 없음');
     expect(src).not.toMatch(/from '@\/lib\/(config|noda)'/);
+  });
+});
+
+describe('근거 창을 화면에 잇는다 (원본 검사)', () => {
+  const read = (p: string) => require('fs').readFileSync(p, 'utf8') as string;
+  it('답변 말풍선은 [n]을 단추로 바꾸고, 출처 칩과 함께 근거 창을 연다', () => {
+    const bubble = read('src/components/chat/MessageBubble.tsx');
+    expect(bubble).toContain('linkCitations(content');
+    expect(bubble).toContain('citationNumber(href)');
+    expect(bubble).toContain('onOpen={onOpenSource}');
+  });
+  it('대화 화면이 근거 창을 하나 두고, 다른 대화를 열면 닫는다', () => {
+    const chat = read('src/components/chat/ChatInterface.tsx');
+    expect(chat).toContain('<SourcePanel source={openSource} onClose={closeSource} />');
+    expect(chat).toContain('onOpenSource={setOpenSource}');
+    expect(chat).toMatch(/followRef\.current = true;\s*setOpenSource\(null\);/);
+  });
+  it('근거 창은 Esc·바깥 누르기·×로 닫힌다', () => {
+    const panel = read('src/components/chat/SourcePanel.tsx');
+    expect(panel).toContain("e.key === 'Escape'");
+    expect(panel).toContain('onClick={onClose}');
+    expect(panel).toContain('aria-label="근거 창 닫기"');
   });
 });

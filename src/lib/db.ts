@@ -168,14 +168,22 @@ export type RetrievedChunk = {
   documentId: string;
   documentTitle?: string;
   chunkIndex: number;
-  /** NODA 근거(S4-a)는 조각 글을 따로 주지 않아 빈 글이다 — 글은 `/context`의 근거 묶음에 있다 */
+  /**
+   * NODA 근거 묶음의 번호(`[n]`). 답변 속 `[n]`이 이 조각을 가리킨다. 받아들인 조각의 순번(`chunkIndex`)과 다를 수 있다 —
+   * 이 비서의 다른 상태 문서 조각은 조용히 빠지기 때문이다. 옛 메시지에는 없다
+   */
+  n?: number;
+  /**
+   * 근거 원문. NODA 근거는 `/context`의 근거 묶음에서 그 번호의 글을 잘라 싣는다(최대 2,000자 — 오른쪽 근거 창이 보인다).
+   * 2026-10-23 이전 메시지는 빈 글이다
+   */
   text: string;
   similarity: number;
   /** 쪽(NODA `anchors[].page`). 엑셀·CSV는 쪽이 없어 null이고 `cellRange`를 쓴다. 옛 메시지에는 없다 */
   page?: number | null;
   /** 칸 주소(`표.csv!A3:D20`) */
   cellRange?: string | null;
-  /** 절(NODA `outline`을 ` › `로 이음) */
+  /** 절(NODA `outline`, 비면 `path`를 ` › `로 이음) */
   section?: string | null;
   /** 스캔 판독(OCR)으로 읽은 조각 — 원문과 다르게 읽혔을 수 있다 */
   ocr?: boolean;

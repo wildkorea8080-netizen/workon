@@ -7,6 +7,9 @@ import {
   isCleanMatch,
   searchAgentDocuments,
   ORPHAN_DELETE_WAIT_MS,
+  contextPassages,
+  PASSAGE_MAX_CHARS,
+  CITE_NUMBER_RULE,
   DOCUMENTS_UNAVAILABLE_CODE,
   DOCUMENTS_UNAVAILABLE_MESSAGE,
   type AgentDocument,
@@ -124,6 +127,64 @@ describe('sourcesToChunks', () => {
     expect(c.cellRange).toBe('표.csv!A1');
     expect(c.section).toBe('규정.hwp › 제1장');
     expect(JSON.stringify(c)).not.toContain(`${id}__`);
+  });
+});
+
+describe('근거 원문과 번호 — 오른쪽 근거 창(2026-10-23)', () => {
+  const ctxText = [
+    `[1] ${id}__규정.hwp · 43쪽 · 매뉴얼 > 서식 5`,
+    `제7조 ② 전략위원회는 25명 이내의 위원으로 구성한다.`,
+    `③ 위원장은 국무총리가 된다. (${id}__규정.hwp 참조)`,
+    `[2] ${id}__규정.hwp · 2쪽`,
+    `둘째 근거`,
+  ].join('\n');
+
+  it('근거 묶음을 [n]마다 원문으로 나눈다 — 머리 줄은 빼고 문서 id 앞부분도 뗀다', () => {
+    const p = contextPassages(ctxText);
+    expect(p.get(1)).toBe('제7조 ② 전략위원회는 25명 이내의 위원으로 구성한다.\n③ 위원장은 국무총리가 된다. (규정.hwp 참조)');
+    expect(p.get(2)).toBe('둘째 근거');
+    expect(p.size).toBe(2);
+  });
+
+  it('줄 가운데의 [3]은 근거 머리가 아니다', () => {
+    const p = contextPassages(`[1] ${id}__a.pdf · 1쪽\n별표 [3] 참조`);
+    expect(p.get(1)).toBe('별표 [3] 참조');
+    expect(p.has(3)).toBe(false);
+  });
+
+  it(`원문은 ${PASSAGE_MAX_CHARS}자에서 자른다`, () => {
+    const p = contextPassages(`[1] ${id}__a.pdf · 1쪽\n${'가'.repeat(PASSAGE_MAX_CHARS + 50)}`);
+    expect(p.get(1)!.length).toBe(PASSAGE_MAX_CHARS + 1);
+    expect(p.get(1)!.endsWith('…')).toBe(true);
+  });
+
+  it('조각에 NODA 번호(n)와 원문을 싣는다 — 빠진 조각이 있어도 번호가 밀리지 않는다', () => {
+    const passages = contextPassages(ctxText);
+    const { chunks } = sourcesToChunks(
+      [src({ n: 1, filename: `${id2}__예전.hwp` }), src({ n: 2 })],
+      [ready(), ready({ id: id2, noda_status: 'reading' })],
+      passages
+    );
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].n).toBe(2);
+    expect(chunks[0].text).toBe('둘째 근거');
+  });
+
+  it('절은 outline이 비면 path(제목 사슬)로 — NODA는 제목 사슬을 path에 준다', () => {
+    const [c] = sourcesToChunks([src({ outline: [], path: ['매뉴얼', '서식 5 서약서'] } as Partial<NodaSource>)], [ready()]).chunks;
+    expect(c.section).toBe('매뉴얼 › 서식 5 서약서');
+  });
+
+  it('인용 규칙이 문장 끝에 자료 번호를 붙이라고 지시한다', () => {
+    const text = docSearchAddendum({ context: '[1] a.pdf\n본문', chunks: [{ documentId: id, chunkIndex: 0, text: '', similarity: 0.9 }], hasDocuments: true, skipped: false })!;
+    expect(text).toContain(CITE_NUMBER_RULE);
+  });
+
+  it('prepare가 만든 조각에 원문이 실린다', async () => {
+    const { d } = deps();
+    const out = await turn(d);
+    expect(out.chunks![0].text).toBe('국내 출장 일비 2만원');
+    expect(out.chunks![0].n).toBe(1);
   });
 });
 

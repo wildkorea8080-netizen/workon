@@ -94,6 +94,40 @@ function sectionOf(outline: NodaSource['outline']): string | null {
   return typeof outline === 'string' && outline.trim() ? stripNodaPrefixes(outline) : null;
 }
 
+/** 근거 원문 상한 — 메시지 기록(source_references)에 근거마다 실리므로 크기를 정해 둔다 */
+export const PASSAGE_MAX_CHARS = 2_000;
+
+/** 근거 묶음의 머리 줄: 줄 첫머리의 `[n] 파일 · 쪽 · 절` */
+const PASSAGE_HEAD = /^\[(\d{1,3})\] /;
+
+/**
+ * NODA 근거 묶음(`context`)을 번호마다 원문으로 나눈다 — 오른쪽 근거 창이 보일 글이다.
+ * 묶음은 `[n] 파일 · 43쪽 · 제목 > 사슬` 머리 줄 아래에 그 근거의 글이 이어지는 꼴이다(실측 2026-10-23).
+ * 머리 줄은 빼고, `{문서 id}__`는 떼고, `PASSAGE_MAX_CHARS`에서 자른다(+`…`).
+ */
+export function contextPassages(context: string): Map<number, string> {
+  const passages = new Map<number, string>();
+  let current: number | null = null;
+  let lines: string[] = [];
+  const flush = () => {
+    if (current === null) return;
+    const text = stripNodaPrefixes(lines.join('\n')).trim();
+    passages.set(current, text.length > PASSAGE_MAX_CHARS ? `${text.slice(0, PASSAGE_MAX_CHARS)}…` : text);
+  };
+  for (const line of context.split('\n')) {
+    const head = PASSAGE_HEAD.exec(line);
+    if (head) {
+      flush();
+      current = Number(head[1]);
+      lines = [];
+    } else if (current !== null) {
+      lines.push(line);
+    }
+  }
+  flush();
+  return passages;
+}
+
 /** 근거를 이 비서의 행과 맞춘 결과 */
 export interface SourceMatch {
   /** 이 비서의 `ready`·`deleting` 행과 맞은 조각 */
@@ -118,7 +152,11 @@ export function isCleanMatch(m: SourceMatch): boolean {
  * - 이 비서의 행이 없는 조각·문서 id를 읽지 못하는 조각·형식이 깨진 원소는 따로 모은다 —
  *   **하나라도** 있으면 근거 전체를 버린다(`matchedChunks`가 섞임·고아를 가른다)
  */
-export function sourcesToChunks(sources: NodaSource[], docs: AgentDocument[]): SourceMatch {
+export function sourcesToChunks(
+  sources: NodaSource[],
+  docs: AgentDocument[],
+  passages: Map<number, string> = new Map()
+): SourceMatch {
   const byId = new Map(docs.map((d) => [d.id.toLowerCase(), d]));
   const match: SourceMatch = { chunks: [], unknown: [], unparsable: [], malformed: 0 };
   const chunks = match.chunks;
@@ -147,16 +185,24 @@ export function sourcesToChunks(sources: NodaSource[], docs: AgentDocument[]): S
       documentId: doc.id,
       documentTitle: doc.title || doc.file_name,
       chunkIndex: chunks.length,
-      text: '',
+      ...(typeof source.n === 'number' && Number.isFinite(source.n) ? { n: source.n } : {}),
+      text: (typeof source.n === 'number' && passages.get(source.n)) || '',
       similarity: typeof source.similarity === 'number' && Number.isFinite(source.similarity) ? source.similarity : 0,
       page: pageAnchor ? (pageAnchor.page as number) : null,
       cellRange: cellAnchor ? stripNodaPrefixes(cellAnchor.cell_range as string) : null,
-      section: sectionOf(source.outline),
+      section: sectionOf(source.outline) ?? sectionOf(source.path),
       ocr: extractors.some((e) => typeof e === 'string' && /ocr/i.test(e)),
     });
   }
   return match;
 }
+
+/**
+ * 답변 속 `[n]` — 화면이 이 번호를 눌러 오른쪽 근거 창을 연다(2026-10-23). 근거 묶음 머리의 번호를 그대로 쓰게 한다.
+ * NODA 답변 검증(S4-b)의 인용 검사도 이 번호를 쓴다
+ */
+export const CITE_NUMBER_RULE =
+  '- 참고 자료의 내용을 쓴 문장 끝에는 그 자료 머리의 번호를 [1]처럼 붙이세요. 여러 자료면 [1][3]처럼 이어 붙이고, 참고 자료에 없는 번호는 만들지 마세요.';
 
 const CITATION_RULES = [
   '[자료 인용 규칙]',
@@ -167,6 +213,7 @@ const CITATION_RULES = [
   '- 자료에서 확인되지 않는 것은 추론해 채우지 말고 확인되지 않는다고 말하세요.',
   // 하한(0.80)을 넘은 근거도 질문의 답이 아닐 수 있다 — '관련 문서 없음'의 둘째 겹(설계 5절)
   '- 참고 자료에 질문의 답이 없으면 지어내지 말고 "문서에서 찾지 못했습니다"라고 답하세요.',
+  CITE_NUMBER_RULE,
 ];
 
 const NO_RESULT = [
@@ -232,7 +279,7 @@ async function matchedChunks(
   docs: AgentDocument[]
 ): Promise<RetrievedChunk[]> {
   const log = deps.log ?? logSystem;
-  const match = sourcesToChunks(result.sources, docs);
+  const match = sourcesToChunks(result.sources, docs, contextPassages(result.context));
   if (isCleanMatch(match)) return match.chunks;
 
   const base = { agent_id: input.agentId, source_count: result.sources.length };

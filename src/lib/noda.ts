@@ -139,7 +139,8 @@ export interface NodaSource {
   doc_id: string;
   filename: string;
   kind?: string;
-  path?: string;
+  /** 제목 사슬(실측: 배열 — 예 `['매뉴얼', '서식 5 서약서']`). `outline`이 비어 있을 때가 많다 */
+  path?: string | string[] | null;
   outline?: string | string[] | null;
   anchors?: NodaAnchor[];
   extractors?: string[];
