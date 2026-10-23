@@ -120,28 +120,35 @@ export async function DELETE(request: NextRequest) {
     // 그 조각이 이 비서의 대화에 계속 섞인다. 그래서 NODA가 먼저 성공해야 행을 지운다.
     // NODA에 간 적 없는 옛 행(noda_status NULL)은 건너뛴다. 이미 없는 사본(404)은 지운 것과 같다.
     if (doc.agent_id && doc.noda_filename && doc.noda_status) {
-      let nodaFailed = false;
+      let nodaError: unknown = null;
       try {
         await noda.deleteDocument(nodaTenant(doc.agent_id), doc.noda_filename);
-      } catch (nodaError) {
-        nodaFailed = true;
+      } catch (e) {
+        nodaError = e;
+      }
+      if (nodaError) {
+        // 지우는 중임을 남긴다 — 읽기 라우트가 이 행을 되살리지 않고, 다시 지우면 같은 길을 다시 탄다.
+        const { error: markError } = await supabaseAdmin
+          .from('documents')
+          .update({ noda_status: 'deleting' })
+          .eq('id', documentId);
         await logSystem({
           level: 'error',
           category: 'api',
-          message: 'NODA 문서 삭제 실패 — 행을 deleting으로 남김',
+          message: markError
+            ? 'NODA 문서 삭제 실패 — 행을 deleting으로 표시하지 못함'
+            : 'NODA 문서 삭제 실패 — 행을 deleting으로 남김',
           details: {
             document_id: doc.id,
             error: nodaError instanceof Error ? nodaError.message : String(nodaError),
+            ...(markError ? { mark_failed: true, mark_error: markError.message } : {}),
           },
         });
-      }
-      if (nodaFailed) {
-        // 지우는 중임을 남긴다 — 읽기 라우트가 이 행을 되살리지 않고, 다시 지우면 같은 길을 다시 탄다.
-        await supabaseAdmin.from('documents').update({ noda_status: 'deleting' }).eq('id', documentId);
         return NextResponse.json({ ok: false, error: { message: NODA_DELETE_FAILED_MESSAGE } }, { status: 502 });
       }
     }
 
+    // NODA 삭제가 끝난 뒤 이 DB 삭제가 실패하면 다시 지워도 안전하다 — NODA는 이미 없는 사본에 404를 주고, 그건 성공으로 센다.
     const { error } = await supabaseAdmin.from('documents').delete().eq('id', documentId);
     if (error) {
       return NextResponse.json({ ok: false, error: { message: '문서 삭제 실패', details: error } }, { status: 500 });

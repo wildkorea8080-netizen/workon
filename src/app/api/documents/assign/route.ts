@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 새 연결 레코드 생성: 저장소 파일은 공유하고, 읽기는 비서마다 새로 한다(새 id·NODA 파일 이름·reading).
-    // 행마다 키 집합이 같다. 읽기 호출은 화면이 목록을 열 때 시작한다(맞추기·kick).
+    // 행마다 키 집합이 같다. 읽기는 화면이 돌려준 documentIds로 읽기 라우트를 불러 시작한다(Task 5). 목록의 kick은 2분이 지나도 안 읽힌 행을 위한 보충이다.
     const now = new Date();
     const newRows = newAgentIds.map((id) => buildAssignedDocumentRow(src, targets.get(id)!, crypto.randomUUID(), now));
 

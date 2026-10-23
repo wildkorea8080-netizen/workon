@@ -96,6 +96,9 @@ describe('DELETE /api/documents', () => {
     expect(del).toContain('status: 502');
     // 502로 돌려보내는 곳이 행 삭제보다 앞이다
     expect(del.indexOf('status: 502')).toBeLessThan(del.indexOf(".from('documents').delete()"));
+    // 502를 돌려주기 전에 deleting 표시를 먼저 남기고, 그 오류를 확인한다
+    expect(del.indexOf("noda_status: 'deleting'")).toBeLessThan(del.indexOf('status: 502'));
+    expect(del).toContain('markError');
   });
 
   it('권한 판정은 그대로다', () => {
@@ -121,7 +124,7 @@ describe('GET /api/documents', () => {
 
   it('범위는 visibilityFilter 그대로고, 맞춘 행에서 noda_filename은 화면에 내보내지 않는다', () => {
     expect(get).toContain('.or(visibleFilter)');
-    expect(get).toMatch(/noda_filename[\s\S]*\.\.\.rest|\{ noda_filename[^}]*\.\.\.\w+ \}/);
+    expect(get).toMatch(/\{\s*noda_filename,[^}]*\.\.\.rest\s*\}\) => rest\)/);
   });
 });
 
