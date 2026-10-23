@@ -38,8 +38,24 @@ interface Message {
   files?: { id: string; file_name: string; size_bytes: number }[];
   /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자 */
   numberCheck?: string[];
+  /** 참고 문서 없이 답함 — 문서를 못 불러와 일반 답변으로 받은 응답 */
+  documentsSkipped?: boolean;
+  /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
+  refusal?: boolean;
   error?: string;
 }
+
+/** 보낸 요청 그대로 — 거절 뒤 '다시 묻기'가 똑같이 다시 보낸다 */
+interface TurnRequest {
+  message: string;
+  conversationId: string | null;
+  images: ChatImage[];
+  attachmentIds: string[];
+}
+
+/** 서버 거절 코드 — 문서 보관소(NODA)를 부르지 못했다 */
+const DOCUMENTS_UNAVAILABLE_CODE = 'documents_unavailable';
+const DOCUMENTS_UNAVAILABLE_MESSAGE = '참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요';
 
 /** 도구 이름 → 사용자에게 보일 문구 */
 const TOOL_LABELS: Record<string, string> = {
@@ -113,6 +129,8 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevConvIdRef = useRef<string | null>(null);
+  // 문서를 불러오지 못해 거절된 요청 - 안내의 '다시 묻기'가 이 요청을 그대로 다시 보낸다
+  const refusedRequestRef = useRef<TurnRequest | null>(null);
 
   useEffect(() => {
     fetch('/api/models')
@@ -166,6 +184,7 @@ export default function ChatInterface({
                 files?: { id: string; file_name: string; size_bytes: number }[];
                 attachments?: { id: string; file_name: string }[];
                 number_check?: { unverified?: string[] };
+                documents_skipped?: boolean;
               };
             }) => ({
               id: m.id,
@@ -180,6 +199,9 @@ export default function ChatInterface({
               attachments: m.role === 'user' ? m.source_references?.attachments : undefined,
               numberCheck: m.role === 'assistant' && m.source_references?.number_check?.unverified?.length
                 ? m.source_references.number_check.unverified
+                : undefined,
+              documentsSkipped: m.role === 'assistant' && m.source_references?.documents_skipped === true
+                ? true
                 : undefined,
             })
           )
@@ -288,14 +310,44 @@ export default function ChatInterface({
         .filter(c => c.stage === 'ready' && c.attachment)
         .map(c => ({ id: c.attachment!.id, file_name: c.name })),
     };
-    const assistantId = String(Date.now() + 1);
 
-    setMessages(prev => [...prev, userMsg]);
+    // 거절 안내가 남아 있으면 치운다 - 새 질문 뒤에 옛 요청이 다시 나가지 않게
+    setMessages(prev => [...prev.filter(m => !m.refusal), userMsg]);
     setInputMessage('');
     // 미리보기 URL은 말풍선이 계속 쓰므로 여기서 revoke 하지 않는다
     setPendingImages([]);
     fileAttach.clear();
     setImageError(null);
+
+    await sendTurn(
+      {
+        message: userMsg.content || '이 이미지를 설명해주세요.',
+        conversationId,
+        images,
+        attachmentIds: fileIds,
+      },
+      sentChips,
+      false,
+    );
+  };
+
+  /** 거절 안내의 단추 — 안내 말풍선(과 단추)을 지우고 같은 요청을 다시 보낸다. 사용자 말풍선은 그대로 */
+  const resendRefused = async (skipDocuments: boolean) => {
+    const req = refusedRequestRef.current;
+    if (!req || isLoading) return;
+    refusedRequestRef.current = null;
+    setMessages(prev => prev.filter(m => !m.refusal));
+    await sendTurn(req, [], skipDocuments);
+  };
+
+  const sendTurn = async (
+    req: TurnRequest,
+    sentChips: Parameters<typeof fileAttach.restore>[0],
+    skipDocuments: boolean,
+  ) => {
+    const assistantId = String(Date.now() + 1);
+    // 일반 답변으로 받은 응답에는 말풍선 위 표시를 단다
+    const skipped = skipDocuments ? true : undefined;
     setIsLoading(true);
     setActiveTool(null);
 
@@ -310,16 +362,28 @@ export default function ChatInterface({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent_id: selectedAgent.id,
-          message: userMsg.content || '이 이미지를 설명해주세요.',
-          conversation_id: conversationId,
-          images: images.length > 0 ? images : undefined,
-          attachment_ids: fileIds.length > 0 ? fileIds : undefined,
+          message: req.message,
+          conversation_id: req.conversationId,
+          images: req.images.length > 0 ? req.images : undefined,
+          attachment_ids: req.attachmentIds.length > 0 ? req.attachmentIds : undefined,
+          skip_documents: skipDocuments ? true : undefined,
         }),
       });
 
       // 스트림 시작 전 실패는 JSON으로 돌아온다
       if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
         const result = await res.json().catch(() => null);
+        if (result?.error?.code === DOCUMENTS_UNAVAILABLE_CODE) {
+          // 대화도 첨부 묶기도 일어나지 않았다. 사용자 말풍선은 두고, 같은 요청을 단추로 다시 보낼 수 있게 쥐고 있는다.
+          // 칩은 돌리지 않는다 - 입력창에도 칩이 있으면 같은 파일이 두 길로 나간다
+          refusedRequestRef.current = req;
+          setMessages(prev => [...prev, {
+            id: assistantId, role: 'assistant', content: '',
+            refusal: true,
+            error: result.error.message || DOCUMENTS_UNAVAILABLE_MESSAGE,
+          }]);
+          return;
+        }
         // 스트림이 시작되기 전에 거절됐다 - 올려 둔 파일은 서버에 안 묶인 채 있으니 칩을 돌려 다시 보낼 수 있게 한다
         fileAttach.restore(sentChips);
         setMessages(prev => [...prev, {
@@ -352,6 +416,7 @@ export default function ChatInterface({
             sources: pendingSources,
             links: collectedLinks.length ? [...collectedLinks] : undefined,
             files: collectedFiles.length ? [...collectedFiles] : undefined,
+            documentsSkipped: skipped,
           },
         ]);
       };
@@ -380,7 +445,7 @@ export default function ChatInterface({
           }
 
           if (name === 'meta') {
-            if (!conversationId && payload.conversation_id) {
+            if (!req.conversationId && payload.conversation_id) {
               onConversationCreated(payload.conversation_id);
               prevConvIdRef.current = payload.conversation_id;
             }
@@ -421,6 +486,7 @@ export default function ChatInterface({
                 id: assistantId, role: 'assistant', content: streamed,
                 links: collectedLinks.length ? [...collectedLinks] : undefined,
                 files: collectedFiles.length ? [...collectedFiles] : undefined,
+                documentsSkipped: skipped,
                 error: payload.message || '오류가 발생했습니다.',
               }]);
               bubbleShown = true;
@@ -575,6 +641,11 @@ export default function ChatInterface({
               links={msg.links}
               files={msg.files}
               numberCheck={msg.numberCheck}
+              documentsSkipped={msg.documentsSkipped}
+              refusal={msg.refusal}
+              refusalDisabled={isLoading}
+              onRetry={() => void resendRefused(false)}
+              onSkipDocuments={() => void resendRefused(true)}
               error={msg.error}
             />
           ))

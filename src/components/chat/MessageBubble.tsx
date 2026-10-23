@@ -38,10 +38,21 @@ interface MessageBubbleProps {
   files?: GeneratedFile[];
   /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자(답변 글은 그대로 둔다) */
   numberCheck?: string[];
+  /** 참고 문서 없이 일반 답변으로 받은 응답 — 말풍선 위에 작게 알린다 */
+  documentsSkipped?: boolean;
+  /** 참고 문서를 불러오지 못해 거절된 안내 — 오류가 아니라 안내로 그리고 단추를 붙인다 */
+  refusal?: boolean;
+  /** 응답을 기다리는 동안 단추를 막는다 */
+  refusalDisabled?: boolean;
+  onRetry?: () => void;
+  onSkipDocuments?: () => void;
   error?: string;
 }
 
-export default function MessageBubble({ role, content, imagePreviews, attachments, sources, links, files, numberCheck, error }: MessageBubbleProps) {
+export default function MessageBubble({
+  role, content, imagePreviews, attachments, sources, links, files, numberCheck,
+  documentsSkipped, refusal, refusalDisabled, onRetry, onSkipDocuments, error,
+}: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
 
@@ -65,10 +76,16 @@ export default function MessageBubble({ role, content, imagePreviews, attachment
       )}
 
       <div className={`flex flex-col max-w-[72%] ${isUser ? 'items-end' : 'items-start'}`}>
+        {/* 참고 문서 없이 답함 — 근거 자료 없이 일반 지식으로 답한 응답임을 알린다 */}
+        {!isUser && !error && documentsSkipped && (
+          <span className="mb-1 text-[11px] text-slate-500">참고 문서 없이 답함</span>
+        )}
         <div
           className={`px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-[#003087] text-white rounded-2xl rounded-tr-sm shadow-sm'
+              : refusal
+              ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-2xl rounded-tl-sm'
               : error
               ? 'bg-red-50 text-red-800 border border-red-200 rounded-2xl rounded-tl-sm'
               : 'bg-white text-slate-900 border border-slate-200 rounded-2xl rounded-tl-sm shadow-sm'
@@ -104,7 +121,29 @@ export default function MessageBubble({ role, content, imagePreviews, attachment
               ))}
             </div>
           )}
-          {error ? (
+          {refusal ? (
+            <div>
+              <p>{error}</p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={refusalDisabled}
+                  className="text-xs font-semibold text-white bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  다시 묻기
+                </button>
+                <button
+                  type="button"
+                  onClick={onSkipDocuments}
+                  disabled={refusalDisabled}
+                  className="text-xs font-semibold text-[#003087] bg-white border border-[#003087]/30 hover:bg-[#003087]/5 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  문서 없이 일반 답변 받기
+                </button>
+              </div>
+            </div>
+          ) : error ? (
             <div>
               <span className="font-semibold">오류: </span>{error}
             </div>
