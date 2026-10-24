@@ -264,6 +264,11 @@ export interface NodaClient {
   listDocuments(tenant: string, opts?: { retry?: boolean; timeoutMs?: number }): Promise<NodaListing>;
   /** 404(이미 없음)는 `{ deleted: false }`로 끝난다 — 던지지 않는다 */
   deleteDocument(tenant: string, filename: string): Promise<{ deleted: boolean }>;
+  /**
+   * 보관함 통째 비우기 — 비서를 지울 때 한 번(`all=1&confirm=<보관함>`, 실수로 남의 보관함을 비우지 않게 NODA가 이름을 한 번 더 받는다).
+   * 404(보관함이 없음)는 `{ existed: false }`로 끝난다. `deleted`는 NODA가 지운 문서 수를 알려 줄 때만 숫자
+   */
+  deleteTenant(tenant: string): Promise<{ existed: boolean; deleted: number | null }>;
   getContext(input: { tenant: string; query: string }): Promise<NodaContextResult>;
   /**
    * 답변 검증(`/verify`). `sources`는 그 턴 `/context`의 `sources[]`를 받은 순서 그대로
@@ -520,6 +525,22 @@ export function createNodaClient(deps: {
           if (res.status === 404) return { deleted: false };
           const b = await readJson(res).catch(() => ({}) as Record<string, unknown>);
           return { deleted: b.deleted !== false };
+        },
+        { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
+      );
+    },
+
+    async deleteTenant(tenant) {
+      return withRetry(
+        async () => {
+          const res = await request('DELETE', '/documents', {
+            query: { tenant, all: '1', confirm: tenant },
+            timeoutMs: DEFAULT_TIMEOUT_MS,
+            allow404: true,
+          });
+          if (res.status === 404) return { existed: false, deleted: null };
+          const b = await readJson(res).catch(() => ({}) as Record<string, unknown>);
+          return { existed: true, deleted: typeof b.deleted === 'number' && Number.isFinite(b.deleted) ? b.deleted : null };
         },
         { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
       );

@@ -108,7 +108,11 @@ export async function DELETE(request: NextRequest) {
     let allowed = false;
     if (doc.agent_id) {
       const agent = await loadAgentAccess(doc.agent_id);
-      allowed = Boolean(agent) && canDeleteAgent(agent!, actor);
+      // 지운 비서에 남은 문서(비서를 지울 때 NODA를 못 비워 deleting으로 남은 것)는 그 부서를 관리하는 관리자가 치운다 —
+      // canDeleteAgent는 지운 비서에 거짓이라 그대로 두면 아무도 못 지운다
+      allowed = agent?.deleted_at
+        ? actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id)
+        : Boolean(agent) && canDeleteAgent(agent!, actor);
     } else {
       allowed = actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id);
     }

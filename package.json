@@ -20,7 +20,8 @@
     "seed:agents": "tsx scripts/seed-agents.mjs",
     "noda:migrate": "tsx scripts/noda-migrate.mjs",
     "noda:check": "tsx scripts/noda-check.mjs",
-    "noda:webhook": "tsx scripts/noda-webhook.mjs"
+    "noda:webhook": "tsx scripts/noda-webhook.mjs",
+    "noda:purge-deleted": "tsx scripts/noda-purge-deleted.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",

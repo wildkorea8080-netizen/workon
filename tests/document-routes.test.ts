@@ -111,6 +111,10 @@ describe('DELETE /api/documents', () => {
     expect(del).toContain('canDeleteAgent(');
     expect(del).toContain('actor.managedDepartmentIds.includes(doc.department_id)');
   });
+
+  it('지운 비서에 남은 문서는 그 부서를 관리하는 관리자가 지운다(canDeleteAgent는 지운 비서에 거짓)', () => {
+    expect(del).toMatch(/agent\?\.deleted_at\s*\?\s*actor\.isAdmin && actor\.managedDepartmentIds\.includes\(doc\.department_id\)\s*:\s*Boolean\(agent\) && canDeleteAgent\(/);
+  });
 });
 
 describe('GET /api/documents', () => {

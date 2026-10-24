@@ -212,6 +212,42 @@ describe('NODA 클라이언트', () => {
     expect(await noda.deleteDocument('t', 'f')).toEqual({ deleted: true });
   });
 
+  it('deleteTenant는 보관함 이름을 confirm으로 한 번 더 보내고, 지운 수가 있으면 돌려준다', async () => {
+    const calls: string[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      calls.push(`${init.method} ${url}`);
+      return json({ deleted: 3 });
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    const tenant = nodaTenant(ID);
+    expect(await noda.deleteTenant(tenant)).toEqual({ existed: true, deleted: 3 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].startsWith('DELETE ')).toBe(true);
+    const u = new URL(calls[0].split(' ')[1]);
+    expect(u.pathname).toBe('/documents');
+    expect(u.searchParams.get('tenant')).toBe(tenant);
+    expect(u.searchParams.get('all')).toBe('1');
+    expect(u.searchParams.get('confirm')).toBe(tenant);
+    expect(u.searchParams.get('filename')).toBeNull();
+  });
+
+  it('deleteTenant 404는 existed:false, 본문에 수가 없으면 deleted:null', async () => {
+    const a = client((async () => json({ error: 'not found' }, 404)) as unknown as typeof fetch);
+    expect(await a.noda.deleteTenant('t')).toEqual({ existed: false, deleted: null });
+    const b = client((async () => json({ ok: true })) as unknown as typeof fetch);
+    expect(await b.noda.deleteTenant('t')).toEqual({ existed: true, deleted: null });
+  });
+
+  it('deleteTenant는 503이면 다시 시도하고 401은 던진다', async () => {
+    let n = 0;
+    const f = (async () => (++n === 1 ? json({}, 503) : json({ deleted: 1 }))) as unknown as typeof fetch;
+    const { noda } = client(f);
+    expect(await noda.deleteTenant('t')).toEqual({ existed: true, deleted: 1 });
+    expect(n).toBe(2);
+    const bad = client((async () => json({}, 401)) as unknown as typeof fetch);
+    await expect(bad.noda.deleteTenant('t')).rejects.toBeInstanceOf(NodaError);
+  });
+
   it('listDocuments는 receiving이 없어도 빈 배열', async () => {
     const { noda } = client((async () => json({ documents: [{ filename: 'a', doc_id: 'd', extra: 1 }] })) as unknown as typeof fetch);
     const r = await noda.listDocuments('t');
