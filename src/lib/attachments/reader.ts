@@ -9,7 +9,9 @@ import {
 import { buildTable, isNumericText } from './header';
 import { readCsvTables, readXlsxTables } from './tables-sheet';
 import { readHwpxTables, truncationWarnings } from './tables-hwpx';
-import { isLikelyScanned } from '@/lib/pdf-ocr';
+import { SCAN_WARNING, isLikelyScanned, parsedToExtract } from './scan';
+import { NodaError, noda } from '@/lib/noda';
+import type { NodaParsedDocument } from '@/lib/noda';
 
 /**
  * 첨부 파일 바이트 → 본문 + 계산용 표 + 요약. 형식 판정은 전부 여기서 한다.
@@ -141,7 +143,22 @@ export function tableAsMarkdown(
 // ── 형식별 읽기 ──────────────────────────────────────────────
 
 /** textCut: 본문을 상한에서 멈춰 만들었다(전체 길이를 모른다) */
-type Parsed = Omit<AttachmentExtract, 'warnings'> & { warnings?: string[]; textCut?: boolean };
+type Parsed = Omit<AttachmentExtract, 'warnings'> & { warnings?: string[]; textCut?: boolean; scanned?: boolean };
+
+/** 스캔 PDF 읽기(NODA `/parse`). 테스트가 갈아 끼운다 */
+export interface ReadDeps {
+  parseScanned?: (bytes: Buffer, fileName: string) => Promise<NodaParsedDocument>;
+}
+
+const defaultParseScanned = (bytes: Buffer, fileName: string) => noda.parseDocument({ filename: fileName, bytes });
+
+/** NODA가 준 이유 코드는 그대로 보이지 않는다 — 사람이 읽는 말로 */
+function scanReasonLabel(reason: string | null | undefined): string {
+  const r = (reason ?? '').toUpperCase();
+  if (r.includes('PASSWORD')) return '암호가 걸린 파일';
+  if (r.includes('DRM')) return '보안(DRM)이 걸린 파일';
+  return '읽을 수 없는 파일';
+}
 
 /** 표가 너무 많으면 앞의 것만. 읽은 내용 크기와 개요를 파일이 정하게 두지 않는다. 경고는 맨 앞에 — 개요는 경고를 3개만 보인다 */
 function capTables(tables: ExtractedTable[], warnings: string[]): ExtractedTable[] {
@@ -218,7 +235,7 @@ async function readHangul(bytes: Buffer, fileName: string): Promise<Parsed> {
   return { kind: 'document', text, tables: capTables(tables, warnings), warnings };
 }
 
-async function readPdf(bytes: Buffer): Promise<Parsed> {
+async function readPdf(bytes: Buffer, fileName: string, deps: ReadDeps): Promise<Parsed> {
   // lib 파일을 직접 부른다 — 기본 import는 테스트 파일을 실행하다 던진다 (document-processor.ts와 같다)
   // @ts-ignore pdf-parse/lib 경로는 타입 선언이 없다
   const mod = await import('pdf-parse/lib/pdf-parse.js');
@@ -226,11 +243,39 @@ async function readPdf(bytes: Buffer): Promise<Parsed> {
   const data = await (pdfParse as (b: Buffer) => Promise<{ text?: string; numpages?: number }>)(bytes);
   const pages = data.numpages ?? 0;
   const text = data.text ?? '';
-  // 글자 층이 없으면 pdf-parse는 오류가 아니라 빈 글을 준다. 판독(OCR)은 아직 첨부에 없다
-  if (isLikelyScanned(text, pages)) {
-    throw new AttachmentReadError('스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.');
+  // 글자 층이 없으면 pdf-parse는 오류가 아니라 빈 글을 준다 — 그때만 NODA로 읽는다. 글자 층이 있으면 NODA를 부르지 않는다
+  if (!isLikelyScanned(text, pages)) return { kind: 'document', text, tables: [], pages };
+  return readScannedPdf(bytes, fileName, pages, deps);
+}
+
+async function readScannedPdf(bytes: Buffer, fileName: string, pdfPages: number, deps: ReadDeps): Promise<Parsed> {
+  let doc: NodaParsedDocument;
+  try {
+    doc = await (deps.parseScanned ?? defaultParseScanned)(bytes, fileName);
+  } catch (err) {
+    if (err instanceof NodaError) {
+      // 키가 없으면 지금까지처럼 '아직 못 읽는다' — 장애와 달리 다시 올려도 같다
+      if (err.code === 'missing_key') {
+        throw new AttachmentReadError('스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.', err);
+      }
+      throw new AttachmentReadError('스캔 문서를 지금 읽지 못했습니다. 잠시 뒤 다시 올려 주세요.', err);
+    }
+    throw err;
   }
-  return { kind: 'document', text, tables: [], pages };
+  if (!doc.readable) {
+    throw new AttachmentReadError(`스캔 문서를 읽지 못했습니다(사유: ${scanReasonLabel(doc.reason)})`);
+  }
+  const read = parsedToExtract(doc);
+  const warnings = [...read.warnings];
+  const tables = capTables(read.tables, warnings);
+  return {
+    kind: 'document',
+    text: read.text,
+    tables,
+    pages: read.pages > 0 ? read.pages : pdfPages,
+    warnings,
+    scanned: true,
+  };
 }
 
 async function readDocx(bytes: Buffer): Promise<Parsed> {
@@ -257,7 +302,7 @@ function readTxt(bytes: Buffer): Parsed {
   return { kind: 'text', text: text.replace(/^﻿/, ''), tables: [] };
 }
 
-async function parse(bytes: Buffer, fileName: string, ext: string): Promise<Parsed> {
+async function parse(bytes: Buffer, fileName: string, ext: string, deps: ReadDeps): Promise<Parsed> {
   switch (ext) {
     case 'xlsx':
     case 'xlsm':
@@ -267,7 +312,7 @@ async function parse(bytes: Buffer, fileName: string, ext: string): Promise<Pars
     case 'hwp':
       return readHangul(bytes, fileName);
     case 'pdf':
-      return readPdf(bytes);
+      return readPdf(bytes, fileName, deps);
     case 'docx':
       return readDocx(bytes);
     case 'pptx':
@@ -281,7 +326,7 @@ async function parse(bytes: Buffer, fileName: string, ext: string): Promise<Pars
  * 실패는 항상 AttachmentReadError. 깨진 zip·암호 파일처럼 파서가 던지는 것은
  * 한 문장으로 감싸고 원인은 cause에 남긴다.
  */
-export async function readAttachment(bytes: Buffer, fileName: string): Promise<AttachmentExtract> {
+export async function readAttachment(bytes: Buffer, fileName: string, deps: ReadDeps = {}): Promise<AttachmentExtract> {
   const refused = refusedFormatMessage(fileName);
   if (refused) throw new AttachmentReadError(refused);
   const ext = attachmentExtension(fileName);
@@ -289,13 +334,13 @@ export async function readAttachment(bytes: Buffer, fileName: string): Promise<A
 
   let parsed: Parsed;
   try {
-    parsed = await parse(bytes, fileName, ext);
+    parsed = await parse(bytes, fileName, ext, deps);
   } catch (err) {
     if (err instanceof AttachmentReadError) throw err;
     throw new AttachmentReadError(GENERIC_FAILURE, err);
   }
 
-  const { textCut, ...rest } = parsed;
+  const { textCut, scanned, ...rest } = parsed;
   const warnings = [...(rest.warnings ?? [])];
   let text = rest.text;
   if (textCut) {
@@ -309,6 +354,8 @@ export async function readAttachment(bytes: Buffer, fileName: string): Promise<A
   if (!text.trim() && rest.tables.length === 0) {
     throw new AttachmentReadError('파일에서 읽을 글이 없습니다.');
   }
+  // 글자 인식으로 읽었다는 안내가 맨 앞 — 개요는 경고를 3개만 보이고, 이것이 숫자를 믿는 정도를 정한다
+  if (scanned) warnings.unshift(SCAN_WARNING);
   return { ...rest, text, warnings };
 }
 

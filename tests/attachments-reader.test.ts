@@ -8,6 +8,9 @@ import {
 } from '@/lib/attachments/reader';
 import { MAX_EXTRACT_CHARS, READ_TABLE_ROWS } from '@/lib/attachments/limits';
 import { buildTable } from '@/lib/attachments/header';
+import { SCAN_WARNING } from '@/lib/attachments/scan';
+import { NodaError } from '@/lib/noda';
+import type { NodaParsedDocument } from '@/lib/noda';
 import { buildHwpx, para as xpara, tableAt } from './fixtures/hwpx';
 import { buildHwp, para, tablePara } from './fixtures/hwp5';
 
@@ -88,9 +91,121 @@ describe('readAttachment', () => {
     await failure(readAttachment(Buffer.from('x'), 'a.exe'));
   });
 
-  it('글자 층 없는 PDF는 스캔 안내로 실패', async () => {
-    const e = await failure(readAttachment(Buffer.from('%PDF SCAN'), 'a.pdf'));
-    expect(e.message).toBe('스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.');
+  describe('글자 층 없는 PDF (NODA /parse)', () => {
+    const scanned = Buffer.from('%PDF SCAN');
+    const parsedDoc = (over: Partial<NodaParsedDocument> = {}): NodaParsedDocument => ({
+      readable: true,
+      reason: null,
+      pages: 3,
+      blocks: [
+        { type: 'paragraph', text: '예산 집행 현황', page: 1 },
+        { type: 'footer', text: '- 1 -', page: 1 },
+      ],
+      tables: [
+        {
+          id: 'x',
+          n_rows: 2,
+          n_cols: 2,
+          caption: '(단위: 천원)',
+          cells: [
+            { r: 0, c: 0, rowspan: 2, text: '구분' },
+            { r: 0, c: 1, text: '예산' },
+            { r: 1, c: 1, text: '100' },
+          ],
+        },
+      ],
+      ...over,
+    });
+
+    it('본문·표를 읽고 경고 맨 앞에 글자 인식 안내', async () => {
+      const parseScanned = vi.fn(async (_b: Buffer, _n: string) => parsedDoc());
+      const ex = await readAttachment(scanned, 'a.pdf', { parseScanned });
+      expect(parseScanned).toHaveBeenCalledTimes(1);
+      expect(parseScanned.mock.calls[0][1]).toBe('a.pdf');
+      expect(ex.kind).toBe('document');
+      expect(ex.pages).toBe(3);
+      expect(ex.text).toBe('예산 집행 현황');
+      expect(ex.tables).toHaveLength(1);
+      expect(ex.tables[0].cells).toEqual([
+        ['구분', '예산'],
+        [null, '100'],
+      ]);
+      expect(ex.tables[0].merges).toEqual([{ row: 0, col: 0, rows: 2, cols: 1 }]);
+      expect(ex.warnings[0]).toBe(SCAN_WARNING);
+      expect(summarize(ex).warnings[0]).toBe(SCAN_WARNING);
+    });
+
+    it('표가 많아 잘린 경고가 있어도 글자 인식 안내가 맨 앞', async () => {
+      const tables = Array.from({ length: 101 }, (_, i) => ({
+        id: `x${i}`,
+        n_rows: 1,
+        n_cols: 1,
+        cells: [{ r: 0, c: 0, text: `칸${i}` }],
+      }));
+      const ex = await readAttachment(scanned, 'a.pdf', { parseScanned: async () => parsedDoc({ tables }) });
+      expect(ex.tables).toHaveLength(100);
+      expect(ex.warnings[0]).toBe(SCAN_WARNING);
+      expect(ex.warnings[1]).toContain('표가 많아');
+    });
+
+    it('읽지 못한 문서는 사유를 사람이 읽는 말로 — NODA 코드는 그대로 보이지 않는다', async () => {
+      const cases: [string | null, string][] = [
+        ['PASSWORD_PROTECTED', '암호가 걸린 파일'],
+        ['DRM', '보안(DRM)이 걸린 파일'],
+        ['DRM_ENCRYPTED', '보안(DRM)이 걸린 파일'],
+        ['UNSUPPORTED', '읽을 수 없는 파일'],
+        [null, '읽을 수 없는 파일'],
+      ];
+      for (const [reason, label] of cases) {
+        const e = await failure(
+          readAttachment(scanned, 'a.pdf', {
+            parseScanned: async () => parsedDoc({ readable: false, reason, blocks: [], tables: [] }),
+          })
+        );
+        expect(e.message).toBe(`스캔 문서를 읽지 못했습니다(사유: ${label})`);
+        if (reason?.includes('_')) expect(e.message).not.toContain(reason);
+      }
+    });
+
+    it('NODA 장애는 다시 올리라는 안내, 원인은 cause에', async () => {
+      for (const code of ['http', 'network', 'timeout'] as const) {
+        const err = new NodaError('x', code);
+        const e = await failure(
+          readAttachment(scanned, 'a.pdf', {
+            parseScanned: async () => {
+              throw err;
+            },
+          })
+        );
+        expect(e.message).toBe('스캔 문서를 지금 읽지 못했습니다. 잠시 뒤 다시 올려 주세요.');
+        expect(e.cause).toBe(err);
+      }
+    });
+
+    it('키가 없으면 아직 읽지 못한다는 안내', async () => {
+      const e = await failure(
+        readAttachment(scanned, 'a.pdf', {
+          parseScanned: async () => {
+            throw new NodaError('no key', 'missing_key');
+          },
+        })
+      );
+      expect(e.message).toBe('스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.');
+    });
+
+    it('읽었는데 글도 표도 없으면 읽을 글이 없다는 실패', async () => {
+      const e = await failure(
+        readAttachment(scanned, 'a.pdf', { parseScanned: async () => parsedDoc({ blocks: [], tables: [] }) })
+      );
+      expect(e.message).toBe('파일에서 읽을 글이 없습니다.');
+    });
+
+    it('글자 층 있는 PDF는 NODA를 부르지 않는다', async () => {
+      const parseScanned = vi.fn(async (_b: Buffer, _n: string) => parsedDoc());
+      const ex = await readAttachment(Buffer.from('%PDF ok'), 'a.pdf', { parseScanned });
+      expect(parseScanned).not.toHaveBeenCalled();
+      expect(ex.warnings).toEqual([]);
+    });
   });
 
   it('글자 층 있는 PDF는 본문과 쪽수', async () => {
