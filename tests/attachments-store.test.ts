@@ -26,6 +26,8 @@ const state = {
   updateError: null as null | { message: string },
   infoSize: null as null | number,
   readThrows: false,
+  /** 읽기가 이 오류를 던진다(예: 스캔 경로의 AttachmentReadError) */
+  readFails: null as null | Error,
   /** 확인 중 상태 변경 직전에 끼어드는 다른 요청 */
   beforeUpdate: null as null | (() => void),
   session: null as null | { user: { id: string } },
@@ -164,6 +166,7 @@ vi.mock('@/lib/attachments/reader', async (importOriginal) => {
     ...actual,
     readAttachment: (bytes: Buffer, name: string) => {
       if (state.readThrows) throw new RangeError('Invalid array length');
+      if (state.readFails) throw state.readFails;
       return actual.readAttachment(bytes, name);
     },
   };
@@ -187,6 +190,8 @@ import {
   deleteConversationAttachments,
   purgeOrphans,
 } from '@/lib/attachments/store';
+import { AttachmentReadError } from '@/lib/attachments/reader';
+import { NodaError } from '@/lib/noda';
 import {
   MAX_ATTACHMENT_BYTES,
   CONFIRM_WINDOW_MS,
@@ -209,7 +214,7 @@ beforeEach(() => {
   usage.length = 0;
   Object.assign(state, {
     insertError: null, signError: null, removeError: null, removeThrows: false, selectError: null,
-    uploadError: null, updateError: null, infoSize: null, readThrows: false, beforeUpdate: null, session: null,
+    uploadError: null, updateError: null, infoSize: null, readThrows: false, readFails: null, beforeUpdate: null, session: null,
   });
 });
 
@@ -463,6 +468,40 @@ describe('확인', () => {
     expect(objects.has(up.path)).toBe(false);
     expect(db.chat_attachments[0].extract_path).toBeNull();
     expect(usage[0]).toMatchObject({ action: 'file_attached', details: { status: 'failed', tables: 0 } });
+  });
+
+  it.each([
+    [401, 'critical'],
+    [403, 'critical'],
+    [503, 'warning'],
+    [null, 'warning'],
+  ] as const)('스캔 경로의 NODA 오류(%s)는 운영 기록(%s)에 남기고 행은 failed', async (status, level) => {
+    const up = await uploaded('비밀 이름.pdf', Buffer.from('%PDF-1.4'));
+    state.readFails = new AttachmentReadError(
+      '스캔 문서를 읽지 못했습니다.',
+      new NodaError('NODA 오류', status === null ? 'network' : 'http', status)
+    );
+    const res = await confirmUpload(actor, up.id);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.attachment.status).toBe('failed');
+    const entry = logged.find((l) => (l as { category?: string }).category === 'api') as
+      | { level: string; details: Record<string, unknown> }
+      | undefined;
+    expect(entry).toBeDefined();
+    expect(entry!.level).toBe(level);
+    expect(entry!.details).toEqual({
+      attachment_id: up.id,
+      code: status === null ? 'network' : 'http',
+      status,
+    });
+    expect(JSON.stringify(logged)).not.toContain('비밀 이름');
+  });
+
+  it('NODA가 원인이 아닌 읽기 실패는 운영 기록을 남기지 않는다', async () => {
+    const up = await uploaded('깨진.xlsx', Buffer.from('this is not a zip'));
+    await confirmUpload(actor, up.id);
+    expect(logged.filter((l) => (l as { category?: string }).category === 'api')).toEqual([]);
   });
 
   it('예상 못 한 예외는 ready를 남기지 않고 pending으로 둔 채 500', async () => {
@@ -884,9 +923,9 @@ describe('대화 삭제 때', () => {
 });
 
 describe('라우트·마이그레이션', () => {
-  it('확인 라우트는 60초까지 돈다', () => {
+  it('확인 라우트는 300초까지 돈다 — 스캔 PDF는 NODA 읽기(시도 60초 + 재시도 창)가 든다', () => {
     const src = readFileSync('src/app/api/attachments/route.ts', 'utf8');
-    expect(src).toMatch(/export const maxDuration = 60/);
+    expect(src).toMatch(/export const maxDuration = 300/);
   });
 
   it('감사 화면이 활동 코드를 한국어로 보인다', () => {

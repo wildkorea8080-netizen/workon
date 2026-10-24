@@ -16,6 +16,7 @@ import {
   refusedFormatMessage,
 } from './limits';
 import { AttachmentReadError, readAttachment, summarize } from './reader';
+import { NodaError } from '@/lib/noda';
 import type { AttachmentExtract, AttachmentRow } from './types';
 
 /**
@@ -378,6 +379,18 @@ export async function confirmUpload(
       patch = { status, summary: summarize(extract), extract_path: extractPath, error: null, size_bytes: bytes.length };
     } catch (e) {
       if (!(e instanceof AttachmentReadError)) throw e;
+      // 스캔 경로의 NODA 장애는 사용자에게는 '읽지 못했습니다'로만 가므로 운영자가 볼 곳을 따로 남긴다
+      // (파일 이름·글은 싣지 않는다). 키 문제(401·403)는 critical
+      if (e.cause instanceof NodaError) {
+        const nodaStatus = e.cause.status;
+        await logSystem({
+          level: nodaStatus === 401 || nodaStatus === 403 ? 'critical' : 'warning',
+          category: 'api',
+          message: '스캔 첨부를 NODA로 읽지 못함',
+          details: { attachment_id: id, code: e.cause.code, status: nodaStatus },
+          orgId: actor.organizationId,
+        });
+      }
       status = 'failed';
       patch = { status, summary: null, extract_path: null, error: e.message, size_bytes: bytes.length };
     }

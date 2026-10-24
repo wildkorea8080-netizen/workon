@@ -100,7 +100,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
-| `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
+| `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요). 번호 없이 돌리면 **0028·0032는 건너뛰고** 안내만 한다(`scripts/migrate-select.mjs` `MANUAL_ONLY`) — 번호로 지정해야 적용 | 예 |
 | `npm run noda:check` | NODA `/health` — `search.vectors`가 참이어야 하고 `llm.external`이 참이면 **실패**('바깥 연결 없음' 확인). `-- --roundtrip`이면 보관함 `workon-check`에 작은 글을 올려 근거·쪽/출처 → 엉뚱한 질문의 빈 근거 → 삭제까지 | 아니오 (키 필요) |
 | `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
@@ -506,9 +506,10 @@ POST /api/attachments/upload-url  (pending 행 + 서명 주소 발급)
 - 읽지 못한 파일(NODA가 못 읽은 스캔 PDF·깨진 zip·암호 파일)은 오류가 아니라 **200 + `status:'failed'`** 로 돌려줍니다 — 칩에 이유를 보이려는 것입니다
   (옛 XLS·PPT·DOC는 발급 단계에서 400으로 거절됩니다). 메모리·시간 초과 같은 예외는 500이고 행은 pending으로 남아 24시간 뒤 정리됩니다
 - **글자 층이 없는 PDF(스캔본)는 NODA `/parse`로 읽습니다**(S4-b). pdf-parse가 먼저 읽고 쪽당 글자 수가 50 미만이면(`attachments/scan.ts`의 `isLikelyScanned`) 그때만 NODA에 보냅니다 —
-  글자 층이 있는 PDF는 NODA를 부르지 않습니다. `/parse`는 한 번 60초(`PARSE_TIMEOUT_MS`)·재시도 창 30초(429·503은 `Retry-After`)이고 첨부 확인 라우트는 `maxDuration = 60`입니다.
+  글자 층이 있는 PDF는 NODA를 부르지 않습니다. 스캔 PDF 내용은 NODA로 가지만 **NODA는 저장하지 않습니다**(`/parse`는 캐시를 쓰지 않음 — 설계 7절, NODA 운영자 확인). `/parse`는 한 번 60초(`PARSE_TIMEOUT_MS`)·재시도 창 30초(429·502·503은 `Retry-After`)이고 첨부 확인 라우트는 `maxDuration = 300`입니다 (60초면 플랫폼이 NODA 시간 제한보다 먼저 함수를 끊어 안내도 기록도 남지 않았다 — 문서 읽기 라우트와 같은 값).
+  NODA가 원인인 읽기 실패는 `system_logs`(`api`)에 남깁니다 — 401·403은 `critical`, 그 밖은 `warning`, 내용은 `{ attachment_id, code, status }`뿐(파일 이름 없음).
   NODA 응답은 **믿지 않고 칸에서 격자를 다시 만듭니다**(`parsedToExtract`): 글은 바닥글을 뺀 블록을 읽는 순서대로, 표는 `ExtractedTable`로 — 병합은 **주인 칸에만 값**·나머지 null·범위는 `merges`이고
-  **병합 안에 놓인 칸·같은 자리의 뒤 칸은 버려**(경고 `병합 안에 놓인 칸 K개를 건너뛰었습니다`) 표 합치기가 같은 값을 두 번 더하지 않습니다. 겹치는 병합은 풀고 경고합니다.
+  **병합 안에 놓인 칸·같은 자리의 뒤 칸은 버려**(글이 있던 칸만 세어 경고 `병합 안에 놓인 칸 K개를 건너뛰었습니다` — NODA가 병합 자리를 빈 칸으로 나열해도 경고하지 않음) 표 합치기가 같은 값을 두 번 더하지 않습니다. 겹치는 병합은 풀고 경고합니다.
   칸 주소·span이 이상하면 버리거나 1로 보고, `n_rows`·`n_cols`는 상한 힌트일 뿐 크기는 칸 원점에서 구하며 20,000행·200열에서 자릅니다(경고). 값 없는 표는 건너뜁니다
   - **스캔으로 읽은 결과의 첫 경고는 항상** `글자 층이 없는 PDF라 글자 인식(OCR)으로 읽었습니다 — 숫자·글자가 원문과 다를 수 있습니다`(`SCAN_WARNING`) — 잘림 경고보다 앞입니다
   - 실패 문구: NODA가 `readable:false`면 `스캔 문서를 읽지 못했습니다(사유: 암호가 걸린 파일 | 보안(DRM)이 걸린 파일 | 읽을 수 없는 파일)`(NODA의 이유 코드는 그대로 보이지 않음),

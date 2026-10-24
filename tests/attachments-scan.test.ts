@@ -195,6 +195,28 @@ describe('parsedToExtract — 표', () => {
     }
   });
 
+  it('병합 안에 놓인 칸의 글이 비어 있으면 건너뛰어도 경고하지 않는다', () => {
+    for (const text of [null, '', '  ']) {
+      const out = parsedToExtract(
+        doc({
+          tables: [
+            {
+              id: 'a',
+              n_rows: 2,
+              n_cols: 1,
+              cells: [
+                { r: 0, c: 0, rowspan: 2, text: '합침' },
+                { r: 1, c: 0, text },
+              ],
+            },
+          ],
+        })
+      );
+      expect(out.tables[0].cells).toEqual([['합침'], [null]]);
+      expect(out.warnings.filter((w) => w.includes('병합 안에 놓인'))).toEqual([]);
+    }
+  });
+
   it('같은 자리에 두 칸이 오면 앞의 것만 둔다', () => {
     const out = parsedToExtract(
       doc({ tables: [{ id: 'a', n_rows: 1, n_cols: 1, cells: [{ r: 0, c: 0, text: '앞' }, { r: 0, c: 0, text: '뒤' }] }] })

@@ -4,8 +4,9 @@ import { getActorScope } from '@/lib/actor-scope';
 import { confirmUpload, isConversationOwner, listConversationAttachments, toClientRow } from '@/lib/attachments/store';
 
 export const dynamic = 'force-dynamic';
-// 확인 단계에서 파일을 내려받아 읽는다. 큰 XLSX는 시간이 든다
-export const maxDuration = 60;
+// 확인 단계에서 파일을 내려받아 읽는다. 큰 XLSX와 스캔 PDF(NODA /parse — 시도 60초 + 재시도 창)는 시간이 든다.
+// 60초면 플랫폼이 먼저 끊어 안내도 기록도 못 남긴다. 문서 읽기 라우트와 같은 300초
+export const maxDuration = 300;
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ ok: false, error: { message } }, { status });

@@ -2,7 +2,7 @@
 -- 0032_documents_drop_embeddings.sql
 -- 옛 임베딩 값을 비운다 — NODA로 옮긴 문서의 embedding·metadata.chunks (S4-b)
 --
--- 설계: docs/superpowers/specs/2026-10-21-s4-noda-document-layer-design.md 9절
+-- 설계: docs/superpowers/specs/2026-10-21-s4-noda-document-layer-design.md 8절
 --
 -- **되돌릴 수 없다.** 비운 값(Voyage 임베딩·청크 사본)은 다시 만들 수 없다 — 지금은 NODA가 읽기·색인을 맡고,
 -- 코드는 이 값을 더 읽지 않는다(`embeddings.ts`·`rag.ts`·`document-processor.ts`는 S4-b에서 지웠다).

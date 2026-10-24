@@ -95,7 +95,8 @@ function toGrid(t: NodaParsedTable): {
     if (p.r >= rows || p.c >= cols) continue; // 상한에 잘림 — truncated로 알린다
     if (taken[p.r * cols + p.c]) {
       // 다른 칸의 병합 안(또는 같은 자리) — 덮인 칸은 null로 둔다. 표 엔진은 덮인 칸의 글을 값으로 믿는다
-      overlapped += 1;
+      // 글이 없는 덮인 칸(NODA가 병합 자리를 빈 칸으로 나열)은 잃는 것이 없어 알리지 않는다
+      if (p.text !== null) overlapped += 1;
       continue;
     }
     cells[p.r][p.c] = p.text;
