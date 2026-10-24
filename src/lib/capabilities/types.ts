@@ -67,6 +67,12 @@ export interface PrepareResult {
   dropped?: number;
   /** 이번 턴은 참고 문서 없이 답한다 — 답변 행 `source_references.documents_skipped` */
   documentsSkipped?: boolean;
+  /**
+   * NODA 답변 검증(`/verify`)에 보낼 이 턴의 근거 — `/context` `sources[]`를 **받은 순서 그대로** `{doc_id, chunk_id}`만.
+   * 답의 `[n]`이 `sources[n-1]`을 가리키므로 순서가 바뀌면 안 된다. 형식이 깨진 원소가 하나라도 있으면 빈 배열.
+   * 근거 조각이 없는 턴(근거 없음·섞임·문서 없이 답함)도 빈 배열
+   */
+  verifySources?: { doc_id: string; chunk_id: string }[];
 }
 
 /** 도구가 만든 파일. 화면(tool_end)과 메시지 저장(source_references.files)으로 간다 */

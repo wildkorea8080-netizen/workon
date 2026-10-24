@@ -111,6 +111,30 @@ describe('대화 실행기의 메시지 삽입', () => {
     expect(rows[1].source_references).not.toHaveProperty('documents_skipped');
   });
 
+  it('NODA 검증 결과가 있으면 답변 행 source_references.verify에만, 두 행 칸 집합은 같다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const verify = { grounded: false, unsupported_numbers: ['50'], unknown_refs: [3] };
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
+      documentsSkipped: false, verify,
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    expect((rows[1].source_references as Record<string, unknown>).verify).toEqual(verify);
+    expect(rows[0].source_references).not.toHaveProperty('verify');
+  });
+
+  it('NODA 검증 결과가 없으면 verify 칸을 남기지 않는다', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    for (const verify of [undefined, null]) {
+      const rows = buildMessageRows({
+        conversationId: 'c', userId: 'u', userContent: 'q', assistantText: 'a', chunks: [], links: [], files: [], attachments: [], agentVersion: 1,
+        documentsSkipped: false, verify,
+      });
+      expect(hasUniformKeys(rows)).toBe(true);
+      expect(rows[1].source_references).not.toHaveProperty('verify');
+    }
+  });
+
   it('조각의 쪽·칸·절·스캔 판독을 저장한다', async () => {
     const { buildMessageRows } = await import('@/lib/assistant/persist');
     const rows = buildMessageRows({

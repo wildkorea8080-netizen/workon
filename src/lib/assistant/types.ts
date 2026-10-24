@@ -12,7 +12,7 @@ export const MAX_OUTPUT_TOKENS = 4096;
 
 /**
  * SSE 이벤트. 이름과 기존 페이로드는 S1 이전과 같다. S2-a에서 tool_end에 files를, S3-b에서 done에 number_check를
- * 더했다(첨부 도구를 쓴 턴의 확인되지 않은 숫자, 없으면 null) — ChatInterface가 읽는다
+ * 더했다(첨부 도구를 쓴 턴·S4-b부터 문서 근거 턴의 확인되지 않은 숫자, 없으면 null) — ChatInterface가 읽는다
  */
 export type TurnEvent =
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
@@ -41,6 +41,8 @@ export interface PreparedTurn {
   documentsSkipped: boolean;
   /** 문서 찾기에서 유사도 하한으로 뺀 조각 수(NODA `dropped`). NODA를 부르지 않았으면 null. 사용 기록 `details.doc_dropped` */
   docDropped: number | null;
+  /** NODA 답변 검증에 보낼 근거(`PrepareResult.verifySources`). 비었으면 검증하지 않는다 */
+  verifySources: { doc_id: string; chunk_id: string }[];
   /** 메시지 행에 저장할 사용자 내용(사진 표시 + 질문) */
   storedUserContent: string;
 }

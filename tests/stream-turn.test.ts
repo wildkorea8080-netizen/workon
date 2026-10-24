@@ -40,7 +40,8 @@ vi.mock('@/lib/supabaseAdmin', () => {
 import { setLlmAdapterForTests } from '@/lib/llm';
 import { LlmApiError, LLM_MESSAGES } from '@/lib/llm/errors';
 import type { LlmAdapter, LlmStreamEvent } from '@/lib/llm/types';
-import { streamTurn } from '@/lib/assistant/stream';
+import { streamTurn, type VerifyFn } from '@/lib/assistant/stream';
+import { NodaError, nodaTenant, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { storedUserContent, buildUserContent } from '@/lib/assistant/prompt';
 import type { PreparedTurn, TurnEvent } from '@/lib/assistant/types';
 
@@ -64,6 +65,7 @@ function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
     storedUserContent: '질문',
     documentsSkipped: false,
     docDropped: null,
+    verifySources: [],
     ...overrides,
   };
 }
@@ -89,9 +91,9 @@ const inserted = (table: string) =>
 const details = (row: Record<string, unknown>) => row.details as Record<string, unknown>;
 const keySet = (row: Record<string, unknown>) => Object.keys(row).sort().join(',');
 
-async function run(t: PreparedTurn, send?: (e: TurnEvent) => void) {
+async function run(t: PreparedTurn, send?: (e: TurnEvent) => void, deps?: { verify?: VerifyFn }) {
   const events: TurnEvent[] = [];
-  await streamTurn(t, send ?? ((e) => events.push(e)));
+  await streamTurn(t, send ?? ((e) => events.push(e)), deps);
   return events;
 }
 
@@ -336,6 +338,188 @@ describe('streamTurn — 숫자 확인', () => {
       { systemPrompt: 'a1/t1 11,111행', ctx: { ...base.ctx, message: '예산 22,222원을' } }
     );
     expect(numberCheck(await run(t))).toEqual({ unverified: ['44,444'] });
+  });
+});
+
+describe('streamTurn — 문서 근거 턴의 숫자 확인(S4-b, 판정 R1)', () => {
+  const chunk = { documentId: 'd1', documentTitle: '예산서', chunkIndex: 0, n: 1, text: '예산 12,345천원', similarity: 0.9 };
+  const numberCheck = (events: TurnEvent[]) =>
+    (events.find((e) => e.event === 'done') as { data: { number_check: unknown } }).data.number_check;
+  const answering = (answer: string) =>
+    adapter({
+      stream: async function* () {
+        yield { type: 'text', text: answer };
+        yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+      },
+    });
+
+  it('문서 근거가 있는 턴이면 첨부 도구가 없어도 숫자를 대조한다', async () => {
+    setLlmAdapterForTests(answering('예산은 12,345천원이고 총액 98,765천원'));
+    const events = await run(turn({ chunks: [chunk], systemPrompt: 'S\n참고 자료:\n[1] 예산서\n예산 12,345천원' }));
+    expect(numberCheck(events)).toEqual({ unverified: ['98,765'] });
+    const rows = inserted('messages');
+    expect((rows[1].source_references as Record<string, unknown>).number_check).toEqual({ unverified: ['98,765'] });
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    // 답변 글은 고치지 않는다
+    expect(rows[1].content).toBe('예산은 12,345천원이고 총액 98,765천원');
+  });
+
+  it('법령 도구가 보여 준 숫자는 근거 묶음에 없어도 확인된다', async () => {
+    const tool = { name: 'law_search', description: '', inputSchema: { type: 'object' as const, properties: {} } };
+    const cap = {
+      id: 'public_data', label: '', description: '', isAvailable: () => true,
+      tools: () => [tool],
+      execute: async () => ({ ok: true, text: '법령', shownValues: [98765] }),
+    } as never;
+    let round = 0;
+    setLlmAdapterForTests(
+      adapter({
+        stream: async function* () {
+          round += 1;
+          if (round === 1) {
+            yield { type: 'tool_use', id: 't1', name: 'law_search', input: {} };
+            yield { type: 'done', stopReason: 'tool_use', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          } else {
+            yield { type: 'text', text: '예산은 12,345천원이고 총액 98,765천원' };
+            yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+          }
+        },
+      })
+    );
+    const events = await run(turn({ chunks: [chunk], systemPrompt: '예산 12,345천원', capabilities: [cap], tools: [tool] }));
+    expect(numberCheck(events)).toBeNull();
+    expect(inserted('messages')[1].source_references).not.toHaveProperty('number_check');
+  });
+
+  it('문서 근거도 첨부 도구도 없는 턴은 대조하지 않는다', async () => {
+    setLlmAdapterForTests(answering('예산은 12,345천원이고 총액 98,765천원'));
+    const events = await run(turn({ chunks: [], systemPrompt: 'S' }));
+    expect(numberCheck(events)).toBeNull();
+    expect(inserted('messages')[1].source_references).not.toHaveProperty('number_check');
+  });
+});
+
+describe('streamTurn — NODA 답변 검증(S4-b)', () => {
+  const AGENT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const chunk = { documentId: 'd1', documentTitle: '예산서', chunkIndex: 0, n: 1, text: '예산 50', similarity: 0.9 };
+  const sources = [
+    { doc_id: 'doc-b', chunk_id: 'ch-9' },
+    { doc_id: 'doc-a', chunk_id: 'ch-1' },
+  ];
+  const VERIFIED: NodaVerifyResult = { grounded: false, unsupported_numbers: ['50'], unknown_refs: [3] };
+  const answering = (answer: string) =>
+    adapter({
+      stream: async function* () {
+        if (answer) yield { type: 'text', text: answer };
+        yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+      },
+    });
+  const docTurn = (over: Partial<PreparedTurn> = {}) => {
+    const base = turn();
+    return turn({ ctx: { ...base.ctx, agentId: AGENT }, chunks: [chunk], systemPrompt: '예산 50', verifySources: sources, ...over });
+  };
+  const refs = (row: Record<string, unknown>) => row.source_references as Record<string, unknown>;
+
+  it('NODA 검증 결과를 답변 행 source_references.verify에 저장한다', async () => {
+    setLlmAdapterForTests(answering('예산은 50입니다 [1]'));
+    const verify = vi.fn<VerifyFn>(async () => VERIFIED);
+    await run(docTurn(), undefined, { verify });
+    const rows = inserted('messages');
+    expect(refs(rows[1]).verify).toEqual(VERIFIED);
+    expect(refs(rows[0])).not.toHaveProperty('verify');
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(rows[1].content).toBe('예산은 50입니다 [1]');
+  });
+
+  it('검증은 그 턴 sources를 받은 순서 그대로 보낸다', async () => {
+    setLlmAdapterForTests(answering('예산은 50입니다 [1]'));
+    let savedBefore = -1;
+    const verify = vi.fn<VerifyFn>(async () => {
+      savedBefore = inserted('messages').length;
+      return VERIFIED;
+    });
+    await run(docTurn(), undefined, { verify });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith({ tenant: nodaTenant(AGENT), answer: '예산은 50입니다 [1]', sources });
+    // 메시지 저장 전에 부른다 — 결과를 함께 저장하려고
+    expect(savedBefore).toBe(0);
+  });
+
+  it('검증이 실패하면 답과 저장은 그대로, verify 칸이 없고 운영 기록만 남는다', async () => {
+    setLlmAdapterForTests(answering('예산은 50입니다 [1]'));
+    const verify = vi.fn<VerifyFn>(async () => {
+      throw new NodaError('NODA 503', 'http', 503);
+    });
+    const events = await run(docTurn(), undefined, { verify });
+    const rows = inserted('messages');
+    expect(rows).toHaveLength(2);
+    expect(rows[1].content).toBe('예산은 50입니다 [1]');
+    expect(refs(rows[1])).not.toHaveProperty('verify');
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(events.some((e) => e.event === 'error')).toBe(false);
+    expect(events.at(-1)?.event).toBe('done');
+    const logs = inserted('system_logs');
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ level: 'warning', category: 'api', org_id: 'o' });
+    expect(logs[0].details).toEqual({ agent_id: AGENT, code: 'http', status: 503 });
+    // 답변 글은 운영 기록에 남기지 않는다
+    expect(JSON.stringify(logs)).not.toContain('예산은');
+  });
+
+  it(`검증이 ${VERIFY_TIMEOUT_MS / 1000}초 넘게 걸리면 기다리지 않는다`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      setLlmAdapterForTests(answering('예산은 50입니다 [1]'));
+      const verify = vi.fn<VerifyFn>(() => new Promise<NodaVerifyResult>(() => {}));
+      let finished = false;
+      const done = run(docTurn(), undefined, { verify }).then((events) => {
+        finished = true;
+        return events;
+      });
+      await vi.advanceTimersByTimeAsync(VERIFY_TIMEOUT_MS - 1);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const events = await done;
+      expect(events.at(-1)?.event).toBe('done');
+      const rows = inserted('messages');
+      expect(rows).toHaveLength(2);
+      expect(refs(rows[1])).not.toHaveProperty('verify');
+      expect(inserted('system_logs')[0]).toMatchObject({
+        level: 'warning', category: 'api', details: { agent_id: AGENT, code: 'timeout', status: null },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('verifySources가 비었으면 검증을 부르지 않는다', async () => {
+    setLlmAdapterForTests(answering('예산은 50입니다'));
+    const verify = vi.fn<VerifyFn>(async () => VERIFIED);
+    await run(docTurn({ verifySources: [] }), undefined, { verify });
+    expect(verify).not.toHaveBeenCalled();
+    expect(refs(inserted('messages')[1])).not.toHaveProperty('verify');
+  });
+
+  it('답이 비었으면 검증을 부르지 않는다', async () => {
+    setLlmAdapterForTests(answering(''));
+    const verify = vi.fn<VerifyFn>(async () => VERIFIED);
+    await run(docTurn(), undefined, { verify });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('턴이 오류로 끝나면 검증을 부르지 않는다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setLlmAdapterForTests(
+      adapter({
+        // eslint-disable-next-line require-yield
+        stream: async function* () {
+          throw new Error('연결 오류');
+        },
+      })
+    );
+    const verify = vi.fn<VerifyFn>(async () => VERIFIED);
+    await run(docTurn(), undefined, { verify });
+    expect(verify).not.toHaveBeenCalled();
   });
 });
 

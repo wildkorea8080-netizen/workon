@@ -375,6 +375,21 @@ async function deleteOrphans(deps: DocSearchDeps, input: MatchInput, filenames: 
   }
 }
 
+/**
+ * NODA 답변 검증(`/verify`)에 보낼 근거 — `/context` `sources[]`를 받은 순서 그대로 `{doc_id, chunk_id}`만.
+ * 답의 `[n]`이 `sources[n-1]`을 가리키므로 깨진 원소 하나만 빼도 번호가 어긋난다 — 하나라도 깨졌으면 빈 배열(검증하지 않음)
+ */
+export function verifySourcesOf(sources: NodaSource[]): { doc_id: string; chunk_id: string }[] {
+  const out: { doc_id: string; chunk_id: string }[] = [];
+  for (const s of sources) {
+    if (!s || typeof s !== 'object' || typeof s.doc_id !== 'string' || !s.doc_id || typeof s.chunk_id !== 'string' || !s.chunk_id) {
+      return [];
+    }
+    out.push({ doc_id: s.doc_id, chunk_id: s.chunk_id });
+  }
+  return out;
+}
+
 /** 관리자 검색 시험(rag-test)용 — 대화와 같은 규칙으로 찾는다. NODA 실패는 던진다 */
 export async function searchAgentDocuments(
   input: { agentId: string; query: string; organizationId: string | null },
@@ -458,6 +473,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       return {
         chunks,
         dropped: carry.result.dropped,
+        verifySources: chunks.length > 0 ? verifySourcesOf(carry.result.sources) : [],
         systemAddendum: docSearchAddendum({
           context: stripNodaPrefixes(carry.result.context),
           chunks,

@@ -10,8 +10,22 @@ import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUs
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
+import { noda, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 
 const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
+
+/** NODA 답변 검증(`/verify`). 테스트가 바꿔 끼운다 — 기본은 `noda.verifyAnswer` */
+export type VerifyFn = (input: {
+  tenant: string;
+  answer: string;
+  sources: { doc_id: string; chunk_id: string }[];
+}) => Promise<NodaVerifyResult>;
+
+export interface StreamTurnDeps {
+  verify?: VerifyFn;
+}
+
+const defaultVerify: VerifyFn = (input) => noda.verifyAnswer(input);
 
 /**
  * 호출한 쪽이 소유하는 누적 사용량. 루프가 도중에 던져도 이미 쓴 토큰이
@@ -232,11 +246,47 @@ async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Recor
 }
 
 /**
+ * NODA 답변 검증 — 감사 기록으로만 남긴다(판정 R1: 화면의 '확인되지 않은 숫자'는 로컬 대조 하나로 낸다).
+ * 근거(`turn.verifySources`)가 없거나 답이 비었으면 부르지 않는다. 한 번만, `VERIFY_TIMEOUT_MS`까지만 기다린다 —
+ * 넘기면 진행 중인 요청은 버리고 검증 없이 저장한다. 실패는 운영 기록에만(답변 글·파일 이름은 남기지 않는다)
+ */
+async function verifyTurn(turn: PreparedTurn, answer: string, verify: VerifyFn): Promise<NodaVerifyResult | null> {
+  if (turn.verifySources.length === 0 || !answer.trim()) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const call = Promise.resolve().then(() =>
+      verify({ tenant: nodaTenant(turn.ctx.agentId), answer, sources: turn.verifySources })
+    );
+    // 시간 제한으로 버린 요청이 뒤늦게 실패해도 처리되지 않은 거부로 남지 않게
+    call.catch(() => {});
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new NodaError('NODA 답변 검증이 시간 안에 끝나지 않았습니다.', 'timeout')), VERIFY_TIMEOUT_MS);
+    });
+    return await Promise.race([call, timeout]);
+  } catch (error) {
+    await logSystem({
+      level: 'warning',
+      category: 'api',
+      message: 'NODA 답변 검증 실패 — 검증 없이 저장',
+      details: {
+        agent_id: turn.ctx.agentId,
+        code: error instanceof NodaError ? error.code : 'unknown',
+        status: error instanceof NodaError ? error.status : null,
+      },
+      orgId: turn.ctx.organizationId,
+    });
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * 한 턴을 흘려보낸다. 시작 뒤의 실패는 SSE error로 알린다.
  *
- * 순서: meta → 도구 루프(delta·tool_*) → 메시지 저장 → 사용 기록 → 제목 → done
+ * 순서: meta → 도구 루프(delta·tool_*) → 숫자 확인·NODA 검증 → 메시지 저장 → 사용 기록 → 제목 → done
  */
-export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promise<void> {
+export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnDeps = {}): Promise<void> {
   // 보내기 실패(연결 끊김)가 저장·사용 기록을 건너뛰게 하면 안 된다. 답변을
   // 받지 못한 사용자도 새로고침하면 대화를 볼 수 있어야 하고, 쓴 토큰은 청구된다.
   // 라우트도 enqueue 실패를 삼키지만 실행기가 그 약속에 기대지 않는다.
@@ -292,14 +342,18 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
     return;
   }
 
-  // 숫자 확인(설계 5.4) — 첨부 도구가 성공한 턴만. 시스템 프롬프트(첨부 개요의 행 수·참고 자료)와
-  // 직원의 질문에 적힌 숫자도 AI가 본 숫자라 함께 대조한다. 답변 글은 고치지 않는다
+  // 숫자 확인(설계 5.4, S4-b 판정 R1) — 첨부 도구가 성공했거나 문서 근거가 있었던 턴만. 시스템 프롬프트(첨부 개요의
+  // 행 수·NODA 근거 묶음)와 직원의 질문에 적힌 숫자, 도구가 보여 준 숫자(법령·통계 포함)가 AI가 본 숫자다 — 그 합집합에
+  // 없는 숫자만 '확인되지 않음'. 답변 글은 고치지 않는다
   let numberCheck: { unverified: string[] } | null = null;
-  if (result.attachmentToolSucceeded) {
+  if (result.attachmentToolSucceeded || turn.chunks.length > 0) {
     const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message));
     const unverified = checkNumbers(result.text, shown);
     if (unverified.length > 0) numberCheck = { unverified };
   }
+
+  // NODA 답변 검증 — 저장 전에 불러 결과를 함께 저장한다(감사 기록). 화면 목록에는 더하지 않는다(판정 R1)
+  const verify = await verifyTurn(turn, result.text, deps.verify ?? defaultVerify);
 
   const saveError = await saveMessages(
     buildMessageRows({
@@ -314,6 +368,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent): Promis
       agentVersion: turn.ctx.agentVersion,
       numberCheck,
       documentsSkipped: turn.documentsSkipped,
+      verify,
     })
   );
   if (saveError) {

@@ -361,6 +361,44 @@ describe('doc_search prepare', () => {
     expect(deleteOrphan).not.toHaveBeenCalled();
   });
 
+  it('prepare: verifySources에 /context sources를 받은 순서대로 {doc_id, chunk_id}만 싣는다', async () => {
+    const { d } = deps({
+      fetchContext: async () => ({
+        context: `[1] ${id}__규정.hwp\n일비\n[2] ${id}__규정.hwp\n숙박비`,
+        sources: [src({ n: 1, doc_id: 'nd-2', chunk_id: 'k-7' }), src({ n: 2, doc_id: 'nd-1', chunk_id: 'k-3' })],
+        dropped: 0,
+      }),
+    });
+    const out = await turn(d);
+    expect(out.chunks).toHaveLength(2);
+    expect(out.verifySources).toEqual([
+      { doc_id: 'nd-2', chunk_id: 'k-7' },
+      { doc_id: 'nd-1', chunk_id: 'k-3' },
+    ]);
+  });
+
+  it('prepare: doc_id·chunk_id가 깨진 원소가 하나라도 있으면 verifySources는 빈 배열 — [n]이 어긋나지 않게', async () => {
+    const { d } = deps({
+      fetchContext: async () => ({
+        context: `[1] ${id}__규정.hwp\n일비\n[2] ${id}__규정.hwp\n숙박비`,
+        sources: [src({ n: 1 }), src({ n: 2, chunk_id: undefined as unknown as string })],
+        dropped: 0,
+      }),
+    });
+    const out = await turn(d);
+    expect(out.chunks).toHaveLength(2);
+    expect(out.verifySources).toEqual([]);
+  });
+
+  it('prepare: 근거가 없는 턴(빈 sources·섞임·skip)은 verifySources가 비었다', async () => {
+    const empty = await turn(deps({ fetchContext: async () => ({ context: '', sources: [], dropped: 5 }) }).d);
+    expect(empty.verifySources ?? []).toEqual([]);
+    const m = deps({ fetchContext: mixed(`${id2}__남의.hwp`) });
+    m.findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
+    expect((await turn(m.d)).verifySources ?? []).toEqual([]);
+    expect((await turn(deps().d, true)).verifySources ?? []).toEqual([]);
+  });
+
   it('prepare: skip이면 일반 답변 안내와 documentsSkipped', async () => {
     const { d, fetchContext } = deps();
     const out = await turn(d, true);

@@ -222,6 +222,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   );
   const chunks: RetrievedChunk[] = prepared.flatMap((p) => p.chunks ?? []);
   const dropped = prepared.find((p) => typeof p.dropped === 'number')?.dropped;
+  const verifySources = prepared.find((p) => p.verifySources?.length)?.verifySources ?? [];
   const { tools } = toolsFor(capabilities, ctx);
 
   return {
@@ -239,6 +240,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       chunks,
       documentsSkipped: prepared.some((p) => p.documentsSkipped === true),
       docDropped: dropped ?? null,
+      verifySources,
       storedUserContent: storedUserContent(
         message,
         attachedImages.length,

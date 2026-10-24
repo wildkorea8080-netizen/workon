@@ -5,6 +5,7 @@ import type { LlmUsage } from '@/lib/llm/types';
 import type { ToolSource } from '@/lib/connectors';
 import type { GeneratedFileRef } from '@/lib/capabilities/types';
 import type { RetrievedChunk } from '@/lib/db';
+import type { NodaVerifyResult } from '@/lib/noda';
 
 export interface MessageRowInput {
   conversationId: string;
@@ -21,6 +22,8 @@ export interface MessageRowInput {
   numberCheck?: NumberCheck | null;
   /** 참고 문서 없이 답한 턴. 참일 때만 답변 행에 `documents_skipped: true`를 싣는다(지난 대화에서도 표시) */
   documentsSkipped: boolean;
+  /** NODA 답변 검증 결과(감사 기록, 판정 R1). 검증을 부르고 결과를 받은 턴만 답변 행에 `verify`로 싣는다 */
+  verify?: NodaVerifyResult | null;
 }
 
 /** 답변 숫자 중 이번 턴에 도구가 보여 준 값에서 못 찾은 것(설계 5.4) */
@@ -78,6 +81,15 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
         // source_references 안의 키라 두 행의 칸 집합은 그대로다. 없으면 키를 두지 않는다
         ...(input.numberCheck?.unverified.length ? { number_check: { unverified: input.numberCheck.unverified } } : {}),
         ...(input.documentsSkipped ? { documents_skipped: true } : {}),
+        ...(input.verify
+          ? {
+              verify: {
+                grounded: input.verify.grounded,
+                unsupported_numbers: input.verify.unsupported_numbers,
+                unknown_refs: input.verify.unknown_refs,
+              },
+            }
+          : {}),
       },
       agent_version: input.agentVersion,
     },
