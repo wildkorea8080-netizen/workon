@@ -158,7 +158,52 @@ describe('parsedToExtract — 표', () => {
     expect(out.warnings.join('\n')).toContain('표 1: 열');
   });
 
-  it('칸 병합이 격자 밖으로 번지면 격자 안으로 줄인다', () => {
+  it('병합이 칸이 있는 범위 밖으로 번지면 그 범위 안으로 줄인다', () => {
+    const out = parsedToExtract(
+      doc({
+        tables: [
+          {
+            id: 'a',
+            n_rows: 2,
+            n_cols: 3,
+            cells: [
+              { r: 0, c: 0, text: '합침', rowspan: 5 },
+              { r: 1, c: 2, text: '끝' },
+            ],
+          },
+        ],
+      })
+    );
+    // 원점이 가장 먼 칸은 (1,2) → 격자는 2행 3열, 병합은 그 안으로
+    expect(out.tables[0].cells).toEqual([
+      ['합침', null, null],
+      [null, null, '끝'],
+    ]);
+    expect(out.tables[0].merges).toEqual([{ row: 0, col: 0, rows: 2, cols: 1 }]);
+  });
+
+  it('병합 안에 놓인 칸은 값을 덮어쓰지 않고 건너뛴다 — 도착 순서와 무관', () => {
+    const owner = { r: 1, c: 0, rowspan: 2, text: '100' };
+    const stray = { r: 2, c: 0, text: '100' };
+    for (const cells of [[owner, stray], [stray, owner]]) {
+      const out = parsedToExtract(doc({ tables: [{ id: 'a', n_rows: 3, n_cols: 1, cells }] }));
+      const t = out.tables[0];
+      expect(t.cells[1][0]).toBe('100');
+      expect(t.cells[2][0]).toBeNull();
+      expect(t.merges).toEqual([{ row: 1, col: 0, rows: 2, cols: 1 }]);
+      expect(out.warnings).toContain('표 1: 병합 안에 놓인 칸 1개를 건너뛰었습니다');
+    }
+  });
+
+  it('같은 자리에 두 칸이 오면 앞의 것만 둔다', () => {
+    const out = parsedToExtract(
+      doc({ tables: [{ id: 'a', n_rows: 1, n_cols: 1, cells: [{ r: 0, c: 0, text: '앞' }, { r: 0, c: 0, text: '뒤' }] }] })
+    );
+    expect(out.tables[0].cells).toEqual([['앞']]);
+    expect(out.warnings).toContain('표 1: 병합 안에 놓인 칸 1개를 건너뛰었습니다');
+  });
+
+  it('merges 안에 겹치는 범위를 기록하지 않는다', () => {
     const out = parsedToExtract(
       doc({
         tables: [
@@ -167,17 +212,57 @@ describe('parsedToExtract — 표', () => {
             n_rows: 2,
             n_cols: 2,
             cells: [
-              { r: 0, c: 0, text: '합침', colspan: 2, rowspan: 2 },
+              { r: 0, c: 1, rowspan: 2, text: 'A' },
+              { r: 1, c: 0, colspan: 2, text: 'B' },
             ],
           },
         ],
       })
     );
-    expect(out.tables[0].merges).toEqual([{ row: 0, col: 0, rows: 2, cols: 2 }]);
+    const m = out.tables[0].merges;
+    const covered = new Set<string>();
+    for (const x of m) {
+      for (let r = x.row; r < x.row + x.rows; r += 1) {
+        for (let c = x.col; c < x.col + x.cols; c += 1) {
+          expect(covered.has(`${r},${c}`)).toBe(false);
+          covered.add(`${r},${c}`);
+        }
+      }
+    }
     expect(out.tables[0].cells).toEqual([
-      ['합침', null],
-      [null, null],
+      [null, 'A'],
+      ['B', null],
     ]);
+  });
+
+  it('칸 하나의 엄청난 rowspan·colspan이 격자나 잘림 경고를 부풀리지 않는다', () => {
+    const out = parsedToExtract(
+      doc({
+        tables: [
+          {
+            id: 'a',
+            n_rows: 1_000_000_000,
+            n_cols: 1_000_000_000,
+            cells: [
+              { r: 0, c: 0, text: '머리', rowspan: 1_000_000_000, colspan: 1_000_000_000 },
+              { r: 1, c: 1, text: '끝' },
+            ],
+          },
+        ],
+      })
+    );
+    const t = out.tables[0];
+    expect(t.cells).toHaveLength(2);
+    expect(t.cells[0]).toHaveLength(2);
+    expect(t.truncated).toBeUndefined();
+    expect(out.warnings.join(' ')).not.toContain('개 중');
+  });
+
+  it('멀리 떨어진 엉뚱한 칸 하나는 있는 그대로 잘림으로 알린다', () => {
+    const out = parsedToExtract(
+      doc({ tables: [{ id: 'a', n_rows: 0, n_cols: 0, cells: [{ r: 0, c: 0, text: '가' }, { r: MAX_TABLE_ROWS + 9, c: 0, text: '멀리' }] }] })
+    );
+    expect(out.tables[0].truncated).toEqual({ rows: MAX_TABLE_ROWS + 10 });
   });
 });
 

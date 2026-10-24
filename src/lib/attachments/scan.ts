@@ -39,26 +39,36 @@ interface Placed {
   text: string | null;
 }
 
+/** 겹침 검사에 쓰는 칸 수 예산 — 겹치는 병합을 잔뜩 보내도 시간이 늘지 않게. 넘으면 이후 병합은 풀어 1×1로 둔다 */
+const OVERLAP_SCAN_BUDGET = 20_000_000;
+
 function toGrid(t: NodaParsedTable): {
   cells: Cell[][];
   merges: TableMerge[];
   truncated?: { rows?: number; cols?: number };
-  dropped: number;
+  /** 힌트 밖 칸 */
+  skipped: number;
+  /** 병합 안(또는 같은 자리)에 놓여 건너뛴 칸 */
+  overlapped: number;
+  /** 겹쳐서 풀어 둔 병합 */
+  unmerged: number;
 } | null {
   const placed: Placed[] = [];
-  let height = 0;
-  let width = 0;
   for (const c of Array.isArray(t.cells) ? t.cells : []) {
     if (!c || !isCount(c.r) || !isCount(c.c)) continue;
-    const rows = span(c.rowspan);
-    const cols = span(c.colspan);
     const text = typeof c.text === 'string' && c.text.trim() !== '' ? c.text.trim() : null;
-    placed.push({ r: c.r, c: c.c, rows, cols, text });
-    if (c.r + rows > height) height = c.r + rows;
-    if (c.c + cols > width) width = c.c + cols;
+    placed.push({ r: c.r, c: c.c, rows: span(c.rowspan), cols: span(c.colspan), text });
   }
   if (placed.length === 0) return null;
 
+  // 격자 크기는 칸의 **원점**으로만 잰다 — 칸 하나의 엄청난 rowspan·colspan이 격자를 부풀리면
+  // 널로 가득한 표와 가짜 잘림 경고가 나온다. 병합은 이 범위 안으로 줄인다
+  let height = 0;
+  let width = 0;
+  for (const p of placed) {
+    if (p.r + 1 > height) height = p.r + 1;
+    if (p.c + 1 > width) width = p.c + 1;
+  }
   // NODA가 알려 준 크기는 위쪽 힌트일 뿐이다 — 칸이 그 밖에 있으면 건너뛰고 알린다
   const rowHint = hint(t.n_rows);
   const colHint = hint(t.n_cols);
@@ -67,25 +77,58 @@ function toGrid(t: NodaParsedTable): {
   const rows = Math.min(height, MAX_TABLE_ROWS);
   const cols = Math.min(width, MAX_TABLE_COLS);
 
+  // 주인 칸이 먼저 오도록 (r,c) 순으로 — 병합 안에 놓인 칸이 도착 순서 때문에 값을 덮어쓰지 않게
+  placed.sort((x, y) => x.r - y.r || x.c - y.c);
+
   const cells: Cell[][] = Array.from({ length: rows }, () => Array.from({ length: cols }, () => null));
+  const taken = new Uint8Array(rows * cols); // 값이 놓였거나 병합에 덮인 자리
   const merges: TableMerge[] = [];
-  let dropped = 0;
+  let skipped = 0;
+  let overlapped = 0;
+  let unmerged = 0;
+  let budget = OVERLAP_SCAN_BUDGET;
   for (const p of placed) {
     if (p.r >= height || p.c >= width) {
-      dropped += 1;
+      skipped += 1;
       continue;
     }
     if (p.r >= rows || p.c >= cols) continue; // 상한에 잘림 — truncated로 알린다
+    if (taken[p.r * cols + p.c]) {
+      // 다른 칸의 병합 안(또는 같은 자리) — 덮인 칸은 null로 둔다. 표 엔진은 덮인 칸의 글을 값으로 믿는다
+      overlapped += 1;
+      continue;
+    }
     cells[p.r][p.c] = p.text;
-    const mr = Math.min(p.rows, rows - p.r);
-    const mc = Math.min(p.cols, cols - p.c);
-    if (mr > 1 || mc > 1) merges.push({ row: p.r, col: p.c, rows: mr, cols: mc });
+    const mr = Math.min(p.rows, height - p.r, rows - p.r);
+    const mc = Math.min(p.cols, width - p.c, cols - p.c);
+    taken[p.r * cols + p.c] = 1;
+    if (mr <= 1 && mc <= 1) continue;
+    // 먼저 놓인 칸·병합과 겹치면 병합은 풀고 이 칸만 둔다 — merges에 겹치는 범위가 없어야 한다
+    let clear = budget >= mr * mc;
+    if (clear) {
+      budget -= mr * mc;
+      for (let r = p.r; clear && r < p.r + mr; r += 1) {
+        for (let c = p.c; c < p.c + mc; c += 1) {
+          if ((r !== p.r || c !== p.c) && taken[r * cols + c]) {
+            clear = false;
+            break;
+          }
+        }
+      }
+    }
+    if (!clear) {
+      unmerged += 1;
+      continue;
+    }
+    for (let r = p.r; r < p.r + mr; r += 1) taken.fill(1, r * cols + p.c, r * cols + p.c + mc);
+    merges.push({ row: p.r, col: p.c, rows: mr, cols: mc });
   }
 
   const truncated: { rows?: number; cols?: number } = {};
   if (height > MAX_TABLE_ROWS) truncated.rows = height;
   if (width > MAX_TABLE_COLS) truncated.cols = width;
-  return truncated.rows || truncated.cols ? { cells, merges, truncated, dropped } : { cells, merges, dropped };
+  const out = { cells, merges, skipped, overlapped, unmerged };
+  return truncated.rows || truncated.cols ? { ...out, truncated } : out;
 }
 
 export function parsedToExtract(doc: NodaParsedDocument): {
@@ -110,9 +153,10 @@ export function parsedToExtract(doc: NodaParsedDocument): {
     const caption = typeof raw.caption === 'string' && raw.caption.trim() !== '' ? raw.caption.trim() : undefined;
     tables.push(buildTable(index, title, grid.cells, grid.merges, caption, grid.truncated));
     warnings.push(...truncationWarnings(title, grid.truncated));
-    if (grid.dropped) {
-      warnings.push(`${title}: 표 범위 밖 칸 ${grid.dropped.toLocaleString('ko-KR')}개를 건너뛰었습니다`);
-    }
+    const n = (v: number) => v.toLocaleString('ko-KR');
+    if (grid.skipped) warnings.push(`${title}: 표 범위 밖 칸 ${n(grid.skipped)}개를 건너뛰었습니다`);
+    if (grid.overlapped) warnings.push(`${title}: 병합 안에 놓인 칸 ${n(grid.overlapped)}개를 건너뛰었습니다`);
+    if (grid.unmerged) warnings.push(`${title}: 겹친 병합 ${n(grid.unmerged)}개를 풀었습니다`);
   }
 
   return { text: lines.join('\n'), tables, pages: isCount(doc.pages) ? doc.pages : 0, warnings };
