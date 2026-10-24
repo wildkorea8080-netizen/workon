@@ -168,6 +168,7 @@ NODA POST /context { tenant: 비서 보관함, query: 질문, budget: 4000(기�
 - 저장: `source_references.verify = { grounded, unsupported_numbers, unsupported_quotes }`(감사에서 "그때 검증 결과"를 묻는다)
 - `/verify`가 실패하면 검증 없이 넘어간다(답은 이미 나갔다). 운영 기록에 남긴다
 - 문구는 '틀렸다'가 아니라 '확인되지 않았다'(S3-b와 같은 철학)
+- **구현에서 정한 것**(S4-b, 판정 R1): 보이는 '확인되지 않은 숫자'는 **로컬 대조 하나**로 낸다 — 첨부 도구가 성공했거나 **문서 근거가 있었던** 턴에 `checkNumbers(답, 도구 값 ∪ 시스템 프롬프트 숫자 ∪ 질문 숫자)`. 시스템 프롬프트에 NODA 근거 묶음이 들어 있으므로 이것이 위의 '어느 근거에도 없는 숫자'(근거 합집합)다. NODA `/verify`의 `unsupported_numbers`는 근거 묶음만 보고 도구 값을 모르므로 화면 목록에 더하지 않고 **감사 기록**(`source_references.verify = { grounded, unsupported_numbers, unknown_refs }`, 5초·다시 시도 없음)으로만 저장한다 — 위 합치기 식과 같은 뜻을 더 단순하게 이룬 것이다(저장 칸의 `unsupported_quotes`는 인용 검사를 뒤로 미뤄 `unknown_refs`가 됐다)
 
 ## 6. 삭제
 

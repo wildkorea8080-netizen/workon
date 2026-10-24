@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-10-23  
+**최종 업데이트**: 2026-10-24  
 **분석 기준**: 코드베이스 전수 확인
 (`next build` + `tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증)
 
@@ -9,7 +9,7 @@
 ## 프로젝트 요약
 
 WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.  
-내부 문서를 업로드·임베딩하고, AI 비서로 RAG 기반 대화를 제공하며, 보고서 템플릿을 관리합니다.
+내부 문서를 올려 NODA(국내 문서 읽기 서비스)로 읽히고, AI 비서로 RAG 기반 대화를 제공하며, 보고서 템플릿을 관리합니다.
 
 ---
 
@@ -19,17 +19,17 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 |---|---|
 | Frontend | Next.js 14 (App Router) + React 18 + TypeScript + Tailwind CSS |
 | Auth | NextAuth.js 4 (Credentials) — Supabase Auth도 signup에서 일부 사용 |
-| DB | Supabase PostgreSQL (+ pgvector — 옛 임베딩 저장, S4-b까지 남음) |
+| DB | Supabase PostgreSQL (`documents.embedding` pgvector 칸과 검색 RPC는 옛 것으로 남아 있고 값은 0032가 비운다 — 새 코드는 쓰지 않음) |
 | 파일 저장 | Supabase Storage (`documents` 버킷) |
 | AI/LLM | Claude API — AI 연결부 `src/lib/llm/` (어댑터: `anthropic.ts`), 모델 4종(기본 `claude-sonnet-4-6`), 논스트리밍 + SSE 스트리밍 |
-| 문서 읽기·검색 | **NODA(국내)** — 참고 문서의 읽기·OCR·검색(S4-a). 임베딩 Voyage AI(`voyage-3`)는 옛 업로드 경로용으로 S4-b까지 남음 |
+| 문서 읽기·검색·검증 | **NODA(국내)** — 참고 문서의 읽기·OCR·검색(S4-a), 채팅 첨부 스캔 PDF 읽기(`/parse`)·답변 검증(`/verify`, S4-b). Voyage·자체 임베딩 경로는 S4-b에서 지움 |
 | 메일 | Resend REST API (선택 — 미설정 시 링크 수동 전달로 폴백) |
 | 배포 | Vercel |
-| 문서 파싱 (옛 업로드 경로 — 첨부·양식에 일부 쓰임, 정리는 S4-b) | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`), 스캔 PDF 판독(`pdf-ocr.ts`) |
+| 첨부·양식 파싱 (채팅 첨부 `attachments/`와 양식 채우기가 씀) | `pdf-parse`, `mammoth`(DOCX), `exceljs`·`papaparse`(XLSX·CSV), 자체 HWP/HWPX 추출기(`hwp.ts`), PPTX(`pptx.ts`). 스캔 PDF는 NODA `/parse` |
 | 차트 | Recharts |
 | 마크다운 | react-markdown + react-syntax-highlighter |
 
-> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`llm/anthropic.ts`, `noda.ts`, `embeddings.ts`, `mailer.ts`).
+> 외부 API는 SDK 없이 `fetch`로 직접 호출하는 것이 이 코드베이스의 관례입니다 (`llm/anthropic.ts`, `noda.ts`, `mailer.ts`).
 
 ---
 
@@ -60,25 +60,22 @@ src/
 │   ├── text-clean.ts     # 파일에서 온 글 다듬기(oneLine·cut) — 첨부 개요와 표 엔진이 공유
 │   ├── doc-fill/         # 양식 채우기 엔진(HWPX·DOCX) — index · hwpx · hwpx-core · hwpx-auto · slots · docx · fallback · xml-scan · errors
 │   ├── generated-files.ts # 생성 파일 보관
-│   ├── attachments/      # 채팅 첨부 — limits · types · header · tables-sheet · tables-hwpx · reader · store · upload-client
+│   ├── attachments/      # 채팅 첨부 — limits · types · header · tables-sheet · tables-hwpx · scan(스캔 PDF 판정·NODA /parse 결과 → 표) · reader · store · upload-client
 │   ├── builtin-templates.ts # 기본 양식
 │   ├── config.ts         # 환경 변수 (직접 process.env 접근 금지)
 │   ├── config-public.ts  # 화면에서도 읽는 NEXT_PUBLIC_ 값만 (config.ts가 버킷 이름을 다시 내보냄)
 │   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
-│   ├── noda.ts           # NODA 클라이언트 — 올리기·목록·삭제·/context·/health, 보관함·파일 이름 규칙, 하한 0.80, 재시도
+│   ├── noda.ts           # NODA 클라이언트 — 올리기·목록·삭제·/context·/verify·/parse·/health, 보관함·파일 이름 규칙, 하한 0.80, 재시도
 │   ├── document-reading.ts # 문서 읽기 상태 전이(readDocument·reconcileReading·decideReadState)
 │   ├── document-upload.ts  # 직접 올리기 검사·행 만들기(주소 발급·확인이 함께 씀)
 │   ├── document-upload-client.ts # 화면용 올리기(주소 → 저장소 직접 → 확인 → 읽기 걸기)
-│   ├── document-processor.ts # (옛) PDF/DOCX/TXT 파싱 + 청킹 + 임베딩 — S4-b에서 지움
-│   ├── embeddings.ts     # (옛) Voyage AI 래퍼 — S4-b에서 지움
 │   ├── filter.ts         # 금지어 + 개인정보 패턴 필터
 │   ├── connectors/       # 공공 데이터 커넥터 (MCP 형식 툴 정의)
 │   ├── forbidden-words.ts # 금지어 DB 조회
 │   ├── hwp.ts            # HWP 5.0 / HWPX 텍스트 추출 + 표 복원 (자체 구현)
 │   ├── mailer.ts         # Resend 메일 발송 (미설정 시 폴백)
 │   ├── plans.ts          # 요금제 정의
-│   ├── rag.ts            # (옛) pgvector RPC 검색 (search_agent_chunks) — 대화는 더 쓰지 않음, S4-b에서 지움
 │   ├── usage-limit.ts    # 기관 상태 + 월 토큰 한도 검사
 │   ├── logger.ts
 │   ├── supabase.ts       # 클라이언트 Supabase (anon key)
@@ -98,14 +95,14 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1370개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1393개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요) | 예 |
 | `npm run noda:check` | NODA `/health` — `search.vectors`가 참이어야 하고 `llm.external`이 참이면 **실패**('바깥 연결 없음' 확인). `-- --roundtrip`이면 보관함 `workon-check`에 작은 글을 올려 근거·쪽/출처 → 엉뚱한 질문의 빈 근거 → 삭제까지 | 아니오 (키 필요) |
-| `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘. `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
+| `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
 `db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
@@ -143,14 +140,14 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 - `departments` — 부서(테넌트) 루트
 - `users` — 사용자 (department_id FK)
 - `agents` — AI 에이전트 (department_id FK)
-- `documents` — 문서 메타데이터 + JSONB 청크+임베딩 + `embedding vector(1024)`
+- `documents` — 문서 메타데이터 (+ 옛 JSONB 청크·`embedding vector(1024)` — NODA로 옮긴 뒤 0032가 값을 비운다. 새 문서는 NULL)
 - `conversations` — 대화 세션
 - `messages` — 채팅 메시지
 - `report_templates` — 보고서 템플릿 (옛 것. 읽기 전용으로 남아 있고 관리자만 본다. 새 양식은 `agent_templates`)
 - `forbidden_words` — 부서별 금지어
 - `usage_logs` — 사용 로그
 
-마이그레이션 0002~0012에서 추가된 것:
+마이그레이션 0002~0032에서 추가된 것:
 
 | 마이그레이션 | 내용 |
 |---|---|
@@ -172,6 +169,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 0029 | 생성 파일(`generated_files`) — 비서가 만든 파일 기록 · 기관 채움 트리거. **코드 배포 전에 적용** |
 | 0030 | 채팅 첨부(`chat_attachments`) — 원본·읽은 내용 경로와 요약, 기관 채움 트리거, `CHECK (ready ⇔ extract_path)`. **코드 배포 전에 적용** (코드가 이 표에 쓴다) |
 | 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다). 순서는 **0031 → 코드 푸시(배포 확인) → `npm run noda:migrate`** — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면 고아가 남는다 |
+| 0032 | 옛 임베딩 값 비우기 — `noda_status`가 NULL이 아닌 행의 `embedding`을 NULL로, `metadata`에서 `chunks`를 뺌. **사용자가 적용한다 — `npm run noda:migrate -- --dry-run`이 0건(문서가 모두 NODA로 옮겨짐)인 것을 확인한 뒤.** **되돌릴 수 없다**(비운 값은 다시 만들 수 없다). 코드는 이 값을 읽지 않으므로 적용 전에도 돈다. `embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC는 **지우지 않는다**(값만 비움). 적용 뒤 확인: `SELECT count(*) FROM documents WHERE embedding IS NOT NULL OR metadata ? 'chunks';` |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
 기준이 `(organization_id, slug)` / `(organization_id, name)`로 바뀌었습니다.
@@ -283,42 +281,21 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
    푸시와 이 단계 사이에는 옛 문서가 근거로 쓰이지 않으니(비서는 문서 없이 답함) 사이를 짧게 둔다
 6. 문서 화면에서 올리기·읽는 중·삭제, 대화에서 근거·쪽 번호·엉뚱한 질문의 '근거 없음'을 확인
 
-> **S4-b까지 남은 옛 길**: 아래 '스캔 PDF'·'표 문서'·'발표자료' 절은 예전 업로드 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)의 설명이다.
-> S4-a부터 새 업로드는 이 길을 타지 않는다. `document-processor.ts`·`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(스캔 판독)와 `VOYAGE_API_KEY`는 코드에 남아 있고 **S4-b에서 지운다**.
-> 단 `attachments/reader.ts`가 `pdf-ocr.ts`의 `isLikelyScanned`를 쓰므로 그 함수는 옮기거나 남겨야 한다. `spreadsheet.ts`·`hwp.ts`·`pptx.ts`는 첨부·양식 채우기 쪽 쓰임을 확인한 뒤 정한다.
-> 채팅 첨부(S3-a)는 별개의 경로(`attachments/`)이고 NODA를 거치지 않는다.
+### S4-b 배포 순서
 
-**스캔 PDF는 Claude가 직접 읽습니다** (`src/lib/pdf-ocr.ts`).
-공공기관은 옛 공문·결재문서·붙임이 스캔본인 경우가 많은데, 텍스트 레이어가
-없으면 pdf-parse가 빈 문자열을 주고 업로드가 거부돼 그 자료를 아예 못 썼습니다.
+마이그레이션 없이 돈다(0032는 옛 값을 비울 뿐이고 코드는 그 값을 읽지 않는다). 사용자가 직접 한다.
 
-- **이미지로 렌더링하지 않습니다.** Anthropic API가 PDF를 `document` 블록으로
-  직접 받습니다. 렌더링 방식은 pdfium/poppler 바이너리가 필요해 Vercel에서 부담입니다
-- **새 업체를 붙이지 않습니다.** Anthropic은 이미 필수 의존이라 OCR 업체나
-  멀티모달 임베딩 업체를 늘리지 않고 해결됩니다. 공공기관 보안성 검토에서
-  문서 본문이 나가는 곳이 하나 늘고 마는 차이가 큽니다
-- 판정 기준은 **페이지당 글자 수**(50자 미만). 전체 길이만 보면 표지만 텍스트고
-  본문이 스캔인 문서를 놓칩니다
-- 상한 100쪽 / 30MB (Anthropic `document` 블록 제한)
-- 페이지당 대략 1,500~3,000 토큰을 씁니다. **`/api/upload`에 한도 검사와
-  `usage_logs` 기록(`action='document_ocr'`)이 들어 있습니다**
-- 판독을 거치면 업로드 응답에 그 사실을 알립니다. 원문과 다르게 읽혔을 수 있어
-  담당자가 확인할 근거가 됩니다
+1. 코드 푸시(배포 확인) — 0032 없이 돈다
+2. 대화에서 확인: 문서 근거 답에서 근거에 없는 숫자가 주황 안내로 뜨는지, 스캔 PDF 첨부가 읽히고 '글자 인식(OCR)' 경고가 첫 경고로 뜨는지
+3. `npm run noda:migrate -- --dry-run`이 **0건**인지(문서가 모두 NODA로 옮겨졌는지) 확인한 뒤 마이그레이션 0032 적용(`npm run db:migrate -- 0032`) — **되돌릴 수 없다**
+4. `VOYAGE_API_KEY`는 Vercel·`.env.local`에서 지워도 된다(코드가 더 읽지 않는다)
 
-**표 문서(XLSX·CSV)도 마크다운 표로 복원합니다** (`src/lib/spreadsheet.ts`).
-공공기관 업무의 상당량이 표입니다 — 예산서, 집행내역, 통계표.
+> **옛 업로드 길은 S4-b에서 지웠다.** 예전 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)와 그 부품(`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(Anthropic 스캔 판독)·`spreadsheet.ts`, `VOYAGE_API_KEY`)은 코드에 없다.
+> `tests/legacy-removed.test.ts`가 파일 부재와 import·환경 변수의 재등장을 막는다. 남긴 것: DB의 `documents.embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC(값만 0032가 비운다),
+> 슈퍼관리자 화면의 'Voyage 키' 칸(`super/api-keys`·기관 상세 키 확인 — 키 보관 화면이라 손대지 않았다, 후속 정리), `usage_logs.action='document_ocr'` 옛 행의 화면 표기.
+> `hwp.ts`·`pptx.ts`는 채팅 첨부와 양식 채우기가 쓰므로 남았다. 첨부의 스캔 PDF는 NODA `/parse`로 읽는다(아래 '파일 첨부').
 
-- 수식 셀은 **계산 결과**를 씁니다. `=SUM(...)`을 색인해도 검색에 안 걸립니다
-- 숨긴 시트는 제외합니다 (대개 계산용 보조 자료)
-- CSV는 UTF-8로 읽어 깨지면 **EUC-KR로 재시도**합니다. 공공기관 CSV는 EUC-KR이 흔합니다
-- **한 시트에 표가 여러 개 쌓여 있으면 나눕니다** (빈 행 2줄 이상이 경계).
-  공공기관 엑셀에 흔한 형태인데, 이어붙이면 머리글이 표 한가운데 끼어들어
-  어느 표의 값인지 알 수 없게 됩니다
-- 전부 빈 열은 떼어냅니다. 서식만 넣은 여백 열이 자주 남습니다
-- 시트당 500행 상한. 수만 행을 통째로 임베딩하면 비용이 감당되지 않습니다
-- `exceljs`는 무거워 표 문서를 올릴 때만 동적으로 불러옵니다
-
-**발표자료(PPTX)는 슬라이드 경계를 남깁니다** (`src/lib/pptx.ts`).
+**첨부 발표자료(PPTX)는 슬라이드 경계를 남깁니다** (`src/lib/pptx.ts`, 채팅 첨부가 읽음).
 
 공공기관은 업무보고·사업설명회·정책브리핑이 전부 PPTX로 쌓입니다.
 
@@ -332,7 +309,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   "2026년도 예산"이 세 조각으로 옵니다. 파서의 `trimValues`를 켜면 런 끝의
   공백(`xml:space="preserve"`)이 지워져 "2026년도예산"이 됩니다
 - 표는 마크다운 표로 복원하고 **그 아래로는 다시 내려가지 않습니다.**
-  내려가면 셀 글자가 본문으로도 잡혀 같은 값이 두 번 임베딩됩니다
+  내려가면 셀 글자가 본문으로도 잡혀 같은 값이 두 번 실립니다
 - **발표자 노트**도 가져옵니다. 화면에는 결론만 적고 근거는 노트에 두는 일이 많습니다
 - 구형 `.ppt`(CFB)는 zip이 아니라 열리지 않습니다. "PPTX로 저장하라"고 안내합니다
 - 상한 300장. 새 업체·새 의존이 필요 없습니다 — `jszip`·`fast-xml-parser`는
@@ -366,7 +343,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 ```
 질문 → prepareTurn: 한도 → 비서 조회 → 권한(canUseAgent) → 능력 결정(기관 범위)
      → 사진·금지어 → 능력 preflight(문서 찾기 — 대화를 만들기 전에 NODA를 불러 못 부르면 거절) → 대화·이력 20개 → 모델(비서 모델, 기관 허용 밖이면 대체) → 능력 prepare(문서 찾기)
-→ streamTurn: 도구 루프(켜진 능력의 도구만) → 메시지 저장(판 번호) → 사용 기록(모델별) → 제목
+→ streamTurn: 도구 루프(켜진 능력의 도구만) → 숫자 확인(첨부 도구 성공 또는 문서 근거가 있었던 턴) → NODA 답변 검증(문서 근거 턴, 감사 기록) → 메시지 저장(판 번호) → 사용 기록(모델별) → 제목
 ```
 
 문서 찾기는 `doc_search` 능력이 합니다 — **NODA `/context`**(`budget` 4000, `min_similarity` 0.80)로 근거를 찾는다(아래 '참고 문서 찾기 (S4-a)'). 능력(`src/lib/capabilities/`)은 `doc_search`·`public_data`·`image`·`document`·`file_read`·`table_merge`
@@ -462,8 +439,8 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 ### 이미지 첨부 (`/api/chat`)
 
 사용자가 화면 캡처·현장 사진·도표를 붙여 물을 수 있습니다.
-스캔 PDF 판독(`pdf-ocr.ts`)과는 다른 경로입니다 — 그쪽은 업로드 문서를
-색인하는 것이고 이쪽은 이번 질문에만 쓰입니다.
+참고 문서(NODA가 읽고 색인)와는 다른 경로입니다 — 그쪽은 비서에 붙여 두고
+계속 쓰는 자료이고 이쪽은 이번 질문에만 쓰입니다.
 
 - 상한은 `src/lib/chat-images.ts` **한 곳에만** 둡니다. 서버 검증·화면
   검사·`accept` 속성이 모두 이 파일을 봅니다
@@ -526,9 +503,17 @@ POST /api/attachments/upload-url  (pending 행 + 서명 주소 발급)
   (우리 코드의 넓은 병합 처리 전, 라이브러리 안에서). 요청은 함수 메모리 한도로 실패하고 행은 pending으로 남아 정리됩니다 — 남의 자료가 새거나 잘못 읽히지는 않아 지금은 받아들입니다
 - 읽은 내용은 **gzip으로 저장**합니다(경로는 `.json` 그대로, `contentType: application/gzip`). `loadExtract`는 gzip 머리(`1f 8b`)가 없으면 평문 JSON으로 읽습니다.
   저장에 실패하면 확인은 500 `읽은 내용을 저장하지 못했습니다. 잠시 뒤 다시 올려 주세요.`이고 행은 pending으로 남습니다
-- 읽지 못한 파일(스캔 PDF·깨진 zip·암호 파일)은 오류가 아니라 **200 + `status:'failed'`** 로 돌려줍니다 — 칩에 이유를 보이려는 것입니다
+- 읽지 못한 파일(NODA가 못 읽은 스캔 PDF·깨진 zip·암호 파일)은 오류가 아니라 **200 + `status:'failed'`** 로 돌려줍니다 — 칩에 이유를 보이려는 것입니다
   (옛 XLS·PPT·DOC는 발급 단계에서 400으로 거절됩니다). 메모리·시간 초과 같은 예외는 500이고 행은 pending으로 남아 24시간 뒤 정리됩니다
-- **첨부에는 스캔 PDF 판독(OCR)이 없습니다.** 글자 층이 없는 PDF는 `failed`(`스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.`) — 업로드 문서의 `pdf-ocr.ts`와 다른 길입니다
+- **글자 층이 없는 PDF(스캔본)는 NODA `/parse`로 읽습니다**(S4-b). pdf-parse가 먼저 읽고 쪽당 글자 수가 50 미만이면(`attachments/scan.ts`의 `isLikelyScanned`) 그때만 NODA에 보냅니다 —
+  글자 층이 있는 PDF는 NODA를 부르지 않습니다. `/parse`는 한 번 60초(`PARSE_TIMEOUT_MS`)·재시도 창 30초(429·503은 `Retry-After`)이고 첨부 확인 라우트는 `maxDuration = 60`입니다.
+  NODA 응답은 **믿지 않고 칸에서 격자를 다시 만듭니다**(`parsedToExtract`): 글은 바닥글을 뺀 블록을 읽는 순서대로, 표는 `ExtractedTable`로 — 병합은 **주인 칸에만 값**·나머지 null·범위는 `merges`이고
+  **병합 안에 놓인 칸·같은 자리의 뒤 칸은 버려**(경고 `병합 안에 놓인 칸 K개를 건너뛰었습니다`) 표 합치기가 같은 값을 두 번 더하지 않습니다. 겹치는 병합은 풀고 경고합니다.
+  칸 주소·span이 이상하면 버리거나 1로 보고, `n_rows`·`n_cols`는 상한 힌트일 뿐 크기는 칸 원점에서 구하며 20,000행·200열에서 자릅니다(경고). 값 없는 표는 건너뜁니다
+  - **스캔으로 읽은 결과의 첫 경고는 항상** `글자 층이 없는 PDF라 글자 인식(OCR)으로 읽었습니다 — 숫자·글자가 원문과 다를 수 있습니다`(`SCAN_WARNING`) — 잘림 경고보다 앞입니다
+  - 실패 문구: NODA가 `readable:false`면 `스캔 문서를 읽지 못했습니다(사유: 암호가 걸린 파일 | 보안(DRM)이 걸린 파일 | 읽을 수 없는 파일)`(NODA의 이유 코드는 그대로 보이지 않음),
+    NODA 장애(http·네트워크·시간 초과)면 `스캔 문서를 지금 읽지 못했습니다. 잠시 뒤 다시 올려 주세요.`, 키가 없으면 `스캔 문서(글자 층이 없는 PDF)는 아직 읽지 못합니다.`
+  - **스캔 첨부의 내용도 NODA로 갑니다**(글자 층이 있는 첨부는 가지 않음) — 데이터 흐름(서비스 정의서 6절)과 보안 심사 자료에 적습니다
 - 파일 이름은 발급 때 **제어 문자(`\p{Cc}`)·서식 글자(`\p{Cf}` — 방향 제어 RLO, 폭 없는 글자, 태그 문자 U+E0000~E007F 등)와 `[` `]`를 빼고** 저장합니다.
   프롬프트·화면·감사 목록에 그대로 들어가고, `gpj.exe`가 `…exe.jpg`처럼 보이게 하거나 보이지 않는 글을 모델에게 싣거나
   첨부 목록 구분 줄(`[첨부 목록 끝]`)을 흉내 낼 수 있기 때문입니다. 경로에는 이름을 넣지 않습니다
@@ -564,11 +549,11 @@ POST /api/attachments/upload-url  (pending 행 + 서명 주소 발급)
 큰 금액이 든 예산표가 막힙니다. 첨부는 직원의 업무 자료이고, **내용이 Claude로 간다**는 사실은 데이터 흐름(서비스 정의서 6절)과
 보안 심사 자료에 그대로 적습니다. 기관이 요구하면 첨부용 필터를 따로 설계합니다. 질문 글에는 필터가 그대로 걸립니다.
 
-**계산용 표 읽기는 색인(RAG)과 따로입니다.** 같은 파일을 두 번 읽는 것이 아니라 **목적이 달라 출력이 달라야** 하기 때문입니다.
-`spreadsheet.ts`·`hwp.ts`는 **검색용 글**을 만들고, `attachments/tables-sheet.ts`·`tables-hwpx.ts`는 **계산할 수 있는 칸 배열**을 만듭니다(`ExtractedTable`).
-색인 출력은 그대로입니다(`hwp.ts`는 칸 해석을 공유하도록 손댔고, HWP 색인 출력이 그대로인 것을 800건 차등 시험으로 확인, `attachments-tables-hwp.test.ts`).
+**계산용 표 읽기는 글(검색용) 읽기와 따로입니다.** 같은 파일을 두 번 읽는 것이 아니라 **목적이 달라 출력이 달라야** 하기 때문입니다.
+옛 `spreadsheet.ts`는 검색용 글을 만들었고 S4-b에서 지웠습니다. 지금 `hwp.ts`가 HWP 본문 글과 표 복원을 맡고, `attachments/tables-sheet.ts`·`tables-hwpx.ts`는 **계산할 수 있는 칸 배열**을 만듭니다(`ExtractedTable`).
+`hwp.ts`는 칸 해석을 공유하도록 손댔고, HWP 글 출력이 그대로인 것을 800건 차등 시험으로 확인했습니다(`attachments-tables-hwp.test.ts`).
 
-| 색인용이 계산에 쓸 수 없는 이유 | 계산용 표에서는 |
+| 글(옛 색인용) 읽기가 계산에 쓸 수 없던 이유 | 계산용 표에서는 |
 |---|---|
 | 병합 셀을 exceljs가 **모든 칸에 복사**해 합계를 내면 같은 값이 여러 번 더해집니다 | 병합은 **주인 칸에만 값**, 나머지는 null. 병합 범위는 `merges`로 따로 둡니다 |
 | 열이 40개를 넘으면 **조용히 버립니다** | 200열까지 읽고 넘으면 **경고**와 원래 크기(`truncated`)를 남깁니다 |
@@ -757,8 +742,9 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 - **숫자 서식은 열마다 소수 자릿수로**: 데이터·합계 행 전체에서 최대 소수 자릿수(최대 4)를 한 번 정해 `#,##0` 또는 `#,##0.00…`을 씁니다. 행마다 정하면 한 열에서 `3`과 `12.5`가 다른 모양이고, 행 순서에 따라 같은 값이 다르게 보입니다. 열 너비는 한글 2칸 기준, 최대 50
 - 시간은 **KST**(UTC+9를 직접 더함 — 외부 날짜 라이브러리 없음)로 적습니다. `exceljs`는 파일을 만들 때만 동적으로 불러옵니다
 
-**숫자 확인 (`src/lib/assistant/number-check.ts`, 설계 5.4)** — 첨부 도구(`read_attachment`·`combine_tables`)가 **한 번이라도 성공한 턴에만** 답변의 숫자를 그 턴에 AI가 **본** 숫자와 대조합니다.
-첨부를 안 봤거나 도구가 실패만 한 답의 숫자는 대조할 원본이 없습니다. NODA 답변 검증(S4) 전에 프로그램 대조로 같은 목적을 먼저 이룹니다.
+**숫자 확인 (`src/lib/assistant/number-check.ts`, 설계 5.4·5.1)** — 첨부 도구(`read_attachment`·`combine_tables`)가 **한 번이라도 성공했거나 문서 근거(`turn.chunks`)가 있었던 턴에** 답변의 숫자를 그 턴에 AI가 **본** 숫자와 대조합니다
+(S4-b 판정 R1 — 전에는 첨부 도구를 쓴 턴만 대조했다). 둘 다 아니면(도구가 실패만 했거나 근거 없이 답한 턴) 대조할 원본이 없습니다.
+시스템 프롬프트에 NODA 근거 묶음이 들어 있으므로 이 로컬 대조 하나가 설계 5.1의 '어느 근거에도 없는 숫자'(근거 합집합)를 냅니다 — 법령 같은 도구가 준 숫자를 답에 옮겨도 '본 숫자'라 걸리지 않습니다.
 - **답변은 고치지 않습니다.** 저장 내용과 화면이 어긋나지 않게 하려는 것이고, 막지는 못해도 **보이게** 합니다. 못 찾은 숫자는 말풍선 아래에 안내로 붙고, `done` 이벤트의 `number_check`로 오며 **`messages.source_references.number_check = { unverified }`** 로 저장돼 지난 대화에서도 보입니다(없으면 칸을 만들지 않음)
 - **안내 문구(`NUMBER_CHECK_NOTE`, 화면도 이 문구를 읽음)**: `원본·계산 결과에서 확인되지 않은 숫자: A · B — 직접 확인하세요`. "틀렸다"가 아니라 "확인되지 않았다"입니다 — 두 값의 차이처럼 AI가 직접 계산해 말한 숫자는 걸릴 수 있기 때문입니다. 안내에는 최대 10개, 중복 없이
 - **대조하지 않는 것**(오탐이 잦으면 안내를 아무도 안 읽습니다): **4자리 미만 정수**(목록 번호·개수 대부분 — 소수는 4자리 미만이어도 대조), **1900~2100 연도**(쉼표 없는 정수만 — `2,026`은 연도 아님), **날짜·시각·전화번호 꼴**(`2026-10-21`·`26. 3. 5.`·`10월 3일`·`10:30`·`02-1234-5678`), **두 자리 연도 날짜** `26.10.21`(달 1~12·날 1~31, 앞뒤에 숫자·점이 이어지지 않을 때),
@@ -767,12 +753,17 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 - **절댓값으로 비교합니다.** 한국어 답은 `△5,678`을 '5,678천원 감소'로 풀어 쓰고, 괄호는 음수가 아니라 덧붙인 설명(`총무과(1,234천원)`)일 때가 많습니다. 부호까지 보면 이런 답이 전부 '확인되지 않음'으로 걸립니다
 - **'본 숫자'** = 이번 턴 도구가 준 `shownValues`(도구 결과 글의 숫자, `combine_tables`는 정확한 값도) + **시스템 프롬프트의 숫자**(첨부 개요의 행 수·참고 문서 조각) + **직원의 질문에 적힌 숫자**.
   AI가 시스템 프롬프트나 질문에서 옮긴 숫자는 지어낸 숫자가 아니기 때문입니다. **지난 답변의 숫자는 포함하지 않습니다** — 지난 답이 틀렸다면 그 숫자를 다시 쓰는 것을 '확인됨'으로 통과시키게 됩니다
+- **NODA `/verify`는 감사 기록으로만 씁니다**(S4-b, 화면 목록에 더하지 않음). 문서 근거가 있었던 턴은 답이 끝난 뒤 `/verify { tenant, answer, sources }`를 **한 번**(5초 `VERIFY_TIMEOUT_MS`, 다시 시도 없음) 부르고,
+  `sources`는 그 턴 `/context`의 `sources[]`를 **받은 순서 그대로** `{doc_id, chunk_id}`만 보냅니다(`verifySourcesOf` — 하나라도 모양이 틀리면 안 부름, 답의 `[n]`이 `sources[n-1]`을 가리킴). `citations`는 보내지 않습니다(인용 검사는 뒤로).
+  결과는 답변 행 **`source_references.verify = { grounded, unsupported_numbers, unknown_refs }`** 로 저장합니다(검증을 부른 턴만 — 없으면 칸을 만들지 않고 두 메시지 행의 칸 집합은 같음). 감사에서 "그때 검증 결과"를 묻기 때문입니다.
+  NODA의 `unsupported_numbers`는 근거 묶음만 보고 도구 값을 몰라, 목록에 더하면 법령 도구 숫자를 옮긴 답이 거짓으로 걸립니다. 그래서 **보이는 안내는 로컬 대조 하나**입니다.
+  `/verify`가 실패하거나 5초를 넘기면 답·저장은 그대로이고 `verify` 칸만 빠지며 운영 기록(`system_logs`, `api`, warning — 답 글 없이 `agent_id`·`code`·`status`)에 남습니다. 답은 고치지 않습니다
 - **알려진 한계**: ① **4자리 미만 정수 비율('22%')은 대조되지 않습니다** — 대신 `TABLE_MERGE_GUIDE`가 '결과에 없는 숫자는 직접 계산한 값이라고 밝히라'고 지시합니다 ② **억·만 표기**('1.2억')는 1.2로 읽혀 원본 값(120,000,000)과 맞지 않아 오탐으로 걸립니다('3만 명'은 4자리 미만 정수라 아예 대조 밖) ③ **모델이 계산한 차이·비율**은 걸릴 수 있습니다(오탐 — 문구가 '확인되지 않음'인 이유) ④ `1588-1234`·YYYYMMDD·URL 숫자는 오탐이 날 수 있습니다 ⑤ 줄머리에서 공백 뒤에 단위 낱말이 아닌 글이 오는 소수('- 3.5 증가')는 소제목 번호로 보여 대조하지 않습니다
 
 ### 참고 문서 찾기 (S4-a)
 
 문서 찾기는 `doc_search` 능력(`src/lib/capabilities/doc-search.ts`)이 질문마다 NODA `/context`를 불러 한다(`budget` 4000, `min_similarity` **0.80**, 상수 `NODA_MIN_SIMILARITY`).
-`search_agent_chunks`·Voyage 임베딩은 더 쓰지 않는다. 부서 전체 검색(`/api/qna`)은 S1-b에서 걷어냈고, 설계상 S4 범위 밖이다(S5 이후에 다시 정한다).
+`search_agent_chunks`·Voyage 임베딩은 더 쓰지 않는다(코드는 S4-b에서 지움). 부서 전체 검색(`/api/qna`)은 S1-b에서 걷어냈고, 설계상 S4 범위 밖이다(S5 이후에 다시 정한다).
 `/context` 한 번의 시간 제한은 8초다(재시도 창 10초 · 간격 2.5초, `Retry-After`가 0이어도 1초는 쉰다).
 (`search_document_chunks`·`search_agent_chunks` RPC는 DB에 남아 있다.)
 
@@ -804,7 +795,7 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 - **형식이 깨진 조각**(`filename`이 글이 아님) → 확인할 수 없으니 근거 없이. warning
 - 문서 확인 조회가 실패하면 근거 없이 답하고 사본은 건드리지 않는다. 운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수만)
 출처 표시는 쪽이 있으면 `p.12 · 제3장 › 여비`, 칸 주소면 `표.csv!A3:D20`, 절만 있으면 절(`source-label.ts`). 절은 NODA `outline`, 비면 `path`(제목 사슬 — 실측상 대개 여기 온다).
-**근거 창(2026-10-23)**: 인용 규칙(`CITE_NUMBER_RULE`)이 근거를 쓴 문장 끝에 근거 묶음의 번호를 `[1]`처럼 붙이게 한다. 조각에는 NODA 번호 `n`과 그 번호의 **원문**(`contextPassages`가 근거 묶음을 `[n]` 머리 줄로 나눔, `PASSAGE_MAX_CHARS` 2,000자)을 싣고 `source_references.chunks`에 저장한다 — 기관 자기 문서의 발췌이고 자기 DB에만 남는다. 번호는 받아들인 순서(`chunkIndex`)가 아니라 `n`이다(이 비서의 다른 상태 문서 조각이 빠지면 순서가 밀린다). 화면은 답변 아래 출처를 한 줄 칩(`[1] 문서 · p.43`)으로 보이고, 답변 속 `[n]`(출처에 있는 번호만, 코드·기존 링크 제외 — `linkCitations`)과 칩을 누르면 오른쪽에서 `SourcePanel`이 열린다(문서·쪽·절·원문, ×·바깥·Esc로 닫음, 다른 대화를 열면 닫힘). 저장된 답변 글은 바꾸지 않는다(그릴 때만 링크). 2026-10-23 이전 메시지는 원문이 없어 창에 안내만 보인다. 인용된 문장 강조는 S4-b의 `/verify` 인용 검사 뒤에.
+**근거 창(2026-10-23)**: 인용 규칙(`CITE_NUMBER_RULE`)이 근거를 쓴 문장 끝에 근거 묶음의 번호를 `[1]`처럼 붙이게 한다. 조각에는 NODA 번호 `n`과 그 번호의 **원문**(`contextPassages`가 근거 묶음을 `[n]` 머리 줄로 나눔, `PASSAGE_MAX_CHARS` 2,000자)을 싣고 `source_references.chunks`에 저장한다 — 기관 자기 문서의 발췌이고 자기 DB에만 남는다. 번호는 받아들인 순서(`chunkIndex`)가 아니라 `n`이다(이 비서의 다른 상태 문서 조각이 빠지면 순서가 밀린다). 화면은 답변 아래 출처를 한 줄 칩(`[1] 문서 · p.43`)으로 보이고, 답변 속 `[n]`(출처에 있는 번호만, 코드·기존 링크 제외 — `linkCitations`)과 칩을 누르면 오른쪽에서 `SourcePanel`이 열린다(문서·쪽·절·원문, ×·바깥·Esc로 닫음, 다른 대화를 열면 닫힘). 저장된 답변 글은 바꾸지 않는다(그릴 때만 링크). 2026-10-23 이전 메시지는 원문이 없어 창에 안내만 보인다. 인용된 문장 강조는 `/verify`에 `citations`를 주는 인용 검사를 하게 된 뒤에(S4-b는 숫자 검증만 감사 기록으로 쓴다).
 관리자 `/api/rag-test`도 같은 규칙(`searchAgentDocuments`)으로 찾고, 비서의 기관 id를 넘겨 운영 기록에 기관이 남는다. 검색 시험 화면도 같은 위치 줄(`sourceLocationLabel`)을 쓴다.
 위치(쪽·칸·절)도 유사도도 없는 조각은 `청크 N`만 보인다(`유사도: 0.0%`를 보이지 않는다).
 
@@ -880,7 +871,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 NEXTAUTH_URL=
 NEXTAUTH_SECRET=
-VOYAGE_API_KEY=                   # 옛 업로드 경로용 — S4-b에서 없앤다
 ANTHROPIC_API_KEY=
 
 # 슈퍼관리자 포털
@@ -935,7 +925,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-23 기준 1370개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-24 기준 1393개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -943,15 +933,14 @@ MAIL_FROM=
    |---|---|
    | `model-policy.test.ts` | 정책 밖 모델 대체, **과거 정산 소급 방지** |
    | `agent-catalog.test.ts` | 링크형 `javascript:`·`data:` 차단, 유형 전환 시 주소 처리 |
-   | `spreadsheet.test.ts` | 열 머리글 대응, 수식→결과값, BOM·파이프 |
-   | `pdf-ocr.test.ts` | 스캔 판정, (옛 `rag.ts`의) RAG 임계값이 실측 분리 구간 안에 있는지 — 둘 다 S4-b에서 코드와 함께 지움. NODA 하한은 `noda-client.test.ts`가 고정 |
-   | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입, 숫자 확인 결과가 있어도 두 행의 칸 집합이 같음(답변 행 `source_references`에만 싣고 없으면 칸을 남기지 않음) |
+   | `message-persistence.test.ts` | 배치 삽입 키 일치, 자료 인용 규칙 주입, 숫자 확인 결과가 있어도 두 행의 칸 집합이 같음(답변 행 `source_references`에만 싣고 없으면 칸을 남기지 않음), 검증 결과(`verify`)는 답변 행에만 싣고 없으면 칸을 두지 않음 |
    | `file-types.test.ts` | 허용 형식이 한 곳에만 정의돼 있는지 |
    | `route-auth.test.ts` | **모든 API 핸들러의 인증·관리자 검사 누락** |
    | `pptx.test.ts` | 런 분할·슬라이드 번호·표 중복, 실제 zip으로 검증 |
    | `chat-images.test.ts` | 첨부 상한·base64 검사, **요청 본문 상한과의 관계** |
    | `llm-anthropic.test.ts` | MCP 도구 → Anthropic 형식 변환, 쪼개진 `input_json_delta` 조립, 스트림 중 오류 전달 |
    | `llm-boundary.test.ts` | **Anthropic 호출이 `src/lib/llm/` 밖에 없는지**, 예외 목록의 이유, 옛 `claude.ts` 부재 |
+   | `legacy-removed.test.ts` | **S4-b에서 지운 옛 길이 돌아오지 않음** — `embeddings`·`rag`·`document-processor`·`pdf-ocr`·`spreadsheet` 파일 부재, `src`·`scripts`에 그 import와 `VOYAGE_API_KEY` 없음, `.env.example`·`vitest.config.ts` 정리 |
    | `capabilities.test.ts` | 능력 여섯·도구 이름 중복, 기관 범위로 거른 능력, 문서 찾기 4경우(자료·근거 없음·문서 없음·일반 답변), **모르는 능력 id는 대화에서 건너뛰고 저장에서는 거절** |
    | `assistant-parts.test.ts` | 시스템 프롬프트 조립, 사진·첨부 파일 순서와 저장 표시, 이력 다듬기, 메시지 저장 행 키 일치·판 번호, 모델별 사용량 |
    | `tool-loop.test.ts` | 도구 루프 라운드 누적, 상한 시 `tool_choice=none` 마무리(**마무리 요청을 도구 결과 뒤 사용자 메시지로도 보냄**), **도구 결과 뒤 빈 답은 한 번만 이어 쓰기 요청**(도구 안 쓴 턴·이어 쓰기도 빈 경우는 더 부르지 않음), 꺼낸 적 없는 도구 거부, 도중 실패 시 쓴 토큰 보존 |
@@ -962,7 +951,8 @@ MAIL_FROM=
    | `attachments-header.test.ts` | 머리글 추정(2단 머리글·제목 줄 아래·숫자뿐인 줄·3줄 상한), 연도·월·분기 꼴은 한 줄에 2개 이상이거나 바로 아래가 숫자일 때 머리글('기준연도·2025' 메타 줄 제외), 하위 머리글의 연도꼴·번호 (1)은 값이 아님, 가로 병합 아래 숫자 줄·병합 밖에 글이 있는 줄은 데이터, △·괄호·단위 접미사·줄표는 값, 캡션 500자 상한, 열 이름 중복·병합 채움, `buildTable`, 허용 확장자·옛 형식 안내 |
    | `attachments-tables-sheet.test.ts` | **계산용 표** — 숫자는 숫자로·수식은 결과값·날짜는 글, 세로 병합은 주인 칸에만, 빈 행 2줄로 표 분리, 200열·20,000행 상한과 경고, 숨긴 시트 제외, CSV EUC-KR·앞자리 0 보존, 한 칸짜리 블록은 다음 표의 캡션, CSV 끝 빈 레코드로 거짓 잘림 없음, 병합 2,000개도 빠르게, 넓은 병합(10만 칸 초과) 경로는 병합 기록만 끼운 작은 파일로 |
    | `attachments-tables-hwp.test.ts` | HWPX 표를 칸 배열로(주소·병합·안쪽 표 분리·바로 든 문단만·앞 문단 + `hp:caption` 잇기·칸 안 그림 캡션 제외), 행 25,000개 표도 안 터짐, HWP 5.0 표(압축 구역·깨진 구역 건너뜀·열 상한), **색인 출력(`extractTextFromHwp`)은 그대로** |
-   | `attachments-reader.test.ts` | 형식별 읽기(엑셀·CSV·HWPX·HWP·PDF·TXT), 옛 형식·깨진 zip·스캔 PDF는 한국어 실패, 본문 상한 경고, 요약에 본문이 없음, `tableAsMarkdown` 쪽 나눔·`|` 이스케이프·**표 위 글·잘림 줄**·세로 병합 글자 채워 보기, 병합 복사본이 없음, 이름이 .hwp인 HWPX, 표 100개 상한, 본문 상한에서 만들기 멈춤 |
+   | `attachments-reader.test.ts` | 형식별 읽기(엑셀·CSV·HWPX·HWP·PDF·TXT), 옛 형식·깨진 zip은 한국어 실패, 본문 상한 경고, 요약에 본문이 없음, `tableAsMarkdown` 쪽 나눔·`|` 이스케이프·**표 위 글·잘림 줄**·세로 병합 글자 채워 보기, 병합 복사본이 없음, 이름이 .hwp인 HWPX, 표 100개 상한, 본문 상한에서 만들기 멈춤, **글자 층 없는 PDF → NODA `/parse`**(글·표·경고 맨 앞 `SCAN_WARNING`·사유 문구 표·NODA 장애·키 없음·읽을 글 없음, 글자 층 있는 PDF는 NODA를 안 부름) |
+   | `attachments-scan.test.ts` | **NODA `/parse` 결과 → 첨부 표** — 바닥글 제외·글 순서, 병합은 주인 칸에만 값·`merges`, **병합 안에 놓인 칸·같은 자리의 뒤 칸은 버림(같은 값 두 번 안 더함)**·겹친 병합 풀기, 칸 주소·span 이상값·`n_rows`/`n_cols` 이상값, 20,000행·200열 상한과 경고(엄청난 span이 잘림을 부풀리지 않음), `isLikelyScanned`, `SCAN_WARNING` 문구 |
    | `attachments-store.test.ts` | 경로에 파일 이름 없음, 발급(형식·크기·이름 정리(태그 문자·`[ ]`)·보내지 않은 20개 상한·묘비 시한 — 묶인·남의 failed는 세지도 지우지도 않음), 읽은 내용 gzip 저장·평문 JSON 폴백·저장 실패 안내, **확인(10분 창·실제 크기·겹친 확인·도중 삭제·예외는 pending)**, 묶기(남의 것·다른 대화·failed 거부, 대화당 30개), 사용 기록에 파일 이름 없음 |
    | `attachments-upload-client.test.ts` | 발급 → 저장소 직접 올리기 → 확인 순서와 단계 알림, 실패 메시지 전달, 화면 검사, 공개 설정이 비면 주소 발급 전에 멈춤 |
    | `config-public-guard.test.ts` | `config-public.ts`가 `NEXT_PUBLIC_` 이름을 그대로 적는지, **화면 코드(`components`·`'use client'`·첨부 모듈)가 `config.ts`를 가져오지 않는지** |
@@ -974,22 +964,22 @@ MAIL_FROM=
    | `table-engine-describe.test.ts` | 지시(`CombineSpec`)를 문장으로 — 엑셀 근거 시트와 도구 결과에 실리는 글 |
    | `xlsx-export.test.ts` | 결과·계산 근거 두 시트, 숫자 서식(열의 최대 소수 자릿수·합계 행 포함)·머리글 고정·열 너비 50, **값은 수식이 아님**, **수식 주입 글자는 글자로**(결과·근거 시트 모두), 홑 `-` 예외, 칸 글 32,000자, 문서 제목에 `'` 안 붙음, 괄호 음수 경고는 엔진 문장 그대로 |
    | `table-merge-capability.test.ts` | `combine_tables` — 결과 글·근거 요약·`shownValues`, 30행 상한·보여 준 것만 `shownValues`, 엔진 안내·경고 싣기, 없는 ref·표 id·본문 불러오기 실패·엔진 실패·지시 형식 오류는 한국어 거절, 같은 호출 엑셀 카드(`table_merge`), 엑셀 실패해도 계산 결과, **입력에 uuid 없음**, 첨부 없으면 도구·안내 없음, `file_read` 꺼짐/켜짐에 따른 목록, 사용 기록에 파일 이름 없음, 첨부 접근 공용(한 턴에 본문 한 번), **엔진 실패 글**(파일 글 안내로 시작·줄바꿈/`[ ]` 없음·4,000자), 원천 20·지시 50 상한(불러오기 전 거절)·스키마 `maxItems`·`type` 배열 없음(`anyOf`), **엑셀 칸 예산 넘으면 엑셀만 건너뜀**, 엑셀 저장 실패는 운영 기록(파일 이름 없음)·짧은 이유, `file_read` 꺼짐이면 개요 '더 보기'가 `combine_tables`를 가리킴 |
-   | `stream-turn.test.ts` | 대화 실행기 마무리(`streamTurn`) — 만든 파일·메시지 두 행 키 일치·판 번호, 모델별 사용 기록, 제목 생성, 사진·첨부 표시, **숫자 확인**(첨부 도구가 성공한 턴만 대조해 `done`·답변 행에 싣고, 맞으면 칸을 남기지 않음, 시스템 프롬프트·질문 숫자는 본 숫자), 실패 시 토큰 보존·AI 오류 안내 |
+   | `stream-turn.test.ts` | 대화 실행기 마무리(`streamTurn`) — 만든 파일·메시지 두 행 키 일치·판 번호, 모델별 사용 기록, 제목 생성, 사진·첨부 표시, **숫자 확인**(첨부 도구가 성공한 턴만 대조해 `done`·답변 행에 싣고, 맞으면 칸을 남기지 않음, 시스템 프롬프트·질문 숫자는 본 숫자), 실패 시 토큰 보존·AI 오류 안내, **문서 근거 턴도 숫자 확인**(법령 도구 값은 본 숫자), **NODA `/verify`**(근거 순서대로 보내 `source_references.verify`에 저장·두 행 칸 집합 동일·실패·5초 시간 초과는 답 그대로 + 운영 기록·근거나 답이 없으면 안 부름) |
    | `agent-form.test.ts` | 비서 편집 값 ↔ 저장 값(능력·모델·문서·파일 받아 읽기·**표 합치기**), 변경 기록 문장, 되돌리기, 연결 선택지·범위 밖, 저장 안 한 수정, **만들기 창 '대화 중 파일 받기'는 `file_read`·`table_merge`를 함께 켬** |
    | `capability-settings.test.ts` | 능력 설정 정규화(**능력 여섯** — S1 셋·문서 만들기·파일 받아 읽기·표 합치기, 모르는 능력·없는 커넥터 거절), 기관 범위(공식 비서가 켠 커넥터만) |
    | `number-check.test.ts` | **숫자 확인** — 표기 차이·반올림 일치·절댓값 비교, 원본에 없는 숫자 표시(최대 10개·중복 없음), 4자리 미만 정수·연도·날짜·시각·전화·id·범위 제외, **줄머리 소제목 번호·두 자리 연도 날짜 제외**(달·날 범위 밖·단위 낱말이 뒤따르면 대조), 소수는 대조, 말풍선 안내(`done`·`source_references.number_check`), 정해 둔 문구·대조를 켜는 도구 둘 |
 
-   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82 |
+   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82, `verifyAnswer`(요청 모양·근거 순서·다시 시도 없음·5초·응답 다듬기), `parseDocument`(원본 바이트·`X-Filename`·30초 재시도 창·60초 제한·칸 다듬기·키 없음) |
    | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건 |
    | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재**, 형식은 확장자로만(MIME만 맞으면 415), **정지된 기관은 발급·확인 두 곳에서 403** |
    | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·**한꺼번에 보냄**·실패해도·곧바로 던져도 나머지를 보냄) |
    | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, NODA 실패는 따로 둔 참거짓 표시로 가름, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음) |
-   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각·문서 id를 못 읽는 조각·형식이 깨진 조각을 따로 모음**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·**섞임은 critical(security)·고아는 근거 없이 + 사본 삭제 + warning·형식 깨짐은 근거 없이**·지우기 실패·오래 걸려도 답을 붙잡지 않음), rag-test 기록에 기관 id, 인용 규칙 추가 줄, `rag.ts` 미사용 |
+   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각·문서 id를 못 읽는 조각·형식이 깨진 조각을 따로 모음**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·**섞임은 critical(security)·고아는 근거 없이 + 사본 삭제 + warning·형식 깨짐은 근거 없이**·지우기 실패·오래 걸려도 답을 붙잡지 않음), rag-test 기록에 기관 id, 인용 규칙 추가 줄, `verifySourcesOf`(받은 순서·모양이 틀리면 비움)·근거 없음·섞임·고아·건너뜀에서는 검증 근거 없음 |
    | `prepare-preflight.test.ts` | 대화 준비 — NODA를 못 부르면 **대화·첨부 묶기 전에** 503, `skip_documents`가 정확히 `true`일 때만 건너뜀, `ready` 없는 비서는 장애 중에도 평소처럼, 문서 찾기 꺼진 비서는 무관 |
    | `chat-documents-ui.test.ts` | **답변 속 `[n]` → 근거 창 단추**(출처에 있는 번호만·기존 링크·코드 제외), 근거 창을 화면에 잇기(Esc·바깥·×, 다른 대화면 닫힘), 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시·**위치도 유사도도 없으면 `청크 N`만**), NODA 파일 이름 앞부분은 화면에 안 보임, 문서 화면 원본(목록은 앞 응답 뒤에 예약·늦은 응답 버림·실패 칩 이유), 검색 시험 화면 위치 줄 |
    | `chat-scroll-follow.test.ts` | 답이 흘러나오는 동안 **맨 아래 근처에 있을 때만** 따라 내림(위로 올려 읽는 중이면 그대로, 새 질문·다른 대화면 다시 따라감) — 예전엔 글자 조각마다 끌어내려 위로 밀린 답을 읽을 수 없었다 |
 
-   변이 테스트로 실제로 무는지 확인했습니다 — (옛 RAG) 임계값을 0.72로 되돌리면 실패합니다.
+   (옛 RAG 임계값 테스트는 코드와 함께 S4-b에서 지웠다 — NODA 유사도 하한은 `noda-client.test.ts`가 0.80~0.82 구간으로 고정한다.)
 
    `route-auth.test.ts`는 `src/app/api`의 라우트 파일을 전부 읽어 핸들러마다
    인증 호출이 있는지 봅니다. 공개해도 되는 라우트는 **이유와 함께** 목록에
@@ -1024,12 +1014,12 @@ MAIL_FROM=
 |---|---|
 | 모델 선택 | 4종 + 기관별 허용 정책 (0021) |
 | MCP / 툴 실행 루프 | 커넥터 4종 7개 도구, `MAX_TOOL_ROUNDS` |
-| XLSX·CSV | `spreadsheet.ts` — 표 분리·수식 결과·EUC-KR |
+| XLSX·CSV | 채팅 첨부 `attachments/tables-sheet.ts` — 표 분리·수식 결과·병합 주인 칸·EUC-KR |
 | PPTX | `pptx.ts` — 슬라이드 경계·표·발표자 노트 |
 | 이미지 입력 | `chat-images.ts`·`image-resize.ts` — 첨부 4장, 브라우저 축소 |
-| 스캔 PDF 판독 | `pdf-ocr.ts` — Claude가 직접 읽음 |
+| 스캔 PDF 판독 | NODA — 참고 문서는 업로드 읽기·OCR, 채팅 첨부는 `/parse`(S4-b) |
 | 번역 | 프리셋 비서로 제공 (별도 번역 엔진은 아님) |
-| 파일 첨부 | S3-a `file_read` — 대화에 엑셀·CSV·한글·워드·PDF·파워포인트·TXT를 붙여 묻기, 계산용 표 읽기 |
+| 파일 첨부 | S3-a `file_read` — 대화에 엑셀·CSV·한글·워드·PDF·파워포인트·TXT를 붙여 묻기, 계산용 표 읽기, 스캔 PDF는 NODA `/parse`(S4-b) |
 | 표 합치기 | S3-b `table_merge` — 첨부 표 쌓기·거르기·묶기·합계(엔진이 계산), 숫자 확인 |
 | 엑셀 생성 | S3-b `xlsx-export.ts` — 결과·계산 근거 두 시트, 수식 주입 방지 |
 
