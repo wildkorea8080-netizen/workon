@@ -96,6 +96,23 @@ export function stripNodaPrefixes(text: string): string {
   return text.replace(STRIP_PREFIX_RE, '');
 }
 
+/** `nodaTenant`의 반대 — 비서 보관함 이름(`workon-a` + 32자)에서 비서 id를 읽는다. 다른 꼴(`workon`·`workon-check`)이면 null */
+export function agentIdFromNodaTenant(tenant: string): string | null {
+  const m = /^workon-a([0-9a-f]{32})$/.exec(tenant);
+  if (!m) return null;
+  const h = m[1];
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function toWebhook(w: Record<string, unknown>): NodaWebhook {
+  return {
+    id: String(w.id ?? ''),
+    url: String(w.url ?? ''),
+    ...(Array.isArray(w.events) ? { events: w.events.filter((e): e is string => typeof e === 'string') } : {}),
+    ...(typeof w.secret === 'string' ? { secret: w.secret } : {}),
+  };
+}
+
 export class NodaError extends Error {
   status: number | null;
   code: 'missing_key' | 'http' | 'network' | 'timeout';
@@ -126,11 +143,43 @@ export interface NodaUploadResult {
   reason: string | null;
   chunks: number;
   cache_purged?: number;
+  /**
+   * 비동기 넣기(`async=1`)를 NODA가 202로 받았다 — 읽기는 서버에서 이어지고 결과는 목록·웹훅으로 온다.
+   * 이때 `readable`·`doc_id`는 아직 모른다(false·null). 비동기를 모르는 서버가 201로 결과를 주면 false
+   */
+  accepted?: boolean;
+}
+
+/** `GET /documents`의 문서 하나. `readable`은 비동기로 넣은 뒤 읽지 못했을 때 false다(그때 `reason`은 코드) */
+export interface NodaListedDocument {
+  filename: string;
+  doc_id?: string;
+  readable?: boolean;
+  reason?: string | null;
+}
+
+/** 202로 받은 넣기가 서버에서 실패한 것 — 15분 남고, 같은 이름을 다시 넣어 성공하면 빠진다 */
+export interface NodaFailedUpload {
+  filename: string;
+  /** 403 한도 초과 · 409 같은 이름이 그 사이 생김 · 500 서버 오류 */
+  status: number | null;
+  error: string | null;
+  /** 실패 시각(ISO, UTC) */
+  at: string | null;
 }
 
 export interface NodaListing {
-  documents: { filename: string; doc_id?: string }[];
+  documents: NodaListedDocument[];
   receiving: { filename: string; seconds: number }[];
+  failed: NodaFailedUpload[];
+}
+
+export interface NodaWebhook {
+  id: string;
+  url: string;
+  events?: string[];
+  /** 걸 때 한 번만 온다 */
+  secret?: string;
 }
 
 export interface NodaAnchor {
@@ -200,7 +249,14 @@ export interface NodaParsedDocument {
 }
 
 export interface NodaClient {
-  uploadDocument(input: { tenant: string; filename: string; bytes: Uint8Array }): Promise<NodaUploadResult>;
+  /** `async: true`면 `async=1`로 보내 NODA가 받자마자(202) 끝난다 — 큰 문서를 Vercel 함수가 붙잡지 않게 */
+  uploadDocument(input: { tenant: string; filename: string; bytes: Uint8Array; async?: boolean }): Promise<NodaUploadResult>;
+  /** 웹훅 걸기(키 하나에 하나 — `workon-…` 보관함 전체의 알림이 온다). 응답의 `secret`은 이때 한 번만 보인다 */
+  createWebhook(url: string): Promise<NodaWebhook>;
+  listWebhooks(): Promise<NodaWebhook[]>;
+  /** 그 주소로 `event: ping` 알림을 하나 보내고 결과를 돌려준다 */
+  pingWebhook(id: string): Promise<{ ok: boolean; status: number | null; ms: number | null }>;
+  deleteWebhook(id: string): Promise<void>;
   /**
    * `retry: false`면 한 번만 부른다(문서 목록 맞추기 — 화면이 NODA 장애에 오래 묶이지 않게).
    * `timeoutMs`는 그 한 번의 시간 제한(기본 30초)
@@ -390,12 +446,12 @@ export function createNodaClient(deps: {
   }
 
   return {
-    async uploadDocument({ tenant, filename, bytes }) {
+    async uploadDocument({ tenant, filename, bytes, async: asyncUpload }) {
       return withRetry(
         async () => {
           const res = await request('POST', '/documents/upload', {
             // 항상 replace=1 — 같은 이름을 다시 올려도 안전하게 바꿔 넣는다(읽기 다시 걸기가 이에 기댄다)
-            query: { tenant, replace: '1' },
+            query: { tenant, replace: '1', ...(asyncUpload ? { async: '1' } : {}) },
             headers: {
               'X-Filename': encodeURIComponent(filename),
               'Content-Type': 'application/octet-stream',
@@ -404,16 +460,18 @@ export function createNodaClient(deps: {
             timeoutMs: UPLOAD_TIMEOUT_MS,
           });
           const b = await readJson(res);
+          const accepted = res.status === 202;
           return {
             tenant: String(b.tenant ?? tenant),
             filename: String(b.filename ?? filename),
             bytes: Number(b.bytes ?? bytes.byteLength),
             stored: b.stored === true,
-            doc_id: typeof b.doc_id === 'string' ? b.doc_id : null,
-            readable: b.readable === true,
-            reason: typeof b.reason === 'string' ? b.reason : null,
+            doc_id: !accepted && typeof b.doc_id === 'string' ? b.doc_id : null,
+            readable: !accepted && b.readable === true,
+            reason: !accepted && typeof b.reason === 'string' ? b.reason : null,
             chunks: Number(b.chunks ?? 0) || 0,
             ...(typeof b.cache_purged === 'number' ? { cache_purged: b.cache_purged } : {}),
+            accepted,
           } satisfies NodaUploadResult;
         },
         { windowMs: UPLOAD_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
@@ -424,16 +482,28 @@ export function createNodaClient(deps: {
       const once = async (): Promise<NodaListing> => {
         const res = await request('GET', '/documents', { query: { tenant }, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
         const b = await readJson(res);
-        const documents = (Array.isArray(b.documents) ? b.documents : [])
-          .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
-          .map((d) => ({
+        const objects = (v: unknown) =>
+          (Array.isArray(v) ? v : []).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object');
+        const documents = objects(b.documents).map((d): NodaListedDocument => ({
+          filename: String(d.filename ?? ''),
+          ...(typeof d.doc_id === 'string' ? { doc_id: d.doc_id } : {}),
+          ...(typeof d.readable === 'boolean'
+            ? { readable: d.readable, reason: typeof d.reason === 'string' ? d.reason : null }
+            : {}),
+        }));
+        const receiving = objects(b.receiving).map((d) => ({
+          filename: String(d.filename ?? ''),
+          seconds: Number(d.seconds ?? 0) || 0,
+        }));
+        const failed = objects(b.failed).map(
+          (d): NodaFailedUpload => ({
             filename: String(d.filename ?? ''),
-            ...(typeof d.doc_id === 'string' ? { doc_id: d.doc_id } : {}),
-          }));
-        const receiving = (Array.isArray(b.receiving) ? b.receiving : [])
-          .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
-          .map((d) => ({ filename: String(d.filename ?? ''), seconds: Number(d.seconds ?? 0) || 0 }));
-        return { documents, receiving };
+            status: typeof d.status === 'number' && Number.isFinite(d.status) ? d.status : null,
+            error: typeof d.error === 'string' ? redact(d.error).slice(0, 300) : null,
+            at: typeof d.at === 'string' ? d.at : null,
+          }),
+        );
+        return { documents, receiving, failed };
       };
       if (opts.retry === false) return once();
       return withRetry(once, { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS });
@@ -453,6 +523,43 @@ export function createNodaClient(deps: {
         },
         { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
       );
+    },
+
+    // 웹훅 관리는 운영자가 스크립트로 한 번 부르는 일이라 다시 시도하지 않는다
+    async createWebhook(url) {
+      const res = await request('POST', '/webhooks', {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      });
+      return toWebhook(await readJson(res));
+    },
+
+    async listWebhooks() {
+      const res = await request('GET', '/webhooks', { timeoutMs: DEFAULT_TIMEOUT_MS });
+      const b = await readJson(res);
+      const list = Array.isArray(b.webhooks) ? b.webhooks : Array.isArray(b) ? b : [];
+      return list
+        .filter((w): w is Record<string, unknown> => !!w && typeof w === 'object')
+        .map((w) => toWebhook(w));
+    },
+
+    async pingWebhook(id) {
+      const res = await request('POST', '/webhooks/ping', {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      });
+      const b = await readJson(res);
+      return {
+        ok: b.ok === true,
+        status: typeof b.status === 'number' ? b.status : null,
+        ms: typeof b.ms === 'number' ? b.ms : null,
+      };
+    },
+
+    async deleteWebhook(id) {
+      await request('DELETE', '/webhooks', { query: { id }, timeoutMs: DEFAULT_TIMEOUT_MS });
     },
 
     async getContext({ tenant, query }) {

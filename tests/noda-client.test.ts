@@ -218,7 +218,65 @@ describe('NODA 클라이언트', () => {
     expect(r.documents).toEqual([{ filename: 'a', doc_id: 'd' }]);
     expect(r.receiving).toEqual([]);
     const { noda: n2 } = client((async () => json({})) as unknown as typeof fetch);
-    expect(await n2.listDocuments('t')).toEqual({ documents: [], receiving: [] });
+    expect(await n2.listDocuments('t')).toEqual({ documents: [], receiving: [], failed: [] });
+  });
+
+  it('listDocuments는 문서의 readable·reason과 failed(비동기 넣기 실패)를 읽는다', async () => {
+    const { noda } = client((async () =>
+      json({
+        documents: [
+          { filename: 'a', doc_id: 'd', readable: true },
+          { filename: 'b', readable: false, reason: 'PASSWORD_PROTECTED' },
+        ],
+        failed: [{ filename: 'c', status: 403, error: '한도를 넘습니다', at: '2026-10-24T08:40:00+00:00' }, null, 'x'],
+      })) as unknown as typeof fetch);
+    const r = await noda.listDocuments('t');
+    expect(r.documents).toEqual([
+      { filename: 'a', doc_id: 'd', readable: true, reason: null },
+      { filename: 'b', readable: false, reason: 'PASSWORD_PROTECTED' },
+    ]);
+    expect(r.failed).toEqual([{ filename: 'c', status: 403, error: '한도를 넘습니다', at: '2026-10-24T08:40:00+00:00' }]);
+  });
+
+  it('비동기 넣기는 async=1을 붙이고, 202면 accepted로 끝난다', async () => {
+    const urls: string[] = [];
+    const f = (async (url: string) => {
+      urls.push(url);
+      return json({ tenant: 't', filename: 'f.pdf', bytes: 3, accepted: true, receiving: true }, 202);
+    }) as unknown as typeof fetch;
+    const r = await client(f).noda.uploadDocument({ tenant: 't', filename: 'f.pdf', bytes: new Uint8Array([1, 2, 3]), async: true });
+    expect(urls[0]).toContain('async=1');
+    expect(urls[0]).toContain('replace=1');
+    expect(r.accepted).toBe(true);
+    expect(r.readable).toBe(false);
+  });
+
+  it('비동기를 모르는 서버가 201로 결과를 주면 지금처럼 결과를 돌려준다', async () => {
+    const f = (async () => json({ stored: true, readable: true, doc_id: 'd', chunks: 2 }, 201)) as unknown as typeof fetch;
+    const r = await client(f).noda.uploadDocument({ tenant: 't', filename: 'f.pdf', bytes: new Uint8Array([1]), async: true });
+    expect(r.accepted).toBe(false);
+    expect(r.readable).toBe(true);
+    expect(r.doc_id).toBe('d');
+  });
+
+  it('웹훅 걸기·핑·목록·떼기는 키로 부른다', async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      calls.push({ url, method: String(init.method), body: init.body as string | undefined });
+      if (url.includes('/webhooks/ping')) return json({ ok: true, status: 200, ms: 12 });
+      if (init.method === 'POST') return json({ id: 'wh_1', url: 'https://x/hook', events: [], secret: 'whsec_s' }, 201);
+      if (init.method === 'DELETE') return json({ deleted: true });
+      return json({ webhooks: [{ id: 'wh_1', url: 'https://x/hook' }] });
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    expect(await noda.createWebhook('https://x/hook')).toMatchObject({ id: 'wh_1', secret: 'whsec_s' });
+    expect(JSON.parse(calls[0].body!)).toEqual({ url: 'https://x/hook' });
+    expect(await noda.pingWebhook('wh_1')).toMatchObject({ ok: true });
+    expect(JSON.parse(calls[1].body!)).toEqual({ id: 'wh_1' });
+    expect((await noda.listWebhooks()).length).toBe(1);
+    await noda.deleteWebhook('wh_1');
+    expect(calls[3].url).toContain('id=wh_1');
+    expect(calls[3].method).toBe('DELETE');
   });
 
   it('listDocuments는 receiving의 이름·초를 읽는다', async () => {

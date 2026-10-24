@@ -38,7 +38,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 99개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 100개 (아래 "API 구조" 참조)
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증)
 │   ├── my/stats/         # 내 사용현황
@@ -95,13 +95,14 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1402개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1427개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요). 번호 없이 돌리면 **0028·0032는 건너뛰고** 안내만 한다(`scripts/migrate-select.mjs` `MANUAL_ONLY`) — 번호로 지정해야 적용 | 예 |
 | `npm run noda:check` | NODA `/health` — `search.vectors`가 참이어야 하고 `llm.external`이 참이면 **실패**('바깥 연결 없음' 확인). `-- --roundtrip`이면 보관함 `workon-check`에 작은 글을 올려 근거·쪽/출처 → 엉뚱한 질문의 빈 근거 → 삭제까지 | 아니오 (키 필요) |
+| `npm run noda:webhook -- register <주소> \| list \| ping <id> \| delete <id>` | NODA 웹훅 걸기·확인 — 키 하나에 하나. register의 서명 비밀값은 한 번만 보이므로 **사용자가 직접** 실행해 `NODA_WEBHOOK_SECRET`에 넣는다 | 아니오 (키 필요) |
 | `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
@@ -111,14 +112,14 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 ---
 
-## API 구조 (99개 라우트)
+## API 구조 (100개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
 
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
-| 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]` | 없음 | 초대 토큰 검증만 |
+| 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]`, `/api/noda/webhook`(NODA 서명으로만 받음) | 없음 | 초대 토큰 검증만 · 웹훅은 HMAC 서명 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/attachments/*` (채팅 첨부 — 올리기 주소·확인·목록·삭제), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
 | 기관 관리자 | `/api/documents/*`(올리기 주소 발급 `upload-url`·확인 `confirm`·붙이기 `assign`·읽기 `[id]/read`·목록·삭제), `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
 | 슈퍼관리자 | `/api/super/**` (34개) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
@@ -231,9 +232,25 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 브라우저 → POST /api/documents/upload-url (검사 + 서명 주소 발급)
 → 저장소(documents 버킷)에 직접 올림 (document-upload-client.ts)
 → POST /api/documents/confirm (검사 다시 + 행 만들기: noda_status='reading', summary NULL, metadata {}, embedding NULL)
-→ 화면이 문서마다 POST /api/documents/{id}/read (서버가 저장소 원본을 NODA에 보냄, replace=1)
-→ NODA가 읽기·OCR·색인을 끝내고 응답 → readable이면 ready, 아니면 unreadable(이유 저장)
+→ 화면이 문서마다 POST /api/documents/{id}/read (서버가 저장소 원본을 NODA에 보냄, replace=1 · async=1)
+→ NODA가 받자마자 202 — 읽기·OCR·색인은 NODA 서버에서 이어진다(함수는 바로 끝남, 행은 reading)
+→ 결과: NODA 웹훅(/api/noda/webhook) 또는 문서 목록 맞추기(GET /api/documents)가 ready / unreadable / failed로 쓴다
+   (비동기를 모르는 NODA는 예전처럼 다 읽고 201로 결과를 준다 — 그때는 읽기 라우트가 바로 쓴다)
 ```
+
+- **비동기 넣기(2026-10-24, NODA `async=1`)**: 큰 문서(45MB 2분여)를 Vercel 함수가 기다리지 않는다. 202 응답에는 결과가 없어 행은 `reading`으로 남고,
+  결과는 **NODA 목록**(`receiving` 읽는 중 · `documents` 다 읽음 · `failed` 202로 받은 넣기의 서버 실패, 15분 남음)과 **웹훅**으로 온다.
+  **비동기로 넣으면 받았지만 읽지 못한 문서도 `documents`에 `readable:false`·`reason` 코드로 온다** — `decideReadState`가 이것을 ready가 아니라 `unreadable`로 본다
+  (전에는 `documents`에 이름만 있으면 ready였다). `failed`는 **마지막으로 보낸 뒤의 실패만** 본다(그 전 것은 이미 다시 보낸 것) —
+  403(서비스 문서 한도) → `failed` `문서 보관 한도를 넘어 읽지 못했습니다. 관리자에게 문의하세요.`, 500 등 → `failed` `문서 보관소에서 읽다가 오류가 났습니다. 다시 시도해 주세요.`,
+  409(같은 이름이 그 사이 생김 — `replace=1`이라 거의 없음) → 다시 걸기(`nodaFailurePatch`). 어디에도 없으면 지금처럼 2분 뒤 다시 보내고 10분 뒤 포기
+- **웹훅(`/api/noda/webhook`, `src/lib/noda-webhook.ts`)**: NODA 키 하나(`workon`)에 **하나만** 건다 — `workon-…` 보관함 전체의 알림이 오고 본문 `tenant`로 비서를 가른다(여러 개 걸면 같은 알림이 겹친다).
+  로그인 없이 열리는 주소라 **서명이 유일한 자격**이다: `X-NODA-Signature: sha256=HMAC-SHA256(NODA_WEBHOOK_SECRET, "{X-NODA-Timestamp}." + 받은 본문 그대로)`, 시각이 5분(`WEBHOOK_MAX_AGE_MS`)을 넘으면 버림, 비밀값이 없으면 503.
+  `tenant`가 비서 보관함(`workon-a`+32자)이고 파일 이름의 문서 id 행이 **그 비서의 행이고 `noda_filename`까지 같을 때만** 바꾼다(아니면 `system_logs` security warning, 파일 이름 없이).
+  `document.ready` → ready(`doc_id`), `document.unreadable` → unreadable(이유의 `{문서 id}__` 뗌), `document.failed` → 위 상태 코드 규칙, `ping`·`document.removed`·모르는 알림은 무시.
+  행이 없는 문서가 읽혔으면(읽는 도중 지움) 그 보관함의 사본을 지운다. 바꾸기는 `reading` 행만(조건부) — **같은 `delivery`가 다시 와도 해가 없어** 따로 기록하지 않는다.
+  DB 오류는 500으로 돌려 NODA가 다시 보내게 한다(5초 안 2xx가 아니면 2초·10초 뒤 두 번 더). **알림이지 장부가 아니다**(NODA 재시작 때 못 보낸 알림은 사라진다) — 목록 맞추기를 그대로 둔다.
+  등록·확인은 `npm run noda:webhook -- register <주소> | list | ping <id> | delete <id>` — **register가 보여 주는 서명 비밀값은 한 번만 나오므로 사용자가 직접 실행하고** `NODA_WEBHOOK_SECRET`으로 `.env.local`·Vercel에 넣는다
 
 - **보관함 = 비서.** NODA 보관함 이름은 `workon-a{비서 id에서 하이픈 뺀 32자}`이고 **서버가 비서 id로만 만든다**(`nodaTenant`가 uuid가 아니면 던진다).
   요청값으로 보관함·파일 이름을 받지 않는다. 같은 문서를 여러 비서에 붙이면(`assign`) 비서마다 행·NODA 사본이 따로 생긴다
@@ -253,10 +270,9 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   맞추기의 NODA 목록은 **다시 시도 없이** 한 번에 4초(`RECONCILE_LIST_TIMEOUT_MS`), 전체 5초(`RECONCILE_BUDGET_MS`)까지만 쓴다 — NODA 장애 중에
   문서 화면이 재시도 창 × 보관함 수만큼 멈추지 않게. 넘기면 남은 보관함의 행은 그대로 두고 다음 목록 때 본다.
   화면(`DocumentsManager`)은 앞 응답을 받은 뒤에 다음 목록을 예약하고(`setTimeout` 사슬 — `setInterval`이면 느린 응답이 겹쳐 쌓인다), 늦게 온 옛 응답은 버린다(요청 순번 — '다시 시도'가 덮이지 않게)
-  **알려진 공백**: 아무도 목록을 열지 않으면 멈춘 행은 다음에 목록을 열 때까지 `reading`이다(클라우드 서버로 옮기면 예약 작업으로 바꾼다).
-  특히 **나만의 비서·부서 비서의 문서는 부서 공개(`department`)로 저장돼 관리자의 문서 목록에 안 나올 수 있어**, 목록의 다시 걸기가 영영 닿지 않을 수 있다.
-  그래서 올린 화면의 `startReading`은 문서마다 읽기 요청을 **한꺼번에**(각각 `keepalive`) 보낸다 — 차례로 보내면 화면을 떠날 때 뒤 문서의 요청이 아예 나가지 않는다.
-  주인이 자기 문서의 읽기 상태를 보는 화면은 후속 작업이다
+  **나만의 비서·부서 비서의 문서는 부서 공개(`department`)로 저장돼 관리자의 문서 목록에 안 나올 수 있다** — 웹훅이 걸려 있으면 목록 없이도 결과가 써진다.
+  웹훅이 없거나 알림을 놓치면 다음에 누가 목록을 열 때까지 `reading`이다(남은 공백). 올린 화면의 `startReading`은 문서마다 읽기 요청을 **한꺼번에**(각각 `keepalive`) 보낸다 —
+  차례로 보내면 화면을 떠날 때 뒤 문서의 요청이 아예 나가지 않는다. 주인이 자기 문서의 읽기 상태를 보는 화면은 후속 작업이다
 - 새 문서의 `summary`는 NULL, `metadata`는 `{}`, `embedding`은 NULL이다 — 요약·색인은 NODA가 한다. 직접 올리기 상한·형식·개수·위험한 이름 검사는 `document-upload.ts`(발급·확인 두 곳)가 하고
   크기·개수 상수는 `file-types.ts` 한 곳에만 둔다. 예전 `/api/upload`는 지웠다(그 경로의 스캔 판독(Anthropic)과 `usage_logs.action='document_ocr'` 기록은 함께 사라졌다 — OCR은 NODA가 한다)
 - **삭제 순서: NODA → DB 행 → 저장소 원본.** NODA 삭제가 실패하면 행을 `deleting`으로 남기고 `문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.`(502)를 돌려준다 —
@@ -289,6 +305,17 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 2. 대화에서 확인: 문서 근거 답에서 근거에 없는 숫자가 주황 안내로 뜨는지, 스캔 PDF 첨부가 읽히고 '글자 인식(OCR)' 경고가 첫 경고로 뜨는지
 3. `npm run noda:migrate -- --dry-run`이 **0건**인지(문서가 모두 NODA로 옮겨졌는지) 확인한 뒤 마이그레이션 0032 적용(`npm run db:migrate -- 0032`) — **되돌릴 수 없다**
 4. `VOYAGE_API_KEY`는 Vercel·`.env.local`에서 지워도 된다(코드가 더 읽지 않는다)
+
+### NODA 비동기 넣기·웹훅 배포 순서 (2026-10-24)
+
+마이그레이션 없음. 사용자가 직접 한다.
+
+1. 코드 푸시(배포 확인) — 웹훅 없이도 돈다. NODA가 `async=1`을 아직 모르면 예전처럼 201로 결과를 받는다
+2. **NODA 배포가 끝난 뒤**(웹훅은 그 배포부터 열림) `npm run noda:webhook -- register https://workon-ai.vercel.app/api/noda/webhook`.
+   이미 걸린 웹훅이 있으면 목록이 먼저 나온다 — 필요 없는 것은 `delete`로 지워 하나만 남긴다
+3. 화면에 한 번만 나온 서명 비밀값을 `NODA_WEBHOOK_SECRET`으로 `.env.local`과 Vercel에 넣고 다시 배포한다(채팅에 붙이지 않는다)
+4. `npm run noda:webhook -- ping <id>`가 `OK`인지 — FAIL이면 주소·비밀값·배포를 본다(비밀값이 없으면 받는 곳이 503, 틀리면 401)
+5. 문서를 하나 올리고 문서 화면을 닫아 둔 채 기다렸다가 다시 열어 '읽음'으로 바뀌어 있는지 본다(목록이 아니라 웹훅이 쓴 것)
 
 > **옛 업로드 길은 S4-b에서 지웠다.** 예전 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)와 그 부품(`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(Anthropic 스캔 판독)·`spreadsheet.ts`, `VOYAGE_API_KEY`)은 코드에 없다.
 > `tests/legacy-removed.test.ts`가 파일 부재와 import·환경 변수의 재등장을 막는다. 남긴 것: DB의 `documents.embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC(값만 0032가 비운다),
@@ -887,6 +914,7 @@ NEXT_PUBLIC_APP_URL=              # 미설정 시 NEXTAUTH_URL로 폴백
 # 선택 (NODA 문서 읽기 서비스) — 키가 없으면 빌드는 되고 문서 올리기·읽기·찾기 때 NodaError('missing_key')
 NODA_API_URL=                     # 비우면 https://api.readlayer.kr
 NODA_API_KEY=
+NODA_WEBHOOK_SECRET=              # 웹훅 서명 비밀값(noda:webhook register가 한 번 보여 줌). 비우면 웹훅 받는 곳이 503 — 문서 목록이 상태를 맞춘다
 
 # 선택 (메일 발송) — 둘 다 있어야 자동 발송, 없으면 링크 수동 전달로 폴백
 RESEND_API_KEY=
@@ -926,7 +954,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-24 기준 1402개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-24 기준 1427개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -970,8 +998,9 @@ MAIL_FROM=
    | `capability-settings.test.ts` | 능력 설정 정규화(**능력 여섯** — S1 셋·문서 만들기·파일 받아 읽기·표 합치기, 모르는 능력·없는 커넥터 거절), 기관 범위(공식 비서가 켠 커넥터만) |
    | `number-check.test.ts` | **숫자 확인** — 표기 차이·반올림 일치·절댓값 비교, 원본에 없는 숫자 표시(최대 10개·중복 없음), 4자리 미만 정수·연도·날짜·시각·전화·id·범위 제외, **줄머리 소제목 번호·두 자리 연도 날짜 제외**(달·날 범위 밖·단위 낱말이 뒤따르면 대조), 소수는 대조, 말풍선 안내(`done`·`source_references.number_check`), 정해 둔 문구·대조를 켜는 도구 둘 |
 
-   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82, `verifyAnswer`(요청 모양·근거 순서·다시 시도 없음·5초·응답 다듬기), `parseDocument`(원본 바이트·`X-Filename`·30초 재시도 창·60초 제한·칸 다듬기·키 없음) |
-   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건 |
+   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82, **비동기 넣기**(`async=1`·202면 `accepted`·201이면 지금처럼 결과)·목록의 `readable`·`reason`·`failed`·웹훅 걸기·핑·목록·떼기, `verifyAnswer`(요청 모양·근거 순서·다시 시도 없음·5초·응답 다듬기), `parseDocument`(원본 바이트·`X-Filename`·30초 재시도 창·60초 제한·칸 다듬기·키 없음) |
+   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘·**`readable:false`는 unreadable·마지막으로 보낸 뒤의 `failed`만**), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), **비동기 202면 reading 유지**, 맞추기의 unreadable·failed 403/500·409는 다시 걸기, NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건 |
+   | `noda-webhook.test.ts` | **NODA 웹훅** — 서명(맞음·다름·본문 한 글자·5분 넘음/앞섬·ISO/밀리초 시각·머리글 없음은 던지지 않고 거절), 알림 적용(ready·unreadable 이유 다듬기·failed 403/409·두 번 와도 한 번·**다른 비서·다른 파일 이름이면 건드리지 않고 기록(파일 이름 없이)**·행 없으면 그 보관함 사본 삭제·비서 보관함 아닌 tenant·문서 id 없는 이름·ping·removed는 무시), 라우트(받은 본문 그대로 서명 확인·비밀값 없으면 503·서명 틀리면 401) |
    | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재**, 형식은 확장자로만(MIME만 맞으면 415), **정지된 기관은 발급·확인 두 곳에서 403** |
    | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·**한꺼번에 보냄**·실패해도·곧바로 던져도 나머지를 보냄) |
    | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, NODA 실패는 따로 둔 참거짓 표시로 가름, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음) |

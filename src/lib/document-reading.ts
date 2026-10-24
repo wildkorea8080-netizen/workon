@@ -33,6 +33,10 @@ import type { NodaStatus } from '@/lib/db';
 export const READ_KICK_AFTER_MS = 120_000;
 export const READ_GIVE_UP_MS = 600_000;
 export const READ_TIMEOUT_REASON = '읽기가 너무 오래 걸려 멈췄습니다. 다시 시도해 주세요.';
+/** 비동기 넣기 실패(NODA `failed`·`document.failed`) 403 — 서비스 문서 한도 초과 */
+export const READ_LIMIT_REASON = '문서 보관 한도를 넘어 읽지 못했습니다. 관리자에게 문의하세요.';
+/** 비동기 넣기 실패 500 등 — 다시 시도하면 될 수 있다 */
+export const READ_SERVER_FAILED_REASON = '문서 보관소에서 읽다가 오류가 났습니다. 다시 시도해 주세요.';
 /** 한 번의 맞추기가 NODA 목록을 부르는 보관함 수 — 문서 목록 응답이 느려지지 않게 */
 export const MAX_TENANTS_PER_RECONCILE = 5;
 /**
@@ -171,7 +175,21 @@ export function startReadingFields(now: Date): {
   };
 }
 
-export type ReadDecision = 'ready' | 'reading' | 'kick' | 'give_up';
+export type ReadDecision = 'ready' | 'reading' | 'kick' | 'give_up' | 'unreadable' | 'noda_failed';
+
+/** NODA가 준 '읽지 못한 이유'를 저장할 글로 — 파일 이름 앞부분(`{문서 id}__`)을 떼고 자른다 */
+export function unreadableReason(reason: string | null | undefined): string {
+  return stripNodaPrefixes(reason ?? '').trim().slice(0, MAX_REASON_CHARS) || UNREADABLE_DEFAULT_REASON;
+}
+
+/**
+ * 비동기 넣기 실패(상태 코드)를 행에 쓸 값으로. 409(같은 이름이 그 사이 생김)는 다시 보내면 되므로 null —
+ * 우리는 항상 `replace=1`로 보내 거의 나오지 않는다
+ */
+export function nodaFailurePatch(status: number | null): FinishPatch | null {
+  if (status === 409) return null;
+  return { noda_status: 'failed', noda_reason: status === 403 ? READ_LIMIT_REASON : READ_SERVER_FAILED_REASON };
+}
 
 function ms(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -189,14 +207,19 @@ function startedAt(row: ReadingRow): number {
  *
  * 순서가 중요하다: **`receiving`을 먼저 본다** — 같은 이름을 바꿔 넣는 중이면 옛 판은 `documents`에,
  * 새 판은 `receiving`에 함께 있어서 `documents`부터 보면 아직 읽는 중인 문서를 ready로 잘못 본다.
- * 둘 다 없고 10분이 지났으면 포기, 마지막 시도가 2분 지났으면 다시 걸기(kick).
+ * 비동기로 넣으면(2026-10-24) 받았지만 읽지 못한 문서도 `documents`에 `readable:false`로 온다 — ready가 아니라 unreadable.
+ * `failed`(202로 받은 넣기가 서버에서 실패)는 **마지막으로 보낸 뒤**의 것만 본다 — 그 전 실패는 이미 다시 보낸 것이다.
+ * 어디에도 없고 10분이 지났으면 포기, 마지막 시도가 2분 지났으면 다시 걸기(kick).
  */
 export function decideReadState(row: ReadingRow, listing: NodaListing, now: number): ReadDecision {
   const name = row.noda_filename;
-  if (name && listing.receiving.some((r) => r.filename === name)) return 'reading';
-  if (name && listing.documents.some((d) => d.filename === name)) return 'ready';
-  if (now - startedAt(row) > READ_GIVE_UP_MS) return 'give_up';
   const lastTry = ms(row.noda_last_attempt_at) ?? startedAt(row);
+  if (name && listing.receiving.some((r) => r.filename === name)) return 'reading';
+  const listed = name ? listing.documents.find((d) => d.filename === name) : undefined;
+  if (listed) return listed.readable === false ? 'unreadable' : 'ready';
+  const failed = name ? (listing.failed ?? []).find((f) => f.filename === name) : undefined;
+  if (failed && (ms(failed.at) ?? now) >= lastTry) return 'noda_failed';
+  if (now - startedAt(row) > READ_GIVE_UP_MS) return 'give_up';
   if (now - lastTry > READ_KICK_AFTER_MS) return 'kick';
   return 'reading';
 }
@@ -301,7 +324,9 @@ export async function readDocument(
 
   let result;
   try {
-    result = await deps.noda.uploadDocument({ tenant, filename, bytes });
+    // 비동기로 보낸다 — NODA가 받자마자(202) 끝나 큰 문서도 함수를 붙잡지 않는다. 결과는 목록 맞추기·웹훅이 쓴다.
+    // 비동기를 모르는 서버는 지금처럼 다 읽고 201로 결과를 준다
+    result = await deps.noda.uploadDocument({ tenant, filename, bytes, async: true });
   } catch (err) {
     if (!(err instanceof NodaError)) throw err;
     await logNodaError(deps, err, documentId);
@@ -314,6 +339,7 @@ export async function readDocument(
     return current(after);
   }
 
+  if (result.accepted) return { status: 'reading' };
   if (result.readable) {
     return conclude(
       { noda_status: 'ready', noda_reason: null, noda_doc_id: result.doc_id, noda_read_at: finishedAt() },
@@ -321,9 +347,7 @@ export async function readDocument(
     );
   }
   // NODA 이유 글에 파일 이름(`{문서 id}__…`)이 섞여 오면 화면에 앞부분이 보이지 않게 뗀다
-  const reason =
-    stripNodaPrefixes(result.reason ?? '').trim().slice(0, MAX_REASON_CHARS) || UNREADABLE_DEFAULT_REASON;
-  return conclude({ noda_status: 'unreadable', noda_reason: reason }, result.stored);
+  return conclude({ noda_status: 'unreadable', noda_reason: unreadableReason(result.reason) }, result.stored);
 }
 
 /**
@@ -378,6 +402,19 @@ export async function reconcileReading<T extends ReadingRow>(
           noda_read_at: new Date(now).toISOString(),
         });
         if (wrote) replaced.set(r.id, { ...r, noda_status: 'ready' });
+      } else if (decision === 'unreadable') {
+        const found = listing.documents.find((d) => d.filename === r.noda_filename);
+        const wrote = await deps.store.finish(r.id, { noda_status: 'unreadable', noda_reason: unreadableReason(found?.reason) });
+        if (wrote) replaced.set(r.id, { ...r, noda_status: 'unreadable' });
+      } else if (decision === 'noda_failed') {
+        const failure = (listing.failed ?? []).find((f) => f.filename === r.noda_filename);
+        const patch = nodaFailurePatch(failure?.status ?? null);
+        if (patch) {
+          const wrote = await deps.store.finish(r.id, patch);
+          if (wrote) replaced.set(r.id, { ...r, noda_status: 'failed' });
+        } else if (!kickCandidate || startedAt(r) < startedAt(kickCandidate)) {
+          kickCandidate = r;
+        }
       } else if (decision === 'give_up') {
         const wrote = await deps.store.finish(r.id, { noda_status: 'failed', noda_reason: READ_TIMEOUT_REASON });
         if (wrote) replaced.set(r.id, { ...r, noda_status: 'failed' });

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   READ_GIVE_UP_MS,
   READ_KICK_AFTER_MS,
+  READ_LIMIT_REASON,
+  READ_SERVER_FAILED_REASON,
   READ_TIMEOUT_REASON,
   RECONCILE_BUDGET_MS,
   RECONCILE_LIST_TIMEOUT_MS,
@@ -34,9 +36,34 @@ function row(over: Partial<ReadingRow> = {}): ReadingRow {
     ...over,
   };
 }
-const listing = (documents: string[], receiving: string[] = []): NodaListing => ({
+const listing = (documents: string[], receiving: string[] = [], failed: NodaListing['failed'] = []): NodaListing => ({
   documents: documents.map((filename) => ({ filename })),
   receiving: receiving.map((filename) => ({ filename, seconds: 5 })),
+  failed,
+});
+
+describe('decideReadState — 비동기 넣기의 결과(2026-10-24)', () => {
+  it('documents에 있지만 readable:false면 unreadable — ready로 보지 않는다', () => {
+    const l: NodaListing = { documents: [{ filename: 'F', readable: false, reason: 'PASSWORD_PROTECTED' }], receiving: [], failed: [] };
+    expect(decideReadState(row(), l, 60_000)).toBe('unreadable');
+  });
+  it('readable 칸이 없는 옛 응답은 지금처럼 ready', () => {
+    expect(decideReadState(row(), listing(['F']), 60_000)).toBe('ready');
+  });
+  it('마지막으로 보낸 뒤의 실패(failed)는 noda_failed', () => {
+    const r = row({ noda_last_attempt_at: iso(10_000) });
+    const l = listing([], [], [{ filename: 'F', status: 403, error: '한도', at: iso(20_000) }]);
+    expect(decideReadState(r, l, 30_000)).toBe('noda_failed');
+  });
+  it('마지막으로 보내기 전의 옛 실패는 보지 않는다', () => {
+    const r = row({ noda_last_attempt_at: iso(50_000) });
+    const l = listing([], [], [{ filename: 'F', status: 500, error: 'x', at: iso(20_000) }]);
+    expect(decideReadState(r, l, 60_000)).toBe('reading');
+  });
+  it('받는 중(receiving)이 실패보다 먼저다', () => {
+    const l = listing([], ['F'], [{ filename: 'F', status: 500, error: 'x', at: iso(20_000) }]);
+    expect(decideReadState(row(), l, 30_000)).toBe('reading');
+  });
 });
 
 describe('decideReadState', () => {
@@ -401,6 +428,42 @@ describe('readDocument', () => {
     w.clock.t += 2;
     await readDocument(DOC, {}, deps);
     expect(w.uploads).toHaveLength(2);
+  });
+});
+
+describe('비동기 넣기(async=1)', () => {
+  it('readDocument는 async로 보내고, NODA가 202로 받으면 reading으로 둔다', async () => {
+    const { w, deps } = makeWorld();
+    w.upload = async () => ({ tenant: '', filename: '', bytes: 3, stored: false, doc_id: null, readable: false, reason: null, chunks: 0, accepted: true });
+    const out = await readDocument(DOC, {}, deps);
+    expect(out).toEqual({ status: 'reading' });
+    expect((w.uploads[0] as { async?: boolean }).async).toBe(true);
+    expect(w.docs.get(DOC)!.noda_status).toBe('reading');
+    expect(w.docs.get(DOC)!.noda_last_attempt_at).not.toBeNull();
+  });
+
+  it('맞추기: readable:false는 unreadable(이유의 문서 id 앞부분을 뗀다), failed 403·500은 failed, 409는 다시 걸기', async () => {
+    const un = doc({ id: 'd-un', noda_filename: 'U' });
+    const lim = doc({ id: 'd-lim', noda_filename: 'L' });
+    const srv = doc({ id: 'd-srv', noda_filename: 'S' });
+    const dup = doc({ id: 'd-dup', noda_filename: 'D' });
+    const { w, deps } = makeWorld([un, lim, srv, dup]);
+    const at = new Date(w.clock.t - 1_000).toISOString();
+    w.lists.set(nodaTenant(AGENT), {
+      documents: [{ filename: 'U', readable: false, reason: `${DOC}__x.pdf PASSWORD_PROTECTED` }],
+      receiving: [],
+      failed: [
+        { filename: 'L', status: 403, error: '한도', at },
+        { filename: 'S', status: 500, error: '오류', at },
+        { filename: 'D', status: 409, error: '같은 이름', at },
+      ],
+    });
+    const out = await reconcileReading([un, lim, srv, dup], deps);
+    expect(w.docs.get('d-un')).toMatchObject({ noda_status: 'unreadable', noda_reason: 'x.pdf PASSWORD_PROTECTED' });
+    expect(w.docs.get('d-lim')).toMatchObject({ noda_status: 'failed', noda_reason: READ_LIMIT_REASON });
+    expect(w.docs.get('d-srv')).toMatchObject({ noda_status: 'failed', noda_reason: READ_SERVER_FAILED_REASON });
+    expect(w.docs.get('d-dup')!.noda_status).toBe('reading');
+    expect(out.find((r) => r.id === 'd-dup')!.kick).toBe(true);
   });
 });
 

@@ -39,6 +39,7 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/super/auth/logout', '쿠키를 지우는 것뿐이라 인증 여부와 무관하다'],
   ['/super/auth/setup', '최초 슈퍼관리자 생성. SUPER_ADMIN_SETUP_KEY로 보호'],
   ['/system/maintenance', '점검 모드 상태 조회'],
+  ['/noda/webhook', 'NODA가 읽기 결과를 알리는 곳. NODA_WEBHOOK_SECRET HMAC 서명·5분 시각 검사가 자격이고, 그 비서의 행만 바꾼다'],
 ]);
 
 /**
