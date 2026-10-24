@@ -236,7 +236,7 @@ async function readHangul(bytes: Buffer, fileName: string): Promise<Parsed> {
 }
 
 async function readPdf(bytes: Buffer, fileName: string, deps: ReadDeps): Promise<Parsed> {
-  // lib 파일을 직접 부른다 — 기본 import는 테스트 파일을 실행하다 던진다 (document-processor.ts와 같다)
+  // lib 파일을 직접 부른다 — 기본 import는 테스트 파일을 실행하다 던진다
   // @ts-ignore pdf-parse/lib 경로는 타입 선언이 없다
   const mod = await import('pdf-parse/lib/pdf-parse.js');
   const pdfParse = (mod as { default?: unknown }).default ?? mod;
@@ -290,7 +290,7 @@ async function readPptx(bytes: Buffer): Promise<Parsed> {
 }
 
 function readTxt(bytes: Buffer): Parsed {
-  // 공공기관 텍스트는 EUC-KR이 흔하다. UTF-8로 읽어 깨지면 다시 시도한다 (spreadsheet.ts와 같은 판정)
+  // 공공기관 텍스트는 EUC-KR이 흔하다. UTF-8로 읽어 깨지면 다시 시도한다 (tables-sheet.ts의 CSV 읽기와 같은 판정)
   let text = new TextDecoder('utf-8').decode(bytes);
   if (text.includes('�')) {
     try {

@@ -40,7 +40,6 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
       NEXTAUTH_URL: 'http://localhost:3000',
       NEXTAUTH_SECRET: 'test-secret',
-      VOYAGE_API_KEY: 'test-voyage',
       ANTHROPIC_API_KEY: 'test-anthropic',
     },
   },

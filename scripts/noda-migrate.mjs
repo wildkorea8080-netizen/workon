@@ -29,7 +29,7 @@ if (existsSync('.env.local')) {
 }
 // config.ts가 import 시점에 필수 환경변수를 검사한다. 이 스크립트에는 없어도 되는 것들을 채운다.
 // (Supabase 값은 채우지 않는다 — 진짜 DB에 써야 하므로 .env.local에 있어야 한다.)
-for (const k of ['NEXTAUTH_URL', 'NEXTAUTH_SECRET', 'VOYAGE_API_KEY', 'ANTHROPIC_API_KEY']) {
+for (const k of ['NEXTAUTH_URL', 'NEXTAUTH_SECRET', 'ANTHROPIC_API_KEY']) {
   if (!process.env[k]) process.env[k] = 'noda-migrate-placeholder';
 }
 

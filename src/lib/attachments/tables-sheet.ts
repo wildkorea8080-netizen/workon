@@ -6,9 +6,8 @@ import type { Cell, ExtractedTable, TableMerge } from './types';
 /**
  * 엑셀·CSV를 계산용 표로 읽는다.
  *
- * `spreadsheet.ts`는 검색용 마크다운 글을 만든다(숫자도 글자). 여기는 표 엔진이
- * 합계·필터를 계산할 수 있도록 **숫자는 숫자로, 병합은 주인 칸에만 값**으로 남긴다.
- * 두 경로의 출력은 달라야 하므로 `spreadsheet.ts`는 건드리지 않는다.
+ * 표 엔진이
+ * 합계·필터를 계산할 수 있도록 **숫자는 숫자로, 병합은 주인 칸에만 값**으로 남긴다. 첨부 본문(`text`)도 이 표에서 만든다.
  */
 
 /** 병합 좌표 키(행 * 폭 + 열). 엑셀 최대 열은 16,384. */
@@ -305,7 +304,7 @@ export async function readXlsxTables(
 }
 
 export function readCsvTables(bytes: Buffer): { tables: ExtractedTable[]; warnings: string[] } {
-  // 공공기관 CSV는 EUC-KR인 경우가 많다. UTF-8로 읽어 깨지면 다시 시도한다 (spreadsheet.ts와 같은 판정).
+  // 공공기관 CSV는 EUC-KR인 경우가 많다. UTF-8로 읽어 깨지면 다시 시도한다 (reader.ts의 텍스트 읽기와 같은 판정).
   let text = new TextDecoder('utf-8').decode(bytes);
   if (text.includes('�')) {
     try {

@@ -12,7 +12,7 @@ import { XMLParser } from 'fast-xml-parser';
  * 슬라이드 단위로 논의되는 문서라 이 경계가 곧 출처다.
  *
  * **표는 마크다운 표로 복원한다.** 셀을 순서대로 이어붙이면 열 머리글과 값의
- * 대응이 끊긴다. `hwp.ts`·`spreadsheet.ts`·`pdf-ocr.ts`가 모두 같은 결론에
+ * 대응이 끊긴다. `hwp.ts`와 첨부 표 읽기(`attachments/tables-*.ts`)도 같은 결론에
  * 도달했고 여기서도 같은 형태로 맞춘다.
  *
  * 새 업체나 새 의존이 필요 없다 — PPTX는 zip + XML이고 `jszip`·

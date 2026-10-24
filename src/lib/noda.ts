@@ -3,7 +3,7 @@ import { NODA_API_KEY, NODA_API_URL } from '@/lib/config';
 /**
  * NODA(문서 읽기 서비스, https://api.readlayer.kr) 클라이언트.
  *
- * 이 코드베이스의 관례대로 SDK 없이 `fetch`로 직접 부른다(embeddings.ts·mailer.ts와 같다).
+ * 이 코드베이스의 관례대로 SDK 없이 `fetch`로 직접 부른다(mailer.ts와 같다).
  * 응답 칸 이름은 https://api.readlayer.kr/openapi.json 을 따른다.
  *
  * 지키는 것:

@@ -24,7 +24,6 @@ export const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY');
 export { SUPABASE_DOCUMENTS_BUCKET } from './config-public';
 export const NEXTAUTH_URL = getEnv('NEXTAUTH_URL');
 export const NEXTAUTH_SECRET = getEnv('NEXTAUTH_SECRET');
-export const VOYAGE_API_KEY = getEnv('VOYAGE_API_KEY');
 export const ANTHROPIC_API_KEY = getEnv('ANTHROPIC_API_KEY');
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? 'WORKON';
 

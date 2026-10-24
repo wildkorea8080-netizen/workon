@@ -25,7 +25,6 @@ for (const key of [
   'SUPABASE_SERVICE_ROLE_KEY',
   'NEXTAUTH_URL',
   'NEXTAUTH_SECRET',
-  'VOYAGE_API_KEY',
   'ANTHROPIC_API_KEY',
 ]) {
   if (!process.env[key]) process.env[key] = 'probe-placeholder';
