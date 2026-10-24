@@ -44,6 +44,12 @@ const UPLOAD_TIMEOUT_MS = 300_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 /** `/context` 한 번의 시간 제한 — 대화가 이만큼 넘게 멈추면 안 된다(설계 "10초쯤") */
 const CONTEXT_TIMEOUT_MS = 8_000;
+/** `/verify` 한 번의 시간 제한 — 답을 붙잡지 않는다(다시 시도 없음) */
+export const VERIFY_TIMEOUT_MS = 5_000;
+/** `/parse` 한 번의 시간 제한 — 스캔 PDF 판독은 오래 걸린다 */
+export const PARSE_TIMEOUT_MS = 60_000;
+/** `/parse` 재시도 창(429·503은 `Retry-After`) */
+export const PARSE_RETRY_WINDOW_MS = 30_000;
 /** 재시도 사이 최소 대기 — `Retry-After: 0`이 와도 서버를 몰아치지 않는다 */
 const MIN_RETRY_WAIT_MS = 1_000;
 /** 업로드 재시도 창 */
@@ -157,6 +163,42 @@ export interface NodaContextResult {
   dropped: number;
 }
 
+export interface NodaVerifyResult {
+  grounded: boolean;
+  unsupported_numbers: string[];
+  unknown_refs: number[];
+}
+
+export interface NodaParsedCell {
+  r: number;
+  c: number;
+  rowspan?: number;
+  colspan?: number;
+  text?: string | null;
+}
+
+export interface NodaParsedTable {
+  id: string;
+  n_rows: number;
+  n_cols: number;
+  caption?: string | null;
+  cells: NodaParsedCell[];
+}
+
+export interface NodaParsedBlock {
+  type?: string;
+  text?: string | null;
+  page?: number;
+}
+
+export interface NodaParsedDocument {
+  readable: boolean;
+  reason: string | null;
+  pages: number;
+  blocks: NodaParsedBlock[];
+  tables: NodaParsedTable[];
+}
+
 export interface NodaClient {
   uploadDocument(input: { tenant: string; filename: string; bytes: Uint8Array }): Promise<NodaUploadResult>;
   /**
@@ -167,7 +209,68 @@ export interface NodaClient {
   /** 404(이미 없음)는 `{ deleted: false }`로 끝난다 — 던지지 않는다 */
   deleteDocument(tenant: string, filename: string): Promise<{ deleted: boolean }>;
   getContext(input: { tenant: string; query: string }): Promise<NodaContextResult>;
+  /**
+   * 답변 검증(`/verify`). `sources`는 그 턴 `/context`의 `sources[]`를 받은 순서 그대로
+   * (답의 `[n]`이 `sources[n-1]`). 한 번만 부른다 — 다시 시도하지 않는다.
+   */
+  verifyAnswer(input: {
+    tenant: string;
+    answer: string;
+    sources: { doc_id: string; chunk_id: string }[];
+  }): Promise<NodaVerifyResult>;
+  /** 한 번 읽기(`/parse`) — 보관함 없이 바이트를 보내 문서 JSON을 받는다. 못 읽은 파일도 200(`readable:false`) */
+  parseDocument(input: { filename: string; bytes: Uint8Array }): Promise<NodaParsedDocument>;
   getHealth(): Promise<Record<string, unknown>>;
+}
+
+function asObject(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function optionalInt(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isInteger(v) ? v : undefined;
+}
+
+function normalizeCell(raw: unknown): NodaParsedCell | null {
+  const o = asObject(raw);
+  if (!o) return null;
+  const r = optionalInt(o.r);
+  const c = optionalInt(o.c);
+  if (r === undefined || c === undefined) return null;
+  const rowspan = optionalInt(o.rowspan);
+  const colspan = optionalInt(o.colspan);
+  return {
+    r,
+    c,
+    ...(rowspan !== undefined ? { rowspan } : {}),
+    ...(colspan !== undefined ? { colspan } : {}),
+    ...(typeof o.text === 'string' || o.text === null ? { text: o.text as string | null } : {}),
+  };
+}
+
+function normalizeTable(raw: unknown): NodaParsedTable | null {
+  const o = asObject(raw);
+  if (!o) return null;
+  const cells = (Array.isArray(o.cells) ? o.cells : [])
+    .map(normalizeCell)
+    .filter((c): c is NodaParsedCell => c !== null);
+  return {
+    id: typeof o.id === 'string' ? o.id : '',
+    n_rows: Number(o.n_rows ?? 0) || 0,
+    n_cols: Number(o.n_cols ?? 0) || 0,
+    ...(typeof o.caption === 'string' || o.caption === null ? { caption: o.caption as string | null } : {}),
+    cells,
+  };
+}
+
+function normalizeBlock(raw: unknown): NodaParsedBlock | null {
+  const o = asObject(raw);
+  if (!o) return null;
+  return {
+    ...(typeof o.type === 'string' ? { type: o.type } : {}),
+    ...(typeof o.text === 'string' || o.text === null ? { text: o.text as string | null } : {}),
+    ...(typeof o.page === 'number' && Number.isFinite(o.page) ? { page: o.page } : {}),
+  };
 }
 
 interface RetryOptions {
@@ -373,6 +476,60 @@ export function createNodaClient(deps: {
           };
         },
         { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: CONTEXT_RETRY_INTERVAL_MS },
+      );
+    },
+
+    async verifyAnswer({ tenant, answer, sources }) {
+      // 다시 시도하지 않는다 — 검증이 답을 붙잡으면 안 된다
+      const res = await request('POST', '/verify', {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant,
+          answer,
+          sources: sources.map((s) => ({ doc_id: s.doc_id, chunk_id: s.chunk_id })),
+        }),
+        timeoutMs: VERIFY_TIMEOUT_MS,
+      });
+      const b = await readJson(res);
+      return {
+        grounded: b.grounded === true,
+        unsupported_numbers: (Array.isArray(b.unsupported_numbers) ? b.unsupported_numbers : [])
+          .filter((n): n is string | number => typeof n === 'string' || typeof n === 'number')
+          .map(String),
+        unknown_refs: (Array.isArray(b.unknown_refs) ? b.unknown_refs : []).filter(
+          (n): n is number => typeof n === 'number' && Number.isFinite(n),
+        ),
+      };
+    },
+
+    async parseDocument({ filename, bytes }) {
+      return withRetry(
+        async () => {
+          const res = await request('POST', '/parse', {
+            headers: {
+              'X-Filename': encodeURIComponent(filename),
+              'Content-Type': 'application/octet-stream',
+            },
+            body: bytes as unknown as BodyInit,
+            timeoutMs: PARSE_TIMEOUT_MS,
+          });
+          const b = await readJson(res);
+          const access = asObject(b.access);
+          const source = asObject(b.source);
+          const pages = source?.pages;
+          return {
+            readable: access?.readable === true,
+            reason: typeof access?.reason === 'string' ? access.reason : null,
+            pages: typeof pages === 'number' && Number.isFinite(pages) ? pages : 0,
+            blocks: (Array.isArray(b.blocks) ? b.blocks : [])
+              .map(normalizeBlock)
+              .filter((x): x is NodaParsedBlock => x !== null),
+            tables: (Array.isArray(b.tables) ? b.tables : [])
+              .map(normalizeTable)
+              .filter((x): x is NodaParsedTable => x !== null),
+          } satisfies NodaParsedDocument;
+        },
+        { windowMs: PARSE_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
       );
     },
 

@@ -3,6 +3,9 @@ import {
   NODA_CONTEXT_BUDGET,
   NODA_MIN_SIMILARITY,
   NodaError,
+  PARSE_RETRY_WINDOW_MS,
+  PARSE_TIMEOUT_MS,
+  VERIFY_TIMEOUT_MS,
   createNodaClient,
   documentIdFromNodaFilename,
   nodaFilename,
@@ -306,6 +309,196 @@ describe('NODA 클라이언트', () => {
     const f = (async () => new Response('x'.repeat(5000), { status: 400 })) as unknown as typeof fetch;
     const err = await client(f).noda.listDocuments('t').catch((e) => e);
     expect(err.message).toBe(`NODA 400: ${'x'.repeat(200)}`);
+  });
+});
+
+describe('답변 검증(/verify)·문서 읽기(/parse)', () => {
+  it('verifyAnswer는 tenant·answer·sources(doc_id·chunk_id만, 순서 그대로)를 보내고 5초 제한, 다시 시도하지 않는다', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return json({ grounded: false, unsupported_numbers: ['1,234'], unknown_refs: [3] });
+    });
+    const { noda } = client(fetchMock as unknown as typeof fetch);
+    const r = await noda.verifyAnswer({
+      tenant: 'workon-a1',
+      answer: '합계는 1,234입니다 [1][3]',
+      sources: [
+        { doc_id: 'd2', chunk_id: 'c9', extra: 'x' } as { doc_id: string; chunk_id: string },
+        { doc_id: 'd1', chunk_id: 'c1' },
+      ],
+    });
+    expect(r).toEqual({ grounded: false, unsupported_numbers: ['1,234'], unknown_refs: [3] });
+    expect(calls[0].url).toBe('https://noda.test/verify');
+    expect(calls[0].init.method).toBe('POST');
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe(`Bearer ${KEY}`);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      tenant: 'workon-a1',
+      answer: '합계는 1,234입니다 [1][3]',
+      sources: [
+        { doc_id: 'd2', chunk_id: 'c9' },
+        { doc_id: 'd1', chunk_id: 'c1' },
+      ],
+    });
+    expect(VERIFY_TIMEOUT_MS).toBe(5_000);
+
+    const f503 = vi.fn(async () => json({ error: 'busy' }, 503, { 'retry-after': '1' }));
+    const c = client(f503 as unknown as typeof fetch);
+    const err = await c.noda.verifyAnswer({ tenant: 't', answer: 'a', sources: [] }).catch((e) => e);
+    expect(err).toBeInstanceOf(NodaError);
+    expect(err.status).toBe(503);
+    expect(f503).toHaveBeenCalledTimes(1);
+    expect(c.clock.sleeps).toEqual([]);
+  });
+
+  it('verifyAnswer는 시간 제한 5초 문구, 네트워크 오류도 한 번뿐', async () => {
+    const timeout = Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    const { noda } = client(
+      (async () => {
+        throw timeout;
+      }) as unknown as typeof fetch,
+    );
+    const err = await noda.verifyAnswer({ tenant: 't', answer: 'a', sources: [] }).catch((e) => e);
+    expect(err.code).toBe('timeout');
+    expect(err.message).toContain('(5초)');
+    const net = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    const e2 = await client(net as unknown as typeof fetch)
+      .noda.verifyAnswer({ tenant: 't', answer: 'a', sources: [] })
+      .catch((e) => e);
+    expect(e2.code).toBe('network');
+    expect(net).toHaveBeenCalledTimes(1);
+  });
+
+  it('verifyAnswer 응답의 빠진 칸은 기본값', async () => {
+    const { noda } = client((async () => json({})) as unknown as typeof fetch);
+    expect(await noda.verifyAnswer({ tenant: 't', answer: 'a', sources: [] })).toEqual({
+      grounded: false,
+      unsupported_numbers: [],
+      unknown_refs: [],
+    });
+    const { noda: n2 } = client(
+      (async () => json({ grounded: 'yes', unsupported_numbers: 'x', unknown_refs: null })) as unknown as typeof fetch,
+    );
+    expect(await n2.verifyAnswer({ tenant: 't', answer: 'a', sources: [] })).toEqual({
+      grounded: false,
+      unsupported_numbers: [],
+      unknown_refs: [],
+    });
+  });
+
+  it('parseDocument는 X-Filename 인코딩·바이트 본문, 503은 Retry-After 따라 다시', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    let n = 0;
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      n += 1;
+      if (n === 1) return json({ error: 'busy' }, 503, { 'retry-after': '5' });
+      return json({ access: { readable: true }, source: { pages: 2 }, blocks: [], tables: [] });
+    });
+    const { noda, clock } = client(fetchMock as unknown as typeof fetch);
+    const bytes = new Uint8Array([1, 2, 3]);
+    const r = await noda.parseDocument({ filename: '스캔 문서.pdf', bytes });
+    expect(r.readable).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(clock.sleeps).toEqual([5000]);
+    expect(calls[0].url).toBe('https://noda.test/parse');
+    expect(calls[0].init.method).toBe('POST');
+    const h = calls[0].init.headers as Record<string, string>;
+    expect(h['X-Filename']).toBe(encodeURIComponent('스캔 문서.pdf'));
+    expect(h['Content-Type']).toBe('application/octet-stream');
+    expect(h.Authorization).toBe(`Bearer ${KEY}`);
+    expect(calls[0].init.body).toBe(bytes);
+    expect(PARSE_TIMEOUT_MS).toBe(60_000);
+    expect(PARSE_RETRY_WINDOW_MS).toBe(30_000);
+  });
+
+  it('parseDocument는 Retry-After가 30초 창을 넘기면 기다리지 않고, 시간 제한은 60초·다시 안 함', async () => {
+    const f = vi.fn(async () => json({}, 503, { 'retry-after': '40' }));
+    const c = client(f as unknown as typeof fetch);
+    const err = await c.noda.parseDocument({ filename: 'a.pdf', bytes: new Uint8Array() }).catch((e) => e);
+    expect(err.status).toBe(503);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(c.clock.sleeps).toEqual([]);
+
+    const timeout = Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    const t = vi.fn().mockRejectedValue(timeout);
+    const c2 = client(t as unknown as typeof fetch);
+    const e2 = await c2.noda.parseDocument({ filename: 'a.pdf', bytes: new Uint8Array() }).catch((e) => e);
+    expect(e2.code).toBe('timeout');
+    expect(e2.message).toContain('(60초)');
+    expect(t).toHaveBeenCalledTimes(1);
+  });
+
+  it('parseDocument는 access·source·blocks·tables를 정리한다', async () => {
+    const { noda } = client(
+      (async () =>
+        json({
+          access: { readable: false, reason: 'PASSWORD_PROTECTED' },
+          source: {},
+        })) as unknown as typeof fetch,
+    );
+    expect(await noda.parseDocument({ filename: 'a.pdf', bytes: new Uint8Array() })).toEqual({
+      readable: false,
+      reason: 'PASSWORD_PROTECTED',
+      pages: 0,
+      blocks: [],
+      tables: [],
+    });
+
+    const { noda: n2 } = client(
+      (async () =>
+        json({
+          access: { readable: true, reason: null },
+          source: { pages: 3 },
+          blocks: [{ id: 'b1', type: 'paragraph', text: '안녕', page: 1, bbox: [1, 2] }, 'x', null],
+          tables: [
+            {
+              id: 't1',
+              n_rows: 2,
+              n_cols: 2,
+              caption: '(단위: 천원)',
+              cells: [
+                { r: 0, c: 0, text: '구분' },
+                { r: 0, c: 1, colspan: 2, text: null },
+                { r: 1.5, c: 0, text: 'bad' },
+                'x',
+                { r: 1, c: 0, rowspan: 2, text: '100' },
+              ],
+            },
+            'x',
+          ],
+        })) as unknown as typeof fetch,
+    );
+    const r = await n2.parseDocument({ filename: 'a.pdf', bytes: new Uint8Array() });
+    expect(r.readable).toBe(true);
+    expect(r.reason).toBeNull();
+    expect(r.pages).toBe(3);
+    expect(r.blocks).toEqual([{ type: 'paragraph', text: '안녕', page: 1 }]);
+    expect(r.tables).toEqual([
+      {
+        id: 't1',
+        n_rows: 2,
+        n_cols: 2,
+        caption: '(단위: 천원)',
+        cells: [
+          { r: 0, c: 0, text: '구분' },
+          { r: 0, c: 1, colspan: 2, text: null },
+          { r: 1, c: 0, rowspan: 2, text: '100' },
+        ],
+      },
+    ]);
+  });
+
+  it('parseDocument·verifyAnswer는 키가 비면 fetch 없이 missing_key', async () => {
+    const f = vi.fn();
+    const { noda } = client(f as unknown as typeof fetch, fakeClock(), '');
+    expect((await noda.parseDocument({ filename: 'a', bytes: new Uint8Array() }).catch((e) => e)).code).toBe(
+      'missing_key',
+    );
+    expect((await noda.verifyAnswer({ tenant: 't', answer: 'a', sources: [] }).catch((e) => e)).code).toBe(
+      'missing_key',
+    );
+    expect(f).not.toHaveBeenCalled();
   });
 });
 
