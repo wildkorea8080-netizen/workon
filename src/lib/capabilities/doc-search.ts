@@ -386,16 +386,17 @@ type MatchInput = { agentId: string; organizationId: string | null };
  * - 어디에도 행이 없는 조각·문서 id를 읽지 못한 조각 → 고아. NODA 사본을 지우고(짧게만 기다림) warning
  * - 형식이 깨진 원소 → 확인할 수 없음. warning
  * 운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수만).
+ * `mixed`면 부르는 쪽이 그 턴의 공통 근거까지 버린다 — 보관함 혼선이 의심되는 턴은 어느 근거로도 답하지 않는다.
  */
 async function matchedChunks(
   deps: DocSearchDeps,
   input: MatchInput,
   result: NodaContextResult,
   docs: AgentDocument[]
-): Promise<RetrievedChunk[]> {
+): Promise<{ chunks: RetrievedChunk[]; mixed: boolean }> {
   const log = deps.log ?? logSystem;
   const match = sourcesToChunks(result.sources, docs, contextPassages(result.context));
-  if (isCleanMatch(match)) return match.chunks;
+  if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false };
 
   const base = { agent_id: input.agentId, source_count: result.sources.length };
 
@@ -412,7 +413,7 @@ async function matchedChunks(
         details: { ...base, error: error instanceof Error ? error.message : String(error) },
         orgId: input.organizationId,
       });
-      return [];
+      return { chunks: [], mixed: false };
     }
   }
 
@@ -425,7 +426,7 @@ async function matchedChunks(
       details: { ...base, foreign_count: foreign.length },
       orgId: input.organizationId,
     });
-    return [];
+    return { chunks: [], mixed: true };
   }
 
   const found = new Set(owners.map((o) => o.id.toLowerCase()));
@@ -454,7 +455,7 @@ async function matchedChunks(
       orgId: input.organizationId,
     });
   }
-  return [];
+  return { chunks: [], mixed: false };
 }
 
 /** 공통 근거를 맞춘 결과. `mixed`면 그 턴 근거 전체(비서 것까지)를 버린다 */
@@ -487,6 +488,8 @@ async function matchedCommonChunks(
   const match = commonSourcesToChunks(shifted.sources, typeDocs, contextPassages(shifted.context), startIndex);
   if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false, shifted };
 
+  // 같은 유형인데 preflight 목록에 없던 행(그 사이 새로 올린 문서)은 섞임도 고아도 아니다 —
+  // 기록 없이 이번 턴의 공통 근거만 버린다(다음 질문부터는 목록에 있다). 비서 쪽과 같은 처리
   const dropped: CommonMatchResult = { chunks: [], mixed: false, shifted };
   const base = { agent_id: input.agentId, org_type_key: ORG_TYPE_KEYS[common.orgType] };
 
@@ -617,7 +620,7 @@ export async function searchAgentDocuments(
   const docs = await deps.documentsOf(agentId);
   if (!hasReady(docs)) return { chunks: [], dropped: 0 };
   const result = await deps.fetchContext(agentId, query);
-  const chunks = await matchedChunks(deps, { agentId, organizationId }, result, docs);
+  const { chunks } = await matchedChunks(deps, { agentId, organizationId }, result, docs);
   return { chunks, dropped: result.dropped };
 }
 
@@ -739,18 +742,20 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       if (!carry.result && !carry.common) return {};
 
       // 비서 근거는 S4 그대로(판정 R5·H)
-      const agentMatched = carry.result ? await matchedChunks(deps, ctx, carry.result, carry.docs) : [];
+      const agentMatch = carry.result ? await matchedChunks(deps, ctx, carry.result, carry.docs) : { chunks: [], mixed: false };
+      const agentMatched = agentMatch.chunks;
 
       // 공통 근거 — 비서 조각이 하나라도 있으면 비서 묶음의 가장 큰 번호만큼 민다(설계 5.2).
       // 비서 조각이 모두 빠진 턴은 밀지 않는다 — 공통 보관함으로 검증할 때 [n]이 맞게(5.5)
+      // 비서 근거에 남의 비서 문서가 섞였으면 공통 근거도 맞추지 않는다(사본 지우기도 하지 않는다) — 그 턴은 근거 없이
       let common: CommonMatchResult | null = null;
-      if (carry.common) {
+      if (carry.common && !agentMatch.mixed) {
         const offset = agentMatched.length > 0 && carry.result ? maxCitationNumber(carry.result) : 0;
         common = await matchedCommonChunks(deps, ctx, carry.common, offset, agentMatched.length);
       }
 
-      // 공통 근거에 다른 유형이 섞였으면 그 턴 근거 전체를 버린다(5.3)
-      const mixed = common?.mixed === true;
+      // 어느 쪽이든 섞였으면 그 턴 근거 전체를 버린다(공통 쪽은 5.3)
+      const mixed = agentMatch.mixed || common?.mixed === true;
       const agentChunks = mixed ? [] : agentMatched;
       const commonChunks = mixed ? [] : (common?.chunks ?? []);
       const chunks = [...agentChunks, ...commonChunks];

@@ -664,6 +664,42 @@ describe('doc_search — 공통 자료실(S5)', () => {
     expect(JSON.stringify(m.log.mock.calls)).not.toContain('남의기준');
   });
 
+  it('prepare — 비서 근거에 남의 비서 문서가 섞이면 깨끗한 공통 근거도 버린다', async () => {
+    const mixedAgent = vi.fn(async () => ({
+      context: `[1] ${id}__규정.hwp
+일비
+[2] ${id2}__남의.hwp
+남의 글`,
+      sources: [src(), src({ n: 2, filename: `${id2}__남의.hwp` })],
+      dropped: 0,
+    }));
+    // 공통 근거는 깨끗하다(기본 — 이 유형의 ready 현재 판 하나)
+    const m = withCommon({ fetchContext: mixedAgent });
+    m.findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
+    const out = await turn(m.d);
+    expect(out.chunks).toEqual([]);
+    expect(out.verifySources).toEqual([]);
+    expect(out.verifyTenant).toBeUndefined();
+    expect(out.systemAddendum).toContain('[문서 검색 결과 없음]');
+    expect(out.systemAddendum).not.toContain('예산편성기준');
+    expect(out.systemAddendum).not.toContain('여비 기준 단가');
+    expect(m.log).toHaveBeenCalledWith(
+      expect.objectContaining({ level: 'critical', category: 'security', details: expect.objectContaining({ agent_id: AGENT, foreign_count: 1 }) })
+    );
+    expect(m.findCommonDocuments).not.toHaveBeenCalled();
+    expect(m.deleteCommonOrphan).not.toHaveBeenCalled();
+
+    // 공통 쪽에 고아가 있어도 맞추지 않으니 지우지도 않는다
+    const o = withCommon({
+      fetchContext: mixedAgent,
+      fetchCommonContext: vi.fn(async () => ({ context: 'x', sources: [csrc({ filename: `${CID2}__지운기준(2025).pdf` })], dropped: 0 })),
+    });
+    o.findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
+    expect((await turn(o.d)).chunks).toEqual([]);
+    expect(o.findCommonDocuments).not.toHaveBeenCalled();
+    expect(o.deleteCommonOrphan).not.toHaveBeenCalled();
+  });
+
   it('prepare — 유형을 바꾼 기관은 새 유형 보관함만 찾는다(옛 유형 행은 조회되지 않음)', async () => {
     // 공통 문서 표에는 두 유형의 행이 있다. 기관은 공공기관 → 지방자치단체로 바뀌었다(Review Focus 1)
     const LOCAL: OrgType = '지방자치단체';
