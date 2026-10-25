@@ -14,7 +14,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/super',              label: '대시보드',        icon: '📊', exact: true  },
   { href: '/super/organizations',label: '기관 관리',       icon: '🏢'               },
-  { href: '/super/accounts',     label: '계정 관리',       icon: '👤'               },
+  { href: '/super/common-library', label: '공통 자료실', icon: '📚'               },
+  { href: '/super/accounts',    label: '계정 관리',       icon: '👤'               },
   { href: '/super/api-keys',     label: 'API 관리',        icon: '🔑'               },
   { href: '/super/usage',        label: '사용량 모니터링', icon: '📈'               },
   { href: '/super/contracts',    label: '계약/과금',       icon: '💰'               },
