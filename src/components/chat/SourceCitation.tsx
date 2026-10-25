@@ -1,5 +1,5 @@
 import type { RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel, stripNodaPrefixes, sourceNumber } from './source-label';
+import { sourceLocationLabel, sourceTitleLabel, sourceNumber } from './source-label';
 
 interface SourceCitationProps {
   sources: RetrievedChunk[];
@@ -8,7 +8,7 @@ interface SourceCitationProps {
 }
 
 /**
- * 참고 자료 — 답변 아래 한 줄짜리 칩(`[1] 문서 · p.43`). 누르면 오른쪽 근거 창(SourcePanel)이 열린다(2026-10-23).
+ * 참고 자료 — 답변 아래 한 줄짜리 칩(`[1] 문서 · p.43`, 공통 자료실 조각은 `[1] [공통] 예산편성기준(2026) · p.12`). 누르면 오른쪽 근거 창(SourcePanel)이 열린다(2026-10-23).
  * 예전에는 근거마다 큰 카드를 쌓아 답변이 화면 위로 밀려났다.
  */
 export default function SourceCitation({ sources, onOpen }: SourceCitationProps) {
@@ -20,7 +20,7 @@ export default function SourceCitation({ sources, onOpen }: SourceCitationProps)
     <div className="flex items-center flex-wrap gap-1.5">
       <span className="text-xs font-medium text-slate-500 mr-0.5">참고 자료</span>
       {sources.map((source, index) => {
-        const title = (source.documentTitle && stripNodaPrefixes(source.documentTitle)) || '제목 없는 문서';
+        const title = sourceTitleLabel(source);
         const location = sourceLocationLabel(source);
         return (
           <button

@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import type { RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel, stripNodaPrefixes, sourceNumber } from './source-label';
+import { sourceLocationLabel, sourceTitleLabel, sourceNumber } from './source-label';
 
 interface SourcePanelProps {
   /** 연 근거. null이면 닫혀 있다 */
@@ -27,7 +27,7 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  const title = source ? (source.documentTitle && stripNodaPrefixes(source.documentTitle)) || '제목 없는 문서' : '';
+  const title = source ? sourceTitleLabel(source) : '';
   const text = source?.text?.trim() ?? '';
 
   return (
@@ -53,6 +53,11 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
                 <div className="text-xs text-slate-500 mt-0.5 truncate" title={title}>
                   [{sourceNumber(source)}] {title}
                 </div>
+                {source.scope === 'common' && (
+                  <div className="text-xs text-[#003087] mt-0.5">
+                    공통 기준{typeof source.editionYear === 'number' ? ` · ${source.editionYear}년 판` : ''}
+                  </div>
+                )}
               </div>
               <button
                 type="button"

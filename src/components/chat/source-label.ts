@@ -48,6 +48,24 @@ export function sourceNumber(c: { n?: number; chunkIndex: number }): number {
   return typeof c.n === 'number' && Number.isFinite(c.n) ? c.n : c.chunkIndex + 1;
 }
 
+export interface SourceTitleInput {
+  documentTitle?: string;
+  /** 공통 자료실 조각이면 `'common'` */
+  scope?: 'common';
+  editionYear?: number;
+}
+
+/**
+ * 출처 제목 — 공통 자료실 조각은 `[공통] 제목(2026)`(연도 없으면 괄호 없이, 제목 없으면 `문서`),
+ * 비서 문서 조각(`scope` 없음·옛 메시지)은 지금 그대로 제목(`{uuid}__` 뗌, 없으면 `제목 없는 문서`).
+ */
+export function sourceTitleLabel(c: SourceTitleInput): string {
+  const title = typeof c.documentTitle === 'string' ? stripNodaPrefixes(c.documentTitle) : '';
+  if (c.scope !== 'common') return title || '제목 없는 문서';
+  const year = typeof c.editionYear === 'number' && Number.isFinite(c.editionYear) ? `(${c.editionYear})` : '';
+  return `[공통] ${title || '문서'}${year}`;
+}
+
 export interface SourceLocationInput {
   page?: number | null;
   cellRange?: string | null;

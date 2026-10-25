@@ -23,7 +23,7 @@ describe('답변 속 [n]을 근거 창 단추로 (2026-10-23)', () => {
     expect(citationNumber('https://x')).toBeNull();
   });
 });
-import { sourceLocationLabel, stripNodaPrefixes } from '@/components/chat/source-label';
+import { sourceLocationLabel, stripNodaPrefixes, sourceTitleLabel } from '@/components/chat/source-label';
 
 const ID = '123e4567-e89b-12d3-a456-426614174000';
 
@@ -106,5 +106,36 @@ describe('근거 창을 화면에 잇는다 (원본 검사)', () => {
     expect(panel).toContain("e.key === 'Escape'");
     expect(panel).toContain('onClick={onClose}');
     expect(panel).toContain('aria-label="근거 창 닫기"');
+  });
+});
+
+describe('출처의 [공통]·기준 연도 (S5)', () => {
+  const read = (p: string) => require('fs').readFileSync(p, 'utf8') as string;
+
+  it('공통 조각은 `[공통] 제목(연도)`, 연도가 없으면 괄호 없이', () => {
+    expect(sourceTitleLabel({ documentTitle: '예산편성기준', scope: 'common', editionYear: 2026 })).toBe('[공통] 예산편성기준(2026)');
+    expect(sourceTitleLabel({ documentTitle: '예산편성기준', scope: 'common' })).toBe('[공통] 예산편성기준');
+  });
+
+  it('공통인데 제목이 없으면 `문서`, 파일 이름 앞부분은 뗀다', () => {
+    expect(sourceTitleLabel({ scope: 'common', editionYear: 2026 })).toBe('[공통] 문서(2026)');
+    const id = '123e4567-e89b-12d3-a456-426614174000';
+    expect(sourceTitleLabel({ documentTitle: `${id}__기준.pdf`, scope: 'common' })).toBe('[공통] 기준.pdf');
+  });
+
+  it('scope 없는 옛 조각은 지금 제목 그대로(앞부분 떼기·제목 없음 문구 유지)', () => {
+    const id = '123e4567-e89b-12d3-a456-426614174000';
+    expect(sourceTitleLabel({ documentTitle: `${id}__규정.pdf` })).toBe('규정.pdf');
+    expect(sourceTitleLabel({ documentTitle: '규정.pdf', editionYear: 2026 })).toBe('규정.pdf');
+    expect(sourceTitleLabel({})).toBe('제목 없는 문서');
+  });
+
+  it('칩과 근거 창이 이 함수를 쓰고, 창은 공통일 때만 `공통 기준` 줄을 둔다', () => {
+    const chip = read('src/components/chat/SourceCitation.tsx');
+    expect(chip).toContain('sourceTitleLabel(source)');
+    const panel = read('src/components/chat/SourcePanel.tsx');
+    expect(panel).toContain('sourceTitleLabel(source)');
+    expect(panel).toContain("source.scope === 'common'");
+    expect(panel).toContain('공통 기준');
   });
 });
