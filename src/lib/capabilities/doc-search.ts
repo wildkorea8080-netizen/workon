@@ -177,24 +177,43 @@ export function sourcesToChunks(
     }
     if (!CITABLE.has(doc.noda_status)) continue;
 
-    const anchors = Array.isArray(source.anchors) ? source.anchors.filter((a) => a && typeof a === 'object') : [];
-    const pageAnchor = anchors.find((a) => typeof a.page === 'number' && Number.isFinite(a.page) && a.page > 0);
-    const cellAnchor = anchors.find((a) => typeof a.cell_range === 'string' && a.cell_range.trim() !== '');
-    const extractors = Array.isArray(source.extractors) ? source.extractors : [];
-    chunks.push({
-      documentId: doc.id,
-      documentTitle: doc.title || doc.file_name,
-      chunkIndex: chunks.length,
-      ...(typeof source.n === 'number' && Number.isFinite(source.n) ? { n: source.n } : {}),
-      text: (typeof source.n === 'number' && passages.get(source.n)) || '',
-      similarity: typeof source.similarity === 'number' && Number.isFinite(source.similarity) ? source.similarity : 0,
-      page: pageAnchor ? (pageAnchor.page as number) : null,
-      cellRange: cellAnchor ? stripNodaPrefixes(cellAnchor.cell_range as string) : null,
-      section: sectionOf(source.outline) ?? sectionOf(source.path),
-      ocr: extractors.some((e) => typeof e === 'string' && /ocr/i.test(e)),
-    });
+    chunks.push(
+      chunkFromSource(source, {
+        documentId: doc.id,
+        documentTitle: doc.title || doc.file_name,
+        chunkIndex: chunks.length,
+        passages,
+      })
+    );
   }
   return match;
+}
+
+/**
+ * NODA 근거 하나 → 화면 출처 조각. 위치 칸(쪽·칸 주소·절·스캔 판독)과 근거 원문을 계산한다 —
+ * 비서 문서(`sourcesToChunks`)와 공통 자료실(`commonSourcesToChunks`)이 같은 규칙으로 쓴다.
+ * 어느 문서의 조각인지(제목·순번)는 부르는 쪽이 정한다.
+ */
+export function chunkFromSource(
+  source: NodaSource,
+  base: { documentId: string; documentTitle: string; chunkIndex: number; passages: Map<number, string> }
+): RetrievedChunk {
+  const anchors = Array.isArray(source.anchors) ? source.anchors.filter((a) => a && typeof a === 'object') : [];
+  const pageAnchor = anchors.find((a) => typeof a.page === 'number' && Number.isFinite(a.page) && a.page > 0);
+  const cellAnchor = anchors.find((a) => typeof a.cell_range === 'string' && a.cell_range.trim() !== '');
+  const extractors = Array.isArray(source.extractors) ? source.extractors : [];
+  return {
+    documentId: base.documentId,
+    documentTitle: base.documentTitle,
+    chunkIndex: base.chunkIndex,
+    ...(typeof source.n === 'number' && Number.isFinite(source.n) ? { n: source.n } : {}),
+    text: (typeof source.n === 'number' && base.passages.get(source.n)) || '',
+    similarity: typeof source.similarity === 'number' && Number.isFinite(source.similarity) ? source.similarity : 0,
+    page: pageAnchor ? (pageAnchor.page as number) : null,
+    cellRange: cellAnchor ? stripNodaPrefixes(cellAnchor.cell_range as string) : null,
+    section: sectionOf(source.outline) ?? sectionOf(source.path),
+    ocr: extractors.some((e) => typeof e === 'string' && /ocr/i.test(e)),
+  };
 }
 
 /**

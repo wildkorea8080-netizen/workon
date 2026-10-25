@@ -38,6 +38,10 @@ export const NODA_MIN_SIMILARITY = 0.8;
 /** `/context`가 돌려주는 근거 묶음의 글자 예산(NODA 기본값과 같다) */
 export const NODA_CONTEXT_BUDGET = 4000;
 
+/** 비서 문서와 공통 자료실을 함께 찾는 턴의 예산(설계 5.2) — 모델에 가는 발췌가 두 배(7,000자)로 늘지 않게 5,000자로 묶는다 */
+export const CONTEXT_BUDGET_AGENT_SHARED = 3000;
+export const CONTEXT_BUDGET_COMMON_SHARED = 2000;
+
 /** NODA 업로드 한 번의 시간 제한 — 큰 문서는 읽는 데 오래 걸린다 */
 const UPLOAD_TIMEOUT_MS = 300_000;
 /** 그 밖 호출 한 번의 시간 제한 */
@@ -269,7 +273,8 @@ export interface NodaClient {
    * 404(보관함이 없음)는 `{ existed: false }`로 끝난다. `deleted`는 NODA가 지운 문서 수를 알려 줄 때만 숫자
    */
   deleteTenant(tenant: string): Promise<{ existed: boolean; deleted: number | null }>;
-  getContext(input: { tenant: string; query: string }): Promise<NodaContextResult>;
+  /** `budget`을 주지 않으면 `NODA_CONTEXT_BUDGET` */
+  getContext(input: { tenant: string; query: string; budget?: number }): Promise<NodaContextResult>;
   /**
    * 답변 검증(`/verify`). `sources`는 그 턴 `/context`의 `sources[]`를 받은 순서 그대로
    * (답의 `[n]`이 `sources[n-1]`). 한 번만 부른다 — 다시 시도하지 않는다.
@@ -583,7 +588,7 @@ export function createNodaClient(deps: {
       await request('DELETE', '/webhooks', { query: { id }, timeoutMs: DEFAULT_TIMEOUT_MS });
     },
 
-    async getContext({ tenant, query }) {
+    async getContext({ tenant, query, budget }) {
       return withRetry(
         async () => {
           const res = await request('POST', '/context', {
@@ -591,7 +596,7 @@ export function createNodaClient(deps: {
             body: JSON.stringify({
               tenant,
               query,
-              budget: NODA_CONTEXT_BUDGET,
+              budget: budget ?? NODA_CONTEXT_BUDGET,
               min_similarity: NODA_MIN_SIMILARITY,
             }),
             timeoutMs: CONTEXT_TIMEOUT_MS,

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   NODA_CONTEXT_BUDGET,
+  CONTEXT_BUDGET_AGENT_SHARED,
+  CONTEXT_BUDGET_COMMON_SHARED,
   NODA_MIN_SIMILARITY,
   NodaError,
   PARSE_RETRY_WINDOW_MS,
@@ -165,6 +167,21 @@ describe('NODA 클라이언트', () => {
     expect(clock.sleeps.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(10_000);
     expect(fetchMock).toHaveBeenCalledTimes(clock.sleeps.length + 1);
     expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('getContext는 budget을 주면 그 값을, 없으면 4000을 싣는다', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const f = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return json({ context: '', sources: [], dropped: 0 });
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    await noda.getContext({ tenant: 't', query: 'q', budget: 3000 });
+    await noda.getContext({ tenant: 't', query: 'q' });
+    expect(bodies[0].budget).toBe(3000);
+    expect(bodies[1].budget).toBe(4000);
+    expect(CONTEXT_BUDGET_AGENT_SHARED).toBe(3000);
+    expect(CONTEXT_BUDGET_COMMON_SHARED).toBe(2000);
   });
 
   it('getContext 응답에 dropped가 없으면 0, sources가 없으면 []', async () => {
