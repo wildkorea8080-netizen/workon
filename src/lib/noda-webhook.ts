@@ -1,9 +1,12 @@
 // src/lib/noda-webhook.ts
 import { createHmac, timingSafeEqual } from 'crypto';
 import { agentIdFromNodaTenant, documentIdFromNodaFilename } from '@/lib/noda';
+import { orgTypeFromCommonTenant } from '@/lib/org-types';
+import { commonReadingDeps } from '@/lib/common-documents';
 import {
   defaultReadingDeps,
   nodaFailurePatch,
+  runAfterReady,
   unreadableReason,
   type FinishPatch,
   type ReadingDeps,
@@ -13,7 +16,7 @@ import {
  * NODA 웹훅(2026-10-24) — 읽기 결과(`document.ready`·`document.unreadable`·`document.failed`)를 받아
  * 목록을 아무도 열지 않아도 행을 바꾼다. 나만의 비서·부서 비서 문서가 관리자 목록에 안 보여 '읽는 중'에 남던 공백을 메운다.
  *
- * - 키 하나(`workon`)에 웹훅 하나 — `workon-…` 보관함 전체의 알림이 오고 `tenant`로 비서를 가른다
+ * - 키 하나(`workon`)에 웹훅 하나 — `workon-…` 보관함 전체의 알림이 오고 `tenant`로 비서(`workon-a…`)와 공통 자료실(`workon-c-…`)을 가른다
  * - **알림이지 장부가 아니다**(NODA) — 놓친 알림은 문서 목록 맞추기(`reconcileReading`)가 바로잡는다
  * - 같은 `delivery`가 다시 와도 해가 없다: 행은 `reading`일 때만 바뀐다(조건부 갱신)
  */
@@ -56,13 +59,21 @@ export function verifyNodaSignature(input: {
 
 export type WebhookOutcome = 'updated' | 'unchanged' | 'ignored' | 'mismatch' | 'orphan';
 
+/** 시험용으로 갈아 끼우는 의존 — 비서 보관함(`documents`)과 공통 보관함(`common_documents`)이 따로다 */
+export interface WebhookDeps {
+  agent?: ReadingDeps;
+  common?: ReadingDeps;
+}
+
 /**
- * 알림 하나를 행에 쓴다. 보관함(비서)과 NODA 파일 이름이 **그 비서의 행과 정확히 맞을 때만** 바꾼다 —
- * 다른 비서·다른 기관의 행은 건드리지 않는다. 운영 기록에는 파일 이름을 남기지 않는다(문서 id·종류만).
+ * 알림 하나를 행에 쓴다. `tenant`로 먼저 가른다 — 비서 보관함이면 `documents`, 공통 보관함이면 `common_documents`.
+ * 보관함과 NODA 파일 이름이 **그 행과 정확히 맞을 때만** 바꾼다(비서는 `agent_id`, 공통은 `org_type`) —
+ * 다른 비서·다른 유형의 행은 건드리지 않는다. 운영 기록에는 파일 이름을 남기지 않는다(문서 id·종류만).
+ * `ready`를 쓴 뒤에는 `afterReady`를 부른다(공통 문서가 옛 판을 내리는 자리 — 실패는 기록만).
  */
 export async function applyNodaEvent(
   event: Record<string, unknown>,
-  deps: ReadingDeps = defaultReadingDeps(),
+  deps: WebhookDeps = {},
 ): Promise<WebhookOutcome> {
   const kind = typeof event.event === 'string' ? event.event : '';
   if (kind !== 'document.ready' && kind !== 'document.unreadable' && kind !== 'document.failed') return 'ignored';
@@ -70,18 +81,23 @@ export async function applyNodaEvent(
   const tenant = typeof event.tenant === 'string' ? event.tenant : '';
   const filename = typeof event.filename === 'string' ? event.filename : '';
   const agentId = agentIdFromNodaTenant(tenant);
+  const orgType = agentId ? null : orgTypeFromCommonTenant(tenant);
   const documentId = documentIdFromNodaFilename(filename);
-  // 비서 보관함이 아닌 곳(`workon`·점검용 `workon-check`)이나 WORKON이 붙이지 않은 이름은 우리 행이 아니다
-  if (!agentId || !documentId) return 'ignored';
+  // 비서·공통 보관함이 아닌 곳(`workon`·점검용 `workon-check`)이나 WORKON이 붙이지 않은 이름은 우리 행이 아니다
+  if ((!agentId && !orgType) || !documentId) return 'ignored';
 
-  const row = await deps.store.getRow(documentId);
+  const d = agentId ? (deps.agent ?? defaultReadingDeps()) : (deps.common ?? commonReadingDeps());
+  const matches = (row: { agent_id?: string | null; org_type?: string | null }) =>
+    agentId ? row.agent_id === agentId : row.org_type === orgType;
+
+  const row = await d.store.getRow(documentId);
   if (!row) {
     // 읽는 도중 문서가 지워졌다 — NODA에 생긴 사본을 그 보관함에서 지운다(실패는 기록만)
     if (kind === 'document.failed') return 'ignored';
     try {
-      await deps.noda.deleteDocument(tenant, filename);
+      await d.noda.deleteDocument(tenant, filename);
     } catch {
-      await deps.log({
+      await d.log({
         level: 'warning',
         category: 'api',
         message: 'NODA 웹훅 — 지워진 문서의 사본을 지우지 못함',
@@ -90,8 +106,8 @@ export async function applyNodaEvent(
     }
     return 'orphan';
   }
-  if (row.agent_id !== agentId || row.noda_filename !== filename) {
-    await deps.log({
+  if (!matches(row) || row.noda_filename !== filename) {
+    await d.log({
       level: 'warning',
       category: 'security',
       message: 'NODA 웹훅 — 보관함·파일 이름이 문서 행과 맞지 않음',
@@ -106,7 +122,7 @@ export async function applyNodaEvent(
       noda_status: 'ready',
       noda_reason: null,
       ...(typeof event.doc_id === 'string' ? { noda_doc_id: event.doc_id } : {}),
-      noda_read_at: new Date(deps.now()).toISOString(),
+      noda_read_at: new Date(d.now()).toISOString(),
     };
   } else if (kind === 'document.unreadable') {
     patch = { noda_status: 'unreadable', noda_reason: unreadableReason(typeof event.reason === 'string' ? event.reason : null) };
@@ -114,5 +130,7 @@ export async function applyNodaEvent(
     patch = nodaFailurePatch(typeof event.status === 'number' ? event.status : null);
   }
   if (!patch) return 'unchanged';
-  return (await deps.store.finish(documentId, patch)) ? 'updated' : 'unchanged';
+  if (!(await d.store.finish(documentId, patch))) return 'unchanged';
+  if (patch.noda_status === 'ready') await runAfterReady(d, documentId);
+  return 'updated';
 }

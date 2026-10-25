@@ -267,7 +267,7 @@ async function logNodaError(deps: ReadingDeps, err: unknown, documentId?: string
 }
 
 /** `ready`를 쓴 뒤 갈고리를 부른다. 실패는 잡아 기록만 한다 — 읽기 결과를 바꾸지 않는다 */
-async function runAfterReady(deps: ReadingDeps, documentId: string): Promise<void> {
+export async function runAfterReady(deps: ReadingDeps, documentId: string): Promise<void> {
   if (!deps.afterReady) return;
   try {
     await deps.afterReady(documentId);
