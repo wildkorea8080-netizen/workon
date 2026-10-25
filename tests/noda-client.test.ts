@@ -10,6 +10,7 @@ import {
   VERIFY_TIMEOUT_MS,
   createNodaClient,
   documentIdFromNodaFilename,
+  nodaErrorFields,
   nodaFilename,
   nodaTenant,
   stripNodaPrefixes,
@@ -263,6 +264,63 @@ describe('NODA 클라이언트', () => {
     expect(n).toBe(2);
     const bad = client((async () => json({}, 401)) as unknown as typeof fetch);
     await expect(bad.noda.deleteTenant('t')).rejects.toBeInstanceOf(NodaError);
+  });
+
+  it('실패 응답의 X-Request-Id를 오류에 싣고, 운영 기록 칸(nodaErrorFields)으로 꺼낸다', async () => {
+    const { noda } = client((async () => json({ error: 'nope' }, 401, { 'x-request-id': 'req_01:a-b.c' })) as unknown as typeof fetch);
+    const err = (await noda.deleteTenant('t').catch((e) => e)) as NodaError;
+    expect(err).toBeInstanceOf(NodaError);
+    expect(err.requestId).toBe('req_01:a-b.c');
+    expect(nodaErrorFields(err)).toEqual({ code: 'http', status: 401, request_id: 'req_01:a-b.c' });
+    expect(nodaErrorFields(new Error('x'))).toEqual({ code: 'unknown', status: null, request_id: null });
+  });
+
+  it('X-Request-Id가 정한 꼴(영문·숫자·._:- 64자 안)이 아니면 싣지 않는다', async () => {
+    for (const bad of ['a b', 'x'.repeat(65), 'a/b', 'a;b']) {
+      const { noda } = client((async () => json({}, 401, { 'x-request-id': bad })) as unknown as typeof fetch);
+      const err = (await noda.deleteTenant('t').catch((e) => e)) as NodaError;
+      expect(err.requestId).toBeNull();
+    }
+  });
+
+  it('응답 본문을 못 읽은 오류에도 요청 번호를 싣는다', async () => {
+    const f = (async () =>
+      new Response('not json', { status: 200, headers: { 'x-request-id': 'r123' } })) as unknown as typeof fetch;
+    const { noda } = client(f);
+    const err = (await noda.listTenants().catch((e) => e)) as NodaError;
+    expect(err).toBeInstanceOf(NodaError);
+    expect(err.requestId).toBe('r123');
+  });
+
+  it('listTenants — 보관함 목록·한도를 다듬어 받고 다시 시도하지 않는다', async () => {
+    let calls = 0;
+    const f = (async (url: string, init: RequestInit) => {
+      calls += 1;
+      expect(init.method).toBe('GET');
+      expect(new URL(url).pathname).toBe('/tenants');
+      return json({
+        tenants: [
+          { tenant: 'workon-a1', files: 12, bytes: 3481920, updated: '2026-10-25T02:14:09Z', receiving: 1, failed: 0, access: 'rules' },
+          { tenant: 'workon-c-local', files: 0, bytes: 0, updated: null, receiving: 0, failed: 0, access: 'public' },
+          { files: 3 },
+          'junk',
+        ],
+        count: 2,
+        quota: { service: 'workon', max_bytes: 1073741824, max_documents: 500, rate_per_minute: 60, used_bytes: 3481920, used_documents: 12, remaining_bytes: 1070259904, remaining_documents: 488 },
+      });
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    const r = await noda.listTenants();
+    expect(calls).toBe(1);
+    expect(r.tenants).toEqual([
+      { tenant: 'workon-a1', files: 12, bytes: 3481920, updated: '2026-10-25T02:14:09Z', receiving: 1, failed: 0, access: 'rules' },
+      { tenant: 'workon-c-local', files: 0, bytes: 0, updated: null, receiving: 0, failed: 0, access: 'public' },
+    ]);
+    expect(r.quota).toMatchObject({ service: 'workon', max_documents: 500, used_documents: 12, remaining_documents: 488 });
+    const empty = client((async () => json({})) as unknown as typeof fetch);
+    expect(await empty.noda.listTenants()).toEqual({ tenants: [], quota: null });
+    const down = client((async () => json({}, 503)) as unknown as typeof fetch);
+    await expect(down.noda.listTenants()).rejects.toBeInstanceOf(NodaError);
   });
 
   it('listDocuments는 receiving이 없어도 빈 배열', async () => {

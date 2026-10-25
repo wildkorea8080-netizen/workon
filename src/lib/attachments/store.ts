@@ -16,7 +16,7 @@ import {
   refusedFormatMessage,
 } from './limits';
 import { AttachmentReadError, readAttachment, summarize } from './reader';
-import { NodaError } from '@/lib/noda';
+import { NodaError, nodaErrorFields } from '@/lib/noda';
 import type { AttachmentExtract, AttachmentRow } from './types';
 
 /**
@@ -387,7 +387,7 @@ export async function confirmUpload(
           level: nodaStatus === 401 || nodaStatus === 403 ? 'critical' : 'warning',
           category: 'api',
           message: '스캔 첨부를 NODA로 읽지 못함',
-          details: { attachment_id: id, code: e.cause.code, status: nodaStatus },
+          details: { attachment_id: id, ...nodaErrorFields(e.cause) },
           orgId: actor.organizationId,
         });
       }

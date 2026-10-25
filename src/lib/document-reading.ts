@@ -8,6 +8,7 @@ import {
   nodaTenant,
   stripNodaPrefixes,
   NodaError,
+  nodaErrorFields,
   type NodaClient,
   type NodaListing,
 } from '@/lib/noda';
@@ -260,8 +261,7 @@ async function logNodaError(deps: ReadingDeps, err: unknown, documentId?: string
     message: 'NODA 문서 읽기 호출 실패',
     details: {
       ...(documentId ? { document_id: documentId } : {}),
-      code: nodaErr?.code ?? 'unknown',
-      status: nodaErr?.status ?? null,
+      ...nodaErrorFields(err),
     },
   });
 }

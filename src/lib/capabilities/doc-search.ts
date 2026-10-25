@@ -6,7 +6,7 @@ import {
   nodaTenant,
   stripNodaPrefixes,
   documentIdFromNodaFilename,
-  NodaError,
+  nodaErrorFields,
   NODA_CONTEXT_BUDGET,
   CONTEXT_BUDGET_AGENT_SHARED,
   CONTEXT_BUDGET_COMMON_SHARED,
@@ -579,8 +579,7 @@ async function deleteOrphans(
             details: {
               agent_id: input.agentId,
               ...extra,
-              code: error instanceof NodaError ? error.code : 'unknown',
-              status: error instanceof NodaError ? error.status : null,
+              ...nodaErrorFields(error),
             },
             orgId: input.organizationId,
           }).catch(() => {})
@@ -710,8 +709,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
             details: {
               agent_id: agentId,
               ...extra,
-              code: error instanceof NodaError ? error.code : 'unknown',
-              status: error instanceof NodaError ? error.status : null,
+              ...nodaErrorFields(error),
             },
             orgId: organizationId,
           });

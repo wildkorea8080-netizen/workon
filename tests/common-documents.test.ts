@@ -96,7 +96,7 @@ describe('retireReplacedEdition', () => {
     expect(w.docs.get(OLD_ID)).toMatchObject({ noda_status: 'deleting', retired_at: null });
     const entry = w.log.mock.calls[0][0] as { level: string; details: Record<string, unknown> };
     expect(entry.level).toBe('warning');
-    expect(entry.details).toEqual({ document_id: OLD_ID, code: 'http', status: 503 });
+    expect(entry.details).toEqual({ document_id: OLD_ID, code: 'http', status: 503, request_id: null });
     expect(JSON.stringify(w.log.mock.calls)).not.toContain('여비');
   });
 

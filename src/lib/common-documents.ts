@@ -2,7 +2,7 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
-import { noda, NodaError, type NodaClient } from '@/lib/noda';
+import { noda, nodaErrorFields, type NodaClient } from '@/lib/noda';
 import { commonTenant, isOrgType } from '@/lib/org-types';
 import type { CommonDocument } from '@/lib/db';
 import type { ReadingDeps, ReadingStore, StoredDocument } from '@/lib/document-reading';
@@ -141,10 +141,6 @@ export function defaultCommonDeps(): CommonDeps {
   return { store: defaultStore(), noda, now: () => Date.now(), log: logSystem };
 }
 
-function errorInfo(err: unknown): { code: string; status: number | null } {
-  return err instanceof NodaError ? { code: err.code, status: err.status } : { code: 'unknown', status: null };
-}
-
 /** NODA 사본이 있을 수 있는 행인가 — 옛 행(NULL)·지난 판(retired)·파일 이름 없는 행은 NODA를 부르지 않는다 */
 function hasNodaCopy(row: Pick<CommonDocument, 'noda_status' | 'noda_filename'>): boolean {
   return Boolean(row.noda_status) && row.noda_status !== 'retired' && Boolean(row.noda_filename);
@@ -171,13 +167,12 @@ export async function retireReplacedEdition(
     try {
       await deps.noda.deleteDocument(commonTenant(old.org_type), old.noda_filename as string);
     } catch (err) {
-      const { code, status } = errorInfo(err);
       await deps.store.markDeleting(old.id);
       await deps.log({
         level: 'warning',
         category: 'api',
         message: '공통 문서 옛 판의 NODA 사본을 지우지 못함 — 지우기로 다시 치워 주세요',
-        details: { document_id: old.id, code, status },
+        details: { document_id: old.id, ...nodaErrorFields(err) },
       });
       return 'kept_deleting';
     }
@@ -208,7 +203,6 @@ export async function deleteCommonDocument(
     try {
       await deps.noda.deleteDocument(commonTenant(row.org_type), row.noda_filename as string);
     } catch (err) {
-      const { code, status } = errorInfo(err);
       const marked = await deps.store.markDeleting(id);
       await deps.log({
         level: 'error',
@@ -216,7 +210,7 @@ export async function deleteCommonDocument(
         message: marked
           ? '공통 문서 NODA 삭제 실패 — 행을 deleting으로 남김'
           : '공통 문서 NODA 삭제 실패 — 행을 deleting으로 표시하지 못함',
-        details: { document_id: id, code, status },
+        details: { document_id: id, ...nodaErrorFields(err) },
       });
       return { ok: false, status: 502 };
     }

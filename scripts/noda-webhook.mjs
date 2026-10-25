@@ -79,7 +79,12 @@ try {
     usage();
   }
 } catch (err) {
-  const msg = err instanceof NodaError ? err.message : err instanceof Error ? err.message : String(err);
+  const msg =
+    err instanceof NodaError
+      ? `${err.message}${err.requestId ? ` (요청 번호 ${err.requestId})` : ''}`
+      : err instanceof Error
+        ? err.message
+        : String(err);
   console.log(`실패: ${msg}`);
   process.exitCode = 1;
 }

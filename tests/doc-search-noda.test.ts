@@ -250,7 +250,7 @@ describe('doc_search preflight', () => {
     expect(DOCUMENTS_UNAVAILABLE_MESSAGE).toBe('참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요');
     expect(DOCUMENTS_UNAVAILABLE_CODE).toBe('documents_unavailable');
     expect(log).toHaveBeenCalledWith(
-      expect.objectContaining({ level: 'warning', category: 'api', details: { agent_id: AGENT, code: 'http', status: 503 }, orgId: 'org' })
+      expect.objectContaining({ level: 'warning', category: 'api', details: { agent_id: AGENT, code: 'http', status: 503, request_id: null }, orgId: 'org' })
     );
     // 질문 원문은 운영 기록에 남기지 않는다
     expect(JSON.stringify(log.mock.calls)).not.toContain('"q"');

@@ -66,7 +66,8 @@ src/
 │   ├── config-public.ts  # 화면에서도 읽는 NEXT_PUBLIC_ 값만 (config.ts가 버킷 이름을 다시 내보냄)
 │   ├── crypto.ts         # API 키 AES-256 암복호화
 │   ├── db.ts             # 타입 정의 전체
-│   ├── noda.ts           # NODA 클라이언트 — 올리기·목록·삭제·/context·/verify·/parse·/health, 보관함·파일 이름 규칙, 하한 0.80, 재시도
+│   ├── noda.ts           # NODA 클라이언트 — 올리기·목록·삭제·/context·/verify·/parse·/health·/tenants, 보관함·파일 이름 규칙, 하한 0.80, 재시도, 실패의 요청 번호(`X-Request-Id` → `nodaErrorFields`)
+│   ├── noda-vaults.ts    # NODA 보관함 목록을 비서 장부와 맞대 가르기(살아 있음·지움·고아·공통·그 밖) — `noda:purge-deleted`가 씀
 │   ├── document-reading.ts # 문서 읽기 상태 전이(readDocument·reconcileReading·decideReadState)
 │   ├── document-upload.ts  # 직접 올리기 검사·행 만들기(주소 발급·확인이 함께 씀)
 │   ├── document-upload-client.ts # 화면용 올리기(주소 → 저장소 직접 → 확인 → 읽기 걸기)
@@ -98,7 +99,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1559개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1569개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -106,7 +107,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요). 번호 없이 돌리면 **0028·0032는 건너뛰고** 안내만 한다(`scripts/migrate-select.mjs` `MANUAL_ONLY`) — 번호로 지정해야 적용 | 예 |
 | `npm run noda:check` | NODA `/health` — `search.vectors`가 참이어야 하고 `llm.external`이 참이면 **실패**('바깥 연결 없음' 확인). `-- --roundtrip`이면 보관함 `workon-check`에 작은 글을 올려 근거·쪽/출처 → 엉뚱한 질문의 빈 근거 → 삭제까지 | 아니오 (키 필요) |
 | `npm run noda:webhook -- register <주소> \| list \| ping <id> \| delete <id>` | NODA 웹훅 걸기·확인 — 키 하나에 하나. register의 서명 비밀값은 한 번만 보이므로 **사용자가 직접** 실행해 `NODA_WEBHOOK_SECRET`에 넣는다 | 아니오 (키 필요) |
-| `npm run noda:purge-deleted` | 이미 지운 비서의 NODA 보관함 비우기 — 그냥 돌리면 대상(비서별 NODA 사본·남은 문서 행 수)만 보고, `-- --yes`면 보관함 → 남은 행 → 원본을 지운다(**되돌릴 수 없음**, 사용자가 실행). 여러 번 돌려도 안전 | 예 (키 필요) |
+| `npm run noda:purge-deleted` | NODA 보관함을 비서 장부와 맞대기 — NODA `GET /tenants`(workon 키는 `workon`·`workon-…`만 보임)의 보관함 목록·파일 수·읽는 중·실패·권한 상태와 서비스 한도를 받아 살아 있는 비서·**지운 비서**·**DB에 없는 비서(고아)**·공통 자료실·그 밖으로 가른다(`noda-vaults.ts`). 그냥 돌리면 보기만, `-- --yes`면 지운 비서(보관함 → 남은 행 → 원본)와 고아 보관함만 비운다(**되돌릴 수 없음**, 사용자가 실행). 권한 상태 `broken`(규칙 파일이 깨져 보관함 전체가 잠김)은 경고. 여러 번 돌려도 안전 | 예 (키 필요) |
 | `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
@@ -256,6 +257,13 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   행이 없는 문서가 읽혔으면(읽는 도중 지움) 그 보관함의 사본을 지운다. 바꾸기는 `reading` 행만(조건부) — **같은 `delivery`가 다시 와도 해가 없어** 따로 기록하지 않는다.
   DB 오류는 500으로 돌려 NODA가 다시 보내게 한다(5초 안 2xx가 아니면 2초·10초 뒤 두 번 더). **알림이지 장부가 아니다**(NODA 재시작 때 못 보낸 알림은 사라진다) — 목록 맞추기를 그대로 둔다.
   등록·확인은 `npm run noda:webhook -- register <주소> | list | ping <id> | delete <id>` — **register가 보여 주는 서명 비밀값은 한 번만 나오므로 사용자가 직접 실행하고** `NODA_WEBHOOK_SECRET`으로 `.env.local`·Vercel에 넣는다
+  **한도 경고(`quota.warning`, 2026-10-26)**: 서비스 한도(용량 `bytes`·문서 수 `documents`)의 80%·95%를 넘는 순간 한 번씩 온다 — 행은 건드리지 않고 `system_logs`(`api`)에 남긴다
+  (95% 이상 critical·그 밖 warning, `{ kind, level, used, max, remaining, event_id }`). 넘으면 새 문서 넣기가 403(`failed` `문서 보관 한도를 넘어…`)으로 막히므로 운영자가 미리 본다.
+  웹훅을 알림 종류를 고르지 않고 걸었으면(`noda:webhook register`가 그렇다) 자동으로 받는다. 지금 값은 `npm run noda:purge-deleted`가 보이는 NODA 한도가 참이다.
+  웹훅 몸의 `event_id`는 따로 거르지 않는다 — 바꾸기가 `reading` 행만이라 같은 알림이 두 번 와도 해가 없다
+- **NODA 실패 기록에는 요청 번호가 실린다**(2026-10-26). NODA는 모든 응답에 `X-Request-Id`를 붙이고, `NodaError.requestId`가 실패 응답의 번호를 들고 있다(꼴 영문·숫자·`._:-` 64자 안만 받음 — 연결·시간 초과는 null).
+  운영 기록은 `nodaErrorFields(err)` → `{ code, status, request_id }` 한 곳으로 남긴다(문서 읽기·찾기·답변 검증·스캔 첨부·비서 보관함 비우기·공통 자료실). NODA에 문의할 때 이 번호 하나만 알려 주면 된다.
+  운영자 명령(`noda:check`·`noda:webhook`·`noda:purge-deleted`)도 실패 줄에 요청 번호를 찍는다
 
 - **보관함 = 비서.** NODA 보관함 이름은 `workon-a{비서 id에서 하이픈 뺀 32자}`이고 **서버가 비서 id로만 만든다**(`nodaTenant`가 uuid가 아니면 던진다).
   요청값으로 보관함·파일 이름을 받지 않는다. 같은 문서를 여러 비서에 붙이면(`assign`) 비서마다 행·NODA 사본이 따로 생긴다
@@ -1046,7 +1054,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-25 기준 1559개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-26 기준 1569개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -1090,9 +1098,9 @@ MAIL_FROM=
    | `capability-settings.test.ts` | 능력 설정 정규화(**능력 여섯** — S1 셋·문서 만들기·파일 받아 읽기·표 합치기, 모르는 능력·없는 커넥터 거절), 기관 범위(공식 비서가 켠 커넥터만) |
    | `number-check.test.ts` | **숫자 확인** — 표기 차이·반올림 일치·절댓값 비교, 원본에 없는 숫자 표시(최대 10개·중복 없음), 4자리 미만 정수·연도·날짜·시각·전화·id·범위 제외, **줄머리 소제목 번호·두 자리 연도 날짜 제외**(달·날 범위 밖·단위 낱말이 뒤따르면 대조), 소수는 대조, 말풍선 안내(`done`·`source_references.number_check`), 정해 둔 문구·대조를 켜는 도구 둘 |
 
-   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, **보관함 통째 비우기**(`all=1`·`confirm`=보관함·404는 `existed:false`·503 다시 시도·401 던짐), 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82, **비동기 넣기**(`async=1`·202면 `accepted`·201이면 지금처럼 결과)·목록의 `readable`·`reason`·`failed`·웹훅 걸기·핑·목록·떼기, `verifyAnswer`(요청 모양·근거 순서·다시 시도 없음·5초·응답 다듬기), `parseDocument`(원본 바이트·`X-Filename`·30초 재시도 창·60초 제한·칸 다듬기·키 없음); **S5**: `getContext`는 `budget`을 주면 그 값(공통 두 곳이면 3000·2000), 없으면 4000 |
-   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘·**`readable:false`는 unreadable·마지막으로 보낸 뒤의 `failed`만**), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), **비동기 202면 reading 유지**, 맞추기의 unreadable·failed 403/500·409는 다시 걸기, NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건; **S5**: **일반화** — `tenantOf`가 보관함을 정함(공통 문서 꼴 행도 읽힘·null이면 `not_found`·맞추기도 `tenantOf`로 묶음), `afterReady`는 `ready`를 쓴 뒤 한 번(읽기·맞추기 둘 다)·던져도 `ready`·`unreadable`/`failed`/쓰기 실패 때는 안 부름 |
-   | `noda-webhook.test.ts` | **NODA 웹훅** — 서명(맞음·다름·본문 한 글자·5분 넘음/앞섬·ISO/밀리초 시각·머리글 없음은 던지지 않고 거절), 알림 적용(ready·unreadable 이유 다듬기·failed 403/409·두 번 와도 한 번·**다른 비서·다른 파일 이름이면 건드리지 않고 기록(파일 이름 없이)**·행 없으면 그 보관함 사본 삭제·비서 보관함 아닌 tenant·문서 id 없는 이름·ping·removed는 무시), 라우트(받은 본문 그대로 서명 확인·비밀값 없으면 503·서명 틀리면 401); **S5**: **공통 보관함 알림** — 그 유형의 행만 `ready`로 바꾸고 `afterReady`·다른 유형/다른 파일 이름이면 security warning(파일 이름 없음)·비서 행은 공통 보관함 이름으로 와도 안 건드림·행 없는 문서는 그 보관함 사본 삭제·모르는 유형 열쇠 무시·비서 알림은 비서 deps만 |
+   | `noda-client.test.ts` | **NODA 클라이언트** — 보관함 이름(비서 id만, 하이픈 뺀 32자)·파일 이름(문서 id + 원래 이름, 확장자 그대로)·`{uuid}__` 떼기, 업로드 `replace=1`·`X-Filename` 인코딩·Bearer, 재시도(429·502·503·네트워크, `Retry-After`가 창을 넘으면 멈춤, 401·timeout은 다시 안 함), `/context`의 `budget`·`min_similarity`·10초 창, **시도 한 번의 시간 제한(`/context` 8초·그 밖 30초·업로드 300초)**·`Retry-After: 0`도 1초는 쉼·목록의 `retry:false`, 삭제 404는 `deleted:false`, **보관함 통째 비우기**(`all=1`·`confirm`=보관함·404는 `existed:false`·503 다시 시도·401 던짐), 키 없음은 호출 없이 `missing_key`, **오류 글에 키 없음**, `NODA_MIN_SIMILARITY`가 실측 구간 0.80~0.82, **비동기 넣기**(`async=1`·202면 `accepted`·201이면 지금처럼 결과)·목록의 `readable`·`reason`·`failed`·웹훅 걸기·핑·목록·떼기, `verifyAnswer`(요청 모양·근거 순서·다시 시도 없음·5초·응답 다듬기), `parseDocument`(원본 바이트·`X-Filename`·30초 재시도 창·60초 제한·칸 다듬기·키 없음), **실패의 요청 번호**(`X-Request-Id` → `requestId`·`nodaErrorFields`, 꼴이 다르면 버림, 본문을 못 읽은 오류에도), **`listTenants`**(목록·한도 다듬기·다시 시도 없음); **S5**: `getContext`는 `budget`을 주면 그 값(공통 두 곳이면 3000·2000), 없으면 4000 |
+   | `document-reading.test.ts` | **읽기 상태 전이** — `decideReadState`(receiving 먼저·2분 다시 걸기·10분 포기·시계 둘·**`readable:false`는 unreadable·마지막으로 보낸 뒤의 `failed`만**), `readDocument`(ready·unreadable·원본 못 가져옴 failed·20MB 초과·**동시 두 번이어도 NODA 업로드 한 번**·읽는 도중 지워지면 NODA 사본 삭제·deleting은 덮지 않음·NodaError는 reading 유지·retry는 failed만), `reconcileReading`(보관함마다 목록 한 번·kick은 하나뿐·목록 실패는 그대로·5개 보관함 상한·**목록은 재시도 없이 4초·전체 5초 예산**), **비동기 202면 reading 유지**, 맞추기의 unreadable·failed 403/500·409는 다시 걸기, NodaError로 끝나도 행이 사라졌으면 사본 삭제, 이유의 문서 id 앞부분 떼기, 401·403은 critical, 조건부 갱신 조건; **S5**: **일반화** — `tenantOf`가 보관함을 정함(공통 문서 꼴 행도 읽힘·null이면 `not_found`·맞추기도 `tenantOf`로 묶음), `afterReady`는 `ready`를 쓴 뒤 한 번(읽기·맞추기 둘 다)·던져도 `ready`·`unreadable`/`failed`/쓰기 실패 때는 안 부름; 실패 기록에 요청 번호(`request_id`) |
+   | `noda-webhook.test.ts` | **NODA 웹훅** — 서명(맞음·다름·본문 한 글자·5분 넘음/앞섬·ISO/밀리초 시각·머리글 없음은 던지지 않고 거절), 알림 적용(ready·unreadable 이유 다듬기·failed 403/409·두 번 와도 한 번·**다른 비서·다른 파일 이름이면 건드리지 않고 기록(파일 이름 없이)**·행 없으면 그 보관함 사본 삭제·비서 보관함 아닌 tenant·문서 id 없는 이름·ping·removed는 무시), 라우트(받은 본문 그대로 서명 확인·비밀값 없으면 503·서명 틀리면 401); **S5**: **공통 보관함 알림** — 그 유형의 행만 `ready`로 바꾸고 `afterReady`·다른 유형/다른 파일 이름이면 security warning(파일 이름 없음)·비서 행은 공통 보관함 이름으로 와도 안 건드림·행 없는 문서는 그 보관함 사본 삭제·모르는 유형 열쇠 무시·비서 알림은 비서 deps만; **한도 경고 `quota.warning`**은 행을 안 건드리고 80% warning·95% critical로 기록(이상한 값은 null) |
    | `document-upload.test.ts` | 직접 올리기 검사(위험한 이름·막는 확장자·형식·20MB) 문구, 저장소 경로 읽기, 새 행(같은 키 집합·`reading`·행마다 NODA 파일 이름), 고른 비서 전부 권한 검사·비서당 개수 상한, 확인 창 10분·읽기 라우트 300초, **옛 `/api/upload` 부재**, 형식은 확장자로만(MIME만 맞으면 415), **정지된 기관은 발급·확인 두 곳에서 403** |
    | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·**한꺼번에 보냄**·실패해도·곧바로 던져도 나머지를 보냄) |
    | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, NODA 실패는 따로 둔 참거짓 표시로 가름, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음), 지운 비서에 남은 문서는 관리 범위 관리자가 지움 |
@@ -1101,6 +1109,7 @@ MAIL_FROM=
    | `prepare-preflight.test.ts` | 대화 준비 — NODA를 못 부르면 **대화·첨부 묶기 전에** 503, `skip_documents`가 정확히 `true`일 때만 건너뜀, `ready` 없는 비서는 장애 중에도 평소처럼, 문서 찾기 꺼진 비서는 무관 |
    | `chat-documents-ui.test.ts` | **답변 속 `[n]` → 근거 창 단추**(출처에 있는 번호만·기존 링크·코드 제외), 근거 창을 화면에 잇기(Esc·바깥·×, 다른 대화면 닫힘), 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시·**위치도 유사도도 없으면 `청크 N`만**), NODA 파일 이름 앞부분은 화면에 안 보임, 문서 화면 원본(목록은 앞 응답 뒤에 예약·늦은 응답 버림·실패 칩 이유), 검색 시험 화면 위치 줄; **S5**: `[공통]` 칩 제목(`[공통] 제목(연도)`·연도 없으면 괄호 없이·제목 없으면 `문서`)·`scope` 없는 옛 조각은 그대로·근거 창은 공통일 때만 `공통 기준` 줄 |
    | `chat-scroll-follow.test.ts` | 답이 흘러나오는 동안 **맨 아래 근처에 있을 때만** 따라 내림(위로 올려 읽는 중이면 그대로, 새 질문·다른 대화면 다시 따라감) — 예전엔 글자 조각마다 끌어내려 위로 밀린 답을 읽을 수 없었다 |
+   | `noda-vaults.test.ts` | **보관함 맞대기** — 살아 있는 비서·지운 비서·DB에 없는 비서(고아)·공통 자료실·그 밖(`workon`·`workon-check`·모르는 이름)으로 가름, 비서 id 대소문자 무시, 숫자·권한 상태 그대로, 비서 보관함 이름에서만 id를 뽑음 |
    | `org-types.test.ts` | **공통 자료실 유형·이름(S5)** — 유형 → 공통 보관함(`workon-c-{열쇠}`, 표 밖·빈 유형은 던짐, 비서 보관함 꼴과 안 겹침), 여섯 유형·열쇠·판별, NODA 파일 이름(`{id}__이름(연도).확장자` — 못 쓰는 글자·80자·빈 이름은 `문서`·확장자 없으면 안 붙임), 슈퍼관리자 기관 화면이 같은 유형 목록을 씀 |
    | `common-documents.test.ts` | **판 바꾸기·삭제** — 새 판 `ready`에서만 옛 판 NODA 사본 삭제 → `retired`(새 판이 읽는 중·실패면 옛 판 그대로, `replaces_id` 없음·옛 판이 다른 유형/이미 지난 판/`deleting`이면 `none`), 사본 삭제 실패는 `deleting`으로 두고 warning(파일 이름 없음), 404는 지운 것, NULL 상태·파일 이름 없음은 NODA 건너뜀, `tenantOf`·갈고리, 삭제 순서 NODA → 행 → 원본·NODA 실패면 `deleting` + 502·행 없으면 404·`deleting`은 다시 지울 수 있음·행 삭제 실패면 원본 안 지움 |
    | `doc-search-common.test.ts` | **공통 근거 순수 함수** — `shiftContext`(머리 줄·`sources[].n`이 함께 밀림, 본문 속 `[2]`·원본·숫자 아닌 `n`은 그대로, 근거 창 원문이 민 번호로 이어짐), `maxCitationNumber`, `commonSourcesToChunks`(현재 판 `ready`만 조각·`startIndex`부터 순번·지난 판/읽는 중은 조용히 뺌·행 없음·id 못 읽음·깨진 원소는 따로 모음), **`citableCommonIds`**(`ready` 새 판이 대신하는 옛 판은 근거 아님·새 판이 읽는 중/실패면 옛 판이 근거·지난 판의 `replaces_id`는 안 셈·대소문자 무시), **`keepContextBlocks`**(고른 번호 블록만·본문 속 `[n]`은 머리 줄 아님·첫 머리 줄 앞 글 버림) |

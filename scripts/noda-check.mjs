@@ -69,7 +69,7 @@ function softFail(label, detail) {
 
 /** 오류를 한 줄로. NodaError 글에는 키가 들어 있지 않다(noda.ts가 지운다) */
 function why(err) {
-  if (err instanceof NodaError) return `${err.message}`;
+  if (err instanceof NodaError) return err.requestId ? `${err.message} (요청 번호 ${err.requestId})` : err.message;
   return err instanceof Error ? err.message : String(err);
 }
 

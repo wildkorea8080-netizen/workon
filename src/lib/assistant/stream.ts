@@ -10,7 +10,7 @@ import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUs
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
-import { noda, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
+import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 
 const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -271,8 +271,7 @@ async function verifyTurn(turn: PreparedTurn, answer: string, verify: VerifyFn):
       message: 'NODA 답변 검증 실패 — 검증 없이 저장',
       details: {
         agent_id: turn.ctx.agentId,
-        code: error instanceof NodaError ? error.code : 'unknown',
-        status: error instanceof NodaError ? error.status : null,
+        ...nodaErrorFields(error),
       },
       orgId: turn.ctx.organizationId,
     });

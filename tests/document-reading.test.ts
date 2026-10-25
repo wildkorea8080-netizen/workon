@@ -301,6 +301,16 @@ describe('readDocument', () => {
     expect(w.logs).toHaveLength(1);
   });
 
+  it('NODA 실패 기록에 응답의 요청 번호(X-Request-Id)가 실린다 — NODA 문의용', async () => {
+    const { w, deps } = makeWorld();
+    w.upload = async () => {
+      throw new NodaError('NODA 500: boom', 'http', 500, null, 'req-77');
+    };
+    await readDocument(DOC, {}, deps);
+    const log = w.logs[0] as { details: Record<string, unknown> };
+    expect(log.details).toMatchObject({ document_id: DOC, code: 'http', status: 500, request_id: 'req-77' });
+  });
+
   it('NodaError면 reading 그대로 두고 던지지 않는다', async () => {
     const { w, deps } = makeWorld();
     w.upload = async () => {
@@ -313,7 +323,7 @@ describe('readDocument', () => {
     const log = w.logs[0] as { level: string; category: string; details: Record<string, unknown> };
     expect(log.level).toBe('warning');
     expect(log.category).toBe('api');
-    expect(log.details).toEqual({ document_id: DOC, code: 'http', status: 503 });
+    expect(log.details).toEqual({ document_id: DOC, code: 'http', status: 503, request_id: null });
     expect(JSON.stringify(w.logs)).not.toContain('예산'); // 파일 이름을 남기지 않는다
   });
 

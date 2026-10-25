@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     if (error instanceof NodaError) {
-      console.error('[RAG-TEST] NODA 오류:', error.code, error.status);
+      console.error('[RAG-TEST] NODA 오류:', error.code, error.status, error.requestId ?? '');
       return NextResponse.json<ApiResponse<null>>(
         { ok: false, error: { message: DOCUMENTS_UNAVAILABLE_MESSAGE } },
         { status: 503 }

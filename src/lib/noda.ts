@@ -122,19 +122,38 @@ export class NodaError extends Error {
   code: 'missing_key' | 'http' | 'network' | 'timeout';
   /** 서버가 `Retry-After`로 알려 준 대기(밀리초). 재시도 판단에만 쓴다 */
   retryAfterMs: number | null;
+  /** NODA 응답의 `X-Request-Id` — NODA에 문의할 때 이 번호 하나면 서버 기록에서 찾는다. 응답을 못 받았으면(연결·시간 초과) null */
+  requestId: string | null;
 
   constructor(
     message: string,
     code: NodaError['code'],
     status: number | null = null,
     retryAfterMs: number | null = null,
+    requestId: string | null = null,
   ) {
     super(message);
     this.name = 'NodaError';
     this.code = code;
     this.status = status;
     this.retryAfterMs = retryAfterMs;
+    this.requestId = requestId;
   }
+}
+
+/**
+ * 응답의 `X-Request-Id`. 운영 기록에 그대로 실리므로 NODA가 정한 꼴(영문·숫자·`._:-` 64자 안)만 받는다 —
+ * 줄바꿈이나 긴 글이 기록을 어지럽히지 않게
+ */
+export function nodaRequestId(res: Pick<Response, 'headers'>): string | null {
+  const v = res.headers.get('x-request-id')?.trim();
+  return v && /^[A-Za-z0-9._:-]{1,64}$/.test(v) ? v : null;
+}
+
+/** 운영 기록에 남길 NODA 실패 정보 — 종류·상태·요청 번호(문의용). 오류 글은 싣지 않는다 */
+export function nodaErrorFields(err: unknown): { code: string; status: number | null; request_id: string | null } {
+  if (err instanceof NodaError) return { code: err.code, status: err.status, request_id: err.requestId };
+  return { code: 'unknown', status: null, request_id: null };
 }
 
 export interface NodaUploadResult {
@@ -176,6 +195,33 @@ export interface NodaListing {
   documents: NodaListedDocument[];
   receiving: { filename: string; seconds: number }[];
   failed: NodaFailedUpload[];
+}
+
+/** `GET /tenants`의 보관함 하나 — 디스크만 본 값(문서마다의 상태는 `/documents?tenant=`) */
+export interface NodaTenantSummary {
+  tenant: string;
+  files: number;
+  bytes: number;
+  /** 마지막으로 바뀐 파일의 때(UTC). 빈 보관함은 null */
+  updated: string | null;
+  /** 지금 202로 받아 읽는 중인 수 */
+  receiving: number;
+  /** 최근 15분의 202 넣기 실패 수 */
+  failed: number;
+  /** 권한 규칙 상태 — `broken`이면 규칙 파일이 깨져 보관함 전체가 잠겼다 */
+  access: 'public' | 'rules' | 'broken' | string;
+}
+
+/** 서비스 키의 한도와 쓴 양(`/tenants`·`/usage`의 `quota`) */
+export interface NodaQuota {
+  service: string | null;
+  max_bytes: number | null;
+  max_documents: number | null;
+  rate_per_minute: number | null;
+  used_bytes: number | null;
+  used_documents: number | null;
+  remaining_bytes: number | null;
+  remaining_documents: number | null;
 }
 
 export interface NodaWebhook {
@@ -273,6 +319,8 @@ export interface NodaClient {
    * 404(보관함이 없음)는 `{ existed: false }`로 끝난다. `deleted`는 NODA가 지운 문서 수를 알려 줄 때만 숫자
    */
   deleteTenant(tenant: string): Promise<{ existed: boolean; deleted: number | null }>;
+  /** 제 보관함 목록(`GET /tenants` — 서비스 키는 `workon`·`workon-…`만 본다)과 한도. 운영자 스크립트용이라 다시 시도하지 않는다 */
+  listTenants(): Promise<{ tenants: NodaTenantSummary[]; quota: NodaQuota | null }>;
   /** `budget`을 주지 않으면 `NODA_CONTEXT_BUDGET` */
   getContext(input: { tenant: string; query: string; budget?: number }): Promise<NodaContextResult>;
   /**
@@ -291,6 +339,22 @@ export interface NodaClient {
 
 function asObject(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function toQuota(raw: unknown): NodaQuota | null {
+  const q = asObject(raw);
+  if (!q) return null;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    service: typeof q.service === 'string' ? q.service : null,
+    max_bytes: n(q.max_bytes),
+    max_documents: n(q.max_documents),
+    rate_per_minute: n(q.rate_per_minute),
+    used_bytes: n(q.used_bytes),
+    used_documents: n(q.used_documents),
+    remaining_bytes: n(q.remaining_bytes),
+    remaining_documents: n(q.remaining_documents),
+  };
 }
 
 function optionalInt(v: unknown): number | undefined {
@@ -442,6 +506,7 @@ export function createNodaClient(deps: {
       'http',
       res.status,
       parseRetryAfter(res.headers.get('retry-after')),
+      nodaRequestId(res),
     );
   }
 
@@ -450,7 +515,7 @@ export function createNodaClient(deps: {
     try {
       parsed = await res.json();
     } catch {
-      throw new NodaError(`NODA ${res.status}: 응답을 읽지 못했습니다.`, 'http', res.status);
+      throw new NodaError(`NODA ${res.status}: 응답을 읽지 못했습니다.`, 'http', res.status, null, nodaRequestId(res));
     }
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
   }
@@ -549,6 +614,27 @@ export function createNodaClient(deps: {
         },
         { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
       );
+    },
+
+    async listTenants() {
+      const res = await request('GET', '/tenants', { timeoutMs: DEFAULT_TIMEOUT_MS });
+      const b = await readJson(res);
+      const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      const tenants = (Array.isArray(b.tenants) ? b.tenants : [])
+        .map(asObject)
+        .filter((t): t is Record<string, unknown> => t !== null && typeof t.tenant === 'string')
+        .map(
+          (t): NodaTenantSummary => ({
+            tenant: t.tenant as string,
+            files: num(t.files),
+            bytes: num(t.bytes),
+            updated: typeof t.updated === 'string' ? t.updated : null,
+            receiving: num(t.receiving),
+            failed: num(t.failed),
+            access: typeof t.access === 'string' ? t.access : 'public',
+          }),
+        );
+      return { tenants, quota: toQuota(b.quota) };
     },
 
     // 웹훅 관리는 운영자가 스크립트로 한 번 부르는 일이라 다시 시도하지 않는다

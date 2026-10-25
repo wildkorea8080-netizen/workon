@@ -237,3 +237,31 @@ describe('applyNodaEvent — 공통 보관함', () => {
     expect(c.afterReady).not.toHaveBeenCalled();
   });
 });
+
+describe('applyNodaEvent — 한도 경고(quota.warning)', () => {
+  const quota = (level: number, extra: Record<string, unknown> = {}) => ({
+    event: 'quota.warning', event_id: '01761373800123456789', delivery: 'd', tenant: 'workon-a1b2', at: '2026-10-26T00:00:00Z',
+    service: 'workon', kind: 'documents', level, used: level * 5, max: 500, remaining: 500 - level * 5, ...extra,
+  });
+
+  it('80%는 warning, 95%는 critical로 운영 기록에 남기고 행은 건드리지 않는다', async () => {
+    const log = vi.fn(async () => {});
+    const agent = { store: { getRow: vi.fn() } } as unknown as ReadingDeps;
+    expect(await applyNodaEvent(quota(80), { agent, log })).toBe('logged');
+    expect(await applyNodaEvent(quota(95, { kind: 'bytes' }), { agent, log })).toBe('logged');
+    expect((agent.store.getRow as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    const calls = log.mock.calls as unknown as [Record<string, unknown>][];
+    expect(calls[0][0]).toMatchObject({
+      level: 'warning', category: 'api',
+      details: { kind: 'documents', level: 80, used: 400, max: 500, remaining: 100, event_id: '01761373800123456789' },
+    });
+    expect(calls[1][0]).toMatchObject({ level: 'critical', details: { kind: 'bytes', level: 95 } });
+  });
+
+  it('이상한 값은 null로 다듬는다(모르는 kind·숫자 아닌 값)', async () => {
+    const log = vi.fn(async () => {});
+    await applyNodaEvent({ event: 'quota.warning', kind: 'files', level: '80', used: 'x' }, { log });
+    const entry = (log.mock.calls as unknown as [Record<string, unknown>][])[0][0];
+    expect(entry).toMatchObject({ level: 'warning', details: { kind: null, level: null, used: null, max: null, remaining: null } });
+  });
+});

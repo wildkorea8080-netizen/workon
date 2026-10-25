@@ -471,7 +471,7 @@ describe('streamTurn — NODA 답변 검증(S4-b)', () => {
     const logs = inserted('system_logs');
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatchObject({ level: 'warning', category: 'api', org_id: 'o' });
-    expect(logs[0].details).toEqual({ agent_id: AGENT, code: 'http', status: 503 });
+    expect(logs[0].details).toEqual({ agent_id: AGENT, code: 'http', status: 503, request_id: null });
     // 답변 글은 운영 기록에 남기지 않는다
     expect(JSON.stringify(logs)).not.toContain('예산은');
   });

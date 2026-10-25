@@ -494,6 +494,7 @@ describe('확인', () => {
       attachment_id: up.id,
       code: status === null ? 'network' : 'http',
       status,
+      request_id: null,
     });
     expect(JSON.stringify(logged)).not.toContain('비밀 이름');
   });

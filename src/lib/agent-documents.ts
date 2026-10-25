@@ -1,7 +1,7 @@
 // src/lib/agent-documents.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
-import { noda, nodaTenant, NodaError, type NodaClient } from '@/lib/noda';
+import { noda, nodaErrorFields, nodaTenant, type NodaClient } from '@/lib/noda';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
 
 /**
@@ -95,15 +95,15 @@ export async function removeAgentDocuments(
 
   const keptIds = nodaCleared ? [] : rows.filter((r) => r.noda_status).map((r) => r.id);
   if (!nodaCleared) {
-    const code = nodaError instanceof NodaError ? nodaError.code : 'unknown';
-    const status = nodaError instanceof NodaError ? nodaError.status : null;
+    const fields = nodaErrorFields(nodaError);
+    const { code, status } = fields;
     // 남긴 행이 없고 키도 없으면(NODA를 쓰지 않는 환경) 비울 것도 없다
     if (keptIds.length > 0 || code !== 'missing_key') {
       await deps.log({
         level: status === 401 || status === 403 ? 'critical' : 'warning',
         category: 'api',
         message: '지운 비서의 NODA 보관함을 비우지 못함 — 문서 화면에서 다시 지워 주세요',
-        details: { agent_id: agentId, documents_kept: keptIds.length, code, status },
+        details: { agent_id: agentId, documents_kept: keptIds.length, ...fields },
       });
     }
     if (keptIds.length > 0) await deps.store.markDeleting(keptIds);

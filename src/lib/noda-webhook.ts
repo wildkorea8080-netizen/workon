@@ -1,5 +1,6 @@
 // src/lib/noda-webhook.ts
 import { createHmac, timingSafeEqual } from 'crypto';
+import { logSystem } from '@/lib/logger';
 import { agentIdFromNodaTenant, documentIdFromNodaFilename } from '@/lib/noda';
 import { orgTypeFromCommonTenant } from '@/lib/org-types';
 import { commonReadingDeps } from '@/lib/common-documents';
@@ -57,12 +58,38 @@ export function verifyNodaSignature(input: {
   return { ok: true };
 }
 
-export type WebhookOutcome = 'updated' | 'unchanged' | 'ignored' | 'mismatch' | 'orphan';
+export type WebhookOutcome = 'updated' | 'unchanged' | 'ignored' | 'mismatch' | 'orphan' | 'logged';
 
 /** 시험용으로 갈아 끼우는 의존 — 비서 보관함(`documents`)과 공통 보관함(`common_documents`)이 따로다 */
 export interface WebhookDeps {
   agent?: ReadingDeps;
   common?: ReadingDeps;
+  /** 운영 기록(한도 경고). 기본은 logSystem */
+  log?: typeof logSystem;
+}
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * `quota.warning` — 서비스 한도(용량 `bytes`·문서 수 `documents`)의 80%·95%를 넘는 순간 한 번씩 온다.
+ * 넘으면 새 문서 넣기가 403으로 막히므로 운영자가 미리 보게 남긴다: 95% 이상은 critical, 그 밖은 warning.
+ * 지금 값은 언제든 NODA `GET /tenants`·`/usage`의 `quota`가 참이다(서버가 다시 뜨면 같은 문턱이 한 번 더 올 수 있다)
+ */
+async function logQuotaWarning(event: Record<string, unknown>, log: typeof logSystem): Promise<void> {
+  const level = num(event.level);
+  await log({
+    level: level !== null && level >= 95 ? 'critical' : 'warning',
+    category: 'api',
+    message: 'NODA 문서 보관 한도에 가까워짐 — 넘으면 새 문서를 읽지 못합니다',
+    details: {
+      kind: event.kind === 'bytes' || event.kind === 'documents' ? event.kind : null,
+      level,
+      used: num(event.used),
+      max: num(event.max),
+      remaining: num(event.remaining),
+      ...(typeof event.event_id === 'string' ? { event_id: event.event_id } : {}),
+    },
+  });
 }
 
 /**
@@ -76,6 +103,10 @@ export async function applyNodaEvent(
   deps: WebhookDeps = {},
 ): Promise<WebhookOutcome> {
   const kind = typeof event.event === 'string' ? event.event : '';
+  if (kind === 'quota.warning') {
+    await logQuotaWarning(event, deps.log ?? logSystem);
+    return 'logged';
+  }
   if (kind !== 'document.ready' && kind !== 'document.unreadable' && kind !== 'document.failed') return 'ignored';
 
   const tenant = typeof event.tenant === 'string' ? event.tenant : '';
