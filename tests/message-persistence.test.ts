@@ -157,6 +157,24 @@ describe('대화 실행기의 메시지 삽입', () => {
     expect(saved.text).toBe('제7조 ② 위원 25명');
   });
 
+  it('공통 자료실 조각의 scope·editionYear가 답변 행에 실리고 두 행의 칸 집합은 같다(S5)', async () => {
+    const { buildMessageRows } = await import('@/lib/assistant/persist');
+    const rows = buildMessageRows({
+      conversationId: 'c', userId: 'u', userContent: 'q', assistantText: '일비 [1], 기준 [2]', links: [], files: [], attachments: [], agentVersion: 1, documentsSkipped: false,
+      chunks: [
+        { documentId: 'd', documentTitle: '규정', chunkIndex: 0, n: 1, text: '일비', similarity: 0.86 },
+        { documentId: 'c', documentTitle: '예산편성기준', chunkIndex: 1, n: 2, text: '기준', similarity: 0.88, scope: 'common', editionYear: 2026 },
+      ],
+    });
+    expect(hasUniformKeys(rows)).toBe(true);
+    const [agent, common] = (rows[1].source_references as { chunks: Record<string, unknown>[] }).chunks;
+    expect(common).toMatchObject({ scope: 'common', editionYear: 2026, n: 2 });
+    // 비서 조각에는 칸이 없다 — 저장된 JSON에서 빠진다
+    const saved = JSON.parse(JSON.stringify(agent)) as Record<string, unknown>;
+    expect(saved).not.toHaveProperty('scope');
+    expect(saved).not.toHaveProperty('editionYear');
+  });
+
   it('저장 실패를 화면에 알린다', async () => {
     const { readFileSync } = await import('fs');
     const src = readFileSync('src/lib/assistant/stream.ts', 'utf8');
@@ -170,7 +188,7 @@ describe('대화 실행기의 메시지 삽입', () => {
     // 문제가 아니라 문서를 근거로 답하는 모든 경로에서 생긴다.
     const { docSearchAddendum } = await import('@/lib/capabilities/doc-search');
     const text = docSearchAddendum({ context: '[1] 규정\nt', chunks: [{ documentId: 'd', chunkIndex: 0, text: 't', similarity: 0.5 }], hasDocuments: true, skipped: false })!;
-    expect(text).toContain('참고 자료:');
+    expect(text).toContain('참고 자료(이 기관 문서):');
     expect(text).toContain('자료 인용 규칙');
     expect(text).toContain('단위');
   });

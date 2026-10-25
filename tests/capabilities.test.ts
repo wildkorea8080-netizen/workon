@@ -97,7 +97,7 @@ describe('참고 문서 찾기', () => {
   // NODA 근거·preflight·섞인 근거는 tests/doc-search-noda.test.ts가 본다
   it('찾으면 자료와 인용 규칙을 함께 붙인다', () => {
     const text = docSearchAddendum({ context: '[1] 여비규정.hwp p.3\n국내 출장 일비 2만원', chunks: [chunk], hasDocuments: true, skipped: false })!;
-    expect(text).toContain('참고 자료:');
+    expect(text).toContain('참고 자료(이 기관 문서):');
     expect(text).toContain('국내 출장 일비 2만원');
     expect(text).toContain('[자료 인용 규칙]');
     // 단위를 임의로 붙이지 말라는 지침이 핵심이다
@@ -123,6 +123,11 @@ describe('참고 문서 찾기', () => {
       }),
       findDocuments: async () => [],
       deleteOrphan: async () => {},
+      orgTypeOf: async () => null,
+      commonDocumentsOf: async () => [],
+      fetchCommonContext: async () => ({ context: '', sources: [], dropped: 0 }),
+      findCommonDocuments: async () => [],
+      deleteCommonOrphan: async () => {},
       log: async () => {},
     });
     const pre = await cap.preflight!({ organizationId: 'org', agentId: 'a', message: '여비 규정', skipDocuments: false });

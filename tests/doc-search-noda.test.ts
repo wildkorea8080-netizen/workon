@@ -15,8 +15,10 @@ import {
   type AgentDocument,
   type DocSearchDeps,
 } from '@/lib/capabilities/doc-search';
-import { NodaError, type NodaContextResult, type NodaSource } from '@/lib/noda';
+import { NodaError, NODA_CONTEXT_BUDGET, CONTEXT_BUDGET_AGENT_SHARED, CONTEXT_BUDGET_COMMON_SHARED, type NodaContextResult, type NodaSource } from '@/lib/noda';
 import type { TurnContext } from '@/lib/capabilities/types';
+import type { CommonSearchDoc } from '@/lib/capabilities/doc-search-common';
+import { commonTenant, type OrgType } from '@/lib/org-types';
 
 /**
  * 문서 찾기를 NODA /context로(S4-a). 실패가 조용한 곳이다 —
@@ -36,6 +38,18 @@ const src = (over: Partial<NodaSource> = {}): NodaSource => ({
   n: 1, chunk_id: 'c1', doc_id: 'd', filename: `${id}__규정.hwp`, similarity: 0.85, ...over,
 });
 
+/** 공통 자료실(S5) — 유형 단위 문서 */
+const CID = 'cccccccc-1111-4222-8333-444444444444';
+const CID2 = 'dddddddd-1111-4222-8333-444444444444';
+
+const commonDoc = (over: Partial<CommonSearchDoc> = {}): CommonSearchDoc => ({
+  id: CID, title: '예산편성기준', edition_year: 2026, org_type: '공공기관', noda_status: 'ready', retired_at: null, ...over,
+});
+
+const csrc = (over: Partial<NodaSource> = {}): NodaSource => ({
+  n: 1, chunk_id: 'k1', doc_id: 'nc', filename: `${CID}__예산편성기준(2026).pdf`, similarity: 0.88, ...over,
+});
+
 function deps(over: Partial<DocSearchDeps> = {}) {
   const log = vi.fn(async () => {});
   const fetchContext = vi.fn(async (): Promise<NodaContextResult> => ({
@@ -45,11 +59,27 @@ function deps(over: Partial<DocSearchDeps> = {}) {
   }));
   const findDocuments = vi.fn(async (_ids: string[]): Promise<{ id: string; agent_id: string | null }[]> => []);
   const deleteOrphan = vi.fn(async (_agentId: string, _filename: string) => {});
+  // 공통 자료실(S5) — 기본은 유형 없는 기관(공통 보관함을 찾지 않음)
+  const orgTypeOf = vi.fn(async (_organizationId: string): Promise<string | null> => null);
+  const commonDocumentsOf = vi.fn(async (_orgType: OrgType): Promise<CommonSearchDoc[]> => [commonDoc()]);
+  const fetchCommonContext = vi.fn(async (_orgType: OrgType, _query: string, _budget: number): Promise<NodaContextResult> => ({
+    context: `[1] ${CID}__예산편성기준(2026).pdf · 3쪽
+여비 기준 단가`,
+    sources: [csrc()],
+    dropped: 1,
+  }));
+  const findCommonDocuments = vi.fn(async (_ids: string[]): Promise<{ id: string; org_type: string }[]> => []);
+  const deleteCommonOrphan = vi.fn(async (_orgType: OrgType, _filename: string) => {});
   const d: DocSearchDeps = {
     documentsOf: async () => [ready()],
     fetchContext,
     findDocuments,
     deleteOrphan,
+    orgTypeOf,
+    commonDocumentsOf,
+    fetchCommonContext,
+    findCommonDocuments,
+    deleteCommonOrphan,
     log,
     ...over,
   };
@@ -59,6 +89,11 @@ function deps(over: Partial<DocSearchDeps> = {}) {
     fetchContext: d.fetchContext as typeof fetchContext,
     findDocuments: d.findDocuments as typeof findDocuments,
     deleteOrphan: d.deleteOrphan as typeof deleteOrphan,
+    orgTypeOf: d.orgTypeOf as typeof orgTypeOf,
+    commonDocumentsOf: d.commonDocumentsOf as typeof commonDocumentsOf,
+    fetchCommonContext: d.fetchCommonContext as typeof fetchCommonContext,
+    findCommonDocuments: d.findCommonDocuments as typeof findCommonDocuments,
+    deleteCommonOrphan: d.deleteCommonOrphan as typeof deleteCommonOrphan,
   };
 }
 
@@ -242,7 +277,7 @@ describe('doc_search prepare', () => {
   it('prepare: 근거 글의 문서 id 앞부분이 모델에 가지 않는다', async () => {
     const { d } = deps();
     const out = await turn(d);
-    expect(out.systemAddendum).toContain('참고 자료:');
+    expect(out.systemAddendum).toContain('참고 자료(이 기관 문서):');
     expect(out.systemAddendum).toContain('규정.hwp p.12');
     expect(out.systemAddendum).toContain('국내 출장 일비 2만원');
     expect(out.systemAddendum).not.toContain(`${id}__`);
@@ -422,6 +457,332 @@ describe('docSearchAddendum', () => {
 
   it('문서가 없으면 아무것도 붙이지 않는다', () => {
     expect(docSearchAddendum({ context: null, chunks: [], hasDocuments: false, skipped: false })).toBeUndefined();
+  });
+});
+
+describe('doc_search — 공통 자료실(S5)', () => {
+  const PUBLIC: OrgType = '공공기관';
+  const LINE_EDITION = '공통 기준 자료는 정부가 정한 기준 문서입니다. 인용할 때는 문서 이름과 기준 연도를 함께 밝히세요(예: 예산편성기준(2026)).';
+  const LINE_CONFLICT = '이 기관 문서와 공통 기준이 서로 다르게 말하면 한쪽을 고르지 말고 둘 다 보여 주고, 어느 것을 따를지는 기관 규정과 담당자가 판단한다고 안내하세요.';
+  const AGENT_HEAD = '참고 자료(이 기관 문서):';
+  const COMMON_HEAD = '참고 자료(공통 기준 — 공공기관 공통, 정부 기준 문서):';
+
+  /** 유형이 공공기관인 기관 — 공통 보관함을 함께 찾는다 */
+  const withCommon = (over: Partial<DocSearchDeps> = {}) => deps({ orgTypeOf: vi.fn(async () => PUBLIC), ...over });
+
+  const preflight = (d: DocSearchDeps) =>
+    createDocSearch(d).preflight!({ organizationId: 'org', agentId: AGENT, message: '여비 규정', skipDocuments: false });
+
+  const twoAgentSources = async (): Promise<NodaContextResult> => ({
+    context: `[1] ${id}__규정.hwp p.1\n일비\n[2] ${id}__규정.hwp p.2\n숙박비`,
+    sources: [src({ n: 1, doc_id: 'na', chunk_id: 'a1' }), src({ n: 2, doc_id: 'na', chunk_id: 'a2' })],
+    dropped: 0,
+  });
+
+  it('preflight — 비서·공통 ready 유무에 따라 /context 0·1·2번, 둘이면 3000·2000 예산으로 동시에', async () => {
+    // 둘 다 없음: 유형 없는 기관 + 비서 문서 없음
+    {
+      const m = deps({ documentsOf: async () => [] });
+      expect((await preflight(m.d)).ok).toBe(true);
+      expect(m.fetchContext).not.toHaveBeenCalled();
+      expect(m.fetchCommonContext).not.toHaveBeenCalled();
+    }
+    // 공통 행은 있지만 ready 현재 판이 없음(지난 판·읽는 중) + 비서 문서 없음
+    {
+      const m = withCommon({
+        documentsOf: async () => [],
+        commonDocumentsOf: vi.fn(async () => [
+          commonDoc({ noda_status: 'retired', retired_at: '2026-10-01T00:00:00Z' }),
+          commonDoc({ id: CID2, noda_status: 'reading' }),
+        ]),
+      });
+      expect((await preflight(m.d)).ok).toBe(true);
+      expect(m.fetchContext).not.toHaveBeenCalled();
+      expect(m.fetchCommonContext).not.toHaveBeenCalled();
+    }
+    // 비서만
+    {
+      const m = deps();
+      await preflight(m.d);
+      expect(m.fetchContext).toHaveBeenCalledTimes(1);
+      expect(m.fetchContext).toHaveBeenCalledWith(AGENT, '여비 규정', NODA_CONTEXT_BUDGET);
+      expect(m.fetchCommonContext).not.toHaveBeenCalled();
+    }
+    // 공통만
+    {
+      const m = withCommon({ documentsOf: async () => [] });
+      await preflight(m.d);
+      expect(m.fetchContext).not.toHaveBeenCalled();
+      expect(m.fetchCommonContext).toHaveBeenCalledTimes(1);
+      expect(m.fetchCommonContext).toHaveBeenCalledWith(PUBLIC, '여비 규정', NODA_CONTEXT_BUDGET);
+    }
+    // 둘 다 — 비서 쪽이 끝나기 전에 공통 쪽도 이미 불렸다(동시에)
+    {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((r) => { release = r; });
+      const m = withCommon({
+        fetchContext: vi.fn(async () => {
+          await gate;
+          return twoAgentSources();
+        }),
+      });
+      const p = preflight(m.d);
+      await vi.waitFor(() => expect(m.fetchCommonContext).toHaveBeenCalledTimes(1));
+      expect(m.fetchContext).toHaveBeenCalledTimes(1);
+      release();
+      expect((await p).ok).toBe(true);
+      expect(m.fetchContext).toHaveBeenCalledWith(AGENT, '여비 규정', CONTEXT_BUDGET_AGENT_SHARED);
+      expect(m.fetchCommonContext).toHaveBeenCalledWith(PUBLIC, '여비 규정', CONTEXT_BUDGET_COMMON_SHARED);
+      expect([CONTEXT_BUDGET_AGENT_SHARED, CONTEXT_BUDGET_COMMON_SHARED]).toEqual([3000, 2000]);
+    }
+  });
+
+  it('preflight — 공통만 실패해도 503 documents_unavailable', async () => {
+    const m = withCommon({ fetchCommonContext: vi.fn(async () => { throw new NodaError('HTTP 502', 'http', 502); }) });
+    const out = await preflight(m.d);
+    expect(out).toEqual({ ok: false, status: 503, message: DOCUMENTS_UNAVAILABLE_MESSAGE, code: DOCUMENTS_UNAVAILABLE_CODE });
+    expect(m.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: 'warning',
+        category: 'api',
+        details: expect.objectContaining({ agent_id: AGENT, org_type_key: 'public', code: 'http', status: 502 }),
+        orgId: 'org',
+      })
+    );
+    // 공통 문서만 있는 비서도 같다
+    const only = withCommon({ documentsOf: async () => [], fetchCommonContext: vi.fn(async () => { throw new NodaError('down', 'network'); }) });
+    expect(await preflight(only.d)).toMatchObject({ ok: false, status: 503, code: DOCUMENTS_UNAVAILABLE_CODE });
+  });
+
+  it('preflight — 유형 없는 기관·목록 밖 유형은 공통 행을 조회하지도 않는다', async () => {
+    for (const type of [null, '기타', '']) {
+      const m = deps({ orgTypeOf: vi.fn(async () => type) });
+      const out = await preflight(m.d);
+      expect(out.ok).toBe(true);
+      expect(m.orgTypeOf).toHaveBeenCalledWith('org');
+      expect(m.commonDocumentsOf).not.toHaveBeenCalled();
+      expect(m.fetchCommonContext).not.toHaveBeenCalled();
+      // 비서 문서는 지금처럼 4000 예산으로 찾는다
+      expect(m.fetchContext).toHaveBeenCalledWith(AGENT, '여비 규정', NODA_CONTEXT_BUDGET);
+    }
+  });
+
+  it('preflight — 유형 조회·공통 행 조회 실패는 503', async () => {
+    const a = deps({ orgTypeOf: vi.fn(async () => { throw new Error('db down'); }) });
+    expect(await preflight(a.d)).toMatchObject({ ok: false, status: 503, code: DOCUMENTS_UNAVAILABLE_CODE });
+    expect(a.fetchContext).not.toHaveBeenCalled();
+    expect(a.log).toHaveBeenCalledWith(expect.objectContaining({ level: 'error', category: 'database', orgId: 'org' }));
+
+    const b = withCommon({ commonDocumentsOf: vi.fn(async () => { throw new Error('db down'); }) });
+    expect(await preflight(b.d)).toMatchObject({ ok: false, status: 503, code: DOCUMENTS_UNAVAILABLE_CODE });
+    expect(b.fetchContext).not.toHaveBeenCalled();
+    expect(b.fetchCommonContext).not.toHaveBeenCalled();
+    expect(b.log).toHaveBeenCalledWith(expect.objectContaining({ level: 'error', category: 'database' }));
+  });
+
+  it('prepare — 비서 근거 먼저, 공통 번호를 비서 최대 번호만큼 밀고 scope common·editionYear', async () => {
+    const m = withCommon({ fetchContext: vi.fn(twoAgentSources) });
+    const out = await turn(m.d);
+    expect(out.chunks!.map((c) => [c.documentId, c.n, c.chunkIndex, c.scope])).toEqual([
+      [id, 1, 0, undefined],
+      [id, 2, 1, undefined],
+      [CID, 3, 2, 'common'],
+    ]);
+    const common = out.chunks![2];
+    expect(common).toMatchObject({ documentTitle: '예산편성기준', editionYear: 2026, text: '여비 기준 단가', page: null });
+    // 모델이 보는 번호와 조각 번호가 같다 — 공통 머리 줄이 [3]으로 밀렸다
+    expect(out.systemAddendum).toContain('[3] 예산편성기준(2026).pdf · 3쪽');
+    expect(out.systemAddendum).not.toContain('[1] 예산편성기준');
+    expect(out.systemAddendum).not.toContain(`${CID}__`);
+    expect(out.systemAddendum).not.toContain(`${id}__`);
+    expect(out.systemAddendum!.indexOf(AGENT_HEAD)).toBeLessThan(out.systemAddendum!.indexOf(COMMON_HEAD));
+    expect(out.dropped).toBe(1 + 0);
+  });
+
+  it('prepare — 비서 조각이 없으면 공통 번호를 밀지 않고 verifyTenant는 공통 보관함', async () => {
+    // 비서 근거는 모두 읽는 중인 문서의 것이라 조용히 빠진다(Review Focus 4)
+    const m = withCommon({
+      documentsOf: async () => [ready(), ready({ id: id2, noda_status: 'reading' })],
+      fetchContext: vi.fn(async () => ({
+        context: `[1] ${id2}__예전.hwp\n옛 글\n[2] ${id2}__예전.hwp\n옛 글2`,
+        sources: [src({ n: 1, filename: `${id2}__예전.hwp` }), src({ n: 2, filename: `${id2}__예전.hwp` })],
+        dropped: 0,
+      })),
+    });
+    const out = await turn(m.d);
+    expect(out.chunks!.map((c) => [c.documentId, c.n, c.chunkIndex])).toEqual([[CID, 1, 0]]);
+    expect(out.verifySources).toEqual([{ doc_id: 'nc', chunk_id: 'k1' }]);
+    expect(out.verifyTenant).toBe(commonTenant(PUBLIC));
+    expect(out.verifyTenant).toBe('workon-c-public');
+    expect(out.systemAddendum).toContain('[1] 예산편성기준(2026).pdf');
+    expect(out.systemAddendum).toContain(COMMON_HEAD);
+    expect(out.systemAddendum).not.toContain(AGENT_HEAD);
+
+    // 공통 문서만 있는 비서도 같다
+    const only = await turn(withCommon({ documentsOf: async () => [] }).d);
+    expect(only.chunks!.map((c) => c.n)).toEqual([1]);
+    expect(only.verifyTenant).toBe('workon-c-public');
+  });
+
+  it('prepare — 둘 다 조각이 있으면 verifySources 빈 배열', async () => {
+    const out = await turn(withCommon({ fetchContext: vi.fn(twoAgentSources) }).d);
+    expect(out.chunks).toHaveLength(3);
+    expect(out.verifySources).toEqual([]);
+    expect(out.verifyTenant).toBeUndefined();
+    // 비서 조각만이면 지금처럼 비서 보관함(verifyTenant 없음)
+    const agentOnly = await turn(deps({ fetchContext: vi.fn(twoAgentSources) }).d);
+    expect(agentOnly.verifySources).toEqual([{ doc_id: 'na', chunk_id: 'a1' }, { doc_id: 'na', chunk_id: 'a2' }]);
+    expect(agentOnly.verifyTenant).toBeUndefined();
+  });
+
+  it('prepare — 다른 유형 공통 근거는 섞임: 전체 근거 버림·critical', async () => {
+    const m = withCommon({
+      fetchContext: vi.fn(twoAgentSources),
+      fetchCommonContext: vi.fn(async () => ({
+        context: `[1] ${CID}__예산편성기준(2026).pdf\n기준\n[2] ${CID2}__남의기준(2026).pdf\n남의 글`,
+        sources: [csrc(), csrc({ n: 2, filename: `${CID2}__남의기준(2026).pdf` })],
+        dropped: 0,
+      })),
+    });
+    m.findCommonDocuments.mockResolvedValue([{ id: CID2, org_type: '중앙행정기관' }]);
+    const out = await turn(m.d);
+    expect(m.findCommonDocuments).toHaveBeenCalledWith([CID2]);
+    expect(out.chunks).toEqual([]);
+    expect(out.verifySources ?? []).toEqual([]);
+    expect(out.systemAddendum).toContain('[문서 검색 결과 없음]');
+    expect(out.systemAddendum).not.toContain('남의 글');
+    expect(out.systemAddendum).not.toContain('숙박비');
+    expect(m.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: 'critical',
+        category: 'security',
+        details: { agent_id: AGENT, org_type_key: 'public', foreign_count: 1 },
+        orgId: 'org',
+      })
+    );
+    expect(m.deleteCommonOrphan).not.toHaveBeenCalled();
+    expect(JSON.stringify(m.log.mock.calls)).not.toContain('남의기준');
+  });
+
+  it('prepare — 유형을 바꾼 기관은 새 유형 보관함만 찾는다(옛 유형 행은 조회되지 않음)', async () => {
+    // 공통 문서 표에는 두 유형의 행이 있다. 기관은 공공기관 → 지방자치단체로 바뀌었다(Review Focus 1)
+    const LOCAL: OrgType = '지방자치단체';
+    const table: CommonSearchDoc[] = [commonDoc(), commonDoc({ id: CID2, title: '지방재정 운영기준', org_type: LOCAL })];
+    const m = deps({
+      orgTypeOf: vi.fn(async () => LOCAL),
+      commonDocumentsOf: vi.fn(async (t: OrgType) => table.filter((r) => r.org_type === t)),
+      fetchCommonContext: vi.fn(async () => ({
+        context: `[1] ${CID2}__지방재정 운영기준(2026).pdf\n지방 기준`,
+        sources: [csrc({ filename: `${CID2}__지방재정 운영기준(2026).pdf` })],
+        dropped: 0,
+      })),
+    });
+    const out = await turn(m.d);
+    expect(m.commonDocumentsOf.mock.calls).toEqual([[LOCAL]]);
+    expect(m.fetchCommonContext.mock.calls.map((c) => c[0])).toEqual([LOCAL]);
+    expect(m.findCommonDocuments).not.toHaveBeenCalled();
+    expect(m.log.mock.calls.some((c) => (c as unknown as [{ level: string }])[0].level === 'critical')).toBe(false);
+    expect(out.chunks!.map((c) => [c.documentId, c.scope])).toEqual([
+      [id, undefined],
+      [CID2, 'common'],
+    ]);
+    expect(out.systemAddendum).toContain('참고 자료(공통 기준 — 지방자치단체 공통, 정부 기준 문서):');
+  });
+
+  it('prepare — 공통 고아는 공통만 버리고 사본 삭제, 비서 근거는 남음', async () => {
+    const m = withCommon({
+      fetchCommonContext: vi.fn(async () => ({
+        context: `[1] ${CID}__예산편성기준(2026).pdf\n기준\n[2] ${CID2}__지운기준(2025).pdf\n지운 글`,
+        sources: [csrc(), csrc({ n: 2, filename: `${CID2}__지운기준(2025).pdf` })],
+        dropped: 0,
+      })),
+    });
+    const out = await turn(m.d);
+    expect(out.chunks!.map((c) => c.documentId)).toEqual([id]);
+    expect(m.deleteCommonOrphan).toHaveBeenCalledWith(PUBLIC, `${CID2}__지운기준(2025).pdf`);
+    expect(m.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: 'warning',
+        details: expect.objectContaining({ agent_id: AGENT, org_type_key: 'public', orphan_count: 1, orphan_document_ids: [CID2] }),
+      })
+    );
+    expect(m.log.mock.calls.some((c) => (c as unknown as [{ level: string }])[0].level === 'critical')).toBe(false);
+    expect(JSON.stringify(m.log.mock.calls)).not.toContain('지운기준');
+    // 공통 근거는 모델에 가지 않고, 공통 인용 줄도 없다. 검증은 비서 보관함
+    expect(out.systemAddendum).toContain(AGENT_HEAD);
+    expect(out.systemAddendum).not.toContain(COMMON_HEAD);
+    expect(out.systemAddendum).not.toContain('지운 글');
+    expect(out.systemAddendum).not.toContain(LINE_EDITION);
+    expect(out.verifySources).toEqual([{ doc_id: 'd', chunk_id: 'c1' }]);
+    expect(out.verifyTenant).toBeUndefined();
+  });
+
+  it('prepare — 공통 고아 사본 지우기가 오래 걸려도 답을 오래 붙잡지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const m = withCommon({
+        fetchCommonContext: vi.fn(async () => ({ context: 'x', sources: [csrc({ filename: `${CID2}__지운기준(2025).pdf` })], dropped: 0 })),
+        deleteCommonOrphan: () => new Promise<void>(() => {}),
+      });
+      const p = turn(m.d);
+      await vi.advanceTimersByTimeAsync(ORPHAN_DELETE_WAIT_MS + 10);
+      expect((await p).chunks!.map((c) => c.documentId)).toEqual([id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prepare — 공통 근거의 깨진 원소·확인 실패는 공통만 버린다', async () => {
+    const broken = withCommon({
+      fetchCommonContext: vi.fn(async () => ({ context: 'x', sources: [csrc(), { n: 2 } as unknown as NodaSource], dropped: 0 })),
+    });
+    const a = await turn(broken.d);
+    expect(a.chunks!.map((c) => c.documentId)).toEqual([id]);
+    expect(broken.log).toHaveBeenCalledWith(expect.objectContaining({ level: 'warning', details: expect.objectContaining({ malformed_count: 1 }) }));
+
+    const failing = withCommon({
+      fetchCommonContext: vi.fn(async () => ({ context: 'x', sources: [csrc({ filename: `${CID2}__무엇(2025).pdf` })], dropped: 0 })),
+      findCommonDocuments: vi.fn(async () => { throw new Error('db down'); }),
+    });
+    const b = await turn(failing.d);
+    expect(b.chunks!.map((c) => c.documentId)).toEqual([id]);
+    expect(failing.deleteCommonOrphan).not.toHaveBeenCalled();
+    expect(failing.log).toHaveBeenCalledWith(expect.objectContaining({ level: 'error', category: 'database' }));
+  });
+
+  it('addendum — 공통 조각이 있을 때만 두 줄·머리 둘, 근거 없음 문구가 공통까지 넓어짐', () => {
+    const agentChunk = { documentId: id, documentTitle: '여비 규정', chunkIndex: 0, n: 1, text: '', similarity: 0.85 };
+    const commonChunk = { ...agentChunk, documentId: CID, chunkIndex: 1, n: 2, scope: 'common' as const, editionYear: 2026 };
+    const base = { hasDocuments: true, skipped: false, commonOrgType: PUBLIC, searchedCommon: true };
+
+    const agentOnly = docSearchAddendum({ ...base, context: '[1] 규정.hwp\n일비', commonContext: '', chunks: [agentChunk] })!;
+    expect(agentOnly).toContain(AGENT_HEAD);
+    expect(agentOnly).not.toContain('공통 기준 —');
+    expect(agentOnly).not.toContain(LINE_EDITION);
+    expect(agentOnly).not.toContain(LINE_CONFLICT);
+
+    const both = docSearchAddendum({ ...base, context: '[1] 규정.hwp\n일비', commonContext: '[2] 예산편성기준(2026).pdf\n기준', chunks: [agentChunk, commonChunk] })!;
+    expect(both).toContain(`${AGENT_HEAD}\n[1] 규정.hwp\n일비`);
+    expect(both).toContain(`${COMMON_HEAD}\n[2] 예산편성기준(2026).pdf\n기준`);
+    expect(both).toContain('[자료 인용 규칙]');
+    // 두 줄은 인용 규칙 끝에, 글자 그대로
+    const lines = both.split('\n');
+    expect(lines.slice(-2)).toEqual([`- ${LINE_EDITION}`, `- ${LINE_CONFLICT}`]);
+    expect(lines[lines.length - 3]).toBe(CITE_NUMBER_RULE);
+
+    const commonOnly = docSearchAddendum({ ...base, context: '', commonContext: '[1] 예산편성기준(2026).pdf\n기준', chunks: [{ ...commonChunk, n: 1, chunkIndex: 0 }] })!;
+    expect(commonOnly).toContain(COMMON_HEAD);
+    expect(commonOnly).not.toContain(AGENT_HEAD);
+    expect(commonOnly).toContain(LINE_EDITION);
+
+    const none = docSearchAddendum({ ...base, context: '', commonContext: '', chunks: [] })!;
+    expect(none).toContain('[문서 검색 결과 없음]');
+    expect(none).toContain('이 비서의 문서와 공통 기준 자료에서 이번 질문과 관련된 내용을 찾지 못했습니다.');
+    expect(none).not.toContain('이 비서에 연결된 문서에서');
+
+    // 공통 보관함을 찾지 않은 턴은 지금 문구 그대로
+    const agentSearchOnly = docSearchAddendum({ context: '', chunks: [], hasDocuments: true, skipped: false })!;
+    expect(agentSearchOnly).toContain('이 비서에 연결된 문서에서 이번 질문과 관련된 내용을 찾지 못했습니다.');
   });
 });
 

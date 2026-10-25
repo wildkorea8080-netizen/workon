@@ -222,7 +222,10 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   );
   const chunks: RetrievedChunk[] = prepared.flatMap((p) => p.chunks ?? []);
   const dropped = prepared.find((p) => typeof p.dropped === 'number')?.dropped;
-  const verifySources = prepared.find((p) => p.verifySources?.length)?.verifySources ?? [];
+  // 근거와 보관함은 같은 능력의 결과에서 함께 꺼낸다 — 섞이면 다른 보관함에 근거를 보낸다
+  const verifyFrom = prepared.find((p) => p.verifySources?.length);
+  const verifySources = verifyFrom?.verifySources ?? [];
+  const verifyTenant = verifyFrom?.verifyTenant ?? null;
   const { tools } = toolsFor(capabilities, ctx);
 
   return {
@@ -241,6 +244,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       documentsSkipped: prepared.some((p) => p.documentsSkipped === true),
       docDropped: dropped ?? null,
       verifySources,
+      verifyTenant,
       storedUserContent: storedUserContent(
         message,
         attachedImages.length,

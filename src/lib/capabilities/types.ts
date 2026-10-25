@@ -73,6 +73,11 @@ export interface PrepareResult {
    * 근거 조각이 없는 턴(근거 없음·섞임·문서 없이 답함)도 빈 배열
    */
   verifySources?: { doc_id: string; chunk_id: string }[];
+  /**
+   * `/verify`를 부를 보관함 — 근거가 공통 자료실에서만 왔으면 그 유형의 공통 보관함(S5 설계 5.5).
+   * 없으면 비서 보관함. 비서·공통 근거가 함께 있는 턴은 `verifySources`를 비워 검증하지 않는다
+   */
+  verifyTenant?: string;
 }
 
 /** 도구가 만든 파일. 화면(tool_end)과 메시지 저장(source_references.files)으로 간다 */

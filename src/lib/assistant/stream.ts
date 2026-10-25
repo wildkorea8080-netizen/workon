@@ -255,7 +255,8 @@ async function verifyTurn(turn: PreparedTurn, answer: string, verify: VerifyFn):
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const call = Promise.resolve().then(() =>
-      verify({ tenant: nodaTenant(turn.ctx.agentId), answer, sources: turn.verifySources })
+      // 공통 자료실 근거만 있던 턴은 그 공통 보관함으로(S5 설계 5.5), 아니면 비서 보관함
+      verify({ tenant: turn.verifyTenant ?? nodaTenant(turn.ctx.agentId), answer, sources: turn.verifySources })
     );
     // 시간 제한으로 버린 요청이 뒤늦게 실패해도 처리되지 않은 거부로 남지 않게
     call.catch(() => {});

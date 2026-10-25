@@ -66,6 +66,7 @@ function turn(overrides: Partial<PreparedTurn> = {}): PreparedTurn {
     documentsSkipped: false,
     docDropped: null,
     verifySources: [],
+    verifyTenant: null,
     ...overrides,
   };
 }
@@ -443,6 +444,15 @@ describe('streamTurn — NODA 답변 검증(S4-b)', () => {
     expect(verify).toHaveBeenCalledWith({ tenant: nodaTenant(AGENT), answer: '예산은 50입니다 [1]', sources });
     // 메시지 저장 전에 부른다 — 결과를 함께 저장하려고
     expect(savedBefore).toBe(0);
+  });
+
+  it('verifyTenant가 있으면 그 보관함(공통 자료실)으로 검증한다(S5)', async () => {
+    setLlmAdapterForTests(answering('기준은 50입니다 [1]'));
+    const verify = vi.fn<VerifyFn>(async () => VERIFIED);
+    await run(docTurn({ verifyTenant: 'workon-c-public' }), undefined, { verify });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith({ tenant: 'workon-c-public', answer: '기준은 50입니다 [1]', sources });
+    expect(refs(inserted('messages')[1]).verify).toEqual(VERIFIED);
   });
 
   it('검증이 실패하면 답과 저장은 그대로, verify 칸이 없고 운영 기록만 남는다', async () => {

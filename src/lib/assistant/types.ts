@@ -43,6 +43,8 @@ export interface PreparedTurn {
   docDropped: number | null;
   /** NODA 답변 검증에 보낼 근거(`PrepareResult.verifySources`). 비었으면 검증하지 않는다 */
   verifySources: { doc_id: string; chunk_id: string }[];
+  /** 검증할 보관함(`PrepareResult.verifyTenant`) — null이면 비서 보관함 */
+  verifyTenant: string | null;
   /** 메시지 행에 저장할 사용자 내용(사진 표시 + 질문) */
   storedUserContent: string;
 }

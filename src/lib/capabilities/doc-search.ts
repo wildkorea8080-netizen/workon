@@ -7,11 +7,21 @@ import {
   stripNodaPrefixes,
   documentIdFromNodaFilename,
   NodaError,
+  NODA_CONTEXT_BUDGET,
+  CONTEXT_BUDGET_AGENT_SHARED,
+  CONTEXT_BUDGET_COMMON_SHARED,
   type NodaContextResult,
   type NodaSource,
 } from '@/lib/noda';
 import type { NodaStatus, RetrievedChunk } from '@/lib/db';
+import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-types';
 import type { Capability, PreflightResult } from './types';
+import {
+  commonSourcesToChunks,
+  maxCitationNumber,
+  shiftContext,
+  type CommonSearchDoc,
+} from './doc-search-common';
 
 /**
  * 참고 문서 찾기 — 질문마다 NODA `/context`로 근거를 먼저 찾아 프롬프트에 붙인다(S4-a, 설계 5절).
@@ -26,6 +36,9 @@ import type { Capability, PreflightResult } from './types';
  *   - 행이 어디에도 없다(또는 문서 id를 읽지 못함) → **고아**(지워진 문서의 NODA 사본). 이번 턴은 근거 없이,
  *     NODA 사본은 지운다(짧게만 기다리고 실패는 기록만). 운영 기록 warning
  *   - 형식이 깨진 원소 → 확인할 수 없으니 이번 턴은 근거 없이. 운영 기록 warning
+ * - **공통 자료실(S5, 설계 5절)** — 기관 유형(`organizations.type`)을 그 턴에 읽어, 그 유형의 공통 보관함도 함께 찾는다.
+ *   두 보관함을 동시에 부르고(예산 3000 + 2000), 공통 번호를 비서 번호 뒤로 민다. 공통 근거는 그 유형의 행과 따로 맞춘다:
+ *   다른 유형의 행이면 섞임(그 턴 근거 전체를 버림), 행이 없으면 고아(공통 근거만 버리고 사본을 지움)
  */
 
 export const DOCUMENTS_UNAVAILABLE_MESSAGE = '참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요';
@@ -41,11 +54,22 @@ export interface AgentDocument {
 
 export interface DocSearchDeps {
   documentsOf(agentId: string): Promise<AgentDocument[]>;
-  fetchContext(agentId: string, query: string): Promise<NodaContextResult>;
+  /** `budget`을 주지 않으면 `NODA_CONTEXT_BUDGET` */
+  fetchContext(agentId: string, query: string, budget?: number): Promise<NodaContextResult>;
   /** 문서 id로 행을 찾는다(어느 비서든, 한 번의 조회) — 이 비서 행이 아닌 근거가 남의 것인지 지워진 것인지 가른다 */
   findDocuments(ids: string[]): Promise<{ id: string; agent_id: string | null }[]>;
   /** 이 비서 보관함의 NODA 고아 사본을 지운다. 던질 수 있다 — 부르는 쪽이 잡는다 */
   deleteOrphan(agentId: string, filename: string): Promise<void>;
+  /** 기관 유형(`organizations.type`) — 그 턴에 읽는다(유형을 바꾸면 다음 질문부터 새 유형). 실패는 던진다 */
+  orgTypeOf(organizationId: string): Promise<string | null>;
+  /** 그 유형의 공통 문서 행 전부(지난 판 포함). 실패는 던진다 */
+  commonDocumentsOf(orgType: OrgType): Promise<CommonSearchDoc[]>;
+  /** 그 유형의 공통 보관함 `/context` — 보관함 이름은 서버가 유형으로만 만든다 */
+  fetchCommonContext(orgType: OrgType, query: string, budget: number): Promise<NodaContextResult>;
+  /** 공통 문서 id로 행을 찾는다(어느 유형이든, 한 번의 조회) — 다른 유형의 것인지 지워진 것인지 가른다 */
+  findCommonDocuments(ids: string[]): Promise<{ id: string; org_type: string }[]>;
+  /** 그 유형 공통 보관함의 NODA 고아 사본을 지운다. 던질 수 있다 — 부르는 쪽이 잡는다 */
+  deleteCommonOrphan(orgType: OrgType, filename: string): Promise<void>;
   /** 운영 기록(system_logs). 기본은 logSystem */
   log?: typeof logSystem;
 }
@@ -59,9 +83,9 @@ const defaultDeps: DocSearchDeps = {
     if (error) throw new Error(error.message);
     return (data ?? []) as AgentDocument[];
   },
-  async fetchContext(agentId, query) {
+  async fetchContext(agentId, query, budget) {
     // 보관함 이름은 서버가 비서 id로만 만든다
-    return noda.getContext({ tenant: nodaTenant(agentId), query });
+    return noda.getContext({ tenant: nodaTenant(agentId), query, budget });
   },
   async findDocuments(ids) {
     if (ids.length === 0) return [];
@@ -72,6 +96,33 @@ const defaultDeps: DocSearchDeps = {
   async deleteOrphan(agentId, filename) {
     // 보관함은 이 비서의 것만 — 근거를 돌려준 바로 그 보관함이다
     await noda.deleteDocument(nodaTenant(agentId), filename);
+  },
+  async orgTypeOf(organizationId) {
+    const { data, error } = await supabaseAdmin.from('organizations').select('type').eq('id', organizationId).maybeSingle();
+    if (error) throw new Error(error.message);
+    const type = (data as { type: unknown } | null)?.type;
+    return typeof type === 'string' ? type : null;
+  },
+  async commonDocumentsOf(orgType) {
+    const { data, error } = await supabaseAdmin
+      .from('common_documents')
+      .select('id, title, edition_year, org_type, noda_status, retired_at')
+      .eq('org_type', orgType);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as CommonSearchDoc[];
+  },
+  async fetchCommonContext(orgType, query, budget) {
+    return noda.getContext({ tenant: commonTenant(orgType), query, budget });
+  },
+  async findCommonDocuments(ids) {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabaseAdmin.from('common_documents').select('id, org_type').in('id', ids);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as { id: string; org_type: string }[];
+  },
+  async deleteCommonOrphan(orgType, filename) {
+    // 보관함은 이 유형의 것만 — 근거를 돌려준 바로 그 보관함이다
+    await noda.deleteDocument(commonTenant(orgType), filename);
   },
   log: logSystem,
 };
@@ -84,6 +135,11 @@ const CITABLE: ReadonlySet<NodaStatus | null> = new Set<NodaStatus | null>(['rea
 
 function hasReady(docs: AgentDocument[]): boolean {
   return docs.some((d) => d.noda_status === 'ready');
+}
+
+/** 공통 문서는 `ready`인 **현재 판**(`retired_at` 없음)이 있어야 찾는다 */
+function hasCurrentCommon(docs: CommonSearchDoc[]): boolean {
+  return docs.some((d) => d.noda_status === 'ready' && !d.retired_at);
 }
 
 function sectionOf(outline: NodaSource['outline']): string | null {
@@ -235,9 +291,22 @@ const CITATION_RULES = [
   CITE_NUMBER_RULE,
 ];
 
+/** 공통 기준 자료가 근거에 있을 때만 인용 규칙 끝에 더한다(설계 5.4 — 글자 그대로) */
+const COMMON_CITATION_RULES = [
+  '- 공통 기준 자료는 정부가 정한 기준 문서입니다. 인용할 때는 문서 이름과 기준 연도를 함께 밝히세요(예: 예산편성기준(2026)).',
+  '- 이 기관 문서와 공통 기준이 서로 다르게 말하면 한쪽을 고르지 말고 둘 다 보여 주고, 어느 것을 따를지는 기관 규정과 담당자가 판단한다고 안내하세요.',
+];
+
+const AGENT_CONTEXT_HEAD = '참고 자료(이 기관 문서):';
+const commonContextHead = (orgType: string) => `참고 자료(공통 기준 — ${orgType} 공통, 정부 기준 문서):`;
+
+const NO_RESULT_AGENT_LINE = '이 비서에 연결된 문서에서 이번 질문과 관련된 내용을 찾지 못했습니다.';
+/** 공통 보관함도 찾은 턴의 '근거 없음' 둘째 줄(설계 5.4) */
+const NO_RESULT_COMMON_LINE = '이 비서의 문서와 공통 기준 자료에서 이번 질문과 관련된 내용을 찾지 못했습니다.';
+
 const NO_RESULT = [
   '[문서 검색 결과 없음]',
-  '이 비서에 연결된 문서에서 이번 질문과 관련된 내용을 찾지 못했습니다.',
+  NO_RESULT_AGENT_LINE,
   '내부 자료에 근거가 없다는 사실을 먼저 밝히고 답하세요.',
   '일반적인 설명을 덧붙일 수는 있으나, 그것이 이 기관의 자료에서 나온 것처럼',
   '말해서는 안 됩니다. 구체적인 수치·자격요건·기한은 지어내지 말고',
@@ -261,26 +330,53 @@ const SKIPPED = [
  * 문서는 있는데 못 찾았을 때 알리지 않으면 모델이 일반 지식으로 그럴듯하게
  * 답한다. 공공기관에서는 근거 없는 답이 근거 있는 답처럼 보이는 것이 가장 위험하다.
  *
- * `context`는 이미 `{문서 id}__`를 뗀 근거 묶음이어야 한다.
+ * `context`·`commonContext`는 이미 `{문서 id}__`를 뗀 근거 묶음이어야 한다(공통 쪽은 번호를 민 뒤).
+ * 두 묶음은 다른 머리 아래 두고, 조각이 있는 쪽만 싣는다(설계 5.2). 공통 조각이 있을 때만 공통 인용 두 줄을 더한다(5.4).
  */
 export function docSearchAddendum(input: {
   context: string | null;
   chunks: RetrievedChunk[];
   hasDocuments: boolean;
   skipped: boolean;
+  /** 공통 보관함의 근거 묶음(S5) */
+  commonContext?: string | null;
+  /** 공통 머리에 보일 기관 유형 */
+  commonOrgType?: string | null;
+  /** 이번 턴에 공통 보관함도 찾았다 — '근거 없음' 문구를 공통까지 넓힌다 */
+  searchedCommon?: boolean;
 }): string | undefined {
   if (input.skipped) return SKIPPED.join('\n');
   const context = input.context?.trim() ?? '';
-  if (input.chunks.length > 0 && context) {
-    return ['참고 자료:', context, '', ...CITATION_RULES].join('\n');
+  const commonContext = input.commonContext?.trim() ?? '';
+  const withAgent = context !== '' && input.chunks.some((c) => c.scope !== 'common');
+  const withCommon = commonContext !== '' && !!input.commonOrgType && input.chunks.some((c) => c.scope === 'common');
+  if (withAgent || withCommon) {
+    return [
+      ...(withAgent ? [AGENT_CONTEXT_HEAD, context, ''] : []),
+      ...(withCommon ? [commonContextHead(input.commonOrgType as string), commonContext, ''] : []),
+      ...CITATION_RULES,
+      ...(withCommon ? COMMON_CITATION_RULES : []),
+    ].join('\n');
   }
-  if (input.hasDocuments) return NO_RESULT.join('\n');
+  if (input.hasDocuments) {
+    const lines = input.searchedCommon
+      ? NO_RESULT.map((line) => (line === NO_RESULT_AGENT_LINE ? NO_RESULT_COMMON_LINE : line))
+      : NO_RESULT;
+    return lines.join('\n');
+  }
   return undefined;
+}
+
+/** preflight가 찾은 공통 보관함 결과 — 유형·그 유형의 행·`/context` 결과 */
+interface CommonCarry {
+  orgType: OrgType;
+  docs: CommonSearchDoc[];
+  result: NodaContextResult;
 }
 
 type DocSearchCarry =
   | { skipped: true }
-  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult };
+  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry };
 
 type MatchInput = { agentId: string; organizationId: string | null };
 
@@ -347,7 +443,7 @@ async function matchedChunks(
       },
       orgId: input.organizationId,
     });
-    await deleteOrphans(deps, input, orphanNames);
+    await deleteOrphans(deps, input, orphanNames, (filename) => deps.deleteOrphan(input.agentId, filename));
   }
   if (match.malformed > 0) {
     await log({
@@ -361,13 +457,115 @@ async function matchedChunks(
   return [];
 }
 
-/** 고아 사본을 지운다. 실패는 기록만 하고, 답이 늦어지지 않게 `ORPHAN_DELETE_WAIT_MS`까지만 기다린다 */
-async function deleteOrphans(deps: DocSearchDeps, input: MatchInput, filenames: string[]): Promise<void> {
+/** 공통 근거를 맞춘 결과. `mixed`면 그 턴 근거 전체(비서 것까지)를 버린다 */
+interface CommonMatchResult {
+  chunks: RetrievedChunk[];
+  mixed: boolean;
+  /** 번호를 민 공통 결과 — 프롬프트에 실을 근거 묶음 */
+  shifted: NodaContextResult;
+}
+
+/**
+ * 공통 근거를 그 유형의 행과 맞춘다(설계 5.3). 번호는 `offset`만큼 밀고 조각 순번은 `startIndex`부터 잇는다.
+ * 맞지 않은 조각이 있으면 공통 근거를 버리고 가른다:
+ * - 다른 유형의 행이 있는 조각 → **섞임**. critical(security). 부르는 쪽이 그 턴 근거 전체를 버린다. 사본은 건드리지 않는다
+ * - 어디에도 행이 없는 조각·문서 id를 읽지 못한 조각 → 고아. 그 유형 보관함의 사본을 지우고(짧게만 기다림) warning
+ * - 형식이 깨진 원소 → warning. 문서 확인 조회가 실패하면 error(사본은 건드리지 않음)
+ * 비서 근거는 섞임이 아니면 그대로 쓴다. 운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수·유형 열쇠만).
+ */
+async function matchedCommonChunks(
+  deps: DocSearchDeps,
+  input: MatchInput,
+  common: CommonCarry,
+  offset: number,
+  startIndex: number
+): Promise<CommonMatchResult> {
+  const log = deps.log ?? logSystem;
+  const shifted = shiftContext(common.result, offset);
+  // 이 유형의 행만 — 다른 유형의 행과 맞은 조각은 아래에서 섞임으로 가른다
+  const typeDocs = common.docs.filter((d) => d.org_type === common.orgType);
+  const match = commonSourcesToChunks(shifted.sources, typeDocs, contextPassages(shifted.context), startIndex);
+  if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false, shifted };
+
+  const dropped: CommonMatchResult = { chunks: [], mixed: false, shifted };
+  const base = { agent_id: input.agentId, org_type_key: ORG_TYPE_KEYS[common.orgType] };
+
+  let owners: { id: string; org_type: string }[] = [];
+  if (match.unknown.length > 0) {
+    try {
+      owners = await deps.findCommonDocuments(Array.from(new Set(match.unknown.map((u) => u.documentId))));
+    } catch (error) {
+      // 다른 유형의 것인지 지워진 것인지 모른다 — 공통 근거 없이 답하고 사본은 건드리지 않는다
+      await log({
+        level: 'error',
+        category: 'database',
+        message: '공통 기준 근거의 문서를 확인하지 못해 공통 근거를 버림',
+        details: { ...base, error: error instanceof Error ? error.message : String(error) },
+        orgId: input.organizationId,
+      });
+      return dropped;
+    }
+  }
+
+  const foreign = owners.filter((o) => o.org_type !== common.orgType);
+  if (foreign.length > 0) {
+    await log({
+      level: 'critical',
+      category: 'security',
+      message: '공통 기준 근거에 다른 유형의 문서가 섞여 그 턴 근거를 모두 버림',
+      details: { ...base, foreign_count: foreign.length },
+      orgId: input.organizationId,
+    });
+    return { ...dropped, mixed: true };
+  }
+
+  const found = new Set(owners.map((o) => o.id.toLowerCase()));
+  const orphanIds = match.unknown.filter((u) => !found.has(u.documentId));
+  const orphanNames = Array.from(new Set([...orphanIds.map((u) => u.filename), ...match.unparsable]));
+  if (orphanNames.length > 0) {
+    await log({
+      level: 'warning',
+      category: 'api',
+      message: '공통 기준 근거에 지워진 문서의 NODA 사본이 있어 공통 근거를 버리고 사본을 지움',
+      details: {
+        ...base,
+        orphan_count: orphanNames.length,
+        orphan_document_ids: Array.from(new Set(orphanIds.map((u) => u.documentId))),
+      },
+      orgId: input.organizationId,
+    });
+    await deleteOrphans(deps, input, orphanNames, (filename) => deps.deleteCommonOrphan(common.orgType, filename), {
+      org_type_key: base.org_type_key,
+    });
+  }
+  if (match.malformed > 0) {
+    await log({
+      level: 'warning',
+      category: 'api',
+      message: '공통 기준 근거에 형식이 깨진 조각이 있어 공통 근거를 버림',
+      details: { ...base, malformed_count: match.malformed },
+      orgId: input.organizationId,
+    });
+  }
+  return dropped;
+}
+
+/**
+ * 고아 사본을 지운다(`remove` — 비서 보관함이든 공통 보관함이든 근거를 돌려준 그 보관함).
+ * 실패는 기록만 하고, 답이 늦어지지 않게 `ORPHAN_DELETE_WAIT_MS`까지만 기다린다
+ */
+async function deleteOrphans(
+  deps: DocSearchDeps,
+  input: MatchInput,
+  filenames: string[],
+  remove: (filename: string) => Promise<void>,
+  extra: Record<string, unknown> = {}
+): Promise<void> {
   const log = deps.log ?? logSystem;
   const all = Promise.all(
     filenames.map((filename) =>
       Promise.resolve()
-        .then(() => deps.deleteOrphan(input.agentId, filename))
+        .then(() => remove(filename))
         .catch((error: unknown) =>
           log({
             level: 'warning',
@@ -375,6 +573,7 @@ async function deleteOrphans(deps: DocSearchDeps, input: MatchInput, filenames: 
             message: '문서 찾기 근거의 NODA 고아 사본을 지우지 못함',
             details: {
               agent_id: input.agentId,
+              ...extra,
               code: error instanceof NodaError ? error.code : 'unknown',
               status: error instanceof NodaError ? error.status : null,
             },
@@ -440,11 +639,28 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
     async preflight({ organizationId, agentId, message, skipDocuments }) {
       if (skipDocuments) return { ok: true, carry: { skipped: true } satisfies DocSearchCarry };
 
+      // 비서 문서 행과 (기관 유형 → 그 유형의 공통 문서 행)을 함께 읽는다. 유형은 그 턴에 읽는다(설계 5.1)
       let docs: AgentDocument[];
+      let orgType: OrgType | null = null;
+      let commonDocs: CommonSearchDoc[] = [];
       try {
-        docs = await deps.documentsOf(agentId);
+        const [agentDocs, common] = await Promise.all([
+          deps.documentsOf(agentId),
+          (async () => {
+            const type = await deps.orgTypeOf(organizationId);
+            // 유형이 없거나 표 밖이면 공통 행을 조회하지도, 공통 보관함을 부르지도 않는다
+            if (!isOrgType(type)) return null;
+            return { type, docs: await deps.commonDocumentsOf(type) };
+          })(),
+        ]);
+        docs = agentDocs;
+        if (common) {
+          orgType = common.type;
+          commonDocs = common.docs;
+        }
       } catch (error) {
-        // 행을 모르면 근거를 맞춰 볼 수 없다 — 근거 없이 답하지 않고 닫는다
+        // 행을 모르면 근거를 맞춰 볼 수 없다 — 근거 없이 답하지 않고 닫는다.
+        // 공통 행을 모르면 공통 문서에 답이 있는 질문에 '찾지 못했습니다'라고 단정할 수 있다(설계 5.1)
         await log({
           level: 'error',
           category: 'database',
@@ -454,26 +670,60 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         });
         return unavailable;
       }
-      if (!hasReady(docs)) return { ok: true, carry: { docs: [] } satisfies DocSearchCarry };
 
-      try {
-        const result = await deps.fetchContext(agentId, message);
-        return { ok: true, carry: { docs, result } satisfies DocSearchCarry };
-      } catch (error) {
-        // 질문 원문은 남기지 않는다. NodaError 글에는 키가 실리지 않는다(noda.ts)
-        await log({
-          level: 'warning',
-          category: 'api',
-          message: '참고 문서(NODA)를 불러오지 못해 대화를 거절함',
-          details: {
-            agent_id: agentId,
-            code: error instanceof NodaError ? error.code : 'unknown',
-            status: error instanceof NodaError ? error.status : null,
-          },
-          orgId: organizationId,
-        });
+      const searchAgent = hasReady(docs);
+      const commonType = orgType !== null && hasCurrentCommon(commonDocs) ? orgType : null;
+      if (!searchAgent && !commonType) return { ok: true, carry: { docs: [] } satisfies DocSearchCarry };
+
+      // 두 곳을 찾으면 예산을 나눈다 — 모델에 가는 발췌가 두 배로 늘지 않게(설계 5.1)
+      const both = searchAgent && commonType !== null;
+      const [agentCall, commonCall] = await Promise.allSettled([
+        searchAgent
+          ? Promise.resolve().then(() => deps.fetchContext(agentId, message, both ? CONTEXT_BUDGET_AGENT_SHARED : NODA_CONTEXT_BUDGET))
+          : Promise.resolve(undefined),
+        commonType
+          ? Promise.resolve().then(() =>
+              deps.fetchCommonContext(commonType, message, both ? CONTEXT_BUDGET_COMMON_SHARED : NODA_CONTEXT_BUDGET)
+            )
+          : Promise.resolve(undefined),
+      ]);
+
+      // 하나라도 실패하면 닫는다 — 한쪽 근거만으로 답하면 다른 쪽에 답이 있는 질문을 '찾지 못했다'고 할 수 있다.
+      // 질문 원문은 남기지 않는다. NodaError 글에는 키가 실리지 않는다(noda.ts)
+      const failures = [
+        ...(agentCall.status === 'rejected' ? [{ error: agentCall.reason as unknown, extra: {} }] : []),
+        ...(commonCall.status === 'rejected' && commonType
+          ? [{ error: commonCall.reason as unknown, extra: { org_type_key: ORG_TYPE_KEYS[commonType] } }]
+          : []),
+      ];
+      if (failures.length > 0) {
+        for (const { error, extra } of failures) {
+          await log({
+            level: 'warning',
+            category: 'api',
+            message: '참고 문서(NODA)를 불러오지 못해 대화를 거절함',
+            details: {
+              agent_id: agentId,
+              ...extra,
+              code: error instanceof NodaError ? error.code : 'unknown',
+              status: error instanceof NodaError ? error.status : null,
+            },
+            orgId: organizationId,
+          });
+        }
         return unavailable;
       }
+
+      const result = agentCall.status === 'fulfilled' ? agentCall.value : undefined;
+      const commonResult = commonCall.status === 'fulfilled' ? commonCall.value : undefined;
+      return {
+        ok: true,
+        carry: {
+          docs,
+          ...(result ? { result } : {}),
+          ...(commonType && commonResult ? { common: { orgType: commonType, docs: commonDocs, result: commonResult } } : {}),
+        } satisfies DocSearchCarry,
+      };
     },
 
     async prepare(ctx) {
@@ -486,18 +736,48 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       if (carry.skipped) {
         return { chunks: [], documentsSkipped: true, systemAddendum: docSearchAddendum({ context: null, chunks: [], hasDocuments: false, skipped: true }) };
       }
-      if (!carry.result) return {};
+      if (!carry.result && !carry.common) return {};
 
-      const chunks = await matchedChunks(deps, ctx, carry.result, carry.docs);
+      // 비서 근거는 S4 그대로(판정 R5·H)
+      const agentMatched = carry.result ? await matchedChunks(deps, ctx, carry.result, carry.docs) : [];
+
+      // 공통 근거 — 비서 조각이 하나라도 있으면 비서 묶음의 가장 큰 번호만큼 민다(설계 5.2).
+      // 비서 조각이 모두 빠진 턴은 밀지 않는다 — 공통 보관함으로 검증할 때 [n]이 맞게(5.5)
+      let common: CommonMatchResult | null = null;
+      if (carry.common) {
+        const offset = agentMatched.length > 0 && carry.result ? maxCitationNumber(carry.result) : 0;
+        common = await matchedCommonChunks(deps, ctx, carry.common, offset, agentMatched.length);
+      }
+
+      // 공통 근거에 다른 유형이 섞였으면 그 턴 근거 전체를 버린다(5.3)
+      const mixed = common?.mixed === true;
+      const agentChunks = mixed ? [] : agentMatched;
+      const commonChunks = mixed ? [] : (common?.chunks ?? []);
+      const chunks = [...agentChunks, ...commonChunks];
+
+      // `/verify`는 보관함 하나만 받는다(5.5) — 둘 다 근거가 있으면 부르지 않는다
+      let verifySources: { doc_id: string; chunk_id: string }[] = [];
+      let verifyTenant: string | undefined;
+      if (agentChunks.length > 0 && commonChunks.length === 0 && carry.result) {
+        verifySources = verifySourcesOf(carry.result.sources);
+      } else if (agentChunks.length === 0 && commonChunks.length > 0 && carry.common) {
+        verifySources = verifySourcesOf(carry.common.result.sources);
+        verifyTenant = commonTenant(carry.common.orgType);
+      }
+
       return {
         chunks,
-        dropped: carry.result.dropped,
-        verifySources: chunks.length > 0 ? verifySourcesOf(carry.result.sources) : [],
+        dropped: (carry.result?.dropped ?? 0) + (carry.common?.result.dropped ?? 0),
+        verifySources,
+        ...(verifyTenant ? { verifyTenant } : {}),
         systemAddendum: docSearchAddendum({
-          context: stripNodaPrefixes(carry.result.context),
+          context: carry.result ? stripNodaPrefixes(carry.result.context) : null,
           chunks,
           hasDocuments: true,
           skipped: false,
+          commonContext: common ? stripNodaPrefixes(common.shifted.context) : null,
+          commonOrgType: carry.common?.orgType ?? null,
+          searchedCommon: carry.common !== undefined,
         }),
       };
     },

@@ -75,6 +75,9 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           cellRange: c.cellRange,
           section: c.section,
           ocr: c.ocr,
+          // 공통 자료실 조각(S5) — 화면이 '[공통]'과 기준 연도를 보인다. 비서 조각에는 없어 JSON에서 빠진다
+          scope: c.scope,
+          editionYear: c.editionYear,
         })),
         links: dedupeLinks(input.links),
         files: input.files,
