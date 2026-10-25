@@ -2,7 +2,7 @@
 
 **최종 업데이트**: 2026-10-25  
 **분석 기준**: 코드베이스 전수 확인
-(`next build` + `tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증)
+(`tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증, `next build`는 배포 때 Vercel이 확인)
 
 ---
 
@@ -98,7 +98,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1550개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1559개 통과·3개 건너뜀) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -825,7 +825,7 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 (`ready` 문서가 있는 비서만 — `/context` 재시도 창 10초) 실패하면 503 `{ ok:false, error:{ message:'참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 물어 주세요', code:'documents_unavailable' } }`로 거절한다
 (빈 대화가 쌓이지 않고 새 대화의 첨부가 묶였다 지워지지 않게). 화면은 `다시 묻기`와 `문서 없이 일반 답변 받기` 두 단추를 붙이고, 후자는 `skip_documents: true`로 같은 요청을 다시 보낸다.
 이때 프롬프트는 '기관 자료에 근거하지 않는다고 첫머리에 밝히라'고 지시하고, 답변 행 `source_references.documents_skipped: true`와 말풍선 `참고 문서 없이 답함` 표시가 지난 대화에서도 남는다.
-`ready` 문서가 없는(또는 문서가 하나도 없는) 비서는 **NODA를 부르지 않으므로** NODA 장애 중에도 평소처럼 답한다. 문서 행을 읽지 못해도 근거를 맞춰 볼 수 없으니 같은 거절로 닫는다.
+`ready` 문서가 없는(또는 문서가 하나도 없는) 비서는 **NODA를 부르지 않으므로** NODA 장애 중에도 평소처럼 답한다 — **단 S5부터는 기관 유형에 근거가 될 공통 문서(`ready` 현재 판)가 있으면 그 공통 보관함을 찾으므로, NODA 장애 때 같은 503으로 거절한다**(아래 '공통 자료실 (S5)'). 문서 행을 읽지 못해도 근거를 맞춰 볼 수 없으니 같은 거절로 닫는다.
 
 **근거는 이 비서의 행과 맞춰 봅니다**(`sourcesToChunks`). NODA 파일 이름 앞의 `{document_id}__`로 `documents` 행을 찾아:
 `ready`·`deleting` 행의 조각은 출처가 되고, 이 비서의 행이지만 다른 상태(읽는 중·실패·못 읽음)인 조각은 출처에서만 조용히 뺀다(근거 글은 남긴다 — 같은 비서가 올린 내용이라 격리에는 영향이 없다).
@@ -917,7 +917,10 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
   `commonReadingDeps()`는 행의 `org_type`으로 공통 보관함을 정하고 `afterReady`에서 판 바꾸기를 부른다. `tenantOf`가 null이면 `not_found`(보낼 보관함 없음). `afterReady`가 던져도 결과는 `ready`이고 warning만 남는다
 - **판 바꾸기(`retireReplacedEdition`)는 새 판이 `ready`가 되는 순간에 한다** — 읽기 시작이 아니라. 새 판이 읽기에 실패하면 옛 판이 그대로 검색된다. 새 판이 `ready`로 바뀌는 곳은 **읽기 라우트·목록 맞추기·웹훅 세 곳**이고
   모두 같은 갈고리를 거친다. 새 판 행을 **다시 읽어** `ready`이고 `replaces_id`가 있을 때만 움직이며, 옛 판이 같은 유형의 현재 판(`deleting` 아님)일 때만 건드린다.
-  옛 판의 NODA 사본을 지우고(404 = 지움) `retired`·`retired_at`을 쓴다 — 행·원본은 감사용으로 남는다. 사본 삭제가 실패하면 옛 판을 `deleting`으로 두고(검색에서는 행 상태로 이미 빠진다) 화면에서 다시 지운다
+  옛 판의 NODA 사본을 지우고(404 = 지움) `retired`·`retired_at`을 쓴다 — 행·원본은 감사용으로 남는다. 사본 삭제가 실패하면 옛 판을 `deleting`으로 두고(검색에서는 행 상태로 이미 빠진다) 화면에서 다시 지운다.
+  **판 바꾸기 자체가 던지면**(잠깐의 DB 오류 — 갈고리는 warning만 남긴다) 새 판은 더 이상 `reading`이 아니라 아무도 다시 부르지 않으므로, **운영자 목록(`GET /api/super/common-documents`)이 열릴 때마다** `ready` 현재 판이 대신하는 옛 판이
+  아직 현재 판(`retired_at` NULL, `deleting` 아님)이면 `retireReplacedEdition`을 다시 부르고(여러 번 불러도 안전, 실패는 기록만) 바뀐 옛 판 행을 다시 읽어 응답에 싣는다(`retryPendingRetirements`).
+  그 사이에도 지난 판 조각은 근거가 아니다 — 문서 찾기가 **`ready` 현재 판의 `replaces_id` 대상은 근거로 치지 않는다**(`citableCommonIds`, preflight의 '찾을 공통 문서가 있는가'와 `commonSourcesToChunks` 둘 다)
 - **삭제**(`deleteCommonDocument`): 현재 판·지난 판 모두. 순서 **NODA → 행 → 원본**(문서와 같다). NODA 실패면 `deleting`으로 남기고 502 `문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.`.
   `retired`·`NULL` 상태·파일 이름 없는 행은 NODA를 건너뛴다. 404는 지운 것으로 센다. 행 삭제가 실패하면 원본을 안 지운다. **운영자 스크립트는 없다**(`noda:purge-deleted`류 — 공통 문서는 화면에서 지운다)
 - **웹훅**(`noda-webhook.ts`): `tenant`가 `workon-c-{열쇠}`면 `common_documents`를 본다. 행의 유형 열쇠와 `noda_filename`이 맞을 때만 바꾼다(아니면 `system_logs` security warning, 파일 이름 없이 — 비서 행은 공통 보관함 이름으로 와도 건드리지 않는다).
@@ -941,14 +944,15 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 
   | 공통 근거의 문서 id | 처리 |
   |---|---|
-  | 이 유형의 `ready` 현재 판 행 | 조각(`scope:'common'`·`editionYear`) |
-  | 이 유형의 행이지만 지난 판·읽는 중·실패·못 읽음·지우는 중 | 그 조각만 조용히 뺀다(지난 판은 사본을 지웠으니 원래 오지 않아야 한다) |
+  | 이 유형의 `ready` 현재 판 행(`ready` 새 판이 대신하지 않음) | 조각(`scope:'common'`·`editionYear`) |
+  | 이 유형의 행이지만 지난 판·읽는 중·실패·못 읽음·지우는 중·`ready` 새 판이 대신하는 옛 판(판 바꾸기가 아직 안 된 사이) | 그 조각만 조용히 뺀다(지난 판은 사본을 지웠으니 원래 오지 않아야 한다) — **프롬프트에도 그 블록의 글을 싣지 않는다** |
   | 다른 유형의 행 | **섞임** — 비서 근거까지 그 턴 근거 전체를 버리고 `system_logs` critical(`security`) |
   | 행이 어디에도 없음·문서 id를 못 읽음 | **고아** — 공통 근거만 버리고 그 공통 보관함의 사본을 지운다(1.5초까지만 기다림), warning. 비서 근거는 쓴다 |
 
   깨진 원소·확인 조회 실패는 공통 근거만 버리고 사본은 건드리지 않는다. **비서 근거가 섞인 턴은 공통 근거도 버린다**(보관함 혼선이 의심되는 턴은 어느 근거로도 답하지 않는다 — 그때는 공통 사본 지우기도 안 한다).
   운영 기록에는 파일 이름을 남기지 않는다(문서 id·개수·유형 열쇠 `org_type_key`만)
-- **프롬프트**: 비서 묶음 머리 `참고 자료(이 기관 문서):`, 공통 묶음 머리 `참고 자료(공통 기준 — {유형} 공통, 정부 기준 문서):`(조각이 있는 쪽만 싣는다). **공통 조각이 있을 때만** 인용 규칙 끝에 두 줄을 더한다 —
+- **프롬프트**: 비서 묶음 머리 `참고 자료(이 기관 문서):`, 공통 묶음 머리 `참고 자료(공통 기준 — {유형} 공통, 정부 기준 문서):`(조각이 있는 쪽만 싣는다).
+  **공통 묶음은 받아들인 조각의 번호 블록만 싣는다**(`keepContextBlocks` — 머리 줄 `[n] `부터 다음 머리 줄 전까지, 첫 머리 줄 앞 글은 버림, 번호는 그대로). 통째로 실으면 조용히 뺀 지난 판 조각의 글이 '정부 기준 문서' 머리 아래로 모델에게 간다(S5 실패 기준 2). 비서 묶음은 S4 그대로 통째로 싣는다. **공통 조각이 있을 때만** 인용 규칙 끝에 두 줄을 더한다 —
   공통 기준은 정부가 정한 기준 문서이니 문서 이름과 기준 연도를 함께 밝힐 것, 이 기관 문서와 공통 기준이 서로 다르면 **한쪽을 고르지 말고 둘 다 보여 주고** 어느 것을 따를지는 기관 규정과 담당자가 판단한다고 안내할 것.
   '관련 문서 없음' 문구는 공통 보관함도 찾은 턴에만 `이 비서의 문서와 공통 기준 자료에서 …`로 넓어진다
 - **답변 검증(`/verify`)은 보관함 하나만 받는다**: 비서 근거만 → 비서 보관함, 공통 근거만 → 공통 보관함(`verifyTenant` — 번호를 밀지 않았으니 `[n]`이 맞다), **둘 다 → 부르지 않는다**(한 보관함에 맞춰 보내면 다른 쪽 번호가
@@ -957,7 +961,7 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
   근거 창(`SourcePanel`)은 공통일 때만 `공통 기준 · {유형} · {연도}년 판` 줄을 둔다. `scope`가 없으면 지금처럼 그린다
 - **운영자 화면 `/super/common-library`**(슈퍼관리자 메뉴 '공통 자료실'): 유형 탭 여섯(`ORG_TYPES` 그대로) · 현재 판 목록(이름·기준 연도·상태 칩·올린 때·크기) + 접힌 '지난 판' · 올리기(파일·유형·이름·기준 연도·**이용 조건 확인 기록 필수**·'바꿀 옛 판' — 같은 유형 현재 판 중 선택, 없으면 `replaces_id`를 안 보냄) ·
   상태 칩 + 실패 시 '다시 시도' · 지우기. 목록은 앞 응답 뒤에 다음을 예약하고 늦은 옛 응답은 버린다(문서 화면과 같다). 올리기는 `common-upload-client.ts`(발급 → 저장소 직접 → 확인 → 읽기를 `keepalive`로 걺)
-- **운영자 API `/api/super/common-documents/…`**(모든 핸들러 첫 줄에서 `getSuperAdminFromRequest` — `route-auth.test.ts`가 본다): `GET` 목록(+ `reconcileReading` 맞추기, 멈춘 행 하나에 `kick`, `storage_path`·`noda_filename`·시각 칸은 안 내보냄) ·
+- **운영자 API `/api/super/common-documents/…`**(모든 핸들러 첫 줄에서 `getSuperAdminFromRequest` — `route-auth.test.ts`가 본다): `GET` 목록(+ `reconcileReading` 맞추기, 멈춘 행 하나에 `kick`, 실패해 남은 판 바꾸기 다시 걸기, `storage_path`·`noda_filename`·시각 칸은 안 내보냄) ·
   `POST upload-url`(발급 — 형식·크기·위험한 이름 검사는 `document-upload.ts`의 `checkUploadFile`을 같이 쓴다, 상한 `MAX_UPLOAD_BYTES`) · `POST`(확인 — 이용 조건·연도 2000~2100·유형 밖 거절, 발급 10분 창 `410`, 저장소 크기·형식 다시 검사, 위 409) ·
   `POST [id]/read`(`maxDuration = 300`) · `DELETE [id]`
 
@@ -1042,7 +1046,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-25 기준 1550개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-25 기준 1559개 통과·3개 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
@@ -1093,14 +1097,14 @@ MAIL_FROM=
    | `document-upload-client.test.ts` | 발급 → 저장소 직접 → 확인 순서, 거절·예외 메시지 전달, 화면 검사, 공개 설정이 비면 발급 전에 멈춤, `startReading`(keepalive·retry·**한꺼번에 보냄**·실패해도·곧바로 던져도 나머지를 보냄) |
    | `document-routes.test.ts` | 문서 라우트 — 삭제 순서 **NODA → DB → 원본**·NODA 실패 시 행을 남기고 `deleting`, 옛 행은 NODA 삭제 건너뜀, NODA 실패는 따로 둔 참거짓 표시로 가름, 목록의 맞추기·실패해도 목록 유지·`noda_filename` 비노출, 붙인 행(새 id·자기 NODA 파일 이름·원본의 NODA 칸을 가져오지 않음), 지운 비서에 남은 문서는 관리 범위 관리자가 지움 |
    | `agent-documents.test.ts` | **비서 지울 때 문서 치우기** — NODA 보관함 → DB 행 → 원본 순서·보관함 이름은 비서 id로만, 404도 지운 것, **NODA 실패면 NODA에 간 행은 `deleting`으로 남기고 옛 행만 지움**(throw undefined도 실패), 401·403 critical·운영 기록에 경로·파일 이름 없음, 키 없고 NODA 행도 없으면 조용히, 문서가 없거나 행을 못 읽어도 보관함은 비움, 행 삭제 실패면 원본을 안 지움, `softDeleteAgent` 연결 |
-   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각·문서 id를 못 읽는 조각·형식이 깨진 조각을 따로 모음**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·**섞임은 critical(security)·고아는 근거 없이 + 사본 삭제 + warning·형식 깨짐은 근거 없이**·지우기 실패·오래 걸려도 답을 붙잡지 않음), rag-test 기록에 기관 id, 인용 규칙 추가 줄, `verifySourcesOf`(받은 순서·모양이 틀리면 비움)·근거 없음·섞임·고아·건너뜀에서는 검증 근거 없음; **S5**: **공통 자료실** — preflight(비서·공통 `ready` 유무로 `/context` 0·1·2번, 둘이면 3000·2000 동시, 공통만 실패해도·유형/공통 행 조회 실패도 503, 유형 없는 기관은 공통 행 조회도 안 함), prepare(비서 먼저·공통 번호 밀기·`scope`·`editionYear`, 비서 조각 없으면 안 밀고 `verifyTenant`=공통, 둘 다면 `verifySources` 빈 배열, 다른 유형은 섞임(전체 버림·critical), **비서 근거가 섞이면 깨끗한 공통도 버림**, 유형을 바꾼 기관은 새 유형만, 고아는 공통만 버리고 사본 삭제(오래 걸려도 답을 안 붙잡음)·깨진 원소는 공통만 버림), 프롬프트(공통 조각이 있을 때만 두 줄·머리 둘·근거 없음 문구 확장) |
+   | `doc-search-noda.test.ts` | **참고 문서 찾기** — `sourcesToChunks`(쪽·칸·절·스캔 판독, **이 비서 행이 없는 조각·문서 id를 못 읽는 조각·형식이 깨진 조각을 따로 모음**, `deleting`은 남김, 다른 상태는 조용히 뺌), preflight(`ready` 없으면 NODA 안 부름·NODA 장애 시 503 `documents_unavailable`·문서 목록 실패도 닫음·skip), prepare(문서 id 앞부분이 모델에 안 감·`[문서 검색 결과 없음]`·**섞임은 critical(security)·고아는 근거 없이 + 사본 삭제 + warning·형식 깨짐은 근거 없이**·지우기 실패·오래 걸려도 답을 붙잡지 않음), rag-test 기록에 기관 id, 인용 규칙 추가 줄, `verifySourcesOf`(받은 순서·모양이 틀리면 비움)·근거 없음·섞임·고아·건너뜀에서는 검증 근거 없음; **S5**: **공통 자료실** — preflight(비서·공통 `ready` 유무로 `/context` 0·1·2번, 둘이면 3000·2000 동시, 공통만 실패해도·유형/공통 행 조회 실패도 503, 유형 없는 기관은 공통 행 조회도 안 함), prepare(비서 먼저·공통 번호 밀기·`scope`·`editionYear`, 비서 조각 없으면 안 밀고 `verifyTenant`=공통, 둘 다면 `verifySources` 빈 배열, 다른 유형은 섞임(전체 버림·critical), **비서 근거가 섞이면 깨끗한 공통도 버림**, 유형을 바꾼 기관은 새 유형만, 고아는 공통만 버리고 사본 삭제(오래 걸려도 답을 안 붙잡음)·깨진 원소는 공통만 버림), 프롬프트(공통 조각이 있을 때만 두 줄·머리 둘·근거 없음 문구 확장), **지난 판 조각의 글은 프롬프트에 안 실림**(번호 그대로), **판 바꾸기가 실패해 두 판이 다 현재 판이어도 `ready` 새 판이 대신한 옛 판은 근거 아님**(새 판이 실패면 옛 판으로 찾음) |
    | `prepare-preflight.test.ts` | 대화 준비 — NODA를 못 부르면 **대화·첨부 묶기 전에** 503, `skip_documents`가 정확히 `true`일 때만 건너뜀, `ready` 없는 비서는 장애 중에도 평소처럼, 문서 찾기 꺼진 비서는 무관 |
    | `chat-documents-ui.test.ts` | **답변 속 `[n]` → 근거 창 단추**(출처에 있는 번호만·기존 링크·코드 제외), 근거 창을 화면에 잇기(Esc·바깥·×, 다른 대화면 닫힘), 출처 위치 줄(`p.12 · 절`·칸 주소·절·옛 메시지 표시·**위치도 유사도도 없으면 `청크 N`만**), NODA 파일 이름 앞부분은 화면에 안 보임, 문서 화면 원본(목록은 앞 응답 뒤에 예약·늦은 응답 버림·실패 칩 이유), 검색 시험 화면 위치 줄; **S5**: `[공통]` 칩 제목(`[공통] 제목(연도)`·연도 없으면 괄호 없이·제목 없으면 `문서`)·`scope` 없는 옛 조각은 그대로·근거 창은 공통일 때만 `공통 기준` 줄 |
    | `chat-scroll-follow.test.ts` | 답이 흘러나오는 동안 **맨 아래 근처에 있을 때만** 따라 내림(위로 올려 읽는 중이면 그대로, 새 질문·다른 대화면 다시 따라감) — 예전엔 글자 조각마다 끌어내려 위로 밀린 답을 읽을 수 없었다 |
    | `org-types.test.ts` | **공통 자료실 유형·이름(S5)** — 유형 → 공통 보관함(`workon-c-{열쇠}`, 표 밖·빈 유형은 던짐, 비서 보관함 꼴과 안 겹침), 여섯 유형·열쇠·판별, NODA 파일 이름(`{id}__이름(연도).확장자` — 못 쓰는 글자·80자·빈 이름은 `문서`·확장자 없으면 안 붙임), 슈퍼관리자 기관 화면이 같은 유형 목록을 씀 |
    | `common-documents.test.ts` | **판 바꾸기·삭제** — 새 판 `ready`에서만 옛 판 NODA 사본 삭제 → `retired`(새 판이 읽는 중·실패면 옛 판 그대로, `replaces_id` 없음·옛 판이 다른 유형/이미 지난 판/`deleting`이면 `none`), 사본 삭제 실패는 `deleting`으로 두고 warning(파일 이름 없음), 404는 지운 것, NULL 상태·파일 이름 없음은 NODA 건너뜀, `tenantOf`·갈고리, 삭제 순서 NODA → 행 → 원본·NODA 실패면 `deleting` + 502·행 없으면 404·`deleting`은 다시 지울 수 있음·행 삭제 실패면 원본 안 지움 |
-   | `doc-search-common.test.ts` | **공통 근거 순수 함수** — `shiftContext`(머리 줄·`sources[].n`이 함께 밀림, 본문 속 `[2]`·원본·숫자 아닌 `n`은 그대로, 근거 창 원문이 민 번호로 이어짐), `maxCitationNumber`, `commonSourcesToChunks`(현재 판 `ready`만 조각·`startIndex`부터 순번·지난 판/읽는 중은 조용히 뺌·행 없음·id 못 읽음·깨진 원소는 따로 모음) |
-   | `common-upload.test.ts` | **운영자 올리기·API** — 저장소 경로 `common/{열쇠}/{발급시각}-{id}.{ext}`(거슬러 오르는 조각·다른 접두사는 null, 표 밖 유형은 던짐), 확인 입력 검사(이용 조건·연도 범위·`replaces_id`는 uuid), 본문이 객체가 아니면 400, 발급 10분 창(410·경계 통과·미래 시각 400), **다섯 핸들러 모두 `getSuperAdminFromRequest`로 첫 줄에서 막음**·401 꼴, 확인의 409 문구·`super_admin_logs`·저장소 크기·형식 검사, 목록은 `storage_path`·`noda_filename`·시각 칸을 안 내보내고 `reconcileReading`으로 맞춤, 읽기 `maxDuration` 300, 삭제 502 문구·기록 |
+   | `doc-search-common.test.ts` | **공통 근거 순수 함수** — `shiftContext`(머리 줄·`sources[].n`이 함께 밀림, 본문 속 `[2]`·원본·숫자 아닌 `n`은 그대로, 근거 창 원문이 민 번호로 이어짐), `maxCitationNumber`, `commonSourcesToChunks`(현재 판 `ready`만 조각·`startIndex`부터 순번·지난 판/읽는 중은 조용히 뺌·행 없음·id 못 읽음·깨진 원소는 따로 모음), **`citableCommonIds`**(`ready` 새 판이 대신하는 옛 판은 근거 아님·새 판이 읽는 중/실패면 옛 판이 근거·지난 판의 `replaces_id`는 안 셈·대소문자 무시), **`keepContextBlocks`**(고른 번호 블록만·본문 속 `[n]`은 머리 줄 아님·첫 머리 줄 앞 글 버림) |
+   | `common-upload.test.ts` | **운영자 올리기·API** — 저장소 경로 `common/{열쇠}/{발급시각}-{id}.{ext}`(거슬러 오르는 조각·다른 접두사는 null, 표 밖 유형은 던짐), 확인 입력 검사(이용 조건·연도 범위·`replaces_id`는 uuid), 본문이 객체가 아니면 400, 발급 10분 창(410·경계 통과·미래 시각 400), **다섯 핸들러 모두 `getSuperAdminFromRequest`로 첫 줄에서 막음**·401 꼴, 확인의 409 문구·`super_admin_logs`·저장소 크기·형식 검사, 목록은 `storage_path`·`noda_filename`·시각 칸을 안 내보내고 `reconcileReading`으로 맞춤, **목록이 맞추기 뒤·응답 전에 실패해 남은 판 바꾸기를 다시 걸고(실패는 기록만) 바뀐 옛 판 행을 다시 읽음**, 읽기 `maxDuration` 300, 삭제 502 문구·기록(이용 조건 포함) |
    | `common-library-ui.test.ts` | **운영자 화면** — 메뉴가 기관 관리 다음, 목록 예약 사슬·늦은 옛 응답 버림·`kick` 행은 한 번만 읽기, 이용 조건 필수(서버 전에 화면이 막음), 유형 탭은 `ORG_TYPES` 그대로(서버 설정을 안 가져옴), 올리기 순서(발급 → 저장소 → 확인, 읽기는 `keepalive`)·발급 거절이면 저장소에 안 올림·저장 실패면 확인 안 함·확인 거절(409) 문구 그대로·바꿀 옛 판이 없으면 `replaces_id`를 안 보냄, 화면 검사, `startCommonReading`은 실패해도 나머지를 보냄 |
 
    (옛 RAG 임계값 테스트는 코드와 함께 S4-b에서 지웠다 — NODA 유사도 하한은 `noda-client.test.ts`가 0.80~0.82 구간으로 고정한다.)
