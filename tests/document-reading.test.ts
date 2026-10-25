@@ -24,7 +24,7 @@ const AGENT_B = '21111111-2222-4333-8444-555555555555';
 const DOC = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const iso = (ms: number) => new Date(ms).toISOString();
 
-function row(over: Partial<ReadingRow> = {}): ReadingRow {
+function row(over: Partial<ReadingRow & { agent_id: string | null }> = {}): ReadingRow & { agent_id: string | null } {
   return {
     id: DOC,
     agent_id: AGENT,
@@ -218,6 +218,7 @@ function makeWorld(docs: StoredDocument[] = [doc()]): { w: World; deps: ReadingD
     log: async (p) => {
       w.logs.push(p as unknown as Record<string, unknown>);
     },
+    tenantOf: (r) => (r.agent_id ? nodaTenant(r.agent_id) : null),
   };
   return { w, deps };
 }
@@ -580,6 +581,112 @@ describe('reconcileReading', () => {
     const out = await reconcileReading([...w.docs.values()], deps);
     expect(w.listCalls).toHaveLength(1);
     expect(out.map((r) => r.noda_status)).toEqual(['ready', 'ready']);
+  });
+});
+
+describe('보관함을 deps가 정한다 (S5 일반화)', () => {
+  const common = () => doc({ agent_id: undefined, org_type: '지방자치단체' });
+  const commonTenant = (r: { org_type?: string | null }) => (r.org_type ? 'workon-c-local' : null);
+
+  it('tenantOf가 보관함을 정한다 — 공통 문서 꼴의 행도 읽힌다', async () => {
+    const { w, deps } = makeWorld([common()]);
+    deps.tenantOf = commonTenant;
+    await readDocument(DOC, {}, deps);
+    expect(w.uploads[0].tenant).toBe('workon-c-local');
+  });
+
+  it('tenantOf가 null이면 not_found(보낼 보관함 없음)', async () => {
+    const { w, deps } = makeWorld([doc()]);
+    deps.tenantOf = () => null;
+    expect(await readDocument(DOC, {}, deps)).toEqual({ status: 'not_found' });
+    expect(w.uploads).toHaveLength(0);
+  });
+
+  it('맞추기도 tenantOf로 보관함을 묶는다 — 공통 문서 꼴, tenantOf가 null인 행은 건너뜀', async () => {
+    const a = common();
+    const skip = doc({ id: 'skip', agent_id: undefined, org_type: null, noda_filename: 'S' });
+    const { w, deps } = makeWorld([a, skip]);
+    deps.tenantOf = commonTenant;
+    w.lists.set('workon-c-local', listing([a.noda_filename!]));
+    const out = await reconcileReading([...w.docs.values()], deps);
+    expect(w.listCalls).toEqual(['workon-c-local']);
+    expect(out.find((r) => r.id === DOC)!.noda_status).toBe('ready');
+    expect(out.find((r) => r.id === 'skip')!.noda_status).toBe('reading');
+  });
+
+  it('ready를 쓰면 afterReady를 한 번 부른다 — readDocument·reconcileReading 둘 다', async () => {
+    const afterReady = vi.fn(async (_id: string) => {});
+    const r2 = makeWorld();
+    r2.deps.afterReady = afterReady;
+    expect((await readDocument(DOC, {}, r2.deps)).status).toBe('ready');
+    expect(afterReady).toHaveBeenCalledTimes(1);
+    expect(afterReady).toHaveBeenCalledWith(DOC);
+
+    afterReady.mockClear();
+    const r3 = makeWorld([doc({ noda_filename: 'R' })]);
+    r3.deps.afterReady = afterReady;
+    r3.w.lists.set(nodaTenant(AGENT), listing(['R']));
+    await reconcileReading([...r3.w.docs.values()], r3.deps);
+    expect(afterReady).toHaveBeenCalledTimes(1);
+    expect(afterReady).toHaveBeenCalledWith(DOC);
+  });
+
+  it('afterReady가 던져도 결과는 ready이고 warning만 남긴다', async () => {
+    const r = makeWorld();
+    r.deps.afterReady = async () => {
+      throw new Error('boom');
+    };
+    expect((await readDocument(DOC, {}, r.deps)).status).toBe('ready');
+    expect(r.w.docs.get(DOC)!.noda_status).toBe('ready');
+    const warn = r.w.logs.find((l) => l.level === 'warning' && l.category === 'api');
+    expect(warn).toBeDefined();
+    expect(warn!.details).toMatchObject({ document_id: DOC });
+    expect(JSON.stringify(warn!.details)).toContain('boom');
+
+    const r2 = makeWorld([doc({ noda_filename: 'R' })]);
+    r2.deps.afterReady = async () => {
+      throw new Error('boom2');
+    };
+    r2.w.lists.set(nodaTenant(AGENT), listing(['R']));
+    const out = await reconcileReading([...r2.w.docs.values()], r2.deps);
+    expect(out[0].noda_status).toBe('ready');
+    expect(r2.w.logs.some((l) => l.level === 'warning')).toBe(true);
+  });
+
+  it('afterReady는 unreadable·failed·쓰기 실패 때 부르지 않는다', async () => {
+    const afterReady = vi.fn(async () => {});
+    // unreadable
+    const a = makeWorld();
+    a.deps.afterReady = afterReady;
+    a.w.upload = async () => ({ tenant: '', filename: '', bytes: 3, stored: true, doc_id: null, readable: false, reason: 'x', chunks: 0 });
+    await readDocument(DOC, {}, a.deps);
+    expect(a.w.docs.get(DOC)!.noda_status).toBe('unreadable');
+    // failed (원본 없음)
+    const b = makeWorld();
+    b.deps.afterReady = afterReady;
+    b.w.files.clear();
+    await readDocument(DOC, {}, b.deps);
+    expect(b.w.docs.get(DOC)!.noda_status).toBe('failed');
+    // 쓰기 실패 — 업로드 중 다른 경로가 먼저 끝냄
+    const c = makeWorld();
+    c.deps.afterReady = afterReady;
+    c.w.upload = async () => {
+      c.w.docs.get(DOC)!.noda_status = 'failed';
+      return { tenant: '', filename: '', bytes: 3, stored: true, doc_id: 'n-1', readable: true, reason: null, chunks: 4 };
+    };
+    await readDocument(DOC, {}, c.deps);
+    // 맞추기: unreadable·failed
+    const d = makeWorld([doc({ id: 'u', noda_filename: 'U' }), doc({ id: 's', noda_filename: 'S', noda_read_started_at: iso(0) })]);
+    d.deps.afterReady = afterReady;
+    d.w.lists.set(nodaTenant(AGENT), {
+      documents: [{ filename: 'U', readable: false, reason: 'x' }],
+      receiving: [],
+      failed: [],
+    });
+    await reconcileReading([...d.w.docs.values()], d.deps);
+    expect(d.w.docs.get('u')!.noda_status).toBe('unreadable');
+    expect(d.w.docs.get('s')!.noda_status).toBe('failed');
+    expect(afterReady).not.toHaveBeenCalled();
   });
 });
 

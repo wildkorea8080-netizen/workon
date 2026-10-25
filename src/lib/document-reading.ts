@@ -54,7 +54,6 @@ const UNREADABLE_DEFAULT_REASON = '이 문서를 읽을 수 없습니다.';
 
 export interface ReadingRow {
   id: string;
-  agent_id: string | null;
   noda_status: NodaStatus | null;
   noda_filename: string | null;
   noda_read_started_at: string | null;
@@ -62,8 +61,17 @@ export interface ReadingRow {
   created_at: string;
 }
 
+/**
+ * 보관함을 정하는 칸 — 참고 문서(`documents`)는 `agent_id`, 공통 문서(`common_documents`)는 `org_type`을 가진다.
+ * 어느 쪽이 보관함인지는 `ReadingDeps.tenantOf`가 정한다(상태 기계는 모른다)
+ */
+export interface TenantKeys {
+  agent_id?: string | null;
+  org_type?: string | null;
+}
+
 /** `readDocument`가 저장소에서 읽는 행 */
-export interface StoredDocument extends ReadingRow {
+export interface StoredDocument extends ReadingRow, TenantKeys {
   storage_path: string;
   file_name: string;
   noda_reason: string | null;
@@ -100,6 +108,13 @@ export interface ReadingDeps {
   noda: Pick<NodaClient, 'uploadDocument' | 'listDocuments' | 'deleteDocument'>;
   now: () => number;
   log: (p: Parameters<typeof logSystem>[0]) => Promise<void>;
+  /** 이 행이 들어갈 NODA 보관함. 보관함이 없는 행이면 null — 읽지 않고 맞추지 않는다 */
+  tenantOf(row: TenantKeys): string | null;
+  /**
+   * `ready`를 쓴 직후(쓰기가 성공했을 때만) 한 번 부른다 — 공통 문서가 바뀐 판을 내리는 자리.
+   * 던져도 읽기 결과는 그대로이고 운영 기록(warning)만 남는다
+   */
+  afterReady?: (id: string) => Promise<void>;
 }
 
 const READ_COLUMNS =
@@ -157,7 +172,13 @@ function defaultStore(): ReadingStore {
 }
 
 export function defaultReadingDeps(): ReadingDeps {
-  return { store: defaultStore(), noda, now: () => Date.now(), log: logSystem };
+  return {
+    store: defaultStore(),
+    noda,
+    now: () => Date.now(),
+    log: logSystem,
+    tenantOf: (row) => (row.agent_id ? nodaTenant(row.agent_id) : null),
+  };
 }
 
 /** 읽기를 (다시) 시작하는 행 칸. 확인 라우트와 '다시 시도'가 같은 값을 쓴다 */
@@ -245,6 +266,21 @@ async function logNodaError(deps: ReadingDeps, err: unknown, documentId?: string
   });
 }
 
+/** `ready`를 쓴 뒤 갈고리를 부른다. 실패는 잡아 기록만 한다 — 읽기 결과를 바꾸지 않는다 */
+async function runAfterReady(deps: ReadingDeps, documentId: string): Promise<void> {
+  if (!deps.afterReady) return;
+  try {
+    await deps.afterReady(documentId);
+  } catch (err) {
+    await deps.log({
+      level: 'warning',
+      category: 'api',
+      message: '문서 읽기 완료 뒤 처리에 실패했습니다',
+      details: { document_id: documentId, error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
 /**
  * 한 문서를 NODA로 읽힌다 — Supabase 원본을 서버끼리 보낸다.
  *
@@ -261,8 +297,11 @@ export async function readDocument(
 ): Promise<ReadOutcome> {
   const { store } = deps;
   const row = await store.getRow(documentId);
-  // 비서 없는 문서(보관함 없음)·옮기기 전 문서(NULL)는 읽을 일이 없다
-  if (!row || !row.agent_id || row.noda_status === null) return { status: 'not_found' };
+  // 보관함 없는 문서(비서 없음 등)·옮기기 전 문서(NULL)는 읽을 일이 없다
+  if (!row || row.noda_status === null) return { status: 'not_found' };
+  const boxOrNull = deps.tenantOf(row);
+  if (!boxOrNull) return { status: 'not_found' };
+  const tenant: string = boxOrNull; // 아래 함수 선언 안에서도 글이 되도록(좁히기가 호이스팅된 함수엔 안 닿는다)
 
   const current = (r: StoredDocument): ReadOutcome => ({ status: r.noda_status ?? 'not_found', reason: r.noda_reason });
 
@@ -281,7 +320,6 @@ export async function readDocument(
   const claimed = await store.claim(documentId, new Date(now).toISOString(), new Date(now - READ_KICK_AFTER_MS).toISOString());
   if (!claimed) return { status: 'busy' };
 
-  const tenant = nodaTenant(row.agent_id);
   const filename = row.noda_filename ?? nodaFilename(row.id, row.file_name);
   const finishedAt = () => new Date(deps.now()).toISOString();
 
@@ -297,6 +335,7 @@ export async function readDocument(
   /** 읽기 결과를 쓴다. 이미 달라진 행이면 덮지 않고 지금 상태를 돌려준다 */
   async function conclude(patch: FinishPatch, sentToNoda: boolean): Promise<ReadOutcome> {
     if (await store.finish(documentId, patch)) {
+      if (patch.noda_status === 'ready') await runAfterReady(deps, documentId);
       return { status: patch.noda_status, ...(patch.noda_reason ? { reason: patch.noda_reason } : {}) };
     }
     const after = await store.getRow(documentId);
@@ -353,7 +392,7 @@ export async function readDocument(
 /**
  * 문서 목록을 열 때 `reading` 행을 NODA 목록과 맞춘다.
  *
- * - 보관함(비서)마다 목록을 한 번만 부르고, 한 번에 5개 보관함까지 본다.
+ * - 보관함(`tenantOf`가 정함 — 참고 문서는 비서)마다 목록을 한 번만 부르고, 한 번에 5개 보관함까지 본다.
  * - 목록은 **다시 시도 없이** 짧은 시간 제한(4초)으로 부르고, 전체 5초를 넘기면 남은 보관함은 건너뛴다 —
  *   NODA 장애 중에 문서 목록 화면이 멈추지 않게. 건너뛴 행은 그대로 두고 다음 목록 때 본다.
  * - 끝났으면 `ready`, 10분 지나도 안 오면 `failed`로 행에 쓴다(조건부 — 그 사이 바뀐 행은 덮지 않는다).
@@ -361,28 +400,30 @@ export async function readDocument(
  *   목록을 받은 화면이 읽기 라우트를 부른다(중복은 차지가 막는다).
  * - NODA 목록을 못 받으면 그 보관함 행은 그대로 둔다(포기하지도 않는다).
  */
-export async function reconcileReading<T extends ReadingRow>(
+export async function reconcileReading<T extends ReadingRow & TenantKeys>(
   rows: T[],
   deps: ReadingDeps = defaultReadingDeps(),
 ): Promise<(T & { kick?: true })[]> {
   const byTenant = new Map<string, T[]>();
   for (const r of rows) {
-    if (r.noda_status !== 'reading' || !r.agent_id || !r.noda_filename) continue;
-    const list = byTenant.get(r.agent_id) ?? [];
+    if (r.noda_status !== 'reading' || !r.noda_filename) continue;
+    const tenant = deps.tenantOf(r);
+    if (!tenant) continue;
+    const list = byTenant.get(tenant) ?? [];
     list.push(r);
-    byTenant.set(r.agent_id, list);
+    byTenant.set(tenant, list);
   }
 
   const replaced = new Map<string, T & { kick?: true }>();
   let kickCandidate: T | null = null;
 
   const begin = deps.now();
-  for (const [agentId, group] of Array.from(byTenant).slice(0, MAX_TENANTS_PER_RECONCILE)) {
+  for (const [tenant, group] of Array.from(byTenant).slice(0, MAX_TENANTS_PER_RECONCILE)) {
     const remaining = RECONCILE_BUDGET_MS - (deps.now() - begin);
     if (remaining < MIN_LIST_TIMEOUT_MS) break;
     let listing: NodaListing;
     try {
-      listing = await deps.noda.listDocuments(nodaTenant(agentId), {
+      listing = await deps.noda.listDocuments(tenant, {
         retry: false,
         timeoutMs: Math.min(RECONCILE_LIST_TIMEOUT_MS, remaining),
       });
@@ -401,7 +442,10 @@ export async function reconcileReading<T extends ReadingRow>(
           ...(found?.doc_id ? { noda_doc_id: found.doc_id } : {}),
           noda_read_at: new Date(now).toISOString(),
         });
-        if (wrote) replaced.set(r.id, { ...r, noda_status: 'ready' });
+        if (wrote) {
+          replaced.set(r.id, { ...r, noda_status: 'ready' });
+          await runAfterReady(deps, r.id);
+        }
       } else if (decision === 'unreadable') {
         const found = listing.documents.find((d) => d.filename === r.noda_filename);
         const wrote = await deps.store.finish(r.id, { noda_status: 'unreadable', noda_reason: unreadableReason(found?.reason) });
