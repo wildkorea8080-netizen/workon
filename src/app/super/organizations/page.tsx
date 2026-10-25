@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-
-const ORG_TYPES = ['중앙행정기관', '지방자치단체', '공공기관', '교육기관', '협회단체', '일반기업'];
+import { ORG_TYPES } from '@/lib/org-types';
 
 const PLAN_PRESETS: Record<string, { maxUsers: number; maxAgents: number; maxTokens: number; price: number }> = {
   trial:      { maxUsers: 5,   maxAgents: 3,   maxTokens: 500000,   price: 0       },

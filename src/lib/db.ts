@@ -1,3 +1,5 @@
+import type { OrgType } from './org-types';
+
 export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: { message: string; code?: string; details?: unknown } };
@@ -74,8 +76,9 @@ export type Agent = {
 /**
  * NODA 읽기 상태(0031). NULL = 옮기기 전 문서.
  * failed = 다시 시도 가능, unreadable = NODA가 못 읽음(다시 해도 같음), deleting = NODA 삭제 실패.
+ * retired = 공통 문서(`common_documents`)만 쓴다 — 지난 판이 되어 NODA 사본을 지운 상태.
  */
-export type NodaStatus = 'reading' | 'ready' | 'failed' | 'unreadable' | 'deleting';
+export type NodaStatus = 'reading' | 'ready' | 'failed' | 'unreadable' | 'deleting' | 'retired';
 
 export type Document = {
   id: string;
@@ -98,6 +101,33 @@ export type Document = {
   noda_last_attempt_at: string | null;
   noda_read_at: string | null;
 };
+
+/** 공통 자료실 문서(S5) — 기관 유형 단위 자료. 기관·부서 칸이 없다 */
+export interface CommonDocument {
+  id: string;
+  org_type: OrgType;
+  title: string;
+  edition_year: number;
+  usage_terms: string;
+  file_name: string;
+  file_type: string | null;
+  size_bytes: number | null;
+  storage_path: string;
+  noda_status: NodaStatus;
+  noda_reason: string | null;
+  noda_filename: string | null;
+  noda_doc_id: string | null;
+  noda_read_started_at: string | null;
+  noda_last_attempt_at: string | null;
+  noda_read_at: string | null;
+  /** 이 문서가 대신하는 옛 판 */
+  replaces_id: string | null;
+  /** 지난 판이 된 때 */
+  retired_at: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export type Conversation = {
   id: string;
@@ -187,6 +217,10 @@ export type RetrievedChunk = {
   section?: string | null;
   /** 스캔 판독(OCR)으로 읽은 조각 — 원문과 다르게 읽혔을 수 있다 */
   ocr?: boolean;
+  /** 공통 자료실 조각이면 `'common'`(비서 문서 조각은 없음). 옛 메시지에는 없다 */
+  scope?: 'common';
+  /** 공통 문서의 기준 연도 — 출처 칩에 `(2026)`으로 보인다 */
+  editionYear?: number;
 };
 
 export type RetrievalResult = {
