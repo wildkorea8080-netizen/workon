@@ -70,7 +70,7 @@
 | `created_at`·`updated_at` | |
 
 - 기관·부서 칸이 **없다** — 유형 단위 자료다. 그래서 `visibilityFilter`·기관 트리거 대상이 아니다
-- 같은 유형에서 **현재 판**(`retired_at IS NULL`)은 이름마다 하나만 — 부분 유일 인덱스 `(org_type, title) WHERE retired_at IS NULL AND noda_status <> 'deleting'`. 새 판은 `replaces_id`로 옛 판을 가리키고, 확인 단계에서 옛 판을 지난 판으로 돌린다(6절)
+- 같은 유형에서 **현재 판**(`retired_at IS NULL`)은 이름마다 하나 — 새 판이 읽히는 동안에는 옛 판도 현재 판으로 남아야 해서(6절) DB 유일 인덱스로는 못 막는다. 확인 라우트가 막는다: 같은 유형·같은 이름의 현재 판이 있는데 그 판을 `replaces_id`로 고르지 않았으면 409(`같은 이름의 문서가 이미 있습니다 — '바꿀 옛 판'으로 고르세요`). 새 판은 `replaces_id`로 옛 판을 가리키고, 새 판이 `ready`가 될 때 옛 판을 지난 판으로 돌린다(6절)
 - 운영자의 올리기·바꾸기·지우기는 `super_admin_logs`에 남긴다(이름·유형·연도·이용 조건 — 공개된 정부 문서 이름이라 남겨도 된다)
 
 ## 5. 대화에서 찾기
@@ -161,7 +161,7 @@ API(`/api/super/common-documents/…`): 목록(+맞추기) · 올리기 주소 �
 
 ## 8. 화면 — 출처 표시
 
-- `source_references.chunks[]`에 `scope: 'common'`과 `edition_year`를 더한다(비서 근거는 칸을 두지 않는다 — 옛 메시지와 같은 꼴)
+- `source_references.chunks[]`에 `scope: 'common'`과 `editionYear`를 더한다(조각의 다른 키처럼 camelCase)(비서 근거는 칸을 두지 않는다 — 옛 메시지와 같은 꼴)
 - 출처 칩: `[1] [공통] 예산편성기준(2026) · p.12`. 근거 창 머리에 `공통 기준 · 지방자치단체 · 2026년 판`
 - 문서 이름은 공통 문서 행의 `title`(NODA 파일 이름의 `{id}__`를 떼고 확장자를 뺀 글이 아니라 행의 값)
 - 화면 코드는 `scope`가 없으면 지금처럼 그린다
