@@ -18,6 +18,8 @@ import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-
 import type { Capability, PreflightResult } from './types';
 import {
   commonSourcesToChunks,
+  citableCommonIds,
+  keepContextBlocks,
   maxCitationNumber,
   shiftContext,
   type CommonSearchDoc,
@@ -106,7 +108,7 @@ const defaultDeps: DocSearchDeps = {
   async commonDocumentsOf(orgType) {
     const { data, error } = await supabaseAdmin
       .from('common_documents')
-      .select('id, title, edition_year, org_type, noda_status, retired_at')
+      .select('id, title, edition_year, org_type, noda_status, retired_at, replaces_id')
       .eq('org_type', orgType);
     if (error) throw new Error(error.message);
     return (data ?? []) as CommonSearchDoc[];
@@ -137,9 +139,9 @@ function hasReady(docs: AgentDocument[]): boolean {
   return docs.some((d) => d.noda_status === 'ready');
 }
 
-/** 공통 문서는 `ready`인 **현재 판**(`retired_at` 없음)이 있어야 찾는다 */
+/** 공통 문서는 근거가 될 수 있는 **현재 판**(`ready`, `retired_at` 없음, `ready` 새 판이 대신하지 않음)이 있어야 찾는다 */
 function hasCurrentCommon(docs: CommonSearchDoc[]): boolean {
-  return docs.some((d) => d.noda_status === 'ready' && !d.retired_at);
+  return citableCommonIds(docs).size > 0;
 }
 
 function sectionOf(outline: NodaSource['outline']): string | null {
@@ -780,7 +782,15 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
           chunks,
           hasDocuments: true,
           skipped: false,
-          commonContext: common ? stripNodaPrefixes(common.shifted.context) : null,
+          // 공통 쪽은 받아들인 조각의 블록만 싣는다 — 뺀 조각(지난 판 등)의 글이 모델에게 가지 않게(설계 실패 기준 2)
+          commonContext: common
+            ? stripNodaPrefixes(
+                keepContextBlocks(
+                  common.shifted.context,
+                  new Set(commonChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number'))
+                )
+              )
+            : null,
           commonOrgType: carry.common?.orgType ?? null,
           searchedCommon: carry.common !== undefined,
         }),

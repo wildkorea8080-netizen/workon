@@ -20,10 +20,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     if (!UUID.test(params.id)) return jsonError('문서를 찾을 수 없습니다.', 404);
 
-    // 감사 기록에 남길 값은 지우기 전에 읽는다(이름·유형·연도뿐 — 파일 경로는 남기지 않는다)
+    // 감사 기록에 남길 값은 지우기 전에 읽는다(이름·유형·연도·사용 조건 — 설계 4절. 파일 경로는 남기지 않는다)
     const { data: before } = await supabaseAdmin
       .from('common_documents')
-      .select('title, org_type, edition_year')
+      .select('title, org_type, edition_year, usage_terms')
       .eq('id', params.id)
       .maybeSingle();
 
@@ -39,7 +39,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       target_type: 'common_document',
       target_id: params.id,
       after_data: before
-        ? { title: before.title, org_type: before.org_type, edition_year: before.edition_year }
+        ? {
+            title: before.title,
+            org_type: before.org_type,
+            edition_year: before.edition_year,
+            usage_terms: before.usage_terms,
+          }
         : {},
     });
 

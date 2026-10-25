@@ -6,7 +6,7 @@ import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_SIZE_LABEL } from '@/lib/file-types';
 import { checkUploadFile } from '@/lib/document-upload';
 import { startReadingFields, reconcileReading } from '@/lib/document-reading';
-import { commonReadingDeps } from '@/lib/common-documents';
+import { commonReadingDeps, retireReplacedEdition } from '@/lib/common-documents';
 import { checkCommonConfirm, parseCommonStoragePath } from '@/lib/common-upload';
 import { ORG_TYPES, commonNodaFilename, isOrgType } from '@/lib/org-types';
 import { logSystem } from '@/lib/logger';
@@ -92,8 +92,52 @@ function compareRows(a: ListRow, b: ListRow): number {
 }
 
 /**
+ * 옛 판 내리기 다시 걸기 — 새 판이 `ready`가 된 뒤 `retireReplacedEdition`이 실패하면(잠깐의 DB 오류 등)
+ * 새 판은 더 이상 `reading`이 아니라 아무도 다시 부르지 않고, 두 판이 모두 현재 판으로 남는다.
+ * 그래서 목록을 열 때마다 `ready` 현재 판이 대신하는 옛 판이 아직 현재 판이면 다시 부른다(여러 번 불러도 안전하다).
+ * 실패는 기록만 하고 목록은 그대로 보낸다. 바뀐 옛 판 행은 다시 읽어 응답에 반영한다.
+ * (`deleting`인 옛 판은 이미 NODA 삭제에 실패해 지우기 길을 기다리는 것이라 건너뛴다 — 다시 불러도 바뀌지 않는다)
+ */
+async function retryPendingRetirements(rows: ListRow[]): Promise<ListRow[]> {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const pending = rows.filter((r) => {
+    if (r.retired_at || r.noda_status !== 'ready' || typeof r.replaces_id !== 'string') return false;
+    const target = byId.get(r.replaces_id);
+    return Boolean(target) && !target!.retired_at && target!.noda_status !== 'deleting';
+  });
+  if (pending.length === 0) return rows;
+
+  for (const row of pending) {
+    try {
+      await retireReplacedEdition(row.id);
+    } catch (retireError) {
+      await logSystem({
+        level: 'warning',
+        category: 'database',
+        message: '공통 문서 옛 판 내리기 다시 걸기 실패 — 다음 목록 때 다시 건다',
+        details: {
+          document_id: row.id,
+          error: retireError instanceof Error ? retireError.message : String(retireError),
+        },
+      });
+    }
+  }
+
+  const targetIds = pending.map((r) => r.replaces_id as string);
+  try {
+    const { data, error } = await supabaseAdmin.from('common_documents').select(LIST_COLUMNS).in('id', targetIds);
+    if (error || !data) return rows;
+    const fresh = new Map(((data ?? []) as unknown as ListRow[]).map((r) => [r.id, r]));
+    return rows.map((r) => fresh.get(r.id) ?? r).sort(compareRows);
+  } catch {
+    return rows;
+  }
+}
+
+/**
  * 공통 문서 목록(운영자). `?org_type=`으로 유형을 좁힌다(없으면 전부).
  * 읽는 중인 행만 NODA와 맞춘다 — 실패해도 목록은 맞추기 전 값 그대로 보낸다.
+ * 그 뒤 실패해 남은 옛 판 내리기를 다시 건다(`retryPendingRetirements`).
  */
 export async function GET(request: NextRequest) {
   const admin = getSuperAdminFromRequest(request);
@@ -122,6 +166,8 @@ export async function GET(request: NextRequest) {
         details: { error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError) },
       });
     }
+
+    rows = await retryPendingRetirements(rows);
 
     return NextResponse.json({ ok: true, data: rows.map(toClientRow) });
   } catch (error) {

@@ -4,6 +4,8 @@ import {
   shiftContext,
   maxCitationNumber,
   commonSourcesToChunks,
+  citableCommonIds,
+  keepContextBlocks,
   type CommonSearchDoc,
 } from '@/lib/capabilities/doc-search-common';
 import { contextPassages } from '@/lib/capabilities/doc-search';
@@ -24,7 +26,7 @@ const src = (over: Partial<NodaSource> = {}): NodaSource => ({
 
 const doc = (over: Partial<CommonSearchDoc> = {}): CommonSearchDoc => ({
   id: ID, title: '지방공무원 여비 규정', edition_year: 2026, org_type: 'local_government',
-  noda_status: 'ready', retired_at: null, ...over,
+  noda_status: 'ready', retired_at: null, replaces_id: null, ...over,
 } as CommonSearchDoc);
 
 describe('shiftContext', () => {
@@ -127,5 +129,50 @@ describe('commonSourcesToChunks', () => {
     expect(m.unparsable).toEqual(['no-prefix.pdf']);
     expect(m.malformed).toBe(2);
     expect(m.chunks.map((c) => c.n)).toEqual([4]);
+  });
+});
+
+describe('citableCommonIds — 옛 판 내리기가 실패한 사이에도 지난 판은 근거가 아니다', () => {
+  it('ready 현재 판만, ready 새 판이 대신하는 옛 판은 뺀다', () => {
+    const ids = citableCommonIds([
+      doc({ id: ID2, edition_year: 2025 }),
+      doc({ replaces_id: ID2 }),
+    ]);
+    expect(Array.from(ids)).toEqual([ID]);
+  });
+
+  it('새 판이 아직 ready가 아니면(읽는 중·실패) 옛 판이 그대로 근거', () => {
+    for (const status of ['reading', 'failed', 'unreadable'] as const) {
+      const ids = citableCommonIds([doc({ id: ID2 }), doc({ noda_status: status, replaces_id: ID2 })]);
+      expect(Array.from(ids)).toEqual([ID2]);
+    }
+  });
+
+  it('지난 판이 된 새 판의 replaces_id는 세지 않는다, 대소문자 무시', () => {
+    expect(Array.from(citableCommonIds([doc({ id: ID2 }), doc({ retired_at: '2026-01-01T00:00:00Z', replaces_id: ID2 })]))).toEqual([ID2]);
+    expect(citableCommonIds([doc({ id: ID2 }), doc({ replaces_id: ID2.toUpperCase() })]).has(ID2)).toBe(false);
+  });
+
+  it('commonSourcesToChunks도 대신된 옛 판 조각을 조용히 뺀다', () => {
+    const m = commonSourcesToChunks(
+      [src({ n: 1 }), src({ n: 2, filename: `${ID2}__old.pdf` })],
+      [doc({ replaces_id: ID2 }), doc({ id: ID2, title: '옛 판', edition_year: 2025 })],
+      new Map(),
+      0,
+    );
+    expect(m.unknown).toEqual([]);
+    expect(m.chunks.map((c) => c.documentId)).toEqual([ID]);
+  });
+});
+
+describe('keepContextBlocks', () => {
+  const ctx = '앞 글\n[4] a.pdf · 3쪽\n일비 [5]\n[5] old.pdf\n옛 단가\n[6] c.pdf\n셋';
+
+  it('고른 번호의 블록만, 본문 속 [5]는 머리 줄이 아니다, 첫 머리 줄 앞 글은 버림', () => {
+    expect(keepContextBlocks(ctx, new Set([4, 6]))).toBe('[4] a.pdf · 3쪽\n일비 [5]\n[6] c.pdf\n셋');
+  });
+
+  it('하나도 고르지 않으면 빈 글', () => {
+    expect(keepContextBlocks(ctx, new Set())).toBe('');
   });
 });

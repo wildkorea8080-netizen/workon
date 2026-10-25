@@ -179,6 +179,25 @@ describe('라우트 원본', () => {
     expect(src).toContain('deleteCommonDocument');
     expect(src).toContain('문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.');
     expect(src).toContain("'common_document_deleted'");
+    // 설계 4절 — 지우기도 이름·유형·연도·사용 조건을 남긴다
+    expect(src).toContain(".select('title, org_type, edition_year, usage_terms')");
+    expect(src).toContain('usage_terms: before.usage_terms');
+  });
+
+  it('목록은 실패해 남은 옛 판 내리기를 다시 건다 — ready 현재 판이 대신하는 옛 판이 아직 현재 판일 때만, 실패는 기록만', () => {
+    const src = read(files.list);
+    expect(src).toContain('retireReplacedEdition');
+    expect(src).toContain('rows = await retryPendingRetirements(rows);');
+    // 맞추기(reconcileReading) 뒤, 응답 전에
+    expect(src.indexOf('rows = await retryPendingRetirements(rows);')).toBeGreaterThan(src.indexOf('rows = await reconcileReading('));
+    expect(src.indexOf('rows = await retryPendingRetirements(rows);')).toBeLessThan(src.indexOf('rows.map(toClientRow)'));
+    const fn = src.slice(src.indexOf('async function retryPendingRetirements'), src.indexOf('export async function GET'));
+    expect(fn).toContain("r.noda_status !== 'ready'");
+    expect(fn).toContain('r.retired_at');
+    expect(fn).toContain('target!.retired_at');
+    expect(fn).toMatch(/try \{\s*await retireReplacedEdition\(row\.id\);\s*\} catch/);
+    // 바뀐 옛 판 행을 다시 읽어 응답에 반영
+    expect(fn).toContain(".select(LIST_COLUMNS).in('id', targetIds)");
   });
 
   it('발급은 checkUploadFile 뒤 createSignedUploadUrl', () => {

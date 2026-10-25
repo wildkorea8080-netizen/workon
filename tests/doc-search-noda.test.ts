@@ -43,7 +43,7 @@ const CID = 'cccccccc-1111-4222-8333-444444444444';
 const CID2 = 'dddddddd-1111-4222-8333-444444444444';
 
 const commonDoc = (over: Partial<CommonSearchDoc> = {}): CommonSearchDoc => ({
-  id: CID, title: '예산편성기준', edition_year: 2026, org_type: '공공기관', noda_status: 'ready', retired_at: null, ...over,
+  id: CID, title: '예산편성기준', edition_year: 2026, org_type: '공공기관', noda_status: 'ready', retired_at: null, replaces_id: null, ...over,
 });
 
 const csrc = (over: Partial<NodaSource> = {}): NodaSource => ({
@@ -633,6 +633,63 @@ describe('doc_search — 공통 자료실(S5)', () => {
     const agentOnly = await turn(deps({ fetchContext: vi.fn(twoAgentSources) }).d);
     expect(agentOnly.verifySources).toEqual([{ doc_id: 'na', chunk_id: 'a1' }, { doc_id: 'na', chunk_id: 'a2' }]);
     expect(agentOnly.verifyTenant).toBeUndefined();
+  });
+
+  it('prepare — 지난 판 조각의 글은 프롬프트에 싣지 않는다(설계 실패 기준 2), 번호는 그대로', async () => {
+    const m = withCommon({
+      documentsOf: async () => [],
+      commonDocumentsOf: vi.fn(async () => [
+        commonDoc(),
+        commonDoc({ id: CID2, title: '예산편성기준', edition_year: 2025, noda_status: 'retired', retired_at: '2026-10-01T00:00:00Z' }),
+      ]),
+      fetchCommonContext: vi.fn(async () => ({
+        context: `[1] ${CID}__예산편성기준(2026).pdf · 3쪽
+새 단가 3만원
+[2] ${CID2}__예산편성기준(2025).pdf · 3쪽
+옛 단가 2만원`,
+        sources: [csrc(), csrc({ n: 2, chunk_id: 'k2', filename: `${CID2}__예산편성기준(2025).pdf` })],
+        dropped: 0,
+      })),
+    });
+    const out = await turn(m.d);
+    expect(out.chunks!.map((c) => [c.documentId, c.n])).toEqual([[CID, 1]]);
+    expect(out.systemAddendum).toContain('[1] 예산편성기준(2026).pdf · 3쪽');
+    expect(out.systemAddendum).toContain('새 단가 3만원');
+    expect(out.systemAddendum).not.toContain('옛 단가 2만원');
+    expect(out.systemAddendum).not.toContain('예산편성기준(2025)');
+  });
+
+  it('옛 판 내리기가 실패해 두 판이 모두 현재 판이어도 ready 새 판이 대신한 옛 판은 근거가 아니다', async () => {
+    // 새 판(2026)은 ready·현재 판, 옛 판(2025)도 내리기에 실패해 아직 ready·현재 판
+    const both = () => [
+      commonDoc({ replaces_id: CID2 }),
+      commonDoc({ id: CID2, edition_year: 2025 }),
+    ];
+    const m = withCommon({
+      documentsOf: async () => [],
+      commonDocumentsOf: vi.fn(async () => both()),
+      fetchCommonContext: vi.fn(async () => ({
+        context: `[1] ${CID2}__예산편성기준(2025).pdf
+옛 단가 2만원
+[2] ${CID}__예산편성기준(2026).pdf
+새 단가 3만원`,
+        sources: [csrc({ filename: `${CID2}__예산편성기준(2025).pdf` }), csrc({ n: 2, chunk_id: 'k2' })],
+        dropped: 0,
+      })),
+    });
+    const out = await turn(m.d);
+    expect(out.chunks!.map((c) => [c.documentId, c.n])).toEqual([[CID, 2]]);
+    expect(out.systemAddendum).not.toContain('옛 단가 2만원');
+    expect(out.systemAddendum).toContain('새 단가 3만원');
+    expect(m.log).not.toHaveBeenCalled();
+
+    // 새 판이 아직 ready가 아니면(실패) 옛 판이 계속 근거 — preflight는 공통 보관함을 찾는다
+    const onlyOld = withCommon({
+      documentsOf: async () => [],
+      commonDocumentsOf: vi.fn(async () => [commonDoc({ id: CID2, edition_year: 2025 }), commonDoc({ noda_status: 'failed', replaces_id: CID2 })]),
+    });
+    await preflight(onlyOld.d);
+    expect(onlyOld.fetchCommonContext).toHaveBeenCalledTimes(1);
   });
 
   it('prepare — 다른 유형 공통 근거는 섞임: 전체 근거 버림·critical', async () => {
