@@ -10,6 +10,7 @@ import { commonReadingDeps, retireReplacedEdition } from '@/lib/common-documents
 import { checkCommonConfirm, parseCommonStoragePath } from '@/lib/common-upload';
 import { ORG_TYPES, commonNodaFilename, isOrgType } from '@/lib/org-types';
 import { logSystem } from '@/lib/logger';
+import { replayNodaEvents } from '@/lib/noda-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -146,6 +147,9 @@ export async function GET(request: NextRequest) {
   try {
     const orgType = new URL(request.url).searchParams.get('org_type');
     if (orgType !== null && !isOrgType(orgType)) return jsonError('기관 유형이 올바르지 않습니다.', 400);
+
+    // 놓친 웹훅을 먼저 받아 둔다 — 1분에 한 번만, 짧게, 던지지 않는다(noda-events.ts)
+    await replayNodaEvents();
 
     let query = supabaseAdmin.from('common_documents').select(LIST_COLUMNS);
     if (orgType) query = query.eq('org_type', orgType);

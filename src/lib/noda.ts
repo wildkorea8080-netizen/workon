@@ -224,6 +224,17 @@ export interface NodaQuota {
   remaining_documents: number | null;
 }
 
+/** `GET /events`의 한 쪽 — 웹훅으로 알리는 일을 NODA가 장부에 적어 둔 것(몸은 웹훅과 같고 `id`가 웹훅의 `event_id`) */
+export interface NodaEventPage {
+  events: (Record<string, unknown> & { id: string })[];
+  /** 다음에 `since`로 넘길 자리 — 이 쪽이 비었으면 받은 `since` 그대로이거나 null */
+  next: string | null;
+  /** 더 있으면 true — 바로 다시 부른다 */
+  more: boolean;
+  /** 장부가 그 자리까지 거슬러 가지 못했다 — 그 사이 일을 다 못 보여 준다(문서 목록 맞추기가 메운다) */
+  gap: boolean;
+}
+
 export interface NodaWebhook {
   id: string;
   url: string;
@@ -319,6 +330,11 @@ export interface NodaClient {
    * 404(보관함이 없음)는 `{ existed: false }`로 끝난다. `deleted`는 NODA가 지운 문서 수를 알려 줄 때만 숫자
    */
   deleteTenant(tenant: string): Promise<{ existed: boolean; deleted: number | null }>;
+  /**
+   * 일 장부(`GET /events`) — 놓친 웹훅을 다시 받는다. `since`가 없으면 가장 새 `limit`개, 있으면 그 뒤의 일이 오래된 것부터 온다.
+   * 다시 시도하지 않는다(부르는 쪽이 다음 기회에 이어 간다). `timeoutMs`는 한 번의 시간 제한
+   */
+  listEvents(opts?: { since?: string | null; limit?: number; timeoutMs?: number }): Promise<NodaEventPage>;
   /** 제 보관함 목록(`GET /tenants` — 서비스 키는 `workon`·`workon-…`만 본다)과 한도. 운영자 스크립트용이라 다시 시도하지 않는다 */
   listTenants(): Promise<{ tenants: NodaTenantSummary[]; quota: NodaQuota | null }>;
   /** `budget`을 주지 않으면 `NODA_CONTEXT_BUDGET` */
@@ -614,6 +630,23 @@ export function createNodaClient(deps: {
         },
         { windowMs: DEFAULT_RETRY_WINDOW_MS, intervalMs: DEFAULT_RETRY_INTERVAL_MS },
       );
+    },
+
+    async listEvents(opts = {}) {
+      const query: Record<string, string> = {};
+      if (opts.since) query.since = opts.since;
+      if (opts.limit) query.limit = String(opts.limit);
+      const res = await request('GET', '/events', { query, timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+      const b = await readJson(res);
+      const events = (Array.isArray(b.events) ? b.events : [])
+        .map(asObject)
+        .filter((e): e is Record<string, unknown> & { id: string } => e !== null && typeof e.id === 'string' && e.id !== '');
+      return {
+        events,
+        next: typeof b.next === 'string' && b.next ? b.next : null,
+        more: b.more === true,
+        gap: b.gap === true,
+      };
     },
 
     async listTenants() {

@@ -4,7 +4,10 @@
   "framework": "nextjs",
   "cleanUrls": true,
   "trailingSlash": false,
-  
+  "crons": [
+    { "path": "/api/cron/noda-events", "schedule": "0 18 * * *" }
+  ],
+
   "headers": [
     {
       "source": "/api/(.*)",

@@ -51,3 +51,5 @@ export const NODA_API_URL = process.env.NODA_API_URL || 'https://api.readlayer.k
 export const NODA_API_KEY = getEnv('NODA_API_KEY', false);
 // NODA 웹훅 서명 비밀값 — `npm run noda:webhook -- register <주소>`가 한 번만 보여 준다. 없으면 웹훅 받는 곳이 503
 export const NODA_WEBHOOK_SECRET = getEnv('NODA_WEBHOOK_SECRET', false);
+// Vercel 예약 작업(cron)이 부를 때 싣는 비밀값(`Authorization: Bearer …`) — 없으면 예약 작업 받는 곳이 503(목록을 열 때 다시 받기는 그대로 돈다)
+export const CRON_SECRET = getEnv('CRON_SECRET', false);

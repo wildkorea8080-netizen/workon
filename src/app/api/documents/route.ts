@@ -8,6 +8,7 @@ import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
 import { noda, nodaTenant } from '@/lib/noda';
 import { reconcileReading } from '@/lib/document-reading';
+import { replayNodaEvents } from '@/lib/noda-events';
 import { logSystem } from '@/lib/logger';
 
 const NODA_DELETE_FAILED_MESSAGE = '문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.';
@@ -29,6 +30,9 @@ export async function GET(_request: NextRequest) {
         { status: 403 }
       );
     }
+
+    // 놓친 웹훅을 먼저 받아 둔다 — 1분에 한 번만 돌고 짧게(3초) 끝나며 던지지 않는다(noda-events.ts)
+    await replayNodaEvents();
 
     // 기관 전체 공개 문서 + 내 부서 계통에 걸린 부서 제한 문서
     const scope = await getAccessScope(departmentId);

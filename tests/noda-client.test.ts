@@ -323,6 +323,46 @@ describe('NODA 클라이언트', () => {
     await expect(down.noda.listTenants()).rejects.toBeInstanceOf(NodaError);
   });
 
+  it('listEvents — since·limit를 싣고, id 없는 일은 버리고, 다시 시도하지 않는다', async () => {
+    const urls: string[] = [];
+    const f = (async (url: string) => {
+      urls.push(url);
+      return json({
+        events: [
+          { id: '01761373905000000001', event: 'document.ready', tenant: 'workon-a1', filename: 'x' },
+          { event: 'document.removed' },
+          'junk',
+        ],
+        count: 1,
+        next: '01761373905000000001',
+        more: true,
+        gap: false,
+      });
+    }) as unknown as typeof fetch;
+    const { noda } = client(f);
+    const page = await noda.listEvents({ since: '0176', limit: 100 });
+    const u = new URL(urls[0]);
+    expect(u.pathname).toBe('/events');
+    expect(u.searchParams.get('since')).toBe('0176');
+    expect(u.searchParams.get('limit')).toBe('100');
+    expect(page.events).toEqual([{ id: '01761373905000000001', event: 'document.ready', tenant: 'workon-a1', filename: 'x' }]);
+    expect(page).toMatchObject({ next: '01761373905000000001', more: true, gap: false });
+
+    const first = client((async (url: string) => {
+      expect(new URL(url).searchParams.has('since')).toBe(false);
+      return json({ events: [], gap: true });
+    }) as unknown as typeof fetch);
+    expect(await first.noda.listEvents({ since: null })).toEqual({ events: [], next: null, more: false, gap: true });
+
+    let downCalls = 0;
+    const down = client((async () => {
+      downCalls += 1;
+      return json({}, 503);
+    }) as unknown as typeof fetch);
+    await expect(down.noda.listEvents()).rejects.toBeInstanceOf(NodaError);
+    expect(downCalls).toBe(1);
+  });
+
   it('listDocuments는 receiving이 없어도 빈 배열', async () => {
     const { noda } = client((async () => json({ documents: [{ filename: 'a', doc_id: 'd', extra: 1 }] })) as unknown as typeof fetch);
     const r = await noda.listDocuments('t');
