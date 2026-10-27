@@ -30,7 +30,8 @@ interface CellRef {
   col: number;
 }
 
-const ATTR = (name: string) => new RegExp(`\s${name}\s*=\s*(?:"(\d+)"|'(\d+)')`);
+// 템플릿 문자열에서 \s·\d는 정규식 이스케이프가 아니라 글자 s·d가 된다 — String.raw로 쓴다
+const ATTR = (name: string) => new RegExp(String.raw`\s${name}\s*=\s*(?:"(\d+)"|'(\d+)')`);
 const COL_ADDR = ATTR('colAddr');
 const ROW_ADDR = ATTR('rowAddr');
 

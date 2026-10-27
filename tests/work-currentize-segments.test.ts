@@ -77,4 +77,27 @@ describe('현행화 — HWPX 조각 읽기', () => {
     expect(r.segments).toHaveLength(MAX_SEGMENTS);
     expect(r.truncated).toBe(true);
   });
+  it('칸 주소(cellAddr)가 행·열 세기와 다르면 주소를 따른다(병합 칸)', async () => {
+    const tc = (text: string, r: number, c: number, cs = 1) =>
+      `<hp:tc><hp:subList>${para(text, '7')}</hp:subList><hp:cellAddr colAddr="${c}" rowAddr="${r}"/><hp:cellSpan colSpan="${cs}" rowSpan="1"/><hp:cellSz width="1000" height="282"/></hp:tc>`;
+    // 첫 칸이 2칸 병합 → 다음 칸의 주소는 col 2 (세기만 하면 1)
+    const body =
+      secPrPara() +
+      `<hp:p id="2" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:tbl id="9" rowCnt="2" colCnt="3">` +
+      `<hp:tr>${tc('합친 칸', 0, 0, 2)}${tc('끝 칸', 0, 2)}</hp:tr>` +
+      `<hp:tr>${tc('아래 가', 5, 7)}</hp:tr>` + // 일부러 어긋난 주소
+      `</hp:tbl></hp:run></hp:p>`;
+    const { segments } = await readSegments(await buildHwpx(body));
+    const by = (t: string) => segments.find((s) => s.text === t)!;
+    expect(by('합친 칸').cell).toEqual({ table: 0, row: 0, col: 0 });
+    expect(by('끝 칸').cell).toEqual({ table: 0, row: 0, col: 2 });
+    expect(by('아래 가').cell).toEqual({ table: 0, row: 5, col: 7 });
+  });
+
+  it('정확히 MAX_SEGMENTS개면 truncated가 아니다', async () => {
+    const body = secPrPara() + Array.from({ length: MAX_SEGMENTS }, (_, i) => para(`문단 ${i}`)).join('');
+    const r = await readSegments(await buildHwpx(body));
+    expect(r.segments).toHaveLength(MAX_SEGMENTS);
+    expect(r.truncated).toBe(false);
+  });
 });
