@@ -60,6 +60,21 @@
         "pdfPages": 1
       },
       "filledSha256": "284c908fb3e21068eac1c74af8e2f1bb5c8afb2c58f8b618e3b564191359c944"
+    },
+    {
+      "file": "handover.hwpx",
+      "sha256": "481e8eec3db540627087324c57cbcf8adc05d8bc147aad8587009775e140eb02",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T16:39:30.5759603+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "fce72a0a25c4e16dfef1b22411ce4fc8abfd010abdad1ad3a84a2dac015077cd"
     }
   ]
 }

@@ -41,6 +41,12 @@ export const BUILTIN_TEMPLATES: readonly BuiltinTemplate[] = [
     file: 'regulation_memo.hwpx',
     markers: ['제목', '작성일', '작성부서', '검토 질문', '적용 기준', '검토 의견', '근거', '유보·확인 필요', '검토 범위'],
   },
+  {
+    ref: 'builtin:handover',
+    name: '인수인계서 (표준 서식)',
+    file: 'handover.hwpx',
+    markers: ['제목', '작성 기준일', '인계자', '인수자', '확인자', '업무 개요', '진행 중 업무', '미결 과제', '완료 업무', '반복 일정', '참고 자료', '유의 사항'],
+  },
 ];
 
 export function findBuiltinTemplate(ref: string): BuiltinTemplate | null {
