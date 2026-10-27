@@ -9,7 +9,7 @@ import { readSegments, type Segment } from './segments';
 import { MAX_SEGMENTS } from './limits';
 import { valueLines } from '@/lib/doc-fill/hwpx-core';
 import { buildChangeLogWorkbook } from './workbook';
-import type { Change, CurrentizeContent } from './plan';
+import { isNoopChange, type Change, type CurrentizeContent } from './plan';
 
 /**
  * 현행화 판 → 파일. 실행기(runs/currentize-op.ts)와 파일 만들기(artifacts.ts)가 함께 쓴다.
@@ -82,7 +82,7 @@ async function checked(bytes: Buffer, format: 'hwpx' | 'xlsx', values?: string[]
  * 첫 줄이 빈 변경은 조각이 사라진다 — 그만큼 순서를 옮긴다.
  */
 async function verifyApplied(priorBytes: Buffer, outBytes: Buffer, changes: Change[]): Promise<void> {
-  const applied = new Map(changes.filter((c) => c.status === 'changed' && c.after !== null).map((c) => [c.segmentId, c.after as string]));
+  const applied = new Map(changes.filter((c) => c.status === 'changed' && c.after !== null && !isNoopChange(c)).map((c) => [c.segmentId, c.after as string]));
   if (applied.size === 0) return;
   const before = (await readSegments(priorBytes)).segments;
   const after = (await readSegments(outBytes)).segments;

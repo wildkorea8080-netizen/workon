@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readSegments, type Segment } from '@/lib/work/workflows/currentize/segments';
-import { buildPlan, type Change } from '@/lib/work/workflows/currentize/plan';
+import { acknowledgeChange, applyUserEdit, buildPlan, type Change } from '@/lib/work/workflows/currentize/plan';
 import { applyChanges } from '@/lib/work/workflows/currentize/apply';
 import type { CitationPair } from '@/lib/work/workflows/currentize/citations';
+import { classifySegment } from '@/lib/work/workflows/currentize/classify';
 import type { ShiftedCell } from '@/lib/work/workflows/currentize/tables';
 import { checkPackage } from '@/lib/work/documents/package-check';
 import { buildHwpx, para, tableAt, secPrPara, sectionXml } from './fixtures/hwpx';
@@ -373,6 +374,11 @@ function planInput() {
       ['0:20', 'ok'],
       ['0:80', 'needs_check'],
     ]),
+    // 확인되지 않은 수치(글 그대로) — 0:10의 1,100은 받아들인 고치기에 없다(고치기가 지웠다)
+    numberTokens: new Map<string, string[]>([
+      ['0:10', ['1,100']],
+      ['0:40', ['1,200']],
+    ]),
   };
 }
 
@@ -401,8 +407,68 @@ describe('buildPlan — 변경 계획', () => {
     const input = planInput();
     input.rewrites.accepted.push({ segmentId: '0:50', text: '제64조에 따라 새 문장을 따른다.', basis: ['0:50'] });
     const c = buildPlan(input).filter((x) => x.segmentId === '0:50');
+    // 고친 글에 바뀐 조문(제64조)이 그대로 있으니 인용 확인 요청은 남는다(C2)
     expect(c).toEqual([
       expect.objectContaining({ kind: 'prose', status: 'changed', after: '제64조에 따라 새 문장을 따른다.', basis: ['0:50'] }),
+      expect.objectContaining({ kind: 'citation', status: 'needs_check', after: null, note: '근거 조문이 바뀜 — 문장을 확인하세요' }),
+    ]);
+  });
+
+  it('받아들인 고치기가 있어도 확인되지 않은 수치가 고친 글에 남으면 수치 확인 요청을 낸다(C2)', () => {
+    const input = planInput();
+    input.numberTokens.set('0:10', ['1,200']);
+    input.numberStatus.set('0:10', 'needs_check');
+    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 1,200백만원으로 추진한다.', basis: ['src1'] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => [x.kind, x.status])).toEqual([
+      ['prose', 'changed'],
+      ['number', 'needs_check'],
+    ]);
+    // 숫자 경계 — 11,200은 1,200이 남은 것이 아니다
+    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 11,200백만원으로 추진한다.', basis: ['src1'] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => x.kind)).toEqual(['prose']);
+    // 어느 수치인지 기록이 없으면 언제나 남긴다
+    input.numberTokens.delete('0:10');
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => x.kind)).toEqual(['prose', 'number']);
+  });
+
+  it('밀어 둔 글과 같은 고치기는 고치기가 아니다 — 연도 밀기·확인 요청이 그대로 남는다(C2)', () => {
+    const input = planInput();
+    input.segments[3] = seg('0:40', '2025년 예산은 1,200백만원이다.');
+    input.shifted.set('0:40', '2026년 예산은 1,200백만원이다.');
+    input.rewrites.accepted = [{ segmentId: '0:40', text: '2026년 예산은 1,200백만원이다.', basis: ['src1'] }];
+    input.rewrites.proposed = [{ segmentId: '0:40', text: '2026년 예산은 1,200백만원이다.', basis: [] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:40').map((x) => [x.kind, x.status])).toEqual([
+      ['year', 'changed'],
+      ['number', 'needs_check'],
+    ]);
+  });
+
+  it('밀린 날짜는 확인 필요(밀린 글은 올해 글로), 다른 연도가 함께 든 문장도 확인 필요(I5)', () => {
+    const input = planInput();
+    const dateText = '착수일은 2025. 3. 1.이다.';
+    const mixed = '2024년 결산 대비 2025년 예산을 늘렸다.';
+    input.segments.push(seg('0:100', dateText), seg('0:110', mixed));
+    input.findings.set('0:100', classifySegment(dateText, { basisDate: '2026-10-28', regulationNames: [], personNames: [] }));
+    input.findings.set('0:110', classifySegment(mixed, { basisDate: '2026-10-28', regulationNames: [], personNames: [] }));
+    input.shifted.set('0:100', '착수일은 2026. 3. 1.이다.');
+    input.shifted.set('0:110', '2024년 결산 대비 2026년 예산을 늘렸다.');
+    const plan = buildPlan(input);
+    expect(plan.filter((x) => x.segmentId === '0:100')).toEqual([
+      expect.objectContaining({ kind: 'date', status: 'needs_check', after: '착수일은 2026. 3. 1.이다.', note: '일정 확인 — 요일·날짜를 확인하세요' }),
+    ]);
+    expect(plan.filter((x) => x.segmentId === '0:110')).toEqual([
+      expect.objectContaining({ kind: 'year', status: 'needs_check', after: '2024년 결산 대비 2026년 예산을 늘렸다.', note: '다른 연도가 함께 있어 확인하세요' }),
+    ]);
+    // 표 계획이 민 머리글 칸(2024년 → 2025년)은 계획대로라 확인 요청이 아니다
+    input.segments.push(seg('0:120', '2024년'));
+    input.shifted.set('0:120', '2025년');
+    const withHeader = { ...input, plannedYearSegments: new Set(['0:120']) };
+    expect(buildPlan(withHeader).filter((x) => x.segmentId === '0:120')).toEqual([expect.objectContaining({ kind: 'year', status: 'changed', after: '2025년' })]);
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:120')).toEqual([expect.objectContaining({ kind: 'year', status: 'needs_check' })]);
+    // 받아들인 고치기도 날짜가 든 문장이면 확인 필요로(파일에 넣지 않음)
+    input.rewrites.accepted.push({ segmentId: '0:100', text: '착수일은 2026. 3. 1.로 앞당겼다.', basis: ['src1'] });
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:100')).toEqual([
+      expect.objectContaining({ kind: 'prose', status: 'needs_check', after: '착수일은 2026. 3. 1.로 앞당겼다.', note: '일정 확인 — 요일·날짜를 확인하세요' }),
     ]);
   });
 
@@ -503,5 +569,37 @@ describe('buildPlan — 변경 계획', () => {
     expect(plan.map((c) => c.status)).toEqual(['changed', 'proposed', 'needs_check']);
     const out = await applyChanges(bytes, plan);
     expect(texts((await readSegments(out)).segments)).toEqual(['2026년 사업을 추진한다.', '옛 방식으로 운영한다.', '예산은 1,200백만원이다.']);
+  });
+});
+
+describe('확인함(acknowledgeChange) — 파일은 바뀌지 않는다(I6)', () => {
+  it('확인 필요 행이 바꿈·근거 user·올해 글 = 작년 글이 되고 메모 끝에 확인함, 확인 필요가 아니면 null', () => {
+    const rows: Change[] = [
+      { id: 'c1', segmentId: '0:10', kind: 'year', before: '2025년 예산 1,200', after: '2026년 예산 1,200', status: 'changed', basis: [], note: null },
+      { id: 'c2', segmentId: '0:10', kind: 'number', before: '2025년 예산 1,200', after: null, status: 'needs_check', basis: [], note: '숫자 확인' },
+      { id: 'c3', segmentId: '0:20', kind: 'structure', before: '', after: null, status: 'needs_check', basis: [], note: null },
+    ];
+    const a = acknowledgeChange(rows, rows[1])!;
+    expect(a.target).toEqual({ ...rows[1], status: 'changed', after: rows[1].before, basis: ['user'], note: '숫자 확인 · 확인함' });
+    expect(acknowledgeChange(a.changes, a.changes[2])!.target.note).toBe('확인함');
+    expect(acknowledgeChange(rows, rows[0])).toBeNull();
+    // 확인함 행은 직원 글 줄이 아니다 — 같은 문단에 직원 글을 넣으면 새 직원 줄이 생기고 확인함 행은 담긴다
+    const u = applyUserEdit(a.changes, rows[0], '2026년 예산 1,300')!;
+    expect(u.target.id).toBe('c1');
+    expect(u.changes.map((c) => c.id)).toEqual(['c1', 'c3']);
+  });
+
+  it('확인함 행은 적용하지 않는다 — 같은 문단의 연도 바꿈과 겹쳐도 파일이 만들어진다', async () => {
+    const bytes = await buildHwpx(secPrPara() + para('2025년 예산은 1,200백만원이다.') + para('짧은 글'));
+    const segments = (await readSegments(bytes)).segments;
+    const [s0, s1] = segments;
+    const rows: Change[] = [
+      { id: 'c1', segmentId: s0.id, kind: 'year', before: s0.text, after: '2026년 예산은 1,200백만원이다.', status: 'changed', basis: [], note: null },
+      { id: 'c2', segmentId: s0.id, kind: 'number', before: s0.text, after: s0.text, status: 'changed', basis: ['user'], note: '확인함' },
+      // 글 없는 빈 칸 확인을 닫은 행(before '') — 붙은 문단의 글과 달라도 PRIOR_MISMATCH가 아니다
+      { id: 'c3', segmentId: s1.id, kind: 'structure', before: '', after: '', status: 'changed', basis: ['user'], note: '확인함' },
+    ];
+    const out = await applyChanges(bytes, rows);
+    expect(texts((await readSegments(out)).segments)).toEqual(['2026년 예산은 1,200백만원이다.', '짧은 글']);
   });
 });

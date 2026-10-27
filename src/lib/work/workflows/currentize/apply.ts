@@ -21,7 +21,7 @@ import { paragraphPrefix } from '@/lib/doc-fill/xml-scan';
 import { parseNumber } from '@/lib/table-engine/number';
 import { WorkError } from '@/lib/work/types';
 import { scanSegmentParas } from './segments';
-import type { Change } from './plan';
+import { isNoopChange, type Change } from './plan';
 
 /** 앞자리 0 없는 `섹션:위치` — '0:010'이 '0:10'과 같은 문단을 가리키는 다른 글이 되지 않게 */
 const SEGMENT_ID = /^(0|[1-9]\d*):(0|[1-9]\d*)$/;
@@ -116,12 +116,13 @@ function sameCell(paraText: string, before: string): boolean {
 }
 
 /**
- * status가 changed이고 after가 있는 변경만 적용한다. 위치는 모두 **원래 바이트** 기준이라 한 섹션의 편집을 한 번에 모아 적용한다.
+ * status가 changed이고 after가 있는 변경만 적용한다(after가 before 그대로인 '확인함'은 건너뛴다). 위치는 모두 **원래 바이트** 기준이라 한 섹션의 편집을 한 번에 모아 적용한다.
  * 조각 id가 풀리지 않거나 그 문단의 글이 before와 다르면(표 칸은 sameCell로) PRIOR_MISMATCH.
  * 적용할 것이 없으면 원래 바이트를 그대로 돌려준다.
  */
 export async function applyChanges(priorBytes: Buffer, changes: Change[]): Promise<Buffer> {
-  const applied = changes.filter((c) => c.status === 'changed' && c.after !== null);
+  // 올해 글이 작년 글 그대로인 바꿈('확인함')은 넣을 것이 없다
+  const applied = changes.filter((c) => c.status === 'changed' && c.after !== null && !isNoopChange(c));
   if (applied.length === 0) return priorBytes;
 
   const doc = await openHwpx(priorBytes);

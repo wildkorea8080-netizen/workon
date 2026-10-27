@@ -1,7 +1,7 @@
 // tests/work-currentize-shift.test.ts
 import { describe, expect, it } from 'vitest';
 import { classifySegment, type ClassifyContext, type Finding } from '@/lib/work/workflows/currentize/classify';
-import { dominantYear, shiftYears } from '@/lib/work/workflows/currentize/shift';
+import { dominantYear, shiftYears, yearCautions } from '@/lib/work/workflows/currentize/shift';
 
 const ctx: ClassifyContext = { basisDate: '2026-03-01', regulationNames: [], personNames: [] };
 
@@ -88,5 +88,23 @@ describe('dominantYear', () => {
   it('연도가 없으면 null', () => {
     expect(dominantYear(f('전년도 실적'))).toBeNull();
     expect(dominantYear([])).toBeNull();
+  });
+});
+
+describe('yearCautions (I5)', () => {
+  const cautions = (text: string) => yearCautions(text, classifySegment(text, ctx), 2025);
+  it('밀린 날짜는 date', () => {
+    expect(cautions('착수일은 2025. 3. 1.이다')).toEqual(['date']);
+  });
+  it('다른 연도가 함께 있으면 mixed', () => {
+    expect(cautions('2024년 결산 대비 2025년 예산')).toEqual(['mixed']);
+    expect(cautions('2025년 대비 2026년 목표')).toEqual(['mixed']);
+  });
+  it('지난해 연도뿐이거나 문서번호의 연도는 아무 사유도 없다', () => {
+    expect(cautions('2025년 사업을 추진한다')).toEqual([]);
+    expect(cautions('2025년 계획(문서번호 2024-123호)')).toEqual([]);
+  });
+  it('다른 해의 날짜는 밀리지 않지만 다른 연도다', () => {
+    expect(cautions('2025년 사업은 2024. 12. 1. 공고했다')).toEqual(['mixed']);
   });
 });

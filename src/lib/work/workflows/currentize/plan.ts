@@ -6,6 +6,7 @@ import type { Finding, FindingKind } from './classify';
 import type { ShiftedCell } from './tables';
 import type { CitationPair } from './citations';
 import type { RawRewrite } from './model';
+import { yearCautions } from './shift';
 
 /** structure = 행·구역을 넣거나 빼야 하는 일(글자 단위 적용 밖이라 언제나 needs_check) */
 export type ChangeKind = FindingKind | 'table' | 'structure';
@@ -43,15 +44,37 @@ export const CHANGE_STATUS_LABEL: Record<Change['status'], string> = { changed: 
 
 export const EDIT_BLANK_CELL = '빈 칸은 한글에서 직접 채워 주세요';
 export const EDIT_MULTI_PARAGRAPH_CELL = '여러 줄 칸은 한글에서 직접 고쳐 주세요';
+export const EDIT_TABLE = '표는 한글에서 직접 고쳐 주세요';
 
 /**
  * 직원이 이 변경에 올해 글을 넣을 수 없는 이유(없으면 null). 적용은 있는 문단의 글만 바꾼다 —
  * 글 없는 빈 칸(structure, 이웃 조각에 붙어 있음)과 여러 문단 칸은 문단 하나로 쓸 수 없어 파일 만들기가 PRIOR_MISMATCH로 멈춘다.
  */
-export function changeEditBlock(c: Pick<Change, 'kind' | 'before'>): string | null {
-  if (c.kind === 'structure') return EDIT_BLANK_CELL;
+export function changeEditBlock(c: Pick<Change, 'kind' | 'before'> & { after?: string | null }): string | null {
+  // 넣을 값이 없는 구조 확인(열을 가리지 못한 표 등)은 빈 칸이 아니라 표 전체를 사람이 본다
+  if (c.kind === 'structure') return c.after === null ? EDIT_TABLE : EDIT_BLANK_CELL;
   if (c.kind === 'table' && c.before.includes('\n')) return EDIT_MULTI_PARAGRAPH_CELL;
   return null;
+}
+
+/**
+ * 파일에 아무것도 넣지 않는 바꿈 — 올해 글이 작년 글 그대로인 것(직원이 '확인함'으로 넘긴 확인 요청 등).
+ * 적용·적용 확인은 이것을 건너뛴다(같은 문단의 다른 바꿈과 겹쳐 '한 문단에 둘'이 되지 않게)
+ */
+export function isNoopChange(c: Pick<Change, 'status' | 'before' | 'after'>): boolean {
+  return c.status === 'changed' && c.after === c.before;
+}
+
+export const NOTE_ACKNOWLEDGED = '확인함';
+
+/**
+ * 확인 요청 하나를 '확인함'으로 넘긴다(순수, S6-1 I6). 그 행은 바꿈이 되지만 올해 글 = 작년 글이라 파일은 바뀌지 않는다 —
+ * 근거 'user', 메모 끝에 '확인함'. 빈 칸·표 구조 확인처럼 글을 넣을 수 없는 행도 이 길로 닫는다. 확인 요청이 아니면 null
+ */
+export function acknowledgeChange(changes: Change[], change: Change): { changes: Change[]; target: Change } | null {
+  if (change.status !== 'needs_check') return null;
+  const target: Change = { ...change, status: 'changed', after: change.before, basis: ['user'], note: change.note ? `${change.note} · ${NOTE_ACKNOWLEDGED}` : NOTE_ACKNOWLEDGED };
+  return { changes: changes.map((c) => (c.id === change.id ? target : c)), target };
 }
 
 /** 직원이 고친 문단의 남은 제안 — 옛 문단을 보고 만든 글이라 그대로 받아들이면 직원 글을 덮는다 */
@@ -67,7 +90,8 @@ export const NOTE_PROPOSAL_STALE = '이 문단은 직접 고쳐져 제안이 더
  * 직원 줄이 이미 같은 글이면 null(새 판을 만들지 않는다).
  */
 export function applyUserEdit(changes: Change[], change: Change, after: string): { changes: Change[]; target: Change } | null {
-  const userRow = changes.find((c) => c.segmentId === change.segmentId && c.status === 'changed' && c.basis.includes('user'));
+  // '확인함'으로 넘긴 행(작년 글 그대로)은 직원 글 줄이 아니다
+  const userRow = changes.find((c) => c.segmentId === change.segmentId && c.status === 'changed' && c.basis.includes('user') && !isNoopChange(c));
   const target = userRow ?? change;
   if (target.status === 'changed' && target.after === after) return null;
   const absorbed = changes.filter((c) => c.segmentId === target.segmentId && c.id !== target.id && c.status === 'changed');
@@ -118,6 +142,13 @@ export interface PlanInput {
   rewrites: { accepted: RawRewrite[]; proposed: RawRewrite[] };
   citations: CitationPair[];
   numberStatus: Map<string, 'ok' | 'needs_check'>;
+  /**
+   * 조각 id → 올해 자료에서 확인되지 않은 수치(글 그대로). 받아들인 고치기가 이 수치를 모두 지웠을 때만 수치 확인 요청을 내리지 않는다.
+   * 없으면(이 조각에 대한 기록이 없으면) 확인 요청은 언제나 남는다
+   */
+  numberTokens?: Map<string, string[]>;
+  /** 표 계획이 머리글 연도를 민 칸의 조각 — 다른 연도가 함께 있어도(전년도 열 2024 → 2025) 확인 요청으로 내리지 않는다 */
+  plannedYearSegments?: Set<string>;
 }
 
 export const NOTE_UNIT_UNKNOWN = '단위를 알 수 없어 그대로 넣었습니다 — 확인하세요';
@@ -126,6 +157,16 @@ export const NOTE_CITATION_NOT_FOUND = '현재 조문을 찾지 못함';
 export const NOTE_NUMBER = '올해 자료에서 확인되지 않은 숫자가 있습니다 — 확인하세요';
 export const NOTE_STALE_YEAR = '지난해 연도가 남아 있습니다 — 확인하세요';
 export const NOTE_DUPLICATE_CELL = '같은 칸에 변경이 둘 이상입니다';
+/** 밀린 날짜 — 요일·날짜가 올해에도 맞는지 프로그램은 모른다 */
+export const NOTE_DATE = '일정 확인 — 요일·날짜를 확인하세요';
+/** fromYear 아닌 연도가 함께 있는 문장 — 한 해만 밀면 비교가 어긋난다 */
+export const NOTE_MIXED_YEAR = '다른 연도가 함께 있어 확인하세요';
+
+/** 숫자 덩어리가 글에 (숫자 경계에서) 남아 있는가 — '1,200'은 '11,200'에 들지 않는다 */
+function stillHasNumber(text: string, token: string): boolean {
+  const escaped = token.replace(/[.,]/g, (c) => `\\${c}`);
+  return new RegExp(String.raw`(?<![\d,.])${escaped}(?![\d]|[,.]\d)`).test(text);
+}
 
 type Draft = Omit<Change, 'id'>;
 
@@ -165,31 +206,60 @@ function segmentChanges(
 ): Draft[] {
   const base = { segmentId: s.id, before: s.text, basis: [] as string[], note: null as string | null };
   const shifted = p.shifted.get(s.id);
-  const rewrite = accepted.get(s.id);
+  const shiftedText = shifted ?? s.text;
+  // 밀어 둔 글과 같은 고치기는 고치기가 아니다(아무것도 바꾸지 않고 확인 요청만 지운다)
+  const noop = (r: RawRewrite) => r.text === shiftedText;
+  const acceptedRewrite = accepted.get(s.id);
+  const rewrite = acceptedRewrite && !noop(acceptedRewrite) ? acceptedRewrite : undefined;
+
+  // 연도 밀기의 확인 사유 — 밀린 날짜·다른 연도(표 계획이 민 머리글 칸은 계획대로라 빼고)
+  const cautions = !tableCell && shiftedText !== s.text && !p.plannedYearSegments?.has(s.id) ? yearCautions(s.text, p.findings.get(s.id) ?? [], p.fromYear) : [];
+  const cautionNote = cautions.length ? cautions.map((c) => (c === 'date' ? NOTE_DATE : NOTE_MIXED_YEAR)).join(' · ') : null;
+
+  // 확인 요청(숫자·인용) — 받아들인 고치기가 있어도 그 표지가 고친 글에 남아 있으면 그대로 낸다
+  const checks = (text: string | null): Draft[] => {
+    const out: Draft[] = [];
+    if (p.numberStatus.get(s.id) === 'needs_check') {
+      const tokens = p.numberTokens?.get(s.id);
+      const stays = text === null || !tokens || tokens.length === 0 || tokens.some((t) => stillHasNumber(text, t));
+      if (stays) out.push({ ...base, kind: 'number', after: null, status: 'needs_check', note: NOTE_NUMBER });
+    }
+    const pairs = p.citations.filter((c) => c.segmentId === s.id);
+    const citeStays = (status: CitationPair['status']) =>
+      pairs.some((c) => c.status === status && (text === null || text.includes(c.cited.article ?? c.cited.name) || !(c.cited.article ?? c.cited.name)));
+    if (citeStays('changed')) out.push({ ...base, kind: 'citation', after: null, status: 'needs_check', note: NOTE_CITATION_CHANGED });
+    if (citeStays('not_found')) out.push({ ...base, kind: 'citation', after: null, status: 'needs_check', note: NOTE_CITATION_NOT_FOUND });
+    return out;
+  };
 
   // 1) 받아들인 고치기가 이긴다 — 모델은 연도를 민 글을 받아 고치므로 연도 밀기를 따로 하지 않는다.
-  //    다만 밀어 둔 글보다 지난해 연도가 많으면(모델이 옛 글을 따랐거나 연도를 되돌림) 넣지 않고 제안으로
+  //    다만 밀어 둔 글보다 지난해 연도가 많으면(모델이 옛 글을 따랐거나 연도를 되돌림) 넣지 않고 제안으로.
+  //    날짜·다른 연도가 든 문장이면 고친 글을 넣지 않고 확인 요청으로(올해 글로 보인다)
   if (rewrite && !tableCell) {
-    const stale = staleYearCount(rewrite.text, p.fromYear) > staleYearCount(shifted ?? s.text, p.fromYear);
-    return [
-      stale
-        ? { ...base, kind: 'prose', after: rewrite.text, status: 'proposed', basis: [...rewrite.basis], note: NOTE_STALE_YEAR }
-        : { ...base, kind: 'prose', after: rewrite.text, status: 'changed', basis: [...rewrite.basis] },
-    ];
+    const stale = staleYearCount(rewrite.text, p.fromYear) > staleYearCount(shiftedText, p.fromYear);
+    const head: Draft = stale
+      ? { ...base, kind: 'prose', after: rewrite.text, status: 'proposed', basis: [...rewrite.basis], note: NOTE_STALE_YEAR }
+      : cautionNote
+        ? { ...base, kind: 'prose', after: rewrite.text, status: 'needs_check', basis: [...rewrite.basis], note: cautionNote }
+        : { ...base, kind: 'prose', after: rewrite.text, status: 'changed', basis: [...rewrite.basis] };
+    return [head, ...checks(rewrite.text)];
   }
 
   const out: Draft[] = [];
-  // 2) 연도 밀기 — 글이 실제로 바뀐 때만
-  if (!tableCell && shifted !== undefined && shifted !== s.text) out.push({ ...base, kind: 'year', after: shifted, status: 'changed' });
-  // 3) 근거가 모자란 고치기는 제안으로만(파일에 넣지 않는다)
-  const suggestions = [...(rewrite ? [rewrite] : []), ...(proposed.get(s.id) ?? [])];
+  // 2) 연도 밀기 — 글이 실제로 바뀐 때만. 날짜·다른 연도가 함께 있으면 확인 요청(올해 글은 밀린 글)
+  if (!tableCell && shifted !== undefined && shifted !== s.text) {
+    out.push(
+      cautionNote
+        ? { ...base, kind: cautions.includes('date') ? 'date' : 'year', after: shifted, status: 'needs_check', note: cautionNote }
+        : { ...base, kind: 'year', after: shifted, status: 'changed' }
+    );
+  }
+  // 3) 근거가 모자란 고치기는 제안으로만(파일에 넣지 않는다). 밀어 둔 글과 같은 고치기는 버린다
+  const suggestions = [...(acceptedRewrite ? [acceptedRewrite] : []), ...(proposed.get(s.id) ?? [])].filter((r) => !noop(r));
   for (const r of suggestions) out.push({ ...base, kind: 'prose', after: r.text, status: 'proposed', basis: [...r.basis] });
   // 4) 본문 숫자는 프로그램도 모델도 바꾸지 않는다 — 올해 자료에 없는 숫자는 사람이 본다
-  if (p.numberStatus.get(s.id) === 'needs_check') out.push({ ...base, kind: 'number', after: null, status: 'needs_check', note: NOTE_NUMBER });
   // 5) 인용 — 같은 조각의 같은 상태는 하나로(바뀜 먼저)
-  const statuses = new Set(p.citations.filter((c) => c.segmentId === s.id).map((c) => c.status));
-  if (statuses.has('changed')) out.push({ ...base, kind: 'citation', after: null, status: 'needs_check', note: NOTE_CITATION_CHANGED });
-  if (statuses.has('not_found')) out.push({ ...base, kind: 'citation', after: null, status: 'needs_check', note: NOTE_CITATION_NOT_FOUND });
+  out.push(...checks(null));
   return out;
 }
 

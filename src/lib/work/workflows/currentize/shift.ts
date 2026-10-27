@@ -64,3 +64,33 @@ export function dominantYear(findings: Finding[]): number | null {
   }
   return best;
 }
+
+/** 문서번호 '2025-123호' — 연도처럼 보여도 번호다 */
+const DOC_NUMBER = /(?<!\d)\d{4}-\d+호/g;
+const ANY_YEAR = /(?<!\d)((?:19|20)\d\d)(?!\d)/g;
+
+/**
+ * 연도를 민 조각이 사람 확인을 받아야 하는 까닭(S6-1 I5). 순수 함수.
+ *  - date: 밀린 날짜(2025. 3. 1. → 2026. 3. 1.)가 있다 — 요일·날짜가 올해에도 맞는지 프로그램은 모른다
+ *  - mixed: fromYear 아닌 다른 연도가 함께 있다('2024년 결산 대비 2025년 예산') — 한 해만 밀면 비교가 어긋난다
+ * 둘 다 아니면 빈 배열. 문서번호의 연도는 세지 않는다.
+ */
+export function yearCautions(text: string, findings: Finding[], fromYear: number): ('date' | 'mixed')[] {
+  const out: ('date' | 'mixed')[] = [];
+  const valid = findings.filter((f) => text.slice(f.start, f.end) === f.text);
+  if (valid.some((f) => f.kind === 'date' && leadingYear(f.text)?.year === fromYear)) out.push('date');
+  const docNumbers = [...text.matchAll(DOC_NUMBER)].map((m) => ({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }));
+  const years: number[] = [];
+  for (const m of text.matchAll(ANY_YEAR)) {
+    const at = m.index ?? 0;
+    if (docNumbers.some((d) => at >= d.start && at < d.end)) continue;
+    years.push(Number(m[1]));
+  }
+  for (const f of valid) {
+    if (f.kind !== 'year' && f.kind !== 'date') continue;
+    const lead = leadingYear(f.text);
+    if (lead) years.push(lead.year);
+  }
+  if (years.some((y) => y !== fromYear)) out.push('mixed');
+  return out;
+}

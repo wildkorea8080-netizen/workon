@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Cell, ExtractedTable } from '@/lib/attachments/types';
 import { classifySegment } from '@/lib/work/workflows/currentize/classify';
 import type { Finding } from '@/lib/work/workflows/currentize/classify';
-import { matchRowValues, proseNumberStatus } from '@/lib/work/workflows/currentize/numbers';
+import { matchRowValues, proseNumberStatus, thisYearColumnValues, unknownProseNumbers } from '@/lib/work/workflows/currentize/numbers';
 import type { Segment } from '@/lib/work/workflows/currentize/segments';
 
 function makeTable(id: string, columns: string[], body: Cell[][], caption?: string): ExtractedTable {
@@ -212,5 +212,24 @@ describe('proseNumberStatus', () => {
   it('읽지 못한 수치 조각은 needs_check', () => {
     const finding: Finding = { kind: 'number', start: 0, end: 3, text: '007' };
     expect(proseNumberStatus(SEG, [finding], new Set([7]))).toBe('needs_check');
+  });
+});
+
+describe('unknownProseNumbers·thisYearColumnValues (C2)', () => {
+  it('확인되지 않은 수치를 글 그대로 낸다 — 850백만원·35명·85%도 수치다', () => {
+    const text = '예산 850백만원, 인원 35명, 달성률 85%';
+    expect(unknownProseNumbers(classifySegment(text, CTX), new Set([35]))).toEqual(['850', '85']);
+    expect(unknownProseNumbers(classifySegment(text, CTX), new Set([850, 35, 85]))).toEqual([]);
+  });
+
+  it('올해 값 열만 — 같은 표의 작년 열·키 열 숫자는 넣지 않는다', () => {
+    const t = makeTable('t1', ['구분', '2025년', '2026년'], [['사업 A', '1,200', '1,300'], ['사업 B', 500, 600]]);
+    expect(thisYearColumnValues([t], 2026).sort((a, b) => a - b)).toEqual([600, 1300]);
+    // 올해 머리글이 없으면 다른 해 머리글이 아닌 첫 값 열
+    const plain = makeTable('t2', ['연번', '구분', '예산'], [[1, '사업 A', 900]]);
+    expect(thisYearColumnValues([plain], 2026)).toEqual([900]);
+    // 작년 열만 있으면 아무것도 내지 않는다
+    const old = makeTable('t3', ['구분', '2025년'], [['사업 A', 1200]]);
+    expect(thisYearColumnValues([old], 2026)).toEqual([]);
   });
 });

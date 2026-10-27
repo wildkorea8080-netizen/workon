@@ -209,6 +209,40 @@ function convertUnit(
 }
 
 /**
+ * 올해 자료 표마다 matchRowValues가 고르는 '올해 값 열'(pickDataColumn — 머리글 연도가 올해인 열, 없으면 다른 해 머리글이 아닌 첫 값 열)의 숫자.
+ * 본문 수치가 올해 값인지 가르는 기준(known)은 이것만 쓴다 — 같은 표의 작년 열(2025년)·키 열의 숫자가 들어가면 옛 수치가 '확인됨'으로 통과한다.
+ * 열을 하나로 정하지 못한 표는 아무것도 내지 않는다.
+ */
+export function thisYearColumnValues(dataTables: ExtractedTable[], year: number): number[] {
+  const out: number[] = [];
+  for (const table of dataTables) {
+    const picked = pickDataColumn(table, year);
+    if ('reason' in picked) continue;
+    for (const c of columnCells(table, picked.col)) {
+      const p = parseNumber(c);
+      if (p.kind === 'number') out.push(p.value);
+    }
+  }
+  return out;
+}
+
+/**
+ * 본문 조각의 수치 가운데 올해 자료·표 결과에 없는 것(읽지 못한 수치 포함) — 글 그대로, 나온 순서.
+ * 크기(절댓값)로 비교한다 — 증감은 부호 대신 '감소'로 풀어 쓰기도 한다.
+ */
+export function unknownProseNumbers(findings: Finding[], knownNumbers: Set<number>): string[] {
+  const known = [...knownNumbers].filter(Number.isFinite).map(Math.abs);
+  const out: string[] = [];
+  for (const f of findings) {
+    if (f.kind !== 'number') continue;
+    const p = parseNumber(f.text);
+    // 읽지 못한 수치는 확인할 수 없으니 사람이 본다
+    if (p.kind !== 'number' || !known.some((k) => Math.abs(k - Math.abs(p.value)) <= NUMBER_TOLERANCE)) out.push(f.text);
+  }
+  return out;
+}
+
+/**
  * 본문 조각의 수치가 모두 올해 자료·표 결과에 있으면 ok, 하나라도 없으면 needs_check.
  * 본문 수치는 프로그램도 모델도 바꾸지 않는다 — 표만 바뀌고 본문에 옛 수치가 남는 것을 사람이 보게 한다.
  * 크기(절댓값)로 비교한다 — 증감은 부호 대신 '감소'로 풀어 쓰기도 한다.
@@ -218,14 +252,5 @@ export function proseNumberStatus(
   findings: Finding[],
   knownNumbers: Set<number>,
 ): 'ok' | 'needs_check' {
-  const known = [...knownNumbers].filter(Number.isFinite).map(Math.abs);
-  for (const f of findings) {
-    if (f.kind !== 'number') continue;
-    const p = parseNumber(f.text);
-    // 읽지 못한 수치는 확인할 수 없으니 사람이 본다
-    if (p.kind !== 'number') return 'needs_check';
-    const v = Math.abs(p.value);
-    if (!known.some((k) => Math.abs(k - v) <= NUMBER_TOLERANCE)) return 'needs_check';
-  }
-  return 'ok';
+  return unknownProseNumbers(findings, knownNumbers).length > 0 ? 'needs_check' : 'ok';
 }

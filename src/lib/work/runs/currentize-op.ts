@@ -15,7 +15,7 @@ import { readSegments, type Segment } from '../workflows/currentize/segments';
 import { classifySegment, type Finding } from '../workflows/currentize/classify';
 import { shiftYears, dominantYear } from '../workflows/currentize/shift';
 import { planColumnShift, shiftColumns, columnName } from '../workflows/currentize/tables';
-import { matchRowValues, proseNumberStatus } from '../workflows/currentize/numbers';
+import { matchRowValues, thisYearColumnValues, unknownProseNumbers } from '../workflows/currentize/numbers';
 import { compareCitations, type CitationInput, type CitationPair } from '../workflows/currentize/citations';
 import { MAX_REWRITE_SOURCE_CHARS, type RawRewrite, type RewriteInput } from '../workflows/currentize/model';
 import { verifyRewrites } from '../workflows/currentize/verify';
@@ -42,6 +42,8 @@ export const NOTE_COST_STOPPED = '원가 상한으로 멈춤 — 나머지 문�
 export const NOTE_BLANK_CELL = '빈 칸에 값을 넣어야 합니다 — 직접 입력하세요';
 /** 문단이 여럿인 칸은 문단 하나로 바꿀 수 없다(적용이 PRIOR_MISMATCH로 멈추지 않게 미리 확인 요청으로) */
 export const NOTE_MULTI_PARAGRAPH_CELL = '여러 줄 칸이라 자동으로 바꾸지 않았습니다 — 직접 고치세요';
+/** 숫자가 든 표인데 전년도·당해 열을 가리지 못했을 때 — 표의 연도·수치를 하나도 바꾸지 않는다 */
+export const NOTE_UNPLANNED_TABLE = '표의 연도 열을 가리지 못해 그대로 두었습니다 — 직접 확인하세요';
 /**
  * 묶음 단계 이름. 단계 이름은 DB가 `^[a-z_]{1,40}$`만 받으므로(0034 work_run_steps) 'rewrite:3' 대신 순번을
  * 글자로 적는다 — 26진수의 자리 글자(0-9a-p)를 a-z로 옮긴다: 0 → rewrite_a, 1 → rewrite_b, 26 → rewrite_ba
@@ -64,12 +66,18 @@ export async function usesCurrentize(ctx: WorkContext, run: WorkRunRow, task: Wo
   return Boolean(await findPriorSource(ctx, task));
 }
 
-/** 작년 파일 읽기(조각·표)의 일반 오류는 다시 시도해도 같다 — 안내 문구가 있는 PRIOR_UNSUPPORTED로 바꿔 바로 멈춘다 */
-async function readPrior<T>(fn: () => Promise<T>): Promise<T> {
+/**
+ * 작년 파일 읽기(조각·표)의 일반 오류는 다시 시도해도 같다 — 안내 문구가 있는 PRIOR_UNSUPPORTED로 바꿔 바로 멈춘다.
+ * 원래 오류는 운영 기록에 남긴다(파일 글 없이 오류 문구 앞부분만) — 안내 문구만 남으면 읽기 코드의 결함을 찾을 수 없다
+ */
+async function readPrior<T>(ctx: WorkContext, task: WorkTaskRow, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
     if (e instanceof WorkError) throw e;
+    await ctx
+      .log({ level: 'warning', category: 'work', message: '작년 파일 읽기 실패', details: { task_id: task.id, error: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) } })
+      .catch(() => undefined);
     throw new WorkError('PRIOR_UNSUPPORTED', '작년 파일을 읽지 못했습니다. 한글에서 다시 저장해 올려 주세요.', 422);
   }
 }
@@ -125,8 +133,10 @@ interface TableWork {
   extra: Omit<Change, 'id'>[];
   /** 밀린 표 열 머리의 연도(전년도 열 머리도 한 해 민다) */
   headerShifted: Map<string, string>;
-  /** 올해 값으로 확인된 숫자(당해 열·증감 열의 새 값) */
+  /** 올해 값으로 확인된 숫자(당해 열·증감 열의 새 값 — 단위를 모르는 행은 빼고) */
   known: number[];
+  /** 연도·수치를 하나도 바꾸지 않을 칸 조각(열을 가리지 못한 숫자 표·위치를 맞추지 못한 표) — 연도 밀기·모델 고치기에서 뺀다 */
+  frozen: Set<string>;
   warnings: string[];
 }
 
@@ -136,12 +146,14 @@ interface TableWork {
  * 짐작하지 않고 표는 바꾸지 않는다(경고).
  */
 async function tableWork(bytes: Buffer, segments: Segment[], findings: Map<string, Finding[]>, dataTables: ExtractedTable[], toYear: number): Promise<TableWork> {
-  const out: TableWork = { tableCells: [], extra: [], headerShifted: new Map(), known: [], warnings: [] };
+  const out: TableWork = { tableCells: [], extra: [], headerShifted: new Map(), known: [], frozen: new Set(), warnings: [] };
   const { tables } = await readHwpxTables(bytes);
   if (!tables.length) return out;
   const counts = await sectionTableCounts(bytes);
   if (counts.reduce((a, b) => a + b, 0) !== tables.length) {
     out.warnings.push('작년 파일의 표 위치를 맞추지 못해 표는 바꾸지 않았습니다 — 표를 직접 확인하세요');
+    // 어느 칸이 어느 표인지 모르니 칸의 연도도 밀지 않는다(표 머리 연도만 밀리면 값과 어긋난다)
+    for (const s of segments) if (s.cell) out.frozen.add(s.id);
     return out;
   }
   const offsets: number[] = [];
@@ -156,11 +168,16 @@ async function tableWork(bytes: Buffer, segments: Segment[], findings: Map<strin
 
   tables.forEach((table, g) => {
     const plan = planColumnShift(table, toYear);
+    const segs = byTable.get(g) ?? [];
     if (!plan) {
-      if (hasNumbers(table)) out.warnings.push(`표 ${g + 1}은 ${toYear - 2}년·${toYear - 1}년 열을 찾지 못해 바꾸지 않았습니다 — 직접 확인하세요`);
+      // 숫자가 든 표의 열을 가리지 못했으면 머리 연도만 밀고 값은 그대로 두는 반쪽 표가 된다 — 표 전체를 그대로 두고 사람이 본다
+      if (hasNumbers(table)) {
+        for (const s of segs) out.frozen.add(s.id);
+        if (segs[0]) out.extra.push({ segmentId: segs[0].id, kind: 'structure', before: '', after: null, status: 'needs_check', basis: [], note: NOTE_UNPLANNED_TABLE });
+        else out.warnings.push(`표 ${g + 1}은 ${toYear - 2}년·${toYear - 1}년 열을 찾지 못해 바꾸지 않았습니다 — 직접 확인하세요`);
+      }
       return;
     }
-    const segs = byTable.get(g) ?? [];
     const at = (row: number, col: number) => segs.filter((s) => s.cell!.row === row && s.cell!.col === col);
 
     // 열 머리의 연도도 한 해씩 민다: 전년도 열 (올해−2 → 올해−1), 당해 열 (올해−1 → 올해)
@@ -173,16 +190,21 @@ async function tableWork(bytes: Buffer, segments: Segment[], findings: Map<strin
     const m = matchRowValues(table, dataTables, columnName(table, plan.curCol));
     out.warnings.push(...m.warnings);
     for (const cell of shiftColumns(table, plan, m.values).cells) {
-      // 전년도 칸에 옮긴 값은 작년 수치다 — 본문 수치가 올해 값인지 가르는 기준(known)에 넣지 않는다
-      if (cell.col !== plan.prevCol && cell.status === 'changed' && cell.after !== null) {
+      const unsure = m.uncertain.has(cell.row);
+      // 전년도 칸에 옮긴 값은 작년 수치다 — 본문 수치가 올해 값인지 가르는 기준(known)에 넣지 않는다.
+      // 단위를 모르는 행의 값(1000배 어긋날 수 있다)도 넣지 않는다
+      if (!unsure && cell.col !== plan.prevCol && cell.status === 'changed' && cell.after !== null) {
         const p = parseNumber(cell.after);
         if (p.kind === 'number') out.known.push(p.value);
       }
       // 값이 그대로인 칸(증감 100 → 100)은 변경이 아니다
       if (cell.status === 'changed' && cell.after === cell.before) continue;
       const own = at(cell.row, cell.col);
-      if (own.length === 1) {
-        out.tableCells.push({ segmentId: own[0].id, cell, uncertain: m.uncertain.has(cell.row) });
+      if (own.length === 1 && (cell.before.includes('\n') || (cell.after ?? '').includes('\n'))) {
+        // 칸 안 줄바꿈(<hp:lineBreak/>)도 여러 줄 칸이다 — 문단 하나의 글로 맞대면 적용이 PRIOR_MISMATCH로 멈춘다
+        out.tableCells.push({ segmentId: own[0].id, cell: { ...cell, status: 'needs_check', note: NOTE_MULTI_PARAGRAPH_CELL }, uncertain: false });
+      } else if (own.length === 1) {
+        out.tableCells.push({ segmentId: own[0].id, cell, uncertain: unsure });
       } else if (own.length > 1) {
         out.tableCells.push({ segmentId: own[0].id, cell: { ...cell, status: 'needs_check', note: NOTE_MULTI_PARAGRAPH_CELL }, uncertain: false });
       } else {
@@ -197,6 +219,23 @@ async function tableWork(bytes: Buffer, segments: Segment[], findings: Map<strin
     }
   });
   return out;
+}
+
+const YEARISH = new Set<Finding['kind']>(['year', 'period', 'date']);
+const YEAR_SENTENCE_KINDS = new Set<Finding['kind']>(['year', 'period', 'date', 'number', 'citation']);
+/** 연도 표지를 뺀 나머지 글이 이만큼(공백 빼고) 있어야 문장으로 본다 — '2025년 ○○ 사업계획' 같은 제목은 모델에 보내지 않는다 */
+const YEAR_SENTENCE_MIN_CHARS = 10;
+
+/**
+ * 연도·기간·날짜가 든 본문 문장(I4) — 그 밖의 표지는 수치·인용뿐이고, 표지를 뺀 글이 10자 이상. 연도만 밀면 내용(사업 B 중단 등)이
+ * 작년 그대로 남으므로 모델이 메모·원자료로 고칠 수 있게 보낸다. 고치기가 없으면 연도 밀기가 그대로 남는다
+ */
+export function isYearSentence(s: Pick<Segment, 'text' | 'cell'>, findings: Finding[]): boolean {
+  if (s.cell || findings.length === 0) return false;
+  if (!findings.every((f) => YEAR_SENTENCE_KINDS.has(f.kind)) || !findings.some((f) => YEARISH.has(f.kind))) return false;
+  let rest = s.text;
+  for (const f of [...findings].sort((a, b) => b.start - a.start)) rest = rest.slice(0, f.start) + rest.slice(f.end);
+  return rest.replace(/\s+/g, '').length >= YEAR_SENTENCE_MIN_CHARS;
 }
 
 /** 모델 한 묶음의 입력 글자 수 어림 — 원가 예상(입력 글자/4 토큰) */
@@ -252,6 +291,8 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
     return s;
   });
   const dataTables = inputs.flatMap((s) => s.tables);
+  // 본문 수치 대조에 쓰는 올해 자료 표 — 참고 자료(규정·지침)의 표는 올해 값이 아니다
+  const valueTables = inputs.filter((s) => s.purpose !== 'reference').flatMap((s) => s.tables);
   const memo = typeof form.values.emphasis === 'string' ? form.values.emphasis : '';
   const formBasis = typeof form.values.basisDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(form.values.basisDate) ? form.values.basisDate : null;
   const today = kstIsoDate(ctx.now());
@@ -262,7 +303,7 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   const regulationNames = inputs.filter((s) => s.purpose === 'reference').map((s) => s.name.replace(/\.[^.]+$/, '').trim()).filter((n) => n.length >= 2);
 
   // 2) 조각 — 같은 바이트에서 언제나 같다
-  const { segments, truncated } = await readPrior(() => readSegments(prior.bytes));
+  const { segments, truncated } = await readPrior(ctx, task, () => readSegments(prior.bytes));
   await step('segments', async () => ({ count: segments.length, truncated }));
 
   // 3) 분류·연도
@@ -274,19 +315,25 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   });
   const { fromYear, toYear } = years;
 
-  const tables = await readPrior(() => tableWork(prior.bytes, segments, findings, dataTables, toYear));
-  const shifted = new Map<string, string>(segments.map((s) => [s.id, tables.headerShifted.get(s.id) ?? shiftYears(s.text, findings.get(s.id) ?? [], fromYear, toYear).text]));
+  const tables = await readPrior(ctx, task, () => tableWork(prior.bytes, segments, findings, dataTables, toYear));
+  // 그대로 둘 칸(열을 가리지 못한 숫자 표)은 연도도 밀지 않는다
+  const shifted = new Map<string, string>(
+    segments.map((s) => [s.id, tables.frozen.has(s.id) ? s.text : (tables.headerShifted.get(s.id) ?? shiftYears(s.text, findings.get(s.id) ?? [], fromYear, toYear).text)])
+  );
 
-  // 본문 수치 대조의 기준 — 올해 자료 표의 숫자 + 표 계산의 새 값 + 직원 메모의 숫자
-  const known = new Set<number>(tables.known);
-  for (const t of dataTables) for (const row of t.cells) for (const c of row) {
-    const p = parseNumber(c ?? null);
-    if (p.kind === 'number') known.add(p.value);
-  }
+  // 본문 수치 대조의 기준(C2) — 올해 자료 표의 '올해 값 열'(표 계산이 고르는 열)만 + 표 계산의 새 값(단위 모르는 행 제외) + 직원 메모의 숫자.
+  // 같은 표의 작년 열·참고 자료의 표를 넣으면 옛 수치가 '확인됨'으로 통과한다
+  const known = new Set<number>([...tables.known, ...thisYearColumnValues(valueTables, toYear)]);
   for (const d of memo.match(DIGIT_RUN) ?? []) known.add(Number(d.replace(/,/g, '')));
   const numberStatus = new Map<string, 'ok' | 'needs_check'>();
+  const numberTokens = new Map<string, string[]>();
   // 표 칸 수치는 표 계산이 맡는다 — 본문(칸 밖) 조각만 본다
-  for (const s of segments) if (!s.cell) numberStatus.set(s.id, proseNumberStatus(s, findings.get(s.id) ?? [], known));
+  for (const s of segments) {
+    if (s.cell) continue;
+    const unknown = unknownProseNumbers(findings.get(s.id) ?? [], known);
+    numberStatus.set(s.id, unknown.length ? 'needs_check' : 'ok');
+    if (unknown.length) numberTokens.set(s.id, unknown);
+  }
 
   // 4) 인용 대조 — 제공자 호출이라 체크포인트
   const citeInputs: CitationInput[] = segments.flatMap((s) => (findings.get(s.id) ?? []).filter((f) => f.kind === 'citation').map((finding) => ({ segmentId: s.id, segmentText: s.text, finding })));
@@ -299,10 +346,10 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   const citations = evidence.citations;
   const warnings = [...tables.warnings, ...(evidence.warning ? [evidence.warning] : [])];
 
-  // 5) 줄글 고치기 — 줄글 조각 + 인용이 바뀐 조각, 문서 순서로 묶음마다(모델에는 연도를 민 글)
+  // 5) 줄글 고치기 — 줄글 조각 + 인용이 바뀐 조각 + 연도가 든 문장, 문서 순서로 묶음마다(모델에는 연도를 민 글)
   const changedCitation = new Set(citations.filter((c) => c.status === 'changed').map((c) => c.segmentId));
   const isProse = (s: Segment) => (findings.get(s.id) ?? []).some((f) => f.kind === 'prose');
-  const targets = segments.filter((s) => isProse(s) || changedCitation.has(s.id));
+  const targets = segments.filter((s) => !tables.frozen.has(s.id) && (isProse(s) || changedCitation.has(s.id) || isYearSentence(s, findings.get(s.id) ?? [])));
   const batches: Segment[][] = [];
   for (let i = 0; i < targets.length; i += MODEL_BATCH_SEGMENTS) batches.push(targets.slice(i, i + MODEL_BATCH_SEGMENTS));
   const modelId = batches.length ? await ctx.resolveModel(task.department_id) : null;
@@ -341,7 +388,19 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   }
 
   // 6) 변경 목록 — 계획 + 빈 칸 구조 확인 + 원가 상한으로 못 본 줄글
-  const planned = buildPlan({ segments, fromYear, toYear, findings, shifted, tableCells: tables.tableCells, rewrites: { accepted, proposed }, citations, numberStatus });
+  const planned = buildPlan({
+    segments,
+    fromYear,
+    toYear,
+    findings,
+    shifted,
+    tableCells: tables.tableCells,
+    rewrites: { accepted, proposed },
+    citations,
+    numberStatus,
+    numberTokens,
+    plannedYearSegments: new Set(tables.headerShifted.keys()),
+  });
   const extra: Omit<Change, 'id'>[] = [...tables.extra];
   if (stoppedAt !== null) {
     for (const s of batches.slice(stoppedAt).flat()) {
