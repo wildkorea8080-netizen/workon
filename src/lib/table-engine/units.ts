@@ -104,15 +104,28 @@ function unitFromCaption(caption: string): string | null {
 export type UnitSource = 'cell' | 'name' | 'caption';
 
 /**
+ * 사람 수를 세는 열 이름의 끝 낱말(참여자 사례 — '(단위: 천원)' 표의 '참여자' 열에 천원이 붙었다).
+ * 끝에서만 본다 — '참여자 지원금'은 돈, '참여자수'는 셈('수')이다.
+ * '…자'를 통째로 사람으로 보지 않는다: 이자·투자·출자·융자·적자·흑자는 돈이고, 사람으로 잘못 보면 그 열의
+ * 캡션 단위가 빠져 천원 표와 원 표가 말없이 섞인다(1,000배 오류). 그래서 셈으로만 쓰이는 낱말만 적는다.
+ * 무리 이름(노인·장애인·청년·근로자·공무원)도 넣지 않는다 — '구분 | 노인 | 장애인 (단위: 천원)'처럼 예산을
+ * 대상별로 나눈 머리글로 흔히 쓰여, 사람으로 보면 그 금액 열의 단위를 잃는다
+ */
+const PEOPLE_ENDINGS = [
+  '참여자', '참석자', '수혜자', '이용자', '대상자', '신청자', '지원자', '응시자', '합격자', '방문자', '가입자', '수료자',
+  '수강생', '교육생',
+];
+
+/**
  * 열 이름의 차원 낱말. 앞 순서가 먼저다 — '집행률'은 돈이 아니라 비율, '예산 건수'는 돈이 아니라 건.
- * 한 글자 낱말(율·률·건·명·액·비·료)은 이름 끝에서만 본다 — '비고'·'명칭'·'건물'을 잘못 잡지 않게.
+ * 한 글자 낱말(율·률·건·명·액·비·료)과 사람 끝 낱말(PEOPLE_ENDINGS)은 이름 끝에서만 본다 — '비고'·'명칭'·'건물'·'위원회 예산'을 잘못 잡지 않게.
  * 괄호 속('예산(국비, 시비)')은 보지 않는다
  */
 const DIMENSION_WORDS: { dimension: string; words: string[]; suffixes: string[] }[] = [
   { dimension: '비율', words: ['비율', '비중', '점유'], suffixes: ['율', '률'] },
   { dimension: '건', words: ['건수'], suffixes: ['건'] },
   { dimension: '개', words: ['개수', '수량', '개소'], suffixes: [] },
-  { dimension: '사람', words: ['인원', '직원', '정원', '현원'], suffixes: ['명'] },
+  { dimension: '사람', words: ['인원', '직원', '정원', '현원'], suffixes: ['명', ...PEOPLE_ENDINGS] },
   { dimension: '돈', words: ['금액', '예산', '원가', '단가', '수입', '지출', '매출', '집행'], suffixes: ['액', '비', '료'] },
 ];
 
@@ -183,7 +196,12 @@ export function columnUnitInfo(input: ColumnUnitInput): { unit: string; source: 
   if (isKeyLikeForCaption(input.columnName, input.cells)) return null;
   const fromCaption = unitFromCaption(input.caption);
   if (!fromCaption) return null;
-  // 이름이 다른 차원을 말하면(인원 ↔ 천원) 캡션 단위는 이 열 것이 아니다. 차원 낱말이 없으면 캡션을 따른다
+  // 이름이 다른 차원을 말하면(인원 ↔ 천원) 캡션 단위는 이 열 것이 아니다.
+  // 차원 낱말이 없으면 캡션을 따른다 — 돈 캡션이어도. 예산표의 금액 열은 대개 차원 낱말이 없다
+  // ('2025년'·'전년도'·'증감'·'국비'·'본예산'·'실적'). 이런 열의 단위를 비우면 '(단위: 천원)' 표와 '(단위: 원)' 표의
+  // 단위 충돌 거절이 꺼져 1,000배 다른 값이 말없이 더해진다. 차원을 모르는 열에 돈 단위가 잘못 붙는 쪽은
+  // 이름표가 틀릴 뿐 값은 그대로이고, 배율 숫자 예시도 이름 차원이 돈일 때만 준다(combine.ts) — 덜 위험한 쪽을 고른다.
+  // 사람 수를 세는 열은 차원 낱말(PEOPLE_ENDINGS)을 늘려 막는다
   const dimension = nameDimension(input.columnName);
   if (dimension && !captionFits(dimension, unitDimension(fromCaption))) return null;
   return { unit: fromCaption, source: 'caption' };
