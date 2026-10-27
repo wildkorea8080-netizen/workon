@@ -7,7 +7,7 @@ import { getWorkflowImpl, summarizeWorkflows, definitionFor, outputKeysOf } from
 import { checkForm } from './workflows/form';
 import { applyPatches, cleanFieldValue, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
 import { MAX_SLOT_TEXT } from '@/lib/doc-fill';
-import { changeEditBlock, type CurrentizeContent } from './workflows/currentize/plan';
+import { applyUserEdit, changeEditBlock, type CurrentizeContent } from './workflows/currentize/plan';
 import { CHANGE_LOG_KEY } from './workflows/currentize/output';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
@@ -452,8 +452,7 @@ export async function saveDocument(ctx: WorkContext, actor: WorkActor, taskId: s
 
 /**
  * 현행화 판의 변경 하나에 직원이 올해 글을 넣는다(작업실 '대조' 보기) — 확인 필요에 올해 글, 제안 받아들이기, 바꿈 고치기.
- * 기준 판이 지금 판이어야 한다(아니면 409). 그 변경은 바꿈·근거 'user'가 되고, 같은 문단의 다른 바꿈은 뺀다 —
- * 직원 글이 문단 전체를 대신하고(입력칸은 그 바꿈 글로 시작한다), 한 문단에 두 번 적용하면 XML이 깨진다. 새 판 → 파일 만들기 실행.
+ * 기준 판이 지금 판이어야 한다(아니면 409). 한 문단의 직원 글은 한 줄뿐이다 — 규칙은 applyUserEdit(plan.ts). 새 판 → 파일 만들기 실행.
  */
 export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; changeId: unknown; after: unknown }) {
   const { task } = await loadTask(ctx, actor, taskId, 'edit');
@@ -470,14 +469,10 @@ export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId
   const after = typeof input.after === 'string' ? cleanFieldValue(input.after) : '';
   if (!after.trim()) throw new WorkError('INVALID_INPUT', '올해 글을 적어 주세요.');
   if (after.length > MAX_SLOT_TEXT) throw new WorkError('INVALID_INPUT', `한 곳에 ${MAX_SLOT_TEXT.toLocaleString()}자까지 넣을 수 있습니다.`);
-  if (change.status === 'changed' && change.after === after) return { version: null, run: null, unchanged: true };
-
-  const updated: CurrentizeContent = {
-    ...content,
-    changes: content.changes
-      .filter((c) => c.id === change.id || c.segmentId !== change.segmentId || c.status !== 'changed')
-      .map((c) => (c.id === change.id ? { ...c, after, status: 'changed' as const, basis: ['user'], note: null } : c)),
-  };
+  const edit = applyUserEdit(content.changes, change, after);
+  if (!edit) return { version: null, run: null, unchanged: true };
+  const target = edit.target;
+  const updated: CurrentizeContent = { ...content, changes: edit.changes };
   const v = await ctx.store.saveVersion({
     taskId: task.id,
     organizationId: task.organization_id,
@@ -486,14 +481,14 @@ export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId
     content: carriedContent({ ...cur.content, currentize: updated }),
     templateVersionId: null,
     origin: 'edit',
-    reason: `변경 ${change.id} 직접 수정`,
+    reason: `변경 ${target.id} 직접 수정`,
     actorId: actor.userId,
     runId: null,
     sourceIds: [],
   });
   await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
   const run = await enqueuePackage(ctx, task, v.id, actor.userId);
-  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, change: change.id } });
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, change: target.id } });
   return { version: { id: v.id, version: v.version }, run: runDto(run), unchanged: false };
 }
 

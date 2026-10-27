@@ -16,7 +16,7 @@ import type { RegulationProviders } from '@/lib/work/workflows/regulations/gathe
 import type { RawEvidence } from '@/lib/work/workflows/regulations/evidence';
 import { mockRegulationModel } from '@/lib/work/workflows/regulations/model';
 import { mockCurrentizeModel, type CurrentizeModel, type RewriteInput } from '@/lib/work/workflows/currentize/model';
-import type { Change, CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
+import { applyUserEdit, NOTE_PROPOSAL_STALE, type Change, type CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
 import { currentizeReviewItems } from '@/lib/work/workflows/currentize/review';
 import { readSegments } from '@/lib/work/workflows/currentize/segments';
 import { readHwpxTables } from '@/lib/attachments/tables-hwpx';
@@ -114,6 +114,34 @@ describe('현행화 확인 사항', () => {
   it('넘지 않으면 요약이 없다', () => {
     const items = currentizeReviewItems({ ...base, changes: [change(1, 'needs_check'), change(2, 'proposed')] });
     expect(items.map((i) => i.code)).toEqual(['NEEDS_CHECK', 'PROPOSED']);
+  });
+});
+
+describe('직원 글 넣기(applyUserEdit) — 한 문단에 직원 글은 한 줄', () => {
+  const S = '0:10';
+  const row = (id: string, over: Partial<Change>): Change => ({ id, segmentId: S, kind: 'year', before: '2025년 예산', after: null, status: 'needs_check', basis: [], note: null, ...over });
+  const year = row('c1', { kind: 'year', after: '2026년 예산', status: 'changed' });
+  const num = row('c2', { kind: 'number', note: '숫자 확인' });
+  const prop = row('c3', { kind: 'prose', after: '2026년 예산(모델)', status: 'proposed', basis: ['memo'] });
+  const other = row('c4', { segmentId: '0:99', kind: 'prose', after: '딴 문단', status: 'proposed' });
+
+  it('첫 직원 글 — 고른 변경이 직원 줄, 같은 문단의 바꿈은 담고 메모에 남김, 제안은 확인 필요로', () => {
+    const r = applyUserEdit([year, num, prop, other], num, '2026년 예산 1,300')!;
+    expect(r.target).toMatchObject({ id: 'c2', status: 'changed', after: '2026년 예산 1,300', basis: ['user'], note: 'c1(연도)을 이 글에 담음' });
+    expect(r.changes.map((c) => [c.id, c.status, c.after, c.note])).toEqual([
+      ['c2', 'changed', '2026년 예산 1,300', 'c1(연도)을 이 글에 담음'],
+      ['c3', 'needs_check', null, NOTE_PROPOSAL_STALE],
+      ['c4', 'proposed', '딴 문단', null],
+    ]);
+  });
+  it('직원 줄이 있으면 어느 변경으로 저장해도 그 줄을 고친다(둘째 줄 없음)·메모는 잇는다·같은 글이면 null', () => {
+    const first = applyUserEdit([year, num, prop], num, 'A')!;
+    const staleProposal = { ...prop, status: 'proposed' as const };
+    const second = applyUserEdit(first.changes, staleProposal, 'B')!;
+    expect(second.target.id).toBe('c2');
+    expect(second.changes.filter((c) => c.status === 'changed')).toEqual([{ ...first.target, after: 'B' }]);
+    expect(second.changes.find((c) => c.id === 'c3')).toMatchObject({ status: 'needs_check', after: null, note: NOTE_PROPOSAL_STALE });
+    expect(applyUserEdit(second.changes, num, 'B')).toBeNull();
   });
 });
 
@@ -282,7 +310,7 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     expect(d2.version!.origin).toBe('edit');
     expect(d2.version!.fields).toEqual([]);
     const c2 = (await contentOf(d2.version!.id))!;
-    expect(c2.changes.find((x) => x.id === number.id)).toMatchObject({ status: 'changed', after: typed, basis: ['user'], note: null });
+    expect(c2.changes.find((x) => x.id === number.id)).toMatchObject({ status: 'changed', after: typed, basis: ['user'], note: `${sibling.id}(연도)을 이 글에 담음` });
     // 같은 문단의 다른 바꿈은 직원 글에 담겼다 — 한 문단에 두 번 적용하지 않게 목록에서 뺀다
     expect(c2.changes.some((x) => x.id === sibling.id)).toBe(false);
     expect(c2.changes.filter((x) => x.segmentId === number.segmentId && x.status === 'changed')).toHaveLength(1);
@@ -305,6 +333,51 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     const d3 = await svc.getTaskDetail(ctx, actor, task.id);
     expect(d3.version!.currentize!.changes.find((x) => x.id === sibling.id)).toMatchObject({ status: 'changed' });
     expect(d3.currentArtifacts.map((a) => a.output_key)).toEqual(['report', 'changeLog']);
+  });
+
+  it('대조 보기 수정: 직원이 고친 문단의 옛 제안을 받아들여도 직원 줄 하나만 고치고 제안은 확인 필요로 내린다', async () => {
+    // 인용 조문이 바뀌어 그 문단이 모델에 가고, 모델은 근거 없는 고치기(→ 제안)를 낸다
+    ctx.regulations = {
+      providers: { ...providers, laws: async () => ({ status: 'ok', items: [{ ...lawText(), text: '제64조(결산) 지방공기업의 결산은 이사회 의결로 확정한다.' }] }) },
+      model: mockRegulationModel,
+    };
+    ctx.currentize = {
+      model: {
+        async rewrite(input: RewriteInput) {
+          return {
+            rewrites: input.segments.filter((s) => s.text.includes('예산은')).map((s) => ({ segmentId: s.id, text: `${s.text} (모델 제안)`, basis: [] })),
+            usage: null,
+            mode: 'mock' as const,
+          };
+        },
+      },
+    };
+    let task = await reportTask('2026년 제안 덮어쓰기');
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS, '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const c1 = (await generate(task)).version!.currentize!;
+    const number = c1.changes.find((x) => x.kind === 'number' && x.before === PROSE)!;
+    const proposal = c1.changes.find((x) => x.status === 'proposed' && x.segmentId === number.segmentId)!;
+    expect(proposal.after).toContain('(모델 제안)');
+
+    const first = '2026년 예산은 1,300백만원이다. 「지방공기업법」 제64조에 따라 편성한다.';
+    const r1 = await svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: number.id, after: first });
+    expect((await runWorker(ctx, { workerId: 'w', runId: r1.run!.id }))[0]).toMatchObject({ finish: 'succeeded' });
+    // 화면이 낡아 제안을 그대로 받아들이려 해도 직원 줄을 고친다
+    const second = '2026년 예산은 1,350백만원이다. 「지방공기업법」 제64조에 따라 편성한다.';
+    const r2 = await svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 2, changeId: proposal.id, after: second });
+    expect(r2.version!.version).toBe(3);
+    expect((await runWorker(ctx, { workerId: 'w', runId: r2.run!.id }))[0]).toMatchObject({ finish: 'succeeded' });
+
+    const d3 = await svc.getTaskDetail(ctx, actor, task.id);
+    const c3 = (await contentOf(d3.version!.id))!;
+    const onS = c3.changes.filter((x) => x.segmentId === number.segmentId);
+    expect(onS.filter((x) => x.status === 'changed')).toEqual([expect.objectContaining({ id: number.id, after: second, basis: ['user'] })]);
+    expect(onS.find((x) => x.id === proposal.id)).toMatchObject({ status: 'needs_check', after: null, note: NOTE_PROPOSAL_STALE });
+    const out = await readSegments(await fileOf(d3.currentArtifacts.find((a) => a.output_key === 'report')!.id));
+    expect(out.segments.some((s) => s.text === second)).toBe(true);
+    expect(out.segments.some((s) => s.text === first)).toBe(false);
   });
 
   it('prior가 HWP 5.0이면 TEMPLATE_UNSUPPORTED가 아니라 PRIOR_UNSUPPORTED로 실패하고 작년 파일·입력은 남는다', async () => {

@@ -250,7 +250,11 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
               {task.access.edit && (
                 <Card>
                   <h2 className="text-[16px] font-semibold">다시 만들기</h2>
-                  <p className="mt-1 text-[14px] text-slate-600">입력·원자료로 초안을 다시 만듭니다. 직접 고친 칸과 잠근 칸은 그대로 둡니다.</p>
+                  <p className="mt-1 text-[14px] text-slate-600">
+                    {version.currentize
+                      ? '작년 파일에서 다시 만듭니다 — 직접 고친 변경은 사라집니다(판 복구로 되돌릴 수 있음)'
+                      : '입력·원자료로 초안을 다시 만듭니다. 직접 고친 칸과 잠근 칸은 그대로 둡니다.'}
+                  </p>
                   <button onClick={() => generate()} disabled={busy} className="mt-3 rounded-[10px] border border-[#003087] px-4 py-2 text-[14px] font-semibold text-[#003087] disabled:opacity-50">
                     초안 다시 만들기
                   </button>

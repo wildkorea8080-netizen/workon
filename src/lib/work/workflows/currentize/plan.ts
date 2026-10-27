@@ -54,6 +54,37 @@ export function changeEditBlock(c: Pick<Change, 'kind' | 'before'>): string | nu
   return null;
 }
 
+/** 직원이 고친 문단의 남은 제안 — 옛 문단을 보고 만든 글이라 그대로 받아들이면 직원 글을 덮는다 */
+export const NOTE_PROPOSAL_STALE = '이 문단은 직접 고쳐져 제안이 더 이상 맞지 않습니다';
+
+/**
+ * 직원 글 하나를 변경 목록에 넣는다(순수). 한 문단(조각)의 직원 글은 **한 줄뿐**이다:
+ *  - 그 문단에 이미 직원이 고친 바꿈(근거 'user')이 있으면 어느 변경으로 저장하든 그 줄의 글을 바꾼다(둘째 줄을 만들지 않는다)
+ *  - 없으면 고른 변경이 바꿈·근거 'user'가 된다
+ *  - 같은 문단의 다른 바꿈(연도 밀기 등)은 직원 글에 담긴 것이라 빼고, 직원 줄의 메모에 `c1(연도)을 이 글에 담음`으로 남긴다
+ *    (한 문단에 두 번 적용하면 XML이 깨진다)
+ *  - 같은 문단의 제안은 확인 필요(올해 글 없음)로 내린다 — 옛 문단을 보고 만든 제안을 그대로 받아들이면 직원 글이 사라진다
+ * 직원 줄이 이미 같은 글이면 null(새 판을 만들지 않는다).
+ */
+export function applyUserEdit(changes: Change[], change: Change, after: string): { changes: Change[]; target: Change } | null {
+  const userRow = changes.find((c) => c.segmentId === change.segmentId && c.status === 'changed' && c.basis.includes('user'));
+  const target = userRow ?? change;
+  if (target.status === 'changed' && target.after === after) return null;
+  const absorbed = changes.filter((c) => c.segmentId === target.segmentId && c.id !== target.id && c.status === 'changed');
+  const absorbedNote = absorbed.length ? `${absorbed.map((c) => `${c.id}(${CHANGE_KIND_LABEL[c.kind] ?? c.kind})`).join(', ')}을 이 글에 담음` : null;
+  // 이미 직원 줄이면 앞서 담은 기록을 잇고, 새로 직원 줄이 되면 확인 요청 메모(수치 확인 등)는 끝난 것이라 지운다
+  const note = [userRow ? userRow.note : null, absorbedNote].filter((n): n is string => !!n).join(' · ') || null;
+  const updated: Change = { ...target, after, status: 'changed', basis: ['user'], note };
+  const out = changes
+    .filter((c) => !absorbed.includes(c))
+    .map((c) => {
+      if (c.id === target.id) return updated;
+      if (c.segmentId === target.segmentId && c.status === 'proposed') return { ...c, status: 'needs_check' as const, after: null, note: NOTE_PROPOSAL_STALE };
+      return c;
+    });
+  return { changes: out, target: updated };
+}
+
 export interface CurrentizeContent {
   schema: 'currentize/1';
   priorSourceId: string;
