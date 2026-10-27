@@ -2,8 +2,9 @@
  * 업무 실제 모델 점검 — 업무별로 가상 자료를 넣어 **실제 Claude**로 끝까지 돌리고, 결과(확인 사항·칸·항목)와 원가를 적는다.
  *
  *   npm run work:testdb -- start
- *   npm run work:llm-smoke -- --yes-cost            -- 모델을 부르는 업무 8개(취합·정산은 모델을 안 써서 뺌)
+ *   npm run work:llm-smoke -- --yes-cost            -- 모델을 부르는 업무 8개(취합·정산은 모델을 안 써서 뺌) + 현행화(S6-1)
  *   npm run work:llm-smoke -- --yes-cost --only reply,meeting
+ *   npm run work:llm-smoke -- --yes-cost --only currentize   -- 보고서에 작년 파일(HWPX)을 넣어 올해 문서로 고치기
  *   npm run work:llm-smoke -- --yes-cost --out docs/workon-rebuild/evidence/llm-smoke.md
  *
  * 지키는 것
@@ -61,6 +62,13 @@ const { llmGenerator } = await import('../src/lib/work/generation/compose.ts');
 const { llmRegulationModel } = await import('../src/lib/work/workflows/regulations/model.ts');
 const { llmItemsModel } = await import('../src/lib/work/workflows/items/model.ts');
 const { llmQaModel } = await import('../src/lib/work/workflows/qa/model.ts');
+const { llmCurrentizeModel } = await import('../src/lib/work/workflows/currentize/model.ts');
+const { readSegments } = await import('../src/lib/work/workflows/currentize/segments.ts');
+const { readFillableTemplate, generateDocumentFile } = await import('../src/lib/work/documents/generate-file.ts');
+const { fieldsFromSlots } = await import('../src/lib/work/documents/fields.ts');
+const { openHwpx, readEntry, writeHwpx } = await import('../src/lib/doc-fill/hwpx-core.ts');
+const { para, tableAt } = await import('../tests/fixtures/hwpx.ts');
+const ExcelJS = (await import('exceljs')).default;
 const { parseLawSearch, splitArticles, pickArticles } = await import('../src/lib/work/workflows/regulations/gather.ts');
 const { lawConnector } = await import('../src/lib/connectors/law.ts');
 const { createSourceUpload, confirmSource } = await import('../src/lib/work/sources.ts');
@@ -102,6 +110,7 @@ const ctx = {
   regulations: { providers, model: llmRegulationModel },
   items: { model: llmItemsModel },
   qa: { model: llmQaModel },
+  currentize: { model: llmCurrentizeModel },
   resolveModel: async () => 'claude-sonnet-4-6',
   checkLimit: async () => ({ allowed: true }),
   log: async (p) => {
@@ -117,6 +126,36 @@ await pool.query('INSERT INTO departments (id, name, slug, organization_id) VALU
 await pool.query('INSERT INTO users (id, email, department_id) VALUES ($1, $2, $3)', [userId, `${userId}@smoke.local`, deptId]);
 await pool.query('INSERT INTO work_org_settings (organization_id, home_enabled, new_tasks_enabled) VALUES ($1, true, true)', [orgId]);
 const actor = { userId, organizationId: orgId, departmentId: deptId, isAdmin: false, managedDepartmentIds: [] };
+
+/** 현행화 사례의 작년 파일 — 표준 보고서 양식(assets/templates/report.hwpx)을 실제 채우기 엔진으로 채운다(tests/helpers/prior-fixture.ts와 같은 방법) */
+async function buildPriorHwpx() {
+  const bytes = readFileSync(path.join(process.cwd(), 'assets', 'templates', 'report.hwpx'));
+  const read = await readFillableTemplate(bytes, 'report.hwpx');
+  const values = {
+    제목: '2025년 ○○ 사업계획',
+    개요: '2025년에는 사업 A·B를 추진하였다.',
+    // 둘째 줄은 연도·수치·인용이 없는 줄글 — 모델이 올해 자료·메모로 다시 쓰는 대상
+    '주요 내용': '2025년 예산은 1,200백만원이다. 「지방공기업법」 제64조에 따라 편성한다. 담당 부서는 기획팀이다.\n사업 B를 계속 추진하여 지역 일자리를 늘린다.',
+  };
+  const fields = fieldsFromSlots(read.slots).map((f) => ({ ...f, value: values[f.label] ?? '' }));
+  const filled = (await generateDocumentFile(bytes, 'report.hwpx', fields)).bytes;
+  // 표 하나(2024·2025년 열)를 첫 구역 끝에 덧붙인다 — tests/helpers/prior-fixture.ts의 appendXml과 같은 방법
+  const doc = await openHwpx(filled);
+  const name = doc.sections[0];
+  const xml = await readEntry(doc.zip, name);
+  const at = xml.lastIndexOf('</hs:sec>');
+  const extra = para('(단위: 백만원)') + tableAt([['구분', '2024년', '2025년', '증감'], ['사업 A', '1,100', '1,200', '100']], { addr: true });
+  return writeHwpx(doc, new Map([[name, xml.slice(0, at) + extra + xml.slice(at)]]));
+}
+/** 올해 자료 — 2026 예산 시트(사업 A 1300) */
+async function buildDataXlsx() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('2026 예산');
+  ws.addRow(['구분', '2026년']);
+  ws.addRow(['사업 A', 1300]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** 업무별 가상 자료 */
 const CASES = {
@@ -168,6 +207,16 @@ const CASES = {
       { name: '2025 제출본.txt', purpose: 'reference', text: '2025년 제출 — 민원 평균 처리 기간 4.8일' },
     ],
   },
+  currentize: {
+    workflowKey: 'report',
+    title: '2026년 ○○ 사업계획',
+    form: { reportType: '사업계획', period: '2026년', emphasis: '사업 B 중단, 사업 C 신설' },
+    sources: async () => [
+      { name: '2025 사업계획.hwpx', purpose: 'prior', bytes: await buildPriorHwpx(), contentType: 'application/hwp+zip' },
+      { name: '2026 예산.xlsx', purpose: 'data', bytes: await buildDataXlsx(), contentType: XLSX_TYPE },
+      { name: '2026년 사업 방향.txt', purpose: 'reference', text: '2026년에는 사업 B를 중단하고 사업 C를 새로 시작한다. 예산은 1,300백만원으로 늘린다.' },
+    ],
+  },
 };
 
 const onlyIdx = args.indexOf('--only');
@@ -184,11 +233,13 @@ for (const key of keys) {
   }
   const started = Date.now();
   try {
-    let task = await svc.createTask(ctx, actor, { workflowKey: key, title: c.title, form: c.form });
-    for (const s of c.sources) {
-      const bytes = Buffer.from(s.text, 'utf8');
+    let task = await svc.createTask(ctx, actor, { workflowKey: c.workflowKey ?? key, title: c.title, form: c.form });
+    const sources = typeof c.sources === 'function' ? await c.sources() : c.sources;
+    for (const s of sources) {
+      // 글 원자료는 text, 파일 원자료(작년 HWPX·엑셀)는 bytes + contentType
+      const bytes = s.bytes ?? Buffer.from(s.text, 'utf8');
       const up = await createSourceUpload(ctx, task, userId, { fileName: s.name, size: bytes.length, purpose: s.purpose });
-      await ctx.files.put(up.path, bytes, 'text/plain');
+      await ctx.files.put(up.path, bytes, s.contentType ?? 'text/plain');
       await confirmSource(ctx, task, up.sourceId);
     }
     await svc.refreshReadiness(ctx, (await ctx.store.getTask(task.id, orgId)));
@@ -206,6 +257,20 @@ for (const key of keys) {
     if (v?.items) lines.push(`- 항목 ${v.items.items.length}개: ${v.items.items.slice(0, 6).map((i) => `${i.id} ${i.type} ${Object.values(i.values).filter(Boolean)[0] ?? ''}${i.flags.length ? ` [${i.flags.join(',')}]` : ''}`).join(' / ')}`);
     if (v?.qa) lines.push(`- 질문 ${v.qa.pairs.length}개: ${v.qa.pairs.map((p) => `${p.id} ${p.question.slice(0, 30)}${p.flags.length ? ` [${p.flags.join(',')}]` : ''}`).join(' / ')}`);
     if (v?.regulations) lines.push(`- 근거 ${v.regulations.evidence.length}건(${v.regulations.evidence.map((e) => `${e.id} ${e.title} ${e.location ?? ''} ${e.applicability}`).join(' / ')}) · 의견 ${v.regulations.findings.length} · 유보 ${v.regulations.reservations.length}`);
+    const cz = v?.currentize ?? null;
+    if (c.workflowKey && key === 'currentize') {
+      const ch = cz?.changes ?? [];
+      const n = (st) => ch.filter((x) => x.status === st).length;
+      let hasTitle = false;
+      const main = d.currentArtifacts.find((a) => a.output_key === 'report');
+      if (main) {
+        const row = (await ctx.store.listArtifacts(task.id, orgId)).find((a) => a.id === main.id);
+        const bytes = row ? await ctx.files.get(row.storage_path) : null;
+        if (bytes) hasTitle = (await readSegments(bytes)).segments.some((sg) => sg.text.includes('2026년 ○○ 사업계획'));
+      }
+      lines.push(`- 현행화: 변경 ${ch.length}개 (바꿈 ${n('changed')} / 확인 필요 ${n('needs_check')} / 제안 ${n('proposed')}) · costStopped ${cz?.costStopped ?? '?'} · 제목에 '2026년 ○○ 사업계획' ${hasTitle ? '있음' : '없음'}`);
+      for (const x of ch.slice(0, 12)) lines.push(`  - [${x.status}] ${x.kind} ${String(x.before).replace(/\s+/g, ' ').slice(0, 60)} → ${x.after == null ? '(없음)' : String(x.after).replace(/\s+/g, ' ').slice(0, 80)}${x.note ? ` // ${x.note}` : ''}`);
+    }
     for (const f of (v?.fields ?? []).filter((f) => f.value.trim()).slice(0, 12)) lines.push(`  - ${f.label}(${f.origin}): ${f.value.replace(/\s*\n\s*/g, ' ⏎ ').slice(0, 220)}`);
     lines.push('');
     console.log(`${key}: ${out?.finish} ${krw.toFixed(1)}원 ${sec}초`);
