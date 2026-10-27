@@ -18,6 +18,8 @@ export interface WorkflowSummaryDto {
   available: boolean;
   reason: string | null;
   defaultTemplateRef: string | null;
+  /** 작년 파일(prior)을 올리면 현행화하는 업무인가 */
+  currentizes: boolean;
 }
 
 export interface TaskDto {
@@ -97,7 +99,7 @@ export interface CollectionResultDto {
 export interface TaskDetailDto {
   task: TaskDto;
   kind: 'document' | 'collection' | 'regulations' | 'items' | 'settlement' | 'qa';
-  workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
+  workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[]; currentizes: boolean };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
   version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null; currentize: CurrentizeDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];

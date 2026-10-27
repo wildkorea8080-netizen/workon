@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import type { WorkflowSummaryDto } from './types';
+import { inputsFor } from './file-set-helpers';
 
 /** 업무 비서 카드 — 무엇을 넣으면 어떤 파일이 나오는지. 모델명은 보이지 않는다. 준비 중이면 이유와 함께 시작 단추를 막는다 */
 export default function WorkflowCard({ workflow, canStart }: { workflow: WorkflowSummaryDto; canStart: boolean }) {
-  const needs = workflow.inputs.filter((i) => i.required && i.type !== 'template').map((i) => i.label);
+  // 현행화하지 않는 업무는 작년 파일 입력을 보이지 않는다(실행기도 작년 파일을 읽지 않는다)
+  const needs = inputsFor(workflow.inputs, workflow.currentizes).filter((i) => i.required && i.type !== 'template').map((i) => i.label);
   return (
     <article className="flex flex-col rounded-xl border border-[#DCE3EC] bg-white p-5">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -20,7 +22,7 @@ export default function WorkflowCard({ workflow, canStart }: { workflow: Workflo
       </div>
       <p className="text-[14px] text-slate-600">{workflow.purpose}</p>
       <p className="mt-2 text-[13px] text-slate-500">필요한 것: {needs.join(', ')}</p>
-      {workflow.inputs.some((i) => i.key === 'prior') && <p className="mt-1 text-[13px] text-slate-500">작년 파일이 있으면 올해 판으로 현행화합니다</p>}
+      {workflow.currentizes && <p className="mt-1 text-[13px] text-slate-500">작년 파일이 있으면 올해 판으로 현행화합니다</p>}
       <div className="mt-auto pt-4">
         {workflow.available ? (
           canStart ? (

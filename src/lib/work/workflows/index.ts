@@ -209,6 +209,8 @@ export interface WorkflowSummary {
   reason: string | null;
   /** 새 작업 화면이 먼저 고를 표준 양식 */
   defaultTemplateRef: string | null;
+  /** 작년 파일(prior)을 올리면 현행화하는 업무인가(usesCurrentizeWhenPrior) — 아니면 화면이 작년 파일 올리기·안내를 숨긴다 */
+  currentizes: boolean;
 }
 
 export function summarizeWorkflows(): WorkflowSummary[] {
@@ -225,6 +227,7 @@ export function summarizeWorkflows(): WorkflowSummary[] {
       available: Boolean(impl),
       reason: impl ? null : '업무 처리·검수·결과 파일 구현이 아직 끝나지 않았습니다.',
       defaultTemplateRef: impl?.defaultTemplateRef ?? null,
+      currentizes: Boolean(impl?.usesCurrentizeWhenPrior),
     };
   });
 }

@@ -1,6 +1,6 @@
 // 작업실 '대조' 보기(CurrentizeView)가 쓰는 순수 함수 — 시험(tests/work-currentize-ui.test.ts)이 그리는 규칙을 고정한다.
 // plan.ts는 순수 모듈(형식만 가져옴)이라 화면에서 가져와도 서버 코드가 섞이지 않는다.
-import { CHANGE_KIND_LABEL, CHANGE_STATUS_LABEL, changeEditBlock } from '@/lib/work/workflows/currentize/plan';
+import { CHANGE_KIND_LABEL, CHANGE_STATUS_LABEL, changeEditBlock, isNoopChange } from '@/lib/work/workflows/currentize/plan';
 import type { CurrentizeChangeDto, CurrentizeCitationDto, CurrentizeDto } from './types';
 
 export type ChangeFilter = 'all' | 'needs_check' | 'proposed' | 'changed';
@@ -36,7 +36,7 @@ export function citationFor(content: CurrentizeDto, segmentId: string): Currenti
 }
 
 /** 직원이 올해 글을 넣을 수 있는가 — 판정은 서버(applyChangeEdit)와 같은 함수 */
-export function editableChange(change: Pick<CurrentizeChangeDto, 'kind' | 'before'>): { ok: true } | { ok: false; reason: string } {
+export function editableChange(change: Pick<CurrentizeChangeDto, 'kind' | 'before' | 'after'>): { ok: true } | { ok: false; reason: string } {
   const reason = changeEditBlock(change);
   return reason ? { ok: false, reason } : { ok: true };
 }
@@ -47,8 +47,17 @@ export function editableChange(change: Pick<CurrentizeChangeDto, 'kind' | 'befor
  */
 export function draftFor(change: CurrentizeChangeDto, changes: CurrentizeChangeDto[]): string {
   if (change.after !== null) return change.after;
-  const sibling = changes.find((c) => c.segmentId === change.segmentId && c.status === 'changed' && c.after !== null);
+  // '확인함'으로 닫은 행(올해 글 = 작년 글)은 밀린 글이 아니다
+  const sibling = changes.find((c) => c.segmentId === change.segmentId && c.status === 'changed' && c.after !== null && !isNoopChange(c));
   return sibling?.after ?? change.before;
+}
+
+/**
+ * '확인함' 단추 — 확인 필요만(서버 acknowledgeChange와 같은 판정). 글을 넣을 수 없는 빈 칸·여러 줄 칸·표 구조 확인도 이것으로 닫는다.
+ * 확인 필요가 하나라도 남으면 검토 완료가 막힌다
+ */
+export function canAcknowledge(change: Pick<CurrentizeChangeDto, 'status'>): boolean {
+  return change.status === 'needs_check';
 }
 
 /** 저장 단추 — 빈 글은 안 되고, 이미 바꾼 변경에 같은 글이면 바뀐 것이 없다(확인 필요·제안은 같은 글이어도 '이대로 받아들임') */

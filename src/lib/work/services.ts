@@ -7,7 +7,7 @@ import { getWorkflowImpl, summarizeWorkflows, definitionFor, outputKeysOf } from
 import { checkForm } from './workflows/form';
 import { applyPatches, cleanFieldValue, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
 import { MAX_SLOT_TEXT } from '@/lib/doc-fill';
-import { applyUserEdit, changeEditBlock, type CurrentizeContent } from './workflows/currentize/plan';
+import { acknowledgeChange, applyUserEdit, changeEditBlock, type CurrentizeContent } from './workflows/currentize/plan';
 import { CHANGE_LOG_KEY } from './workflows/currentize/output';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
@@ -240,7 +240,17 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
   return {
     task: taskDto(task, access),
     kind: getWorkflowImpl(task.workflow_key)?.kind ?? 'document',
-    workflow: { key: def.key, name: def.name, purpose: def.purpose, inputs: def.inputs, outputs: def.outputs, scopeNote: def.scopeNote, validationRules: def.validationRules },
+    workflow: {
+      key: def.key,
+      name: def.name,
+      purpose: def.purpose,
+      inputs: def.inputs,
+      outputs: def.outputs,
+      scopeNote: def.scopeNote,
+      validationRules: def.validationRules,
+      // 작년 파일을 올리면 현행화하는 업무인가 — 아니면 작업실이 작년 파일 올리기를 숨긴다(실행기도 작년 파일을 읽지 않는다)
+      currentizes: Boolean(getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior),
+    },
     template: tv ? templateDto(tv) : null,
     version: version
       ? {
@@ -452,9 +462,10 @@ export async function saveDocument(ctx: WorkContext, actor: WorkActor, taskId: s
 
 /**
  * 현행화 판의 변경 하나에 직원이 올해 글을 넣는다(작업실 '대조' 보기) — 확인 필요에 올해 글, 제안 받아들이기, 바꿈 고치기.
+ * `acknowledge: true`(올해 글 없이)면 확인 필요를 '확인함'으로 닫는다 — 파일은 바뀌지 않고(올해 글 = 작년 글) 검토 완료를 막지 않게 된다.
  * 기준 판이 지금 판이어야 한다(아니면 409). 한 문단의 직원 글은 한 줄뿐이다 — 규칙은 applyUserEdit(plan.ts). 새 판 → 파일 만들기 실행.
  */
-export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; changeId: unknown; after: unknown }) {
+export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; changeId: unknown; after?: unknown; acknowledge?: unknown }) {
   const { task } = await loadTask(ctx, actor, taskId, 'edit');
   if (typeof input.baseVersion !== 'number') throw new WorkError('INVALID_INPUT', 'baseVersion이 필요합니다.');
   const cur = await currentVersionNumber(ctx, task);
@@ -464,13 +475,21 @@ export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId
   if (content?.schema !== 'currentize/1') throw new WorkError('INVALID_INPUT', '작년 문서를 현행화한 판이 아닙니다.');
   const change = typeof input.changeId === 'string' ? content.changes.find((c) => c.id === input.changeId) : undefined;
   if (!change) throw new WorkError('INVALID_INPUT', '변경을 찾을 수 없습니다. 새로고침해 주세요.');
-  const blocked = changeEditBlock(change);
-  if (blocked) throw new WorkError('INVALID_INPUT', blocked);
-  const after = typeof input.after === 'string' ? cleanFieldValue(input.after) : '';
-  if (!after.trim()) throw new WorkError('INVALID_INPUT', '올해 글을 적어 주세요.');
-  if (after.length > MAX_SLOT_TEXT) throw new WorkError('INVALID_INPUT', `한 곳에 ${MAX_SLOT_TEXT.toLocaleString()}자까지 넣을 수 있습니다.`);
-  const edit = applyUserEdit(content.changes, change, after);
-  if (!edit) return { version: null, run: null, unchanged: true };
+  const acknowledge = input.acknowledge === true;
+  let edit: { changes: CurrentizeContent['changes']; target: CurrentizeContent['changes'][number] } | null;
+  if (acknowledge) {
+    // 확인함 — 글을 넣지 않으므로 빈 칸·여러 줄 칸·표 구조 확인도 닫을 수 있다
+    edit = acknowledgeChange(content.changes, change);
+    if (!edit) throw new WorkError('INVALID_INPUT', '확인 필요인 변경만 확인함으로 닫을 수 있습니다.');
+  } else {
+    const blocked = changeEditBlock(change);
+    if (blocked) throw new WorkError('INVALID_INPUT', blocked);
+    const after = typeof input.after === 'string' ? cleanFieldValue(input.after) : '';
+    if (!after.trim()) throw new WorkError('INVALID_INPUT', '올해 글을 적어 주세요.');
+    if (after.length > MAX_SLOT_TEXT) throw new WorkError('INVALID_INPUT', `한 곳에 ${MAX_SLOT_TEXT.toLocaleString()}자까지 넣을 수 있습니다.`);
+    edit = applyUserEdit(content.changes, change, after);
+    if (!edit) return { version: null, run: null, unchanged: true };
+  }
   const target = edit.target;
   const updated: CurrentizeContent = { ...content, changes: edit.changes };
   const v = await ctx.store.saveVersion({
@@ -481,14 +500,14 @@ export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId
     content: carriedContent({ ...cur.content, currentize: updated }),
     templateVersionId: null,
     origin: 'edit',
-    reason: `변경 ${target.id} 직접 수정`,
+    reason: acknowledge ? `변경 ${target.id} 확인함` : `변경 ${target.id} 직접 수정`,
     actorId: actor.userId,
     runId: null,
     sourceIds: [],
   });
   await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
   const run = await enqueuePackage(ctx, task, v.id, actor.userId);
-  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, change: target.id } });
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, change: target.id, ...(acknowledge ? { acknowledged: true } : {}) } });
   return { version: { id: v.id, version: v.version }, run: runDto(run), unchanged: false };
 }
 
@@ -641,6 +660,7 @@ export async function reviewTask(
     if (input.versionId !== task.current_document_version_id) throw new WorkError('VERSION_CONFLICT', '그 사이 새 판이 생겼습니다. 최신 판을 확인한 뒤 검토를 마쳐 주세요.', 409);
     const gate = await completionGate(ctx, task);
     if (gate.blocking > 0) throw new WorkError('INVALID_INPUT', `반드시 고쳐야 할 사항 ${gate.blocking}건이 남아 있습니다.`, 422);
+    if (gate.needsCheck > 0) throw new WorkError('INVALID_INPUT', `확인 필요 ${gate.needsCheck}건이 남아 있습니다. 대조에서 올해 글을 넣거나 '확인함'으로 닫아 주세요.`, 422);
     if (!gate.artifactReady) throw new WorkError('INVALID_INPUT', '이 판의 결과 파일이 아직 준비되지 않았습니다. 파일이 만들어진 뒤 검토를 마쳐 주세요.', 409);
     await ctx.store.setTaskStatus(task.id, task.organization_id, 'completed', { approved_version_id: task.current_document_version_id, approved_by: actor.userId, approved_at: ctx.now().toISOString() });
     await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'task.approved', details: { version_id: task.current_document_version_id } });
@@ -649,16 +669,25 @@ export async function reviewTask(
   throw new WorkError('INVALID_INPUT', '알 수 없는 검토 동작입니다.');
 }
 
-/** 완료 조건(서버 판정) — 필요한 파일이 지금 판으로 있고 검증됐으며, 막는 사항이 없다 */
+/**
+ * 완료 조건(서버 판정) — 필요한 파일이 지금 판으로 있고 검증됐으며, 막는 사항이 없다.
+ * 현행화 판은 변경 목록에 확인 필요가 하나라도 남으면 막는다(needsCheck) — 확인 사항 화면에는 종류마다 20개만 실리므로 목록 전체를 센다
+ */
 export async function completionGate(ctx: WorkContext, task: WorkTaskRow) {
   const versionId = task.current_document_version_id!;
   const impl = getWorkflowImpl(task.workflow_key);
-  const [items, artifacts] = await Promise.all([ctx.store.listReviewItems(versionId, task.organization_id), ctx.store.listArtifacts(task.id, task.organization_id)]);
+  const [items, artifacts, version] = await Promise.all([
+    ctx.store.listReviewItems(versionId, task.organization_id),
+    ctx.store.listArtifacts(task.id, task.organization_id),
+    ctx.store.getVersion(versionId, task.organization_id),
+  ]);
   const blocking = items.filter((i) => i.severity === 'blocking' && i.state === 'open').length;
+  const currentize = (version?.content as { currentize?: CurrentizeContent } | null)?.currentize;
+  const needsCheck = currentize?.schema === 'currentize/1' ? currentize.changes.filter((c) => c.status === 'needs_check').length : 0;
   // 함께 만드는 파일이 여럿이면 모두 지금 판으로 있어야 한다(회의록 + 후속조치표 등)
   const keys = impl ? outputKeysOf(impl) : [];
   const artifactReady = keys.length > 0 && keys.every((k) => artifacts.some((a) => a.document_version_id === versionId && a.output_key === k && a.validation_status === 'valid'));
-  return { blocking, artifactReady };
+  return { blocking, artifactReady, needsCheck };
 }
 
 export async function cancelRun(ctx: WorkContext, actor: WorkActor, taskId: string, runId: string) {

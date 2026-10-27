@@ -8,7 +8,9 @@ import {
   editableChange,
   draftFor,
   canSave,
+  canAcknowledge,
 } from '@/components/work/currentize-view-helpers';
+import { inputsFor } from '@/components/work/file-set-helpers';
 import type { CurrentizeChangeDto, CurrentizeDto } from '@/components/work/types';
 
 /** 작업실 '대조' 보기(S6-1 Task 13) — 화면이 쓰는 순수 함수. DOM 시험 도구가 없어 그리는 규칙을 여기서 고정한다 */
@@ -121,5 +123,36 @@ describe('대조 보기 — 올해 글 입력칸의 처음 글', () => {
     // 확인 필요·제안은 같은 글이어도 '이대로 받아들임'이라 저장할 수 있다
     expect(canSave(LIST[2], '새 문장')).toBe(true);
     expect(canSave(LIST[1], '2026년 계획')).toBe(true);
+  });
+});
+
+describe('대조 보기 — 확인함(I6)', () => {
+  it('확인 필요만 확인함으로 닫는다 — 글을 넣을 수 없는 빈 칸·여러 줄 칸·표 구조도', () => {
+    expect(canAcknowledge(LIST[1])).toBe(true);
+    expect(canAcknowledge(LIST[3])).toBe(true);
+    expect(canAcknowledge(ch('c5', { kind: 'structure', before: '', after: null, status: 'needs_check' }))).toBe(true);
+    expect(canAcknowledge(LIST[0])).toBe(false);
+    expect(canAcknowledge(LIST[2])).toBe(false);
+  });
+  it('넣을 값이 없는 구조 확인(열을 못 가린 표)은 표를 한글에서 고치라고 한다', () => {
+    expect(editableChange(ch('c5', { kind: 'structure', before: '', after: null, status: 'needs_check' }))).toEqual({ ok: false, reason: '표는 한글에서 직접 고쳐 주세요' });
+  });
+  it('확인함으로 닫은 행(올해 글 = 작년 글)은 입력칸의 처음 글이 되지 않는다', () => {
+    const acked = ch('c7', { kind: 'number', before: '2025년 계획', after: '2025년 계획', status: 'changed', basis: ['user'], note: '확인함' });
+    const year = ch('c8', { kind: 'year' });
+    const open = ch('c9', { kind: 'citation', status: 'needs_check', after: null });
+    expect(draftFor(open, [acked, year, open])).toBe('2026년 계획');
+  });
+});
+
+describe('업무 입력 보이기 — 작년 파일은 현행화 업무에만(I1)', () => {
+  const inputs = [
+    { key: 'title', type: 'string' },
+    { key: 'prior', type: 'file-set' },
+    { key: 'meetingSource', type: 'file-set' },
+  ];
+  it('현행화하지 않는 업무는 작년 파일 입력을 숨긴다', () => {
+    expect(inputsFor(inputs, false).map((i) => i.key)).toEqual(['title', 'meetingSource']);
+    expect(inputsFor(inputs, true).map((i) => i.key)).toEqual(['title', 'prior', 'meetingSource']);
   });
 });

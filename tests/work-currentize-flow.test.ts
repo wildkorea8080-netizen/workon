@@ -9,7 +9,8 @@ import { createPgWorkStore } from '@/lib/work/store/pg';
 import { createLocalWorkFiles } from '@/lib/work/files';
 import { unavailableRenderer } from '@/lib/work/documents/renderer';
 import { mockGenerator } from '@/lib/work/generation/compose';
-import { confirmSource, createSourceUpload } from '@/lib/work/sources';
+import { confirmSource, createSourceUpload, loadSourceExtracts } from '@/lib/work/sources';
+import { gzipSync } from 'zlib';
 import type { WorkContext } from '@/lib/work/context';
 import { WorkError, type WorkActor, type WorkTaskRow } from '@/lib/work/types';
 import type { RegulationProviders } from '@/lib/work/workflows/regulations/gather';
@@ -22,7 +23,7 @@ import { readSegments } from '@/lib/work/workflows/currentize/segments';
 import { readHwpxTables } from '@/lib/attachments/tables-hwpx';
 import * as svc from '@/lib/work/services';
 import { runWorker } from '@/lib/work/runs/worker';
-import { rewriteStepName } from '@/lib/work/runs/currentize-op';
+import { rewriteStepName, NOTE_MULTI_PARAGRAPH_CELL, NOTE_UNPLANNED_TABLE } from '@/lib/work/runs/currentize-op';
 import { priorFixture } from './helpers/prior-fixture';
 import { para, tableAt, sectionXml } from './fixtures/hwpx';
 import { buildHwp, para as hwpPara } from './fixtures/hwp5';
@@ -92,6 +93,39 @@ async function dataWorkbook(): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/** 한 표에 작년 열(2025년)과 올해 열(2026년)이 함께 — 작년 열의 1,200은 올해 값이 아니다(C2) */
+async function twoYearWorkbook(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('예산');
+  ws.addRow(['구분', '2025년(백만원)', '2026년(백만원)']);
+  ws.addRow(['사업 A', 1200, 1300]);
+  ws.addRow(['사업 B', 500, 600]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+describe('작년 파일은 현행화 밖의 길에 섞이지 않는다(I1)', () => {
+  const row = (id: string, purpose: string) => ({
+    id,
+    task_id: 't1',
+    organization_id: 'o1',
+    status: 'ready',
+    purpose,
+    file_name: `${id}.hwpx`,
+    sha256: 'h',
+    summary: {},
+    extract_path: `x/${id}.json`,
+  });
+  const fakeCtx = {
+    store: { listSources: async () => [row('meeting-note', 'reference'), row('last-year', 'prior')] },
+    files: { get: async (p: string) => gzipSync(Buffer.from(JSON.stringify({ text: `글 ${p}`, tables: [] }), 'utf8')) },
+  } as unknown as WorkContext;
+  const task = { id: 't1', organization_id: 'o1', workflow_key: 'meeting' } as unknown as WorkTaskRow;
+  it('회의 정리 같은 업무의 원자료 읽기는 기본으로 작년 파일(prior)을 빼고, includePrior일 때만 싣는다', async () => {
+    expect((await loadSourceExtracts(fakeCtx, task)).map((x) => x.id)).toEqual(['meeting-note']);
+    expect((await loadSourceExtracts(fakeCtx, task, { includePrior: true })).map((x) => x.id)).toEqual(['meeting-note', 'last-year']);
+  });
+});
+
 describe('현행화 묶음 단계 이름', () => {
   it('DB가 받는 꼴(영소문자·밑줄)이고 순번마다 다르다', () => {
     const names = Array.from({ length: 200 }, (_, i) => rewriteStepName(i));
@@ -114,6 +148,11 @@ describe('현행화 확인 사항', () => {
   it('넘지 않으면 요약이 없다', () => {
     const items = currentizeReviewItems({ ...base, changes: [change(1, 'needs_check'), change(2, 'proposed')] });
     expect(items.map((i) => i.code)).toEqual(['NEEDS_CHECK', 'PROPOSED']);
+  });
+  it('메시지 앞에 변경 번호와 위치(없으면 조각 id)', () => {
+    const items = currentizeReviewItems({ ...base, changes: [{ ...change(1, 'needs_check'), location: '개요 › 주요 내용' }, change(2, 'proposed')] });
+    expect(items[0].message).toBe('c1 개요 › 주요 내용 — 확인 1');
+    expect(items[1].message).toBe('c2 0:2 — AI 제안 — 근거가 모자라 파일에 넣지 않았습니다 (확인 2)');
   });
 });
 
@@ -451,6 +490,145 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     // 묶음마다 사용 기록 한 줄(실패한 호출은 기록 없음)
     const { rows } = await pool.query("SELECT details->>'stage' AS stage FROM usage_logs WHERE details->>'task_id' = $1", [task.id]);
     expect(rows.map((x) => x.stage)).toEqual(['rewrite', 'rewrite']);
+  });
+
+  it('C2: 올해 자료 표의 작년 열 숫자(1,200)는 확인 기준이 아니다 — 본문 1,200은 확인 필요', async () => {
+    let task = await reportTask('2026년 작년 열 섞인 자료');
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS, '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await twoYearWorkbook(), 'data');
+    const c = (await generate(task)).version!.currentize!;
+    expect(c.changes.find((x) => x.kind === 'number' && x.before === PROSE)).toMatchObject({ status: 'needs_check', after: null });
+    // 표 계산은 올해 열(2026년)을 쓴다
+    expect(c.changes.filter((x) => x.kind === 'table').map((x) => [x.before, x.after])).toEqual([['1,100', '1,200'], ['1,200', '1,300'], ['500', '600']]);
+  });
+
+  it('C2: 바뀐 인용을 근거로 받아들인 고치기에 1,200이 남으면 수치·인용 확인 요청이 그대로 남는다', async () => {
+    ctx.regulations = {
+      providers: { ...providers, laws: async () => ({ status: 'ok', items: [{ ...lawText(), text: '제64조(결산) 지방공기업의 결산은 이사회 의결로 확정한다.' }] }) },
+      model: mockRegulationModel,
+    };
+    ctx.currentize = {
+      model: {
+        async rewrite(input: RewriteInput) {
+          return {
+            rewrites: input.segments.filter((x) => x.text.includes('예산은')).map((x) => ({ segmentId: x.id, text: x.text.replace('편성한다', '결산과 함께 편성한다'), basis: [x.id] })),
+            usage: null,
+            mode: 'mock' as const,
+          };
+        },
+      },
+    };
+    let task = await reportTask('2026년 인용 고치기');
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS, '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const c = (await generate(task)).version!.currentize!;
+    const onProse = c.changes.filter((x) => x.before === PROSE);
+    expect(onProse.map((x) => [x.kind, x.status])).toEqual([
+      ['prose', 'changed'],
+      ['number', 'needs_check'],
+      ['citation', 'needs_check'],
+    ]);
+    expect(onProse[0].after).toBe('2026년 예산은 1,200백만원이다. 「지방공기업법」 제64조에 따라 결산과 함께 편성한다.');
+  });
+
+  it('I2: 연도 열을 가리지 못한 숫자 표는 칸을 하나도 바꾸지 않고 표마다 구조 확인 하나', async () => {
+    let task = await reportTask('2026년 한 해 표');
+    const single = para('(단위: 백만원)') + tableAt([['구분', '2025년'], ['사업 A', '1,200']], { addr: true });
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS }, { appendXml: single });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const d = await generate(task);
+    const c = d.version!.currentize!;
+    const priorSegments = (await readSegments(prior)).segments;
+    const header = priorSegments.find((x) => x.cell && x.text === '구분')!;
+    const cellIds = new Set(priorSegments.filter((x) => x.cell).map((x) => x.id));
+    expect(c.changes.filter((x) => cellIds.has(x.segmentId))).toEqual([
+      expect.objectContaining({ segmentId: header.id, kind: 'structure', status: 'needs_check', before: '', after: null, note: NOTE_UNPLANNED_TABLE }),
+    ]);
+    const [t] = (await readHwpxTables(await fileOf(d.currentArtifacts.find((a) => a.format === 'hwpx')!.id))).tables;
+    expect(t.cells).toEqual([['구분', '2025년'], ['사업 A', '1,200']]);
+  });
+
+  it('I3: 칸 안 줄바꿈(<hp:lineBreak/>)이 든 칸은 여러 줄 칸처럼 확인 필요 — 파일 만들기가 멈추지 않는다', async () => {
+    let task = await reportTask('2026년 줄바꿈 칸');
+    const broken = para('(단위: 백만원)') + tableAt([['구분', '2024년', '2025년', '증감'], ['사업 A', '1,100', '1,200<hp:lineBreak/>(추경)', '100']], { addr: true });
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS }, { appendXml: broken });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const d = await generate(task);
+    const c = d.version!.currentize!;
+    const multi = c.changes.filter((x) => x.kind === 'table' && (x.before.includes('\n') || (x.after ?? '').includes('\n')));
+    expect(multi.length).toBeGreaterThan(0);
+    for (const x of multi) expect(x).toMatchObject({ status: 'needs_check', note: NOTE_MULTI_PARAGRAPH_CELL });
+    expect(d.currentArtifacts.find((a) => a.format === 'hwpx')).toMatchObject({ validation_status: 'valid' });
+  });
+
+  it('I4: 연도가 든 본문 문장도 밀린 글로 모델에 간다(메모로 고칠 수 있게)', async () => {
+    const seen: RewriteInput[] = [];
+    ctx.currentize = {
+      model: {
+        async rewrite(input: RewriteInput) {
+          seen.push(input);
+          return { rewrites: [], usage: null, mode: 'mock' as const };
+        },
+      },
+    };
+    let task = await svc.createTask(ctx, actor, { workflowKey: 'report', title: '2026년 사업 B 중단', form: { reportType: '사업계획', period: '2026년', emphasis: '사업 B 중단' } });
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': '2025년에는 사업 A·B를 추진하였다.' });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const c = (await generate(task)).version!.currentize!;
+    const sent = seen.flatMap((i) => i.segments.map((x) => x.text));
+    expect(sent).toContain('2026년에는 사업 A·B를 추진하였다.');
+    // 제목('2025년 ○○ 사업계획')은 연도를 뺀 글이 짧아 보내지 않는다
+    expect(sent).not.toContain('2026년 ○○ 사업계획');
+    expect(seen[0].memo).toBe('사업 B 중단');
+    // 모델이 고치지 않았으면 연도 밀기는 그대로
+    expect(c.changes.find((x) => x.before === '2025년에는 사업 A·B를 추진하였다.')).toMatchObject({ kind: 'year', status: 'changed', after: '2026년에는 사업 A·B를 추진하였다.' });
+  });
+
+  it('I6: 확인 필요가 남으면 검토 완료가 막히고, 모두 확인함으로 닫으면 열린다(파일은 그대로)', async () => {
+    let task = await reportTask('2026년 확인함');
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS, '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const d1 = await generate(task);
+    const open1 = d1.version!.currentize!.changes.filter((x) => x.status === 'needs_check');
+    expect(open1.length).toBeGreaterThan(1);
+    // 빈 칸(구조) 확인 요청도 있다 — 글을 넣을 수 없어도 확인함으로 닫을 수 있어야 한다
+    expect(open1.some((x) => x.kind === 'structure')).toBe(true);
+    let t = (await ctx.store.getTask(task.id, actor.organizationId))!;
+    expect((await svc.completionGate(ctx, t)).needsCheck).toBe(open1.length);
+    await expect(svc.reviewTask(ctx, actor, task.id, { action: 'approve', versionId: t.current_document_version_id })).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: expect.stringContaining(`확인 필요 ${open1.length}건이 남아 있습니다`),
+    });
+    // 바꿈은 확인함으로 닫을 수 없다
+    const changed = d1.version!.currentize!.changes.find((x) => x.status === 'changed')!;
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: changed.id, acknowledge: true })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+    let version = 1;
+    for (const ch of open1) {
+      const r = await svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: version, changeId: ch.id, acknowledge: true });
+      version = r.version!.version;
+      expect((await runWorker(ctx, { workerId: 'w', runId: r.run!.id }))[0]).toMatchObject({ finish: 'succeeded' });
+    }
+    const d2 = await svc.getTaskDetail(ctx, actor, task.id);
+    const c2 = d2.version!.currentize!;
+    expect(c2.changes.filter((x) => x.status === 'needs_check')).toEqual([]);
+    for (const ch of open1) {
+      expect(c2.changes.find((x) => x.id === ch.id)).toMatchObject({ status: 'changed', after: ch.before, basis: ['user'], note: ch.note ? `${ch.note} · 확인함` : '확인함' });
+    }
+    expect(d2.review.filter((x) => x.code === 'NEEDS_CHECK')).toEqual([]);
+    // 확인함은 파일을 바꾸지 않는다 — 처음 판의 HWPX 글과 같다
+    const first = (await readSegments(await fileOf(d1.currentArtifacts.find((a) => a.format === 'hwpx')!.id))).segments.map((x) => x.text);
+    const last = (await readSegments(await fileOf(d2.currentArtifacts.find((a) => a.format === 'hwpx')!.id))).segments.map((x) => x.text);
+    expect(last).toEqual(first);
+    t = (await ctx.store.getTask(task.id, actor.organizationId))!;
+    expect(await svc.completionGate(ctx, t)).toMatchObject({ needsCheck: 0, blocking: 0, artifactReady: true });
+    expect(await svc.reviewTask(ctx, actor, task.id, { action: 'approve', versionId: t.current_document_version_id })).toMatchObject({ status: 'completed' });
   });
 
   it('prior가 없는 report는 지금처럼 양식 채우기(document) 경로다', async () => {

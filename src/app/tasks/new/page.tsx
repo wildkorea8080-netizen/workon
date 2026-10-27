@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShell';
 import FormFields, { cleanForm, type FormState } from '@/components/work/FormFields';
+import { inputsFor } from '@/components/work/file-set-helpers';
 import { api } from '@/lib/work/client';
 import type { TaskDetailDto, TemplatesDto, WorkflowSummaryDto } from '@/components/work/types';
 
@@ -130,9 +131,9 @@ function NewTask() {
               )}
             </div>
             <FormFields inputs={workflow.inputs} value={form} onChange={setForm} missing={missing} />
-            {workflow.inputs.some((i) => i.type === 'file-set') && (
+            {inputsFor(workflow.inputs, workflow.currentizes).some((i) => i.type === 'file-set') && (
               <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2 text-[14px] text-slate-600">
-                {workflow.inputs.filter((i) => i.type === 'file-set').map((i) => i.label).join('·')} 파일은 작업을 저장한 뒤 작업실에서 올립니다.
+                {inputsFor(workflow.inputs, workflow.currentizes).filter((i) => i.type === 'file-set').map((i) => i.label).join('·')} 파일은 작업을 저장한 뒤 작업실에서 올립니다.
               </p>
             )}
           </Card>

@@ -133,12 +133,17 @@ export interface SourceExtract extends ComposeSource {
   truncated: boolean;
 }
 
-/** 읽힌 원자료(글·표) — 지금 작업의 것만. gzip 머리(1f 8b)가 없으면 평문 JSON으로 읽는다 */
-export async function loadSourceExtracts(ctx: WorkContext, task: WorkTaskRow): Promise<SourceExtract[]> {
+/**
+ * 읽힌 원자료(글·표) — 지금 작업의 것만. gzip 머리(1f 8b)가 없으면 평문 JSON으로 읽는다.
+ * **작년 파일(purpose 'prior')은 기본으로 뺀다** — 현행화(runs/currentize-op.ts)만 작년 파일을 쓰고 그것도 원본 바이트를 따로 읽는다(loadPriorFile).
+ * 빼지 않으면 양식 채우기·항목 뽑기·질문 답변·규정 확인이 작년 문서를 올해 근거처럼 읽는다. 꼭 필요하면 includePrior
+ */
+export async function loadSourceExtracts(ctx: WorkContext, task: WorkTaskRow, opts: { includePrior?: boolean } = {}): Promise<SourceExtract[]> {
   const list = await ctx.store.listSources(task.id, task.organization_id);
   const out: SourceExtract[] = [];
   for (const s of list) {
     if (s.status !== 'ready' || !s.extract_path || s.task_id !== task.id) continue;
+    if (s.purpose === 'prior' && !opts.includePrior) continue;
     const raw = await ctx.files.get(s.extract_path);
     if (!raw) throw new WorkError('STORAGE_FAILED', '원자료를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     try {
@@ -162,9 +167,9 @@ export async function loadSourceExtracts(ctx: WorkContext, task: WorkTaskRow): P
   return out;
 }
 
-/** 생성에 넣을 원자료 글 */
-export async function loadSourceTexts(ctx: WorkContext, task: WorkTaskRow): Promise<ComposeSource[]> {
-  return (await loadSourceExtracts(ctx, task)).map((s) => ({ id: s.id, name: s.name, text: s.text }));
+/** 생성에 넣을 원자료 글 — 작년 파일은 기본으로 뺀다(loadSourceExtracts) */
+export async function loadSourceTexts(ctx: WorkContext, task: WorkTaskRow, opts: { includePrior?: boolean } = {}): Promise<ComposeSource[]> {
+  return (await loadSourceExtracts(ctx, task, opts)).map((s) => ({ id: s.id, name: s.name, text: s.text }));
 }
 
 export function sourceDto(s: WorkSourceRow) {

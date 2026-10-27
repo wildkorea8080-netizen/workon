@@ -19,6 +19,7 @@ import ItemsView from './ItemsView';
 import SettlementView from './SettlementView';
 import QaView from './QaView';
 import { satisfiesFileSet, uploadPurposeOf } from '@/lib/work/file-sets';
+import { inputsFor } from './file-set-helpers';
 import { MAX_PRIOR_BYTES } from '@/lib/work/workflows/currentize/limits';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
@@ -132,12 +133,12 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
     await refresh();
   }
 
-  // 현행화 '대조' 보기 — 변경 하나에 올해 글. 기준 판과 함께 보내 다른 화면이 먼저 고쳤으면 덮어쓰지 않는다(409)
-  async function editChange(changeId: string, after: string) {
+  // 현행화 '대조' 보기 — 변경 하나에 올해 글, 또는 확인 필요를 '확인함'으로. 기준 판과 함께 보내 다른 화면이 먼저 고쳤으면 덮어쓰지 않는다(409)
+  async function editChange(changeId: string, input: { after: string } | { acknowledge: true }) {
     if (!version) return;
     const r = await api<{ version: { version: number } | null; run: RunDto | null; unchanged: boolean }>(`/api/work/tasks/${taskId}/currentize`, {
       method: 'PATCH',
-      json: { baseVersion: version.version, changeId, after },
+      json: { baseVersion: version.version, changeId, ...input },
     });
     if (!r.ok) return setError(r.error.message);
     setError(null);
@@ -234,7 +235,14 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
               {version.items && <ItemsView data={version.items} />}
               {version.settlement && <SettlementView data={version.settlement} />}
               {version.qa && <QaView data={version.qa} />}
-              {version.currentize && <CurrentizeView key={version.id} content={version.currentize} canEdit={task.access.edit} busy={busy} onEdit={editChange} />}
+              {version.currentize && <CurrentizeView
+                  key={version.id}
+                  content={version.currentize}
+                  canEdit={task.access.edit}
+                  busy={busy}
+                  onEdit={(id, after) => editChange(id, { after })}
+                  onAcknowledge={(id) => editChange(id, { acknowledge: true })}
+                />}
               {version.fields.length > 0 && <FieldEditor
                 key={version.id}
                 detail={detail}
@@ -719,7 +727,8 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
   const [stage, setStage] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const fileSets = detail.workflow.inputs.filter((i) => i.type === 'file-set');
+  // 현행화하지 않는 업무는 '작년 파일'을 고를 수 없다(올려도 실행기가 읽지 않는다)
+  const fileSets = inputsFor(detail.workflow.inputs, detail.workflow.currentizes).filter((i) => i.type === 'file-set');
   const [setKey, setSetKey] = useState(fileSets[0]?.key ?? '');
   const purpose = uploadPurposeOf(setKey);
   const [picking, setPicking] = useState<{ id: string; label: string }[] | null>(null);

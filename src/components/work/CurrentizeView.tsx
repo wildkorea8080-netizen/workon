@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Card } from './WorkShell';
 import type { CurrentizeChangeDto, CurrentizeDto } from './types';
-import { FILTERS, canSave, citationFor, countByStatus, draftFor, editableChange, filterChanges, kindLabel, statusLabel, type ChangeFilter } from './currentize-view-helpers';
+import { FILTERS, canAcknowledge, canSave, citationFor, countByStatus, draftFor, editableChange, filterChanges, kindLabel, statusLabel, type ChangeFilter } from './currentize-view-helpers';
 
 const STATUS_TONE: Record<CurrentizeChangeDto['status'], string> = {
   changed: 'bg-emerald-50 text-emerald-800 border-emerald-200',
@@ -16,7 +16,9 @@ const CITATION_STATUS: Record<string, string> = { same: '같음', changed: '바�
  * 현행화 '대조' 보기 — 변경마다 작년 글(왼쪽)과 올해 글(오른쪽). 확인 필요에는 올해 글을 넣고, 제안은 받아들이고, 바꿈은 고친다.
  * 저장하면 새 판이 생기고 그 판의 HWPX·변경 내역표를 다시 만든다(파일에 들어가는 것은 '바꿈'뿐).
  */
-export default function CurrentizeView({ content, canEdit, busy, onEdit }: { content: CurrentizeDto; canEdit: boolean; busy: boolean; onEdit: (changeId: string, after: string) => Promise<void> }) {
+type Handlers = { onEdit: (changeId: string, after: string) => Promise<void>; onAcknowledge: (changeId: string) => Promise<void> };
+
+export default function CurrentizeView({ content, canEdit, busy, onEdit, onAcknowledge }: { content: CurrentizeDto; canEdit: boolean; busy: boolean } & Handlers) {
   const [filter, setFilter] = useState<ChangeFilter>(() => (content.changes.some((c) => c.status === 'needs_check') ? 'needs_check' : 'all'));
   const counts = countByStatus(content.changes);
   const shown = filterChanges(content.changes, filter);
@@ -27,7 +29,8 @@ export default function CurrentizeView({ content, canEdit, busy, onEdit }: { con
         대조 — {content.fromYear}년 → {content.toYear}년
       </h2>
       <p className="mt-1 text-[13px] text-slate-600">
-        파일에는 &lsquo;바꿈&rsquo;만 들어갔습니다. &lsquo;확인 필요&rsquo;는 올해 글을 넣고, &lsquo;제안&rsquo;은 맞으면 그대로 저장해 받아들이세요. 저장할 때마다 새 판과 파일을 만듭니다.
+        파일에는 &lsquo;바꿈&rsquo;만 들어갔습니다. &lsquo;확인 필요&rsquo;는 올해 글을 넣거나, 그대로 두어도 되면 &lsquo;확인함&rsquo;을 누르세요 — 확인 필요가 남아 있으면 검토를 마칠 수 없습니다.
+        &lsquo;제안&rsquo;은 맞으면 그대로 저장해 받아들이세요. 저장할 때마다 새 판과 파일을 만듭니다.
       </p>
       {(content.costStopped || content.truncated) && (
         <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-800">
@@ -56,7 +59,7 @@ export default function CurrentizeView({ content, canEdit, busy, onEdit }: { con
       ) : (
         <ol className="mt-3 space-y-3">
           {shown.map((c) => (
-            <ChangeCard key={c.id} change={c} content={content} canEdit={canEdit} busy={busy} onEdit={onEdit} />
+            <ChangeCard key={c.id} change={c} content={content} canEdit={canEdit} busy={busy} onEdit={onEdit} onAcknowledge={onAcknowledge} />
           ))}
         </ol>
       )}
@@ -64,7 +67,7 @@ export default function CurrentizeView({ content, canEdit, busy, onEdit }: { con
   );
 }
 
-function ChangeCard({ change, content, canEdit, busy, onEdit }: { change: CurrentizeChangeDto; content: CurrentizeDto; canEdit: boolean; busy: boolean; onEdit: (changeId: string, after: string) => Promise<void> }) {
+function ChangeCard({ change, content, canEdit, busy, onEdit, onAcknowledge }: { change: CurrentizeChangeDto; content: CurrentizeDto; canEdit: boolean; busy: boolean } & Handlers) {
   const [draft, setDraft] = useState(() => draftFor(change, content.changes));
   const [saving, setSaving] = useState(false);
   const editable = editableChange(change);
@@ -74,6 +77,14 @@ function ChangeCard({ change, content, canEdit, busy, onEdit }: { change: Curren
     setSaving(true);
     try {
       await onEdit(change.id, draft);
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function acknowledge() {
+    setSaving(true);
+    try {
+      await onAcknowledge(change.id);
     } finally {
       setSaving(false);
     }
@@ -142,14 +153,28 @@ function ChangeCard({ change, content, canEdit, busy, onEdit }: { change: Curren
         </details>
       )}
 
-      {canEdit && editable.ok && (
-        <button
-          onClick={save}
-          disabled={busy || saving || !canSave(change, draft)}
-          className="mt-2 rounded-[10px] bg-[#003087] px-4 py-2 text-[14px] font-semibold text-white disabled:bg-slate-300"
-        >
-          {saving ? '저장 중…' : change.status === 'proposed' ? '이 글로 받아들이기' : '올해 글 저장'}
-        </button>
+      {canEdit && (editable.ok || canAcknowledge(change)) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {editable.ok && (
+            <button
+              onClick={save}
+              disabled={busy || saving || !canSave(change, draft)}
+              className="rounded-[10px] bg-[#003087] px-4 py-2 text-[14px] font-semibold text-white disabled:bg-slate-300"
+            >
+              {saving ? '저장 중…' : change.status === 'proposed' ? '이 글로 받아들이기' : '올해 글 저장'}
+            </button>
+          )}
+          {canAcknowledge(change) && (
+            <button
+              onClick={acknowledge}
+              disabled={busy || saving}
+              title="작년 글 그대로 두어도 된다고 확인했습니다 — 파일은 바뀌지 않습니다"
+              className="rounded-[10px] border border-[#DCE3EC] bg-white px-4 py-2 text-[14px] font-semibold text-slate-700 hover:border-[#003087] disabled:text-slate-300"
+            >
+              확인함
+            </button>
+          )}
+        </div>
       )}
     </li>
   );
