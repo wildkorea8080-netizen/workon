@@ -333,4 +333,33 @@ describe('compareCitations', () => {
     const [p2] = await compareCitations([cite('s1', seg2, 'A규정', '제1조')], fakes([art]), scope, BASIS);
     expect(p2.cited.text).toBe('예산을 편성한다');
   });
+
+  // ── 항·호·목 인용 ──
+  it('제64조제1항에 따라 — 항 번호를 떼고 맞댄다(조문 글은 항을 ①로 매긴다)', async () => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(예산) ① 지방공기업은 예산을 편성한다.' });
+    const seg = '「지방공기업법」 제64조제1항에 따라 예산을 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('same');
+  });
+
+  it('제64조 제2호의 기준 — 호 번호는 낱말로 세지 않는다', async () => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(기준) 기준을 정한다.' });
+    const seg = '「지방공기업법」 제64조 제2호의 기준';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('same');
+  });
+
+  it('항 번호를 떼도 실제 수치(70%)가 조문에 없으면 여전히 바뀜', async () => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(예산) ① 지방공기업은 예산을 편성한다.' });
+    const seg = '「지방공기업법」 제64조제1항에 따라 예산의 70%를 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('changed');
+  });
+
+  it('『 에서도 창을 끊는다', async () => {
+    const art = lawEvidence({ title: 'A규정', text: '제1조(총칙) 예산을 편성한다.' });
+    const seg = '「A규정」 제1조 및 『B지침』 결산';
+    const [pair] = await compareCitations([cite('s1', seg, 'A규정', '제1조')], fakes([art]), scope, BASIS);
+    expect(pair.cited.text).toBe('및');
+  });
 });

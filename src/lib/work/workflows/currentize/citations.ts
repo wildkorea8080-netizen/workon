@@ -33,6 +33,14 @@ const ALL_REQUIRED_MAX = 3;
 const SAME_RATIO = 0.7;
 
 /**
+ * 조문 번호 바로 뒤의 항·호·목 인용('제64조제1항', '제2호의2'). 조문 글은 항을 ①②로 매겨 '제1항'이 글에 없으므로
+ * 연결 표현보다 먼저 뗀다(안 떼면 숫자가 든 낱말이라 늘 바뀜으로 보인다)
+ */
+const LEADING_SUBCLAUSES = /^(?:\s*제\d+(?:항|호|목)(?:의\d+)?)+/;
+/** 항·호·목 번호 낱말 — 숫자가 있어도 꼭 맞아야 하는 수치로 세지 않는다(비율에는 다른 낱말처럼 든다) */
+const REFERENCE_TOKEN = /^제\d+(?:조|항|호|목)(?:의\d+)?$/;
+
+/**
  * 조문 번호 바로 뒤에 붙는 연결 표현('제64조에 따라', '제3조의 규정에 의하여', '제5조에서 정한', '제2조상의').
  * 작년 문장의 내용은 이 뒤부터이고, 연결 표현은 법 본문에 없으므로 대조 전에 뗀다. 연결 표현 뒤의 쉼표도 함께 뗀다.
  */
@@ -111,7 +119,7 @@ function resolveArticle(e: RawEvidence, article: string | null): Resolved | null
  */
 function citedWindow(input: CitationInput): string {
   const w = input.segmentText.slice(input.finding.end, input.finding.end + WINDOW_CHARS);
-  const cut = w.search(/「|[.。](?=\s|$)/);
+  const cut = w.search(/[「『]|[.。](?=\s|$)/);
   return (cut >= 0 ? w.slice(0, cut) : w).trim();
 }
 
@@ -165,11 +173,11 @@ export async function compareCitations(
     const current = { kind: r.kind, title: r.title, article: r.article, text: r.text.slice(0, EVIDENCE_TEXT_MAX), enforced: r.enforced };
     // 연결 표현을 뗀 인용 뒤 문장의 내용 낱말이 현재 조문 글에 얼마나 있는가.
     // 낱말은 조문 글에 들어 있기만 하면 된다('편성' ↔ '편성하여' — 어미가 달라진 것은 바뀜이 아니다)
-    const tokens = contentTokens(window.replace(LEADING_CONNECTOR, ''));
+    const tokens = contentTokens(window.replace(LEADING_SUBCLAUSES, '').trim().replace(LEADING_CONNECTOR, ''));
     const hay = r.text.normalize('NFC');
     const found = tokens.filter((t) => hay.includes(t)).length;
     // 숫자가 든 낱말(70, 3년)은 하나라도 조문에 없으면 바뀜 — 다른 낱말이 맞아 비율을 채워도 바뀐 수치를 덮지 못하게 한다
-    const numbersHeld = tokens.filter((t) => /\d/.test(t)).every((t) => hay.includes(t));
+    const numbersHeld = tokens.filter((t) => /\d/.test(t) && !REFERENCE_TOKEN.test(t)).every((t) => hay.includes(t));
     // 대조할 내용이 없으면 반박할 것도 없다(같음). 적으면 전부, 많으면 70% 이상
     const same = numbersHeld && (tokens.length === 0 || (tokens.length <= ALL_REQUIRED_MAX ? found === tokens.length : found / tokens.length >= SAME_RATIO));
     return { segmentId: input.segmentId, cited, current, status: same ? 'same' : 'changed' };
