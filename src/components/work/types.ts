@@ -96,10 +96,10 @@ export interface CollectionResultDto {
 
 export interface TaskDetailDto {
   task: TaskDto;
-  kind: 'document' | 'collection' | 'regulations' | 'items';
+  kind: 'document' | 'collection' | 'regulations' | 'items' | 'settlement' | 'qa';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];
@@ -143,4 +143,16 @@ export interface ItemsDto {
   items: { id: string; type: string; values: Record<string, string>; sourceName: string | null; quote: string; flags: string[]; notes: string[] }[];
   meta: Record<string, string>;
   extra: { label: string; values: Record<string, string> }[] | null;
+}
+
+export interface SettlementDto {
+  transactions: { id: string; date: string | null; item: string; desc: string; vendor: string; amount: number; evidenceNo: string; evidenceId: string | null; flags: string[] }[];
+  evidence: { id: string; date: string | null; vendor: string; amount: number | null; evidenceNo: string; ocr: boolean; transactionIds: string[]; flags: string[] }[];
+  budget: { item: string; budget: number | null; executed: number; balance: number | null }[];
+  totals: { budget: number | null; executed: number; balance: number | null; evidenced: number; unevidenced: number };
+}
+
+export interface QaDto {
+  kind: 'reply' | 'audit';
+  pairs: { id: string; question: string; quote: string; sourceName: string | null; answer: string; evidence: { id: string; label: string }[]; priorDiffs: { label: string; current: string; prior: string; reason: string }[]; flags: string[] }[];
 }

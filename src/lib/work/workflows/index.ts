@@ -14,9 +14,10 @@ export interface WorkflowImpl {
   /**
    * document = 양식 칸 채우기(HWPX), collection = 표 취합(XLSX, 숫자는 프로그램이 냄),
    * regulations = 근거를 찾아 검토 메모(HWPX — 양식 칸이지만 근거 모으기·유보 판정을 거친다),
-   * items = 원자료에서 항목(요청사항·결정·미결 과제)을 원문 인용과 함께 뽑아 처리표(XLSX)·양식(HWPX)으로(workflows/items)
+   * items = 원자료에서 항목(요청사항·결정·미결 과제)을 원문 인용과 함께 뽑아 처리표(XLSX)·양식(HWPX)으로(workflows/items),
+   * settlement = 예산·집행·증빙 대사(프로그램 계산, workflows/settlement), qa = 질문별 답변(회신·감사, workflows/qa)
    */
-  kind: 'document' | 'collection' | 'regulations' | 'items';
+  kind: 'document' | 'collection' | 'regulations' | 'items' | 'settlement' | 'qa';
   /** 기관 양식이 없을 때 쓰는 WORKON 표준 양식(취합은 없음) */
   defaultTemplateRef: string | null;
   /** 비면 '검토 완료'를 막는 칸(양식 자리 이름) */
@@ -130,6 +131,42 @@ const handover: WorkflowImpl = {
   prefill: () => ({}),
 };
 
+/** 예산·정산 대사 — 승인 예산·집행 내역·증빙을 프로그램이 맞춰 대사표 XLSX. 비용 인정·지급은 하지 않는다 */
+const settlement: WorkflowImpl = {
+  key: 'settlement',
+  kind: 'settlement',
+  defaultTemplateRef: null,
+  requiredFieldLabels: [],
+  documentOutputKey: 'reconciliation',
+  outputs: [{ key: 'reconciliation', format: 'xlsx' }],
+  humanOnlyLabels: [],
+  prefill: () => ({}),
+};
+
+/** 민원·문의 회신 — 담당자가 확인한 사실·근거로 질문별 회신 초안(HWPX). 처분·자격·발송은 하지 않는다 */
+const reply: WorkflowImpl = {
+  key: 'reply',
+  kind: 'qa',
+  defaultTemplateRef: 'builtin:reply',
+  requiredFieldLabels: ['제목', '답변'],
+  documentOutputKey: 'reply',
+  outputs: [{ key: 'reply', format: 'hwpx' }],
+  humanOnlyLabels: ['연락처'],
+  prefill: () => ({}),
+};
+
+/** 감사·평가 요구자료 — 요구 항목별 답변(HWPX) + 증빙목록·수치 대조(XLSX) */
+const auditResponse: WorkflowImpl = {
+  key: 'audit-response',
+  kind: 'qa',
+  defaultTemplateRef: 'builtin:audit_response',
+  requiredFieldLabels: ['제목', '요구 항목별 답변'],
+  documentOutputKey: 'response',
+  outputs: [{ key: 'response', format: 'hwpx' }, { key: 'evidenceIndex', format: 'xlsx' }],
+  humanOnlyLabels: [],
+  prefill: () => ({}),
+};
+
 const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
   'official-letter': officialLetter,
   collection,
@@ -138,6 +175,9 @@ const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
   intake,
   meeting,
   handover,
+  settlement,
+  reply,
+  'audit-response': auditResponse,
 };
 
 /** 만들 결과 파일 키 — 주 결과가 먼저 */

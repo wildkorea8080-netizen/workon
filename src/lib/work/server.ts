@@ -13,6 +13,7 @@ import { getRenderer } from './documents/renderer';
 import { defaultRegulationProviders } from './workflows/regulations/providers';
 import { llmRegulationModel, mockRegulationModel } from './workflows/regulations/model';
 import { llmItemsModel, mockItemsModel } from './workflows/items/model';
+import { llmQaModel, mockQaModel } from './workflows/qa/model';
 import type { WorkContext } from './context';
 import { WorkError, type WorkActor } from './types';
 
@@ -29,6 +30,7 @@ export function defaultWorkContext(): WorkContext {
     renderer: getRenderer(),
     regulations: { providers: defaultRegulationProviders, model: WORK_GENERATOR === 'mock' ? mockRegulationModel : llmRegulationModel },
     items: { model: WORK_GENERATOR === 'mock' ? mockItemsModel : llmItemsModel },
+    qa: { model: WORK_GENERATOR === 'mock' ? mockQaModel : llmQaModel },
     resolveModel: (departmentId) => resolveModelForDepartment(departmentId),
     async checkLimit(departmentId, userId) {
       const s = await checkTokenLimit(departmentId, userId);

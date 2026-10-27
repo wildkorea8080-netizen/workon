@@ -11,7 +11,7 @@ import { WorkError, type DocumentField } from '../types';
  */
 
 /** 여러 문단이 들어가는 자리로 보는 이름(그 밖은 한 줄 글) */
-const PARAGRAPH_LABELS = /본문|내용|개요|경과|계획|사항|안건|결정|논의|검토|의견|요지|배경|현황|목적|붙임|근거|유보/;
+const PARAGRAPH_LABELS = /본문|내용|개요|경과|계획|사항|안건|결정|논의|검토|의견|요지|배경|현황|목적|붙임|근거|유보|답변|필요|목록|일정|과제|업무|자료|조치/;
 
 export function fieldsFromSlots(slots: Slot[], requiredLabels: readonly string[] = []): DocumentField[] {
   return slots.map((s) => ({

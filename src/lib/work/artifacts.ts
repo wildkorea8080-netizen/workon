@@ -14,7 +14,10 @@ import { buildCollectionWorkbook } from './workflows/collection/workbook';
 import type { CollectionResult } from './workflows/collection/aggregate';
 import { buildItemsWorkbook } from './workflows/items/workbook';
 import { ITEMS_WORKFLOWS, type ItemsWorkflowKey } from './workflows/items/specs';
-import type { ItemsContent } from './runs/executor';
+import type { ItemsContent, QaContent } from './runs/executor';
+import { buildSettlementWorkbook } from './workflows/settlement/workbook';
+import type { SettlementResult } from './workflows/settlement/reconcile';
+import { buildAuditIndexWorkbook } from './workflows/qa/output';
 import { createHash } from 'crypto';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -57,6 +60,28 @@ async function buildItemsFile(task: WorkTaskRow, content: Record<string, unknown
   return { bytes, format: 'xlsx', mimeType: XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
 }
 
+async function xlsxResult(bytes: Buffer, values: string[]): Promise<BuiltFile> {
+  const check = await checkPackage(bytes, { format: 'xlsx', values });
+  if (!check.valid) throw new WorkError('OUTPUT_INVALID', `만든 엑셀이 검사를 통과하지 못했습니다: ${check.problems.slice(0, 3).join('; ')}`, 422);
+  return { bytes, format: 'xlsx', mimeType: XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
+}
+
+/** 대사 판(content.settlement) → 대사표 엑셀. 숫자는 판에 저장된 대사 결과 그대로 */
+async function buildSettlementFile(task: WorkTaskRow, content: Record<string, unknown> | null): Promise<BuiltFile> {
+  const r = (content?.settlement ?? null) as SettlementResult | null;
+  if (!r || r.schema !== 'settlement/1') throw new WorkError('OUTPUT_INVALID', '이 판에는 대사 결과가 없습니다.', 422);
+  const bytes = await buildSettlementWorkbook({ title: task.title, period: String(task.form.period ?? ''), result: r, createdAt: new Date() });
+  return xlsxResult(bytes, r.transactions.slice(0, 3).map((x) => x.id));
+}
+
+/** 감사 판(content.qa) → 증빙목록·수치 대조 엑셀 */
+async function buildAuditIndexFile(task: WorkTaskRow, content: Record<string, unknown> | null): Promise<BuiltFile> {
+  const c = (content?.qa ?? null) as QaContent | null;
+  if (!c || c.schema !== 'qa/1') throw new WorkError('OUTPUT_INVALID', '이 판에는 답변 결과가 없습니다.', 422);
+  const bytes = await buildAuditIndexWorkbook({ title: task.title, result: c.result, review: c.review, createdAt: new Date(), testMode: c.mode === 'mock' });
+  return xlsxResult(bytes, c.result.pairs.slice(0, 3).map((p) => p.id));
+}
+
 /**
  * 판 → 실제 결과 파일. 파일은 그 판에서 만든 불변 결과다(같은 판·같은 키는 한 벌).
  *
@@ -76,6 +101,10 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
     gen = await buildCollectionFile(task, v.content);
   } else if (impl?.kind === 'items' && format === 'xlsx') {
     gen = await buildItemsFile(task, v.content);
+  } else if (impl?.kind === 'settlement') {
+    gen = await buildSettlementFile(task, v.content);
+  } else if (impl?.kind === 'qa' && format === 'xlsx') {
+    gen = await buildAuditIndexFile(task, v.content);
   } else {
     if (!v.template_version_id) throw new WorkError('TEMPLATE_MISSING', '이 판에는 양식이 없습니다.', 422);
     const tv = await ctx.store.getTemplateVersion(v.template_version_id, task.organization_id);

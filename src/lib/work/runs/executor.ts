@@ -20,6 +20,9 @@ import { settleFindings, memoFieldValues, kstDate, type RegulationDraft, type Re
 import type { RegulationPlan } from '../workflows/regulations/model';
 import { verifyItems, verifyMeta, type ExtractedItem, type VerifySource } from '../workflows/items/verify';
 import { ITEMS_WORKFLOWS, departmentCandidates, flagReviewItems, type ItemsWorkflowKey } from '../workflows/items/specs';
+import { reconcile, type SettlementResult } from '../workflows/settlement/reconcile';
+import { factLines, qaReviewItems, verifyQa, type QaResult } from '../workflows/qa/verify';
+import { auditFieldValues, replyFieldValues } from '../workflows/qa/output';
 
 /**
  * 실행 하나를 끝까지 처리한다 — 작업자(runs/worker.ts)가 lease를 잡은 실행만 넘긴다.
@@ -498,8 +501,135 @@ async function opGenerateItems(ctx: WorkContext, run: WorkRunRow, task: WorkTask
   return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, review, mode, items: items.length };
 }
 
+/**
+ * 예산·정산 대사 — 모델을 부르지 않는다. 원자료 표·글 → 대사(프로그램) → 판(content.settlement) → 대사표 엑셀
+ */
+async function opGenerateSettlement(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
+  const def = definitionFor(task.workflow_key);
+  const form = checkForm(def, task.form);
+  if (form.missing.length) {
+    throw new WorkError('REQUIRED_INPUT_MISSING', `필수 입력이 비어 있습니다: ${form.missing.map((m) => m.label).join(', ')}`, 422);
+  }
+  const computed = await step('aggregate', async () => {
+    const sources = await loadSourceExtracts(ctx, task);
+    if (!sources.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다.', 422);
+    const result = reconcile({ sources: sources.map((s) => ({ id: s.id, name: s.name, purpose: s.purpose, text: s.text, tables: s.tables, warnings: s.warnings })), period: String(form.values.period ?? '') });
+    return { result, sourceIds: sources.map((s) => s.id) } as unknown as Record<string, unknown>;
+  });
+  const result = computed.result as SettlementResult;
+  const saved = await step('save_version', async () => {
+    const existing = await ctx.store.getVersionByRun(task.id, run.id);
+    if (existing) return { versionId: existing.id, version: existing.version };
+    const v = await ctx.store.saveVersion({
+      taskId: task.id,
+      organizationId: task.organization_id,
+      baseVersion: run.base_version,
+      fields: [],
+      content: { settlement: result },
+      templateVersionId: null,
+      origin: 'generate',
+      reason: '예산·집행·증빙 대사',
+      actorId: run.requested_by,
+      runId: run.id,
+      sourceIds: computed.sourceIds as string[],
+    });
+    return { versionId: v.id, version: v.version };
+  });
+  await step('review', async () => {
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, saved.versionId, result.review.map((r) => ({ ...r, field_ids: [] })));
+    return { count: result.review.length };
+  });
+  const file = await step('file', () => buildFileStep(ctx, run, task, saved.versionId));
+  await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
+  return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, transactions: result.transactions.length };
+}
+
+/** 질문별 답변 판(content.qa) */
+export interface QaContent {
+  schema: 'qa/1';
+  result: QaResult;
+  review: NewReviewItem[];
+  mode: 'llm' | 'mock';
+}
+
+/**
+ * 민원·문의 회신 / 감사·평가 요구자료 — 질문 나누기·답(모델, 근거 번호) → 검사(프로그램: 누락·근거 없음·약속·다른 사람 정보·
+ * 연도 혼합·과거 수치 차이) → 양식 칸 → 판 → HWPX(+ 감사 증빙목록 XLSX)
+ */
+async function opGenerateQa(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
+  if (!ctx.qa) throw new WorkError('WORKFLOW_NOT_READY', '이 업무는 아직 준비 중입니다.', 409);
+  const impl = getWorkflowImpl(task.workflow_key)!;
+  const def = definitionFor(task.workflow_key);
+  const kind = task.workflow_key === 'reply' ? 'reply' : 'audit';
+  const p = await step('prepare', () => prepareFields(ctx, task));
+  const form = checkForm(def, task.form);
+  const extracts = (await loadSourceExtracts(ctx, task)).map((s) => ({ id: s.id, name: s.name, text: s.text, purpose: s.purpose }));
+  const inquiryText = typeof form.values.inquiry === 'string' ? form.values.inquiry : '';
+  const questionSources = kind === 'reply' ? [{ id: 'inquiry', name: '문의 내용', text: inquiryText }] : extracts.filter((s) => s.purpose === 'request');
+  const evidenceSources = kind === 'reply' ? extracts.filter((s) => s.purpose !== 'template') : extracts.filter((s) => s.purpose === 'evidence');
+  const priorSources = kind === 'audit' ? extracts.filter((s) => s.purpose === 'reference') : [];
+  const facts = factLines(typeof form.values.confirmedFacts === 'string' ? form.values.confirmedFacts : '');
+  const definitions = Array.isArray(form.values.indicatorDefinitions) ? (form.values.indicatorDefinitions as { name: string }[]).map((d) => d.name).filter(Boolean) : [];
+  if (!questionSources.length || !questionSources.some((s) => s.text.trim())) throw new WorkError('REQUIRED_INPUT_MISSING', kind === 'reply' ? '문의 내용이 비어 있습니다.' : '요구서를 올려 주세요.', 422);
+
+  const answered = await step('compose', async () => {
+    const model = await ctx.resolveModel(task.department_id);
+    const r = await ctx.qa!.model.answer({ kind, title: task.title, questionSources, evidenceSources, priorSources, facts, definitions }, { model });
+    await writeModelUsage(ctx, run, task, r.usage, 'answer');
+    return { raw: r.raw, mode: r.mode } as unknown as Record<string, unknown>;
+  });
+  const mode = answered.mode as 'llm' | 'mock';
+  const result = verifyQa(answered.raw as never, { kind, questionSources, evidenceSources, priorSources, facts, inquiryText, definitionsText: definitions.join('\n') });
+  const saved = await step('save_version', async () => {
+    const existing = await ctx.store.getVersionByRun(task.id, run.id);
+    if (existing) return { versionId: existing.id, version: existing.version };
+    const values =
+      kind === 'reply'
+        ? replyFieldValues(result, { title: task.title, recipient: String(form.values.recipient ?? ''), today: kstDate(ctx.now()), departmentName: await ctx.store.getDepartmentName(task.department_id, task.organization_id) })
+        : auditFieldValues(result, { title: task.title, organizationName: await ctx.store.getOrganizationName(task.organization_id), definitions });
+    const aiLabels = new Set(['답변', '요구 항목별 답변']);
+    const byId = (labels: (l: string) => boolean) => Object.fromEntries(p.fields.filter((f) => values[f.label] !== undefined && labels(f.label)).map((f) => [f.id, { value: values[f.label] }]));
+    let fields = mergeGenerated(p.fields, byId((l) => !aiLabels.has(l)), { origin: 'system' }).fields;
+    fields = mergeGenerated(fields, byId((l) => aiLabels.has(l)), { origin: 'ai' }).fields;
+    const content: QaContent = { schema: 'qa/1', result, review: qaReviewItems(result), mode };
+    const v = await ctx.store.saveVersion({
+      taskId: task.id,
+      organizationId: task.organization_id,
+      baseVersion: run.base_version,
+      fields,
+      content: { qa: content },
+      templateVersionId: p.templateVersionId,
+      origin: 'generate',
+      reason: mode === 'mock' ? '시험 모드로 질문별 답변' : '질문별 답변',
+      actorId: run.requested_by,
+      runId: run.id,
+      sourceIds: extracts.map((s) => s.id),
+    });
+    return { versionId: v.id, version: v.version };
+  });
+  const review = await step('review', async () => {
+    const v = (await ctx.store.getVersion(saved.versionId, task.organization_id))!;
+    const content = (v.content as { qa?: QaContent } | null)?.qa;
+    const vf = normalizeStoredFields(v.fields);
+    const general = computeReviewItems({
+      fields: vf,
+      missing: vf.filter((f) => impl.humanOnlyLabels.includes(f.label) && !f.value.trim()).map((f) => ({ fieldId: f.id, reason: '직원이 정하는 칸입니다(AI가 채우지 않음).' })),
+      knownText: [inquiryText, ...facts.map((f) => f.text), ...evidenceSources.map((s) => s.text), ...questionSources.map((s) => s.text), ...definitions].join('\n'),
+      testMode: mode === 'mock',
+    });
+    const all = [...general, ...(content?.review ?? [])];
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, all);
+    return { blocking: all.filter((i) => i.severity === 'blocking').length, warning: all.filter((i) => i.severity === 'warning').length };
+  });
+  const file = await step('file', () => buildFileStep(ctx, run, task, saved.versionId));
+  await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
+  return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, review, mode, questions: result.pairs.length };
+}
+
 async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
   const kind = getWorkflowImpl(task.workflow_key)?.kind;
+  if (kind === 'settlement') return opGenerateSettlement(ctx, run, task, step);
+  if (kind === 'qa') return opGenerateQa(ctx, run, task, step);
   if (kind === 'items') return opGenerateItems(ctx, run, task, step);
   if (kind === 'collection') return opGenerateCollection(ctx, run, task, step);
   if (kind === 'regulations') return opGenerateRegulations(ctx, run, task, step);
@@ -562,6 +692,11 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
   if (!v || v.task_id !== task.id) throw new WorkError('NOT_FOUND', '판을 찾을 수 없습니다.', 404);
   await step('review', async () => {
     const result = (v.content as { result?: CollectionResult } | null)?.result;
+    const settled = (v.content as { settlement?: SettlementResult } | null)?.settlement;
+    if (settled?.schema === 'settlement/1') {
+      await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, settled.review.map((r) => ({ ...r, field_ids: [] })));
+      return { count: settled.review.length };
+    }
     if (result?.schema === 'collection/1') {
       // 취합 판(복구 등)은 그 판에 저장된 계산 결과의 확인 사항을 그대로 다시 건다
       await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, result.review.map((r) => ({ ...r, field_ids: [] })));
@@ -571,8 +706,9 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
     // 규정 판은 그 판에 저장한 근거 판정(유보·제외·시행일 미확인)을 다시 건다 — 직원이 칸을 고쳐도 근거가 바뀐 것은 아니다
     const reg = (v.content as { regulations?: RegulationContent } | null)?.regulations;
     const itemsContent = (v.content as { items?: ItemsContent } | null)?.items;
+    const qaContent = (v.content as { qa?: QaContent } | null)?.qa;
     // 직접 수정한 판은 AI 숫자 대조 대상이 아니다(직원 글) — 필수 칸·자리 표시만 다시 본다
-    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, [...items.filter((i) => i.code !== 'UNVERIFIED_NUMBER'), ...(reg?.review ?? []), ...(itemsContent?.review ?? [])]);
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, [...items.filter((i) => i.code !== 'UNVERIFIED_NUMBER'), ...(reg?.review ?? []), ...(itemsContent?.review ?? []), ...(qaContent?.review ?? [])]);
     return { count: items.length };
   });
   const file = await step('file', () => buildFileStep(ctx, run, task, v.id));

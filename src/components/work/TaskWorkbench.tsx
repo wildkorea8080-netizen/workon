@@ -16,6 +16,9 @@ import {
 } from '@/lib/work/client';
 import { Card, ErrorNote, StatusBadge, statusTone } from './WorkShell';
 import ItemsView from './ItemsView';
+import SettlementView from './SettlementView';
+import QaView from './QaView';
+import { satisfiesFileSet, uploadPurposeOf } from '@/lib/work/file-sets';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
 import type { ArtifactDto, FieldDto, RegulationEvidenceDto, RegulationsDto, RunDto, TaskDetailDto } from './types';
@@ -209,6 +212,8 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
                 ? detail.currentArtifacts.map((a) => <PreviewCard key={a.id} artifact={a} canDownload={task.access.download} />)
                 : <PreviewCard artifact={current} canDownload={task.access.download} />}
               {version.items && <ItemsView data={version.items} />}
+              {version.settlement && <SettlementView data={version.settlement} />}
+              {version.qa && <QaView data={version.qa} />}
               {version.fields.length > 0 && <FieldEditor
                 key={version.id}
                 detail={detail}
@@ -316,6 +321,10 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
             ? '올린 원자료의 표를 부서·항목별로 더해 통합 엑셀(XLSX)을 만듭니다. 숫자는 프로그램이 계산하고, 중복·미제출·단위 차이는 확인할 사항으로 알립니다.'
             : detail.kind === 'regulations'
               ? '기관 문서·공통 기준 자료·국가법령정보·올린 추가 자료에서 근거를 찾아 근거 검토 메모(HWPX)를 만듭니다. 적용 기준일 뒤에 시행된 근거·다른 기관 자료는 빼고, 근거로 받치지 못한 판단은 유보로 적습니다. 법률적 최종 판단이 아닙니다.'
+              : detail.kind === 'settlement'
+                ? '승인 예산·집행 내역·증빙을 프로그램이 맞춰 예산·집행·증빙 대사표(XLSX)를 만듭니다. 취소·중복·분할 집행, 부가세·단위 차이, OCR로 읽은 금액, 증빙 없는 거래와 예산 잔액을 확인할 사항으로 알립니다. 비용 인정·지급은 하지 않습니다.'
+              : detail.kind === 'qa'
+                ? `질문을 나눠 담당자가 확인한 사실·근거 자료로 질문별 답을 쓰고 ${workflow.outputs.filter((o) => detail.producedOutputs.includes(o.key)).map((o) => `${o.label}(${o.format.toUpperCase()})`).join('·')}을 만듭니다. 답이 빠진 질문·근거 없는 약속·다른 사람 정보는 확인할 사항으로 알립니다.`
               : detail.kind === 'items'
                 ? `원자료에서 항목을 원문 인용과 함께 뽑아 ${workflow.outputs.filter((o) => detail.producedOutputs.includes(o.key)).map((o) => `${o.label}(${o.format.toUpperCase()})`).join('·')}을 만듭니다. 날짜·담당·화자는 원자료에 적힌 것만 옮기고, 없으면 비운 채 확인할 사항으로 알립니다.`
               : '입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.'}
@@ -326,7 +335,7 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
           disabled={!task.access.edit || busy || dirty || task.status === 'draft'}
           className="mt-4 rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300"
         >
-          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : detail.kind === 'regulations' ? '근거 찾아 메모 만들기' : detail.kind === 'items' ? `${workflow.outputs[0].label} 만들기` : 'HWPX 만들기'}
+          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : detail.kind === 'regulations' ? '근거 찾아 메모 만들기' : detail.kind === 'items' || detail.kind === 'qa' || detail.kind === 'settlement' ? `${workflow.outputs[0].label} 만들기` : 'HWPX 만들기'}
         </button>
         {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">{draftReason(detail)}</p>}
         {dirty && <p className="mt-2 text-[13px] text-amber-800">바꾼 입력을 먼저 저장해 주세요.</p>}
@@ -337,9 +346,9 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
 
 /** '만들 준비 안 됨'의 실제 이유 — 입력은 다 있는데 필수 원자료만 없을 때 '입력을 채우라'고 하지 않는다 */
 function draftReason(detail: TaskDetailDto): string {
-  const fileSet = detail.workflow.inputs.find((i) => i.type === 'file-set' && i.required);
-  const readySources = detail.sources.filter((s) => s.status === 'ready').length;
-  if (fileSet && readySources === 0) return `왼쪽 ‘원자료’ 탭에서 ${fileSet.label}을(를) 먼저 올려 주세요. 필수 입력도 모두 채웠는지 확인하세요.`;
+  const ready = detail.sources.filter((s) => s.status === 'ready');
+  const missing = detail.workflow.inputs.filter((i) => i.type === 'file-set' && i.required && !ready.some((s) => satisfiesFileSet(i.key, s.purpose)));
+  if (missing.length) return `왼쪽 ‘원자료’ 탭에서 ${missing.map((m) => m.label).join('·')}을(를) 먼저 올려 주세요. 필수 입력도 모두 채웠는지 확인하세요.`;
   return '필수 입력을 먼저 채워 저장해 주세요.';
 }
 
@@ -583,6 +592,7 @@ function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: {
   const [busy, setBusy] = useState(false);
   const keyRef = useRef<string | null>(null);
   const version = detail.version;
+  if (detail.kind === 'settlement') return <p className="text-[14px] text-slate-600">대사 숫자는 원자료에서 프로그램이 맞춥니다. 고치려면 집행 내역·증빙을 바로잡아 다시 올린 뒤 다시 만드세요.</p>;
   if (detail.kind === 'items' && !detail.version?.fields.length) return <p className="text-[14px] text-slate-600">처리표는 원자료에서 뽑은 항목 그대로입니다. 고치려면 원자료를 바로잡아 다시 만들거나, 내려받은 엑셀에서 직접 고치세요.</p>;
   if (detail.kind === 'collection') return <p className="text-[14px] text-slate-600">취합 숫자는 원자료에서 프로그램이 계산합니다. 고치려면 가운데에서 결정(중복·단위·잠정)을 바꿔 다시 취합하거나 원자료를 고쳐 다시 올리세요.</p>;
   if (!version) return <p className="text-[14px] text-slate-500">파일을 만든 뒤 고칠 수 있습니다.</p>;
@@ -679,8 +689,6 @@ function ArtifactList({ artifacts, canDownload }: { artifacts: ArtifactDto[]; ca
   );
 }
 
-/** 파일 입력(카탈로그 file-set) → 원자료 용도. 업무가 파일을 여러 갈래로 받을 때(공문·붙임 / 업무분장표) 서버가 가른다 */
-const FILE_SET_PURPOSE: Record<string, 'request' | 'reference' | 'template'> = { requestFiles: 'request', departmentMap: 'reference', baseForm: 'template' };
 
 function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; taskId: string; onChanged: () => Promise<void> }) {
   const [stage, setStage] = useState<string | null>(null);
@@ -688,7 +696,7 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
   const inputRef = useRef<HTMLInputElement>(null);
   const fileSets = detail.workflow.inputs.filter((i) => i.type === 'file-set');
   const [setKey, setSetKey] = useState(fileSets[0]?.key ?? '');
-  const purpose = FILE_SET_PURPOSE[setKey] ?? 'reference';
+  const purpose = uploadPurposeOf(setKey);
   const [picking, setPicking] = useState<{ id: string; label: string }[] | null>(null);
   async function openImport() {
     setErr(null);
@@ -722,7 +730,7 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
         {detail.sources.map((s) => (
           <li key={s.id} className="rounded border border-[#DCE3EC] p-2">
             <div className="break-all font-medium">{s.file_name}</div>
-            {fileSets.length > 1 && <div className="text-[12px] text-slate-500">{fileSets.find((f) => (FILE_SET_PURPOSE[f.key] ?? 'reference') === s.purpose)?.label ?? '자료'}</div>}
+            {fileSets.length > 1 && <div className="text-[12px] text-slate-500">{fileSets.find((f) => satisfiesFileSet(f.key, s.purpose) && uploadPurposeOf(f.key) === s.purpose)?.label ?? fileSets.find((f) => satisfiesFileSet(f.key, s.purpose))?.label ?? '자료'}</div>}
             {(s as { origin?: { type?: string } | null }).origin?.type === 'work_artifact' && <div className="text-[12px] text-[#003087]">다른 작업의 결과 파일에서 가져옴</div>}
             <div className="text-[12px] text-slate-500">
               {s.status === 'ready' ? '읽음' : s.status === 'pending' ? '확인 전' : `읽지 못함 — ${s.failure_reason ?? ''}`} · {formatBytes(s.size_bytes)}

@@ -8,7 +8,10 @@ import { checkForm } from './workflows/form';
 import { applyPatches, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
-import type { RegulationContent, ItemsContent } from './runs/executor';
+import { satisfiesFileSet } from './file-sets';
+import type { RegulationContent, ItemsContent, QaContent } from './runs/executor';
+import type { SettlementResult } from './workflows/settlement/reconcile';
+import type { QaResult } from './workflows/qa/verify';
 import { artifactDto } from './artifacts';
 import { sourceDto, copyArtifactToSource } from './sources';
 import { WorkError, type WorkActor, type WorkTaskRow, type WorkRunRow, type DocumentField } from './types';
@@ -126,7 +129,7 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
     form: form.values,
     template_version_id: tv?.id ?? null,
     due_date: dueDate,
-    status: requiredReady(def, form.missing.length, 0) ? 'ready' : 'draft',
+    status: requiredReady(def, form.missing.length, []) ? 'ready' : 'draft',
   });
   await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'task.created', details: { workflow_key: task.workflow_key } });
   return task;
@@ -138,14 +141,14 @@ export async function refreshReadiness(ctx: WorkContext, task: WorkTaskRow): Pro
   const def = definitionFor(task.workflow_key);
   const form = checkForm(def, task.form);
   const sources = await ctx.store.listSources(task.id, task.organization_id);
-  const next = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').length) ? 'ready' : 'draft';
+  const next = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').map((s) => s.purpose)) ? 'ready' : 'draft';
   if (next !== task.status) await ctx.store.setTaskStatus(task.id, task.organization_id, next);
 }
 
-/** 필수 폼 입력·필수 원자료가 다 있으면 ready */
-function requiredReady(def: ReturnType<typeof definitionFor>, missingForm: number, readySources: number): boolean {
-  const needsFiles = def.inputs.some((i) => i.type === 'file-set' && i.required);
-  return missingForm === 0 && (!needsFiles || readySources > 0);
+/** 필수 폼 입력이 다 있고, 필수 파일 입력마다 그 용도의 읽힌 원자료가 하나 이상이면 ready(정산: 예산·집행 + 증빙 + 기준) */
+function requiredReady(def: ReturnType<typeof definitionFor>, missingForm: number, readyPurposes: string[]): boolean {
+  const sets = def.inputs.filter((i) => i.type === 'file-set' && i.required);
+  return missingForm === 0 && sets.every((i) => readyPurposes.some((p) => satisfiesFileSet(i.key, p)));
 }
 
 export async function listTasks(ctx: WorkContext, actor: WorkActor, q: { status?: string[]; workflowKey?: string; cursor?: string | null; limit?: number }) {
@@ -243,6 +246,10 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
           regulations: regulationsDto((version.content as { regulations?: RegulationContent } | null)?.regulations),
           // 뽑은 항목(접수·회의·인수인계) — 원문 인용·확인 표시 그대로
           items: itemsDto((version.content as { items?: ItemsContent } | null)?.items),
+          // 대사 결과(거래·증빙·잔액) — 원자료 경로 없음
+          settlement: (version.content as { settlement?: SettlementResult } | null)?.settlement ?? null,
+          // 질문별 답변(근거·확인 표시)
+          qa: ((version.content as { qa?: QaContent } | null)?.qa?.result as QaResult | undefined) ?? null,
         }
       : null,
     review: review.map((r) => ({ id: r.id, severity: r.severity, code: r.code, message: r.message, fieldIds: r.field_ids, state: r.state, resolutionNote: r.resolution_note })),
@@ -312,7 +319,7 @@ export async function updateTaskMeta(ctx: WorkContext, actor: WorkActor, taskId:
     patch.form = task.template_version_id ? { ...form.values, templateVersion: task.template_version_id } : form.values;
     const sources = await ctx.store.listSources(task.id, task.organization_id);
     if (task.status === 'draft' || task.status === 'ready') {
-      patch.status = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').length) ? 'ready' : 'draft';
+      patch.status = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').map((s) => s.purpose)) ? 'ready' : 'draft';
     }
   }
   const updated = await ctx.store.updateTaskIfRevision(task.id, task.organization_id, input.revision, patch);
@@ -331,6 +338,7 @@ function carriedContent(content: Record<string, unknown> | null): Record<string,
   if (!content) return null;
   if ('regulations' in content) return { regulations: content.regulations };
   if ('items' in content) return { items: content.items };
+  if ('qa' in content) return { qa: content.qa };
   return null;
 }
 

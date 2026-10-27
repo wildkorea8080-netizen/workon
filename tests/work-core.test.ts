@@ -155,3 +155,13 @@ describe('확인할 사항 — 시험 모드 글', () => {
     expect(computeReviewItems({ fields: clean, missing: [], knownText: '', testMode: false }).map((i) => i.code)).not.toContain('TEST_MODE');
   });
 });
+
+describe('여러 줄 칸 이름', () => {
+  // 회신 '답변'이 한 줄 칸이면 질문별 답이 한 줄로 붙는다(P5 흐름 시험에서 찾음) — 인수인계·감사 칸도 같은 꼴
+  it('회신·감사·인수인계·메모의 목록 칸은 여러 줄 칸이다', () => {
+    const labels = ['답변', '추가 확인 필요', '증빙 목록', '요구 항목별 답변', '진행 중 업무', '미결 과제', '반복 일정', '참고 자료', '근거', '유보·확인 필요'];
+    const fields = fieldsFromSlots(labels.map((label, i) => ({ id: `s${i}`, label, kind: 'marker' as const, path: [], hint: null })));
+    expect(fields.filter((f) => f.type !== 'paragraph').map((f) => f.label)).toEqual([]);
+    expect(fieldsFromSlots([{ id: 'x', label: '수신', kind: 'marker', path: [], hint: null }])[0].type).toBe('text');
+  });
+});
