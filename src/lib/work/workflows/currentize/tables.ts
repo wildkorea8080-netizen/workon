@@ -10,7 +10,10 @@ import { parseNumber } from '@/lib/table-engine/number';
 export interface ColumnPlan {
   prevCol: number;
   curCol: number;
-  diffCols: { col: number; kind: 'diff' | 'rate' }[];
+  /**
+   * diff: 증감 금액 · rate: 증감률(%) · check: 비중·구성비 같은 열 — 증감률 공식이 아니라 자동 계산하지 않고 확인을 요청한다
+   */
+  diffCols: { col: number; kind: 'diff' | 'rate' | 'check' }[];
 }
 
 export interface ShiftedCell {
@@ -19,10 +22,18 @@ export interface ShiftedCell {
   before: string;
   after: string | null;
   status: 'changed' | 'needs_check';
+  /** 확인이 필요한 까닭(있을 때만) */
+  note?: string;
 }
 
-const RATE_NAME = /증감률|증감율|증가율|비율/;
+/** 백분율 표시(% · ％ · %p)가 이름에 있으면 증감 낱말이 있어도 비율 열이다 */
+const PERCENT_MARK = /[%％]/;
+const RATE_NAME = /증감률|증감율|증가율/;
+/** 전체에서 차지하는 몫 — 증감률 공식(증감/전년×100)이 아니다 */
+const SHARE_NAME = /비율|구성비|비중|점유율/;
 const DIFF_NAME = /증감|증가|차이|대비/;
+const SHARE_NOTE = '비율 열은 다시 계산해야 합니다';
+const PAREN_NOTE = '괄호로 적힌 숫자라 음수인지 확인이 필요합니다';
 
 /** 4자리 연도(1900~2100). 앞뒤에 숫자가 이어지면 연도가 아니다 */
 const FOUR_DIGIT_YEAR = /(?<!\d)(19\d{2}|20\d{2}|2100)(?!\d)/g;
@@ -68,8 +79,13 @@ export function planColumnShift(table: ExtractedTable, toYear: number): ColumnPl
   for (let col = 0; col < columnCount(table); col++) {
     const name = columnName(table, col);
     // 증감 열이 이름에 연도를 품을 수 있다('2025 대비 증감') — 연도 열로 세지 않는다
-    if (RATE_NAME.test(name)) {
+    if (PERCENT_MARK.test(name) || RATE_NAME.test(name)) {
       diffCols.push({ col, kind: 'rate' });
+      continue;
+    }
+    if (SHARE_NAME.test(name)) {
+      // '구성비율'은 확인 열, '증감비율'·'전년대비 비율'은 증감 낱말이 있어 증감률로 본다
+      diffCols.push({ col, kind: DIFF_NAME.test(name) ? 'rate' : 'check' });
       continue;
     }
     if (DIFF_NAME.test(name)) {
@@ -101,10 +117,28 @@ function coveredCells(table: ExtractedTable): Set<string> {
   return covered;
 }
 
-/** 칸의 숫자 값. 비었거나 읽지 못하면 null — 0으로 치지 않는다 */
-function numberOf(cell: Cell | undefined): number | null {
+interface CellNumber {
+  /** 비었거나 읽지 못하면 null — 0으로 치지 않는다 */
+  value: number | null;
+  /** 괄호 음수 '(1,234)' — 부연 괄호일 수도 있어 계산에 쓰지 않는다 */
+  parenthesized: boolean;
+  /** 칸 끝에 적힌 단위 글('천원'). 단위가 있어도 끝에 붙어 있지 않으면 빈 글 */
+  suffix: string;
+}
+
+function numberOf(cell: Cell | undefined): CellNumber {
   const p = parseNumber(cell ?? null);
-  return p.kind === 'number' ? p.value : null;
+  if (p.kind !== 'number') return { value: null, parenthesized: false, suffix: '' };
+  let suffix = '';
+  if (p.unit && typeof cell === 'string') {
+    const m = /[\d)]\s*([^\d)\s]+)$/.exec(cell.trim());
+    if (m) suffix = m[1];
+  }
+  return { value: p.value, parenthesized: p.parenthesized === true, suffix };
+}
+
+function isBlank(cell: Cell | undefined): boolean {
+  return cell === null || cell === undefined || String(cell).trim() === '';
 }
 
 function textOf(cell: Cell | undefined): string {
@@ -133,8 +167,13 @@ export function shiftColumns(
   for (let row = table.header.to + 1; row < table.cells.length; row++) {
     const line = table.cells[row] ?? [];
     const oldCur = line[plan.curCol];
-    const prev = numberOf(oldCur);
     const nv = newValues.get(row);
+    // 구분선·빈 줄: 옮길 것도 채울 것도 없다
+    if (isBlank(line[plan.prevCol]) && isBlank(oldCur) && (nv === null || nv === undefined)) continue;
+    const old = numberOf(oldCur);
+    const parenPrev = old.parenthesized;
+    // 괄호 숫자는 계산에 쓰지 않는다(복사는 글 그대로)
+    const prev = parenPrev ? null : old.value;
     const cur = typeof nv === 'number' && Number.isFinite(nv) ? roundValue(nv) : null;
 
     // 1) 전년도 ← 옛 당해(글 그대로). 당해 칸이 병합에 덮인 행은 값의 주인이 윗 행이라 옮길 수 없다
@@ -155,7 +194,7 @@ export function shiftColumns(
         row,
         col: plan.curCol,
         before: textOf(oldCur),
-        after: cur === null ? null : formatNumber(cur, 10),
+        after: cur === null ? null : formatNumber(cur, 10) + old.suffix,
         status: cur === null ? 'needs_check' : 'changed',
       });
     }
@@ -164,10 +203,15 @@ export function shiftColumns(
     for (const { col, kind } of plan.diffCols) {
       if (isCovered(row, col)) continue;
       let after: string | null = null;
-      if (cur !== null && prev !== null) {
+      let note: string | undefined;
+      if (kind === 'check') {
+        note = SHARE_NOTE;
+      } else if (parenPrev) {
+        note = PAREN_NOTE;
+      } else if (cur !== null && prev !== null) {
         const diff = roundValue(cur - prev);
         if (kind === 'diff') {
-          after = formatNumber(diff, 10);
+          after = formatNumber(diff, 10) + old.suffix;
         } else if (prev > 0) {
           // 기준(전년도)이 0이면 나눌 수 없고, 음수면 증감률의 부호가 뒤집혀 모호하다
           after = formatNumber(Number(roundValue((diff / prev) * 100).toFixed(2)), 2);
@@ -179,6 +223,7 @@ export function shiftColumns(
         before: textOf(line[col]),
         after,
         status: after === null ? 'needs_check' : 'changed',
+        ...(note ? { note } : {}),
       });
     }
   }

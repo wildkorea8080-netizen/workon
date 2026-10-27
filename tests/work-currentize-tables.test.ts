@@ -39,10 +39,30 @@ describe('planColumnShift', () => {
   });
 
   it('여러 머리글 꼴을 연도로 읽는다 (2025년도, 2025년(안), ’25)', () => {
-    const t = makeTable(['구분', "'24", '2025년(안)', '비율'], []);
+    const t = makeTable(['구분', "'24", '2025년(안)', '증감률'], []);
     expect(planColumnShift(t, 2026)).toEqual({ prevCol: 1, curCol: 2, diffCols: [{ col: 3, kind: 'rate' }] });
     const t2 = makeTable(['구분', '2024년도', '’25', '전년 대비 차이'], []);
     expect(planColumnShift(t2, 2026)).toEqual({ prevCol: 1, curCol: 2, diffCols: [{ col: 3, kind: 'diff' }] });
+  });
+
+  it('이름에 %·%p가 있으면 증감 낱말이 있어도 rate (금액 증감을 써 넣지 않는다)', () => {
+    const t = makeTable(['구분', '2024', '2025', '전년대비 증감(%)', '증감 (%p)', '대비(％)'], []);
+    expect(planColumnShift(t, 2026)?.diffCols).toEqual([
+      { col: 3, kind: 'rate' },
+      { col: 4, kind: 'rate' },
+      { col: 5, kind: 'rate' },
+    ]);
+  });
+
+  it('비율·구성비·비중·점유율 열은 check, 증감 낱말이 함께 있으면 rate', () => {
+    const t = makeTable(['구분', '2024', '2025', '구성비율', '비중', '점유율', '증감비율', '전년대비 비율'], []);
+    expect(planColumnShift(t, 2026)?.diffCols).toEqual([
+      { col: 3, kind: 'check' },
+      { col: 4, kind: 'check' },
+      { col: 5, kind: 'check' },
+      { col: 6, kind: 'rate' },
+      { col: 7, kind: 'rate' },
+    ]);
   });
 
   it('연도 열이 하나뿐이면 null', () => {
@@ -217,9 +237,9 @@ describe('shiftColumns', () => {
     expect(at(cells, 2, 3)).toBeUndefined();
     expect(at(cells, 1, 2)?.after).toBe('25');
     expect(at(cells, 1, 3)?.status).toBe('changed');
-    // 덮이지 않은 칸(2행 전년도·증감률)은 그대로 있다
-    expect(at(cells, 2, 1)).toBeDefined();
-    expect(at(cells, 2, 4)).toBeDefined();
+    // 당해가 덮인 2행: 값 주인이 윗 행이라 전년도는 비우고 확인 요청, 증감률도 확인 요청
+    expect(at(cells, 2, 1)).toEqual({ row: 2, col: 1, before: '11', after: null, status: 'needs_check' });
+    expect(at(cells, 2, 4)).toEqual({ row: 2, col: 4, before: '', after: null, status: 'needs_check' });
     // 병합 안의 좌표 중 주인이 아닌 것은 하나도 없다
     for (const m of t.merges) {
       for (let r = m.row; r < m.row + m.rows; r++) {
@@ -229,5 +249,157 @@ describe('shiftColumns', () => {
         }
       }
     }
+  });
+});
+
+describe('shiftColumns — 열 종류와 칸 읽기', () => {
+  const diffRate = {
+    prevCol: 1,
+    curCol: 2,
+    diffCols: [
+      { col: 3, kind: 'diff' as const },
+      { col: 4, kind: 'rate' as const },
+    ],
+  };
+
+  it('rate 열(증감(%))과 check 열(구성비율)', () => {
+    const t = makeTable(['구분', '2024', '2025', '증감(%)', '구성비율'], [['A', 1000, 1200, 20, 40]]);
+    const plan = planColumnShift(t, 2026)!;
+    expect(plan.diffCols).toEqual([
+      { col: 3, kind: 'rate' },
+      { col: 4, kind: 'check' },
+    ]);
+    const { cells } = shiftColumns(t, plan, new Map([[1, 1500]]));
+    expect(at(cells, 1, 3)).toEqual({ row: 1, col: 3, before: '20', after: '25', status: 'changed' });
+    expect(at(cells, 1, 4)).toEqual({
+      row: 1,
+      col: 4,
+      before: '40',
+      after: null,
+      status: 'needs_check',
+      note: '비율 열은 다시 계산해야 합니다',
+    });
+  });
+
+  it('check 열은 새 값이 있어도 모든 자료 행이 needs_check', () => {
+    const t = makeTable(['구분', '2024', '2025', '구성비율'], [
+      ['A', 1, 2, 10],
+      ['B', 3, 4, 20],
+    ]);
+    const plan = planColumnShift(t, 2026)!;
+    const { cells } = shiftColumns(
+      t,
+      plan,
+      new Map([
+        [1, 3],
+        [2, 5],
+      ]),
+    );
+    expect(cells.filter((c) => c.col === 3).map((c) => c.status)).toEqual(['needs_check', 'needs_check']);
+  });
+
+  it('괄호 숫자 (1,234)는 계산에 쓰지 않는다 — 복사는 글 그대로, 증감·증감률은 needs_check', () => {
+    const t = makeTable(HEAD, [['A', 5, '(1,234)', 0, 0]]);
+    const { cells } = shiftColumns(t, diffRate, new Map([[1, 1300]]));
+    expect(at(cells, 1, 1)).toEqual({ row: 1, col: 1, before: '5', after: '(1,234)', status: 'changed' });
+    expect(at(cells, 1, 2)?.after).toBe('1,300');
+    expect(at(cells, 1, 3)).toMatchObject({ after: null, status: 'needs_check' });
+    expect(at(cells, 1, 4)).toMatchObject({ after: null, status: 'needs_check' });
+  });
+
+  it('△100·▲ 50은 음수로 읽어 증감을 계산하고, 증감률은 기준이 음수라 확인 요청', () => {
+    const t = makeTable(HEAD, [
+      ['A', 5, '△100', 0, 0],
+      ['B', 5, '▲ 50', 0, 0],
+    ]);
+    const { cells } = shiftColumns(
+      t,
+      diffRate,
+      new Map([
+        [1, 50],
+        [2, 20],
+      ]),
+    );
+    expect(at(cells, 1, 1)?.after).toBe('△100');
+    expect(at(cells, 1, 3)).toMatchObject({ after: '150', status: 'changed' });
+    expect(at(cells, 1, 4)).toMatchObject({ after: null, status: 'needs_check' });
+    expect(at(cells, 2, 1)?.after).toBe('▲ 50');
+    expect(at(cells, 2, 3)).toMatchObject({ after: '70', status: 'changed' });
+    expect(at(cells, 2, 4)).toMatchObject({ after: null, status: 'needs_check' });
+  });
+
+  it('칸 끝의 단위(천원)를 새 당해·증감에 붙이고, 증감률에는 붙이지 않는다', () => {
+    const t = makeTable(HEAD, [['A', '1,100천원', '1,200천원', '100천원', '9.09']]);
+    const { cells } = shiftColumns(t, diffRate, new Map([[1, 1300]]));
+    expect(at(cells, 1, 1)?.after).toBe('1,200천원');
+    expect(at(cells, 1, 2)?.after).toBe('1,300천원');
+    expect(at(cells, 1, 3)?.after).toBe('100천원');
+    expect(at(cells, 1, 4)?.after).toBe('8.33');
+  });
+
+  it('칸 끝에 단위가 없으면(₩ 앞붙임) 단위를 붙이지 않는다', () => {
+    const plan = { prevCol: 1, curCol: 2, diffCols: [{ col: 3, kind: 'diff' as const }] };
+    const t = makeTable(['구분', '2024', '2025', '증감'], [['A', 1, '₩1,200', 0]]);
+    const { cells } = shiftColumns(t, plan, new Map([[1, 1300]]));
+    expect(at(cells, 1, 2)?.after).toBe('1,300');
+    expect(at(cells, 1, 3)?.after).toBe('100');
+  });
+
+  it('전년도·당해·새 값이 모두 빈 행(구분선)은 결과에 없다', () => {
+    const plan = { prevCol: 1, curCol: 2, diffCols: [{ col: 3, kind: 'diff' as const }] };
+    const t = makeTable(['구분', '2024', '2025', '증감'], [
+      ['A', 1, 2, 1],
+      ['', null, '  ', null],
+      ['B', 3, 4, 1],
+    ]);
+    const { cells } = shiftColumns(
+      t,
+      plan,
+      new Map([
+        [1, 3],
+        [3, 5],
+      ]),
+    );
+    expect(new Set(cells.map((c) => c.row))).toEqual(new Set([1, 3]));
+  });
+
+  it('새 값만 있는 행은 빈 줄이 아니다', () => {
+    const t = makeTable(['구분', '2024', '2025'], [['신규', null, null]]);
+    const { cells } = shiftColumns(t, { prevCol: 1, curCol: 2, diffCols: [] }, new Map([[1, 7]]));
+    expect(at(cells, 1, 2)?.after).toBe('7');
+  });
+
+  it('두 줄 머리글 표: 자료는 header.to 아래부터, 병합 머리글 칸은 건드리지 않는다', () => {
+    const t: ExtractedTable = {
+      id: 't1',
+      title: '표 1',
+      cells: [
+        ['구분', '예산', null, '증감'],
+        [null, '2024', '2025', null],
+        ['A', 10, 20, 10],
+        ['B', 30, 40, 10],
+      ],
+      merges: [
+        { row: 0, col: 1, rows: 1, cols: 2 },
+        { row: 0, col: 0, rows: 2, cols: 1 },
+        { row: 0, col: 3, rows: 2, cols: 1 },
+      ],
+      header: { from: 0, to: 1 },
+      columns: ['구분', '예산 / 2024', '예산 / 2025', '증감'],
+    };
+    const plan = planColumnShift(t, 2026)!;
+    const { cells } = shiftColumns(
+      t,
+      plan,
+      new Map([
+        [2, 25],
+        [3, 45],
+      ]),
+    );
+    expect(new Set(cells.map((c) => c.row))).toEqual(new Set([2, 3]));
+    expect(at(cells, 2, 1)).toEqual({ row: 2, col: 1, before: '10', after: '20', status: 'changed' });
+    expect(at(cells, 2, 2)).toEqual({ row: 2, col: 2, before: '20', after: '25', status: 'changed' });
+    expect(at(cells, 2, 3)).toEqual({ row: 2, col: 3, before: '10', after: '5', status: 'changed' });
+    expect(at(cells, 3, 3)?.after).toBe('5');
   });
 });
