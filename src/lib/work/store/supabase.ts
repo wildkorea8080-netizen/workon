@@ -111,6 +111,7 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
         p_actor: i.actorId,
         p_run_id: i.runId,
         p_source_ids: i.sourceIds,
+        p_content: i.content ?? null,
       });
       if (error) fail(error);
       return data as WorkDocumentVersionRow;

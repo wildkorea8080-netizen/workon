@@ -131,8 +131,9 @@ export function createPgWorkStore(db: Pool): WorkStore {
       return call(async () =>
         (await one<WorkDocumentVersionRow>(
           db,
-          'SELECT * FROM work_save_document_version($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10)',
-          [i.taskId, i.organizationId, i.baseVersion, JSON.stringify(i.fields), i.templateVersionId, i.origin, i.reason, i.actorId, i.runId, i.sourceIds]
+          'SELECT * FROM work_save_document_version($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11::jsonb)',
+          [i.taskId, i.organizationId, i.baseVersion, JSON.stringify(i.fields), i.templateVersionId, i.origin, i.reason, i.actorId, i.runId, i.sourceIds,
+           i.content ? JSON.stringify(i.content) : null]
         ))!
       );
     },

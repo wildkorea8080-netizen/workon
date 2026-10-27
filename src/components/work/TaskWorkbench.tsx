@@ -15,6 +15,7 @@ import {
 } from '@/lib/work/client';
 import { Card, ErrorNote, StatusBadge, statusTone } from './WorkShell';
 import FormFields, { cleanForm, type FormState } from './FormFields';
+import CollectionView from './CollectionView';
 import type { ArtifactDto, FieldDto, RunDto, TaskDetailDto } from './types';
 
 /**
@@ -63,13 +64,13 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
     return () => clearInterval(t);
   }, [run, taskId, refresh]);
 
-  async function generate() {
+  async function generate(decisions?: unknown) {
     if (!detail) return;
     setError(null);
     if (!genKey.current) genKey.current = newIdempotencyKey();
     const r = await api<{ run: RunDto; executeUrl: string }>(`/api/work/tasks/${taskId}/runs`, {
       method: 'POST',
-      json: { operation: 'generate', baseVersion: detail.version?.version ?? 0 },
+      json: { operation: 'generate', baseVersion: detail.version?.version ?? 0, ...(decisions ? { decisions } : {}) },
       idempotencyKey: genKey.current,
     });
     if (!r.ok) {
@@ -122,7 +123,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
         {detail.generatorMode === 'mock' && <StatusBadge label="시험 모드(AI 미사용)" tone="bad" />}
         {current && task.access.download && (
           <a href={`/api/work/artifacts/${current.id}/download`} className="rounded-[10px] border border-[#003087] px-4 py-2 text-[14px] font-semibold text-[#003087] hover:bg-blue-50">
-            HWPX 내려받기
+            {current.format.toUpperCase()} 내려받기
           </a>
         )}
         {task.access.review && version && (
@@ -177,7 +178,12 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
         {/* 가운데 — 입력(만들기 전) 또는 결과 파일·문서 구조 */}
         <section className="order-1 lg:order-2 space-y-4 min-w-0">
           {!version ? (
-            <BeforeGenerate detail={detail} taskId={taskId} busy={busy} onGenerate={generate} onSaved={refresh} setError={setError} />
+            <BeforeGenerate detail={detail} taskId={taskId} busy={busy} onGenerate={() => generate()} onSaved={refresh} setError={setError} />
+          ) : detail.kind === 'collection' && version.collection ? (
+            <>
+              <PreviewCard artifact={current} canDownload={task.access.download} />
+              <CollectionView key={version.id} result={version.collection} canEdit={task.access.edit} busy={busy} onRecompute={(d) => generate(d)} />
+            </>
           ) : (
             <>
               <PreviewCard artifact={current} canDownload={task.access.download} />
@@ -198,7 +204,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
                 <Card>
                   <h2 className="text-[16px] font-semibold">다시 만들기</h2>
                   <p className="mt-1 text-[14px] text-slate-600">입력·원자료로 초안을 다시 만듭니다. 직접 고친 칸과 잠근 칸은 그대로 둡니다.</p>
-                  <button onClick={generate} disabled={busy} className="mt-3 rounded-[10px] border border-[#003087] px-4 py-2 text-[14px] font-semibold text-[#003087] disabled:opacity-50">
+                  <button onClick={() => generate()} disabled={busy} className="mt-3 rounded-[10px] border border-[#003087] px-4 py-2 text-[14px] font-semibold text-[#003087] disabled:opacity-50">
                     초안 다시 만들기
                   </button>
                 </Card>
@@ -273,7 +279,7 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
     <>
       <Card>
         <h2 className="mb-1 text-[18px] font-semibold">입력 정보</h2>
-        <p className="mb-4 text-[14px] text-slate-500">양식: {detail.template?.name} — {detail.template?.label}</p>
+        {detail.template && <p className="mb-4 text-[14px] text-slate-500">양식: {detail.template.name} — {detail.template.label}</p>}
         <FormFields inputs={workflow.inputs} value={form} onChange={setForm} disabled={!task.access.edit || busy} missing={missing} />
         {task.access.edit && (
           <button onClick={save} disabled={!dirty || saving} className="mt-4 rounded-[10px] border border-[#DCE3EC] px-4 py-2 text-[14px] disabled:opacity-50">
@@ -284,14 +290,17 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
       <Card>
         <h2 className="text-[18px] font-semibold">파일 만들기</h2>
         <p className="mt-1 text-[14px] text-slate-600">
-          입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.
+          {detail.kind === 'collection'
+            ? '올린 원자료의 표를 부서·항목별로 더해 통합 엑셀(XLSX)을 만듭니다. 숫자는 프로그램이 계산하고, 중복·미제출·단위 차이는 확인할 사항으로 알립니다.'
+            : '입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.'}
         </p>
+        {detail.kind === 'collection' && <p className="mt-1 text-[13px] text-slate-500">원자료는 왼쪽 &lsquo;원자료&rsquo; 탭에서 올립니다(부서별 파일 — 파일 이름에 부서명이 있으면 부서를 알아봅니다).</p>}
         <button
           onClick={onGenerate}
           disabled={!task.access.edit || busy || dirty || task.status === 'draft'}
           className="mt-4 rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300"
         >
-          {busy ? '만드는 중…' : 'HWPX 만들기'}
+          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : 'HWPX 만들기'}
         </button>
         {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">필수 입력을 먼저 채워 저장해 주세요.</p>}
         {dirty && <p className="mt-2 text-[13px] text-amber-800">바꾼 입력을 먼저 저장해 주세요.</p>}
@@ -485,6 +494,7 @@ function RevisePanel({ detail, taskId, selected, onApplied, setError }: { detail
   const [busy, setBusy] = useState(false);
   const keyRef = useRef<string | null>(null);
   const version = detail.version;
+  if (detail.kind === 'collection') return <p className="text-[14px] text-slate-600">취합 숫자는 원자료에서 프로그램이 계산합니다. 고치려면 가운데에서 결정(중복·단위·잠정)을 바꿔 다시 취합하거나 원자료를 고쳐 다시 올리세요.</p>;
   if (!version) return <p className="text-[14px] text-slate-500">파일을 만든 뒤 고칠 수 있습니다.</p>;
   if (!detail.task.access.edit) return <p className="text-[14px] text-slate-500">이 작업을 고칠 권한이 없습니다.</p>;
   const label = (id: string) => version.fields.find((f) => f.id === id)?.label ?? id;

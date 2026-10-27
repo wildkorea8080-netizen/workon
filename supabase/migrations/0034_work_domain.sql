@@ -144,6 +144,8 @@ CREATE TABLE IF NOT EXISTS work_document_versions (
   template_version_id  uuid REFERENCES work_template_versions(id),
   source_ids           uuid[] NOT NULL DEFAULT '{}',
   fields               jsonb NOT NULL CHECK (jsonb_typeof(fields) = 'array' AND pg_column_size(fields) <= 1048576),
+  -- 문서 칸이 아닌 업무 결과(취합 결과·직원 결정 등). 업무마다 꼴이 다르고 서버가 런타임 스키마로 검사한다
+  content              jsonb CHECK (content IS NULL OR (jsonb_typeof(content) = 'object' AND pg_column_size(content) <= 2097152)),
   origin               text NOT NULL CHECK (origin IN ('generate','edit','revise','restore','import')),
   change_reason        text NOT NULL DEFAULT '' CHECK (char_length(change_reason) <= 500),
   run_id               uuid,
@@ -363,7 +365,7 @@ ALTER TABLE work_document_versions ADD CONSTRAINT work_document_versions_templat
 -- (늦게 끝난 옛 실행이 새 판을 덮지 않게 — WK410 SUPERSEDED).
 CREATE OR REPLACE FUNCTION work_save_document_version(
   p_task_id uuid, p_org uuid, p_base_version integer, p_fields jsonb, p_template_version_id uuid,
-  p_origin text, p_reason text, p_actor uuid, p_run_id uuid, p_source_ids uuid[]
+  p_origin text, p_reason text, p_actor uuid, p_run_id uuid, p_source_ids uuid[], p_content jsonb DEFAULT NULL
 ) RETURNS work_document_versions LANGUAGE plpgsql AS $$
 DECLARE
   t work_tasks;
@@ -383,9 +385,9 @@ BEGIN
     RAISE EXCEPTION 'VERSION_CONFLICT' USING ERRCODE = 'WK409', DETAIL = cur::text;
   END IF;
   INSERT INTO work_document_versions (task_id, organization_id, version, parent_version_id, template_version_id,
-                                      source_ids, fields, origin, change_reason, run_id, created_by)
+                                      source_ids, fields, content, origin, change_reason, run_id, created_by)
   VALUES (p_task_id, p_org, cur + 1, cur_id, COALESCE(p_template_version_id, t.template_version_id),
-          COALESCE(p_source_ids, '{}'), p_fields, p_origin, COALESCE(p_reason, ''), p_run_id, p_actor)
+          COALESCE(p_source_ids, '{}'), p_fields, p_content, p_origin, COALESCE(p_reason, ''), p_run_id, p_actor)
   RETURNING * INTO v;
   UPDATE work_tasks
      SET current_document_version_id = v.id, revision = revision + 1, updated_at = now(),
@@ -517,14 +519,14 @@ ALTER TABLE work_revision_proposals  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_events              ENABLE ROW LEVEL SECURITY;
 
 -- 함수는 anon·authenticated가 PostgREST RPC로 부르지 못하게 한다(서버 service role만)
-REVOKE EXECUTE ON FUNCTION work_save_document_version(uuid, uuid, integer, jsonb, uuid, text, text, uuid, uuid, uuid[]) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION work_save_document_version(uuid, uuid, integer, jsonb, uuid, text, text, uuid, uuid, uuid[], jsonb) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION work_enqueue_run(uuid, uuid, text, text, jsonb, text, integer, uuid, uuid, integer) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION work_claim_runs(text, integer, integer, uuid) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION work_heartbeat_run(uuid, text, integer) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION work_finish_run(uuid, text, text, jsonb, jsonb, integer) FROM PUBLIC;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    GRANT EXECUTE ON FUNCTION work_save_document_version(uuid, uuid, integer, jsonb, uuid, text, text, uuid, uuid, uuid[]) TO service_role;
+    GRANT EXECUTE ON FUNCTION work_save_document_version(uuid, uuid, integer, jsonb, uuid, text, text, uuid, uuid, uuid[], jsonb) TO service_role;
     GRANT EXECUTE ON FUNCTION work_enqueue_run(uuid, uuid, text, text, jsonb, text, integer, uuid, uuid, integer) TO service_role;
     GRANT EXECUTE ON FUNCTION work_claim_runs(text, integer, integer, uuid) TO service_role;
     GRANT EXECUTE ON FUNCTION work_heartbeat_run(uuid, text, integer) TO service_role;

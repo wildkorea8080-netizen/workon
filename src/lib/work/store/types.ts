@@ -76,6 +76,8 @@ export interface SaveVersionInput {
   actorId: string | null;
   runId: string | null;
   sourceIds: string[];
+  /** 문서 칸이 아닌 업무 결과(취합 결과·직원 결정) */
+  content?: Record<string, unknown> | null;
 }
 
 export interface EnqueueInput {

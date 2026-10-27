@@ -7,6 +7,33 @@ import { loadTemplateBytes } from './documents/templates';
 import { generateDocumentFile } from './documents/generate-file';
 import { artifactStoragePath } from './files';
 import { RENDERER_UNAVAILABLE_REASON } from './documents/renderer';
+import { checkPackage } from './documents/package-check';
+import { getWorkflowImpl } from './workflows';
+import { buildCollectionWorkbook } from './workflows/collection/workbook';
+import type { CollectionResult } from './workflows/collection/aggregate';
+import { createHash } from 'crypto';
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+interface BuiltFile {
+  bytes: Buffer;
+  format: 'hwpx' | 'docx' | 'xlsx';
+  mimeType: string;
+  sha256: string;
+  entries: number;
+  uncompressedBytes: number;
+}
+
+/** 취합 판의 결과(content.result) → 엑셀. 숫자는 판에 저장된 계산 결과 그대로 */
+async function buildCollectionFile(task: WorkTaskRow, content: Record<string, unknown> | null): Promise<BuiltFile> {
+  const result = (content?.result ?? null) as CollectionResult | null;
+  if (!result || result.schema !== 'collection/1') throw new WorkError('OUTPUT_INVALID', '이 판에는 취합 결과가 없습니다.', 422);
+  const period = typeof task.form.period === 'string' ? task.form.period : null;
+  const bytes = await buildCollectionWorkbook({ title: task.title, period, result, createdAt: new Date() });
+  const check = await checkPackage(bytes, { format: 'xlsx', values: result.departments.map((d) => d.name) });
+  if (!check.valid) throw new WorkError('OUTPUT_INVALID', `만든 엑셀이 검사를 통과하지 못했습니다: ${check.problems.slice(0, 3).join('; ')}`, 422);
+  return { bytes, format: 'xlsx', mimeType: XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
+}
 
 /**
  * 판 → 실제 결과 파일. 파일은 그 판에서 만든 불변 결과다(같은 판·같은 키는 한 벌).
@@ -20,11 +47,17 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
 
   const v = await ctx.store.getVersion(versionId, task.organization_id);
   if (!v || v.task_id !== task.id) throw new WorkError('NOT_FOUND', '판을 찾을 수 없습니다.', 404);
-  if (!v.template_version_id) throw new WorkError('TEMPLATE_MISSING', '이 판에는 양식이 없습니다.', 422);
-  const tv = await ctx.store.getTemplateVersion(v.template_version_id, task.organization_id);
-  if (!tv) throw new WorkError('TEMPLATE_MISSING', '양식을 찾을 수 없습니다.', 404);
-  const bytes = await loadTemplateBytes(ctx.files, tv);
-  const gen = await generateDocumentFile(bytes, tv.file_name, normalizeStoredFields(v.fields));
+  let gen: BuiltFile;
+  if (getWorkflowImpl(task.workflow_key)?.kind === 'collection') {
+    gen = await buildCollectionFile(task, v.content);
+  } else {
+    if (!v.template_version_id) throw new WorkError('TEMPLATE_MISSING', '이 판에는 양식이 없습니다.', 422);
+    const tv = await ctx.store.getTemplateVersion(v.template_version_id, task.organization_id);
+    if (!tv) throw new WorkError('TEMPLATE_MISSING', '양식을 찾을 수 없습니다.', 404);
+    const bytes = await loadTemplateBytes(ctx.files, tv);
+    const doc = await generateDocumentFile(bytes, tv.file_name, normalizeStoredFields(v.fields));
+    gen = { bytes: doc.bytes, format: doc.format, mimeType: doc.mimeType, sha256: doc.sha256, entries: doc.check.entries, uncompressedBytes: doc.check.uncompressedBytes };
+  }
 
   const path = artifactStoragePath(task.organization_id, task.id, v.id, outputKey, gen.format);
   try {
@@ -47,7 +80,7 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
       sha256: gen.sha256,
       storage_path: path,
       validation_status: 'valid',
-      validation: { kind: 'package', entries: gen.check.entries, uncompressedBytes: gen.check.uncompressedBytes, problems: [], hancomVisual: 'not_checked' },
+      validation: { kind: 'package', entries: gen.entries, uncompressedBytes: gen.uncompressedBytes, problems: [], hancomVisual: gen.format === 'hwpx' ? 'not_checked' : 'not_applicable' },
       preview_status: 'pending',
     });
     artifact = r.artifact;
@@ -58,12 +91,13 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
 
   // 실제 파일 미리보기 — 렌더러가 없으면 없다고 남긴다(구조 미리보기로 대신하지 않는다)
   const health = await ctx.renderer.health();
-  if (!health.available || !health.supportsHwpx) {
-    await ctx.store.updateArtifact(artifact.id, task.organization_id, { preview_status: 'unsupported', preview: { reason: health.reason ?? RENDERER_UNAVAILABLE_REASON } });
+  if (gen.format !== 'hwpx' || !health.available || !health.supportsHwpx) {
+    const reason = gen.format === 'xlsx' ? '엑셀 파일은 화면의 표로 확인하고, 쪽 배치는 내려받아 엑셀에서 확인하세요.' : health.reason ?? RENDERER_UNAVAILABLE_REASON;
+    await ctx.store.updateArtifact(artifact.id, task.organization_id, { preview_status: 'unsupported', preview: { reason } });
     artifact = { ...artifact, preview_status: 'unsupported' };
   } else {
     try {
-      const r = await ctx.renderer.render({ bytes: gen.bytes, sha256: gen.sha256, format: gen.format });
+      const r = await ctx.renderer.render({ bytes: gen.bytes, sha256: gen.sha256, format: 'hwpx' });
       const preview: Record<string, unknown> = { inputSha256: r.inputSha256, renderer: r.renderer, pageCount: r.pageCount, warnings: r.warnings };
       if (r.pdf) {
         const pdfPath = path.replace(/\.[a-z]+$/, '.preview.pdf');

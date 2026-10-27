@@ -8,7 +8,8 @@ import { fieldsFromSlots, mergeGenerated, normalizeStoredFields } from '../docum
 import { loadTemplateBytes } from '../documents/templates';
 import { readFillableTemplate } from '../documents/generate-file';
 import { computeReviewItems } from '../review';
-import { loadSourceTexts } from '../sources';
+import { loadSourceTexts, loadSourceExtracts } from '../sources';
+import { aggregateCollection, parseDecisions, type CollectionResult } from '../workflows/collection/aggregate';
 import { buildArtifact } from '../artifacts';
 import type { ComposeSource } from '../generation/compose';
 
@@ -174,7 +175,60 @@ async function composeStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow,
   return { values: res.values, missing: res.missing, mode: res.mode, model: res.usage?.model ?? null };
 }
 
+/**
+ * 취합 — 모델을 부르지 않는다. 원자료 표 → 표 엔진 → 부서·항목별 합(숫자는 프로그램이 냄) → 판(content.result) → 엑셀.
+ * 직원 결정(중복 포함·제외·단위·잠정 승인)은 실행 내용(payload.decisions) → 없으면 지금 판의 결정 → 없으면 기본값.
+ */
+async function opGenerateCollection(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
+  const def = definitionFor(task.workflow_key);
+  const form = checkForm(def, task.form);
+  if (form.missing.length) {
+    throw new WorkError('REQUIRED_INPUT_MISSING', `필수 입력이 비어 있습니다: ${form.missing.map((m) => m.label).join(', ')}`, 422);
+  }
+  const computed = await step('aggregate', async () => {
+    const sources = await loadSourceExtracts(ctx, task);
+    if (!sources.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다.', 422);
+    const expected = (form.values.expectedDepartments as string[]) ?? [];
+    const fieldNames = ((form.values.fieldDefinitions as { name: string }[]) ?? []).map((f) => f.name);
+    let previous: unknown = undefined;
+    if (task.current_document_version_id) {
+      const cur = await ctx.store.getVersion(task.current_document_version_id, task.organization_id);
+      previous = (cur?.content as { result?: CollectionResult } | null)?.result?.decisions;
+    }
+    const decisions = parseDecisions(run.payload.decisions ?? previous, sources.map((x) => x.id), expected);
+    const result = aggregateCollection({ sources, expectedDepartments: expected, fieldNames, decisions });
+    return { result, sourceIds: sources.map((x) => x.id) } as unknown as Record<string, unknown>;
+  });
+  const result = computed.result as CollectionResult;
+  const saved = await step('save_version', async () => {
+    const existing = await ctx.store.getVersionByRun(task.id, run.id);
+    if (existing) return { versionId: existing.id, version: existing.version };
+    const v = await ctx.store.saveVersion({
+      taskId: task.id,
+      organizationId: task.organization_id,
+      baseVersion: run.base_version,
+      fields: [],
+      content: { result },
+      templateVersionId: null,
+      origin: 'generate',
+      reason: run.payload.decisions ? '직원 결정을 반영해 다시 취합' : '원자료 취합',
+      actorId: run.requested_by,
+      runId: run.id,
+      sourceIds: computed.sourceIds as string[],
+    });
+    return { versionId: v.id, version: v.version };
+  });
+  await step('review', async () => {
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, saved.versionId, result.review.map((r) => ({ ...r, field_ids: [] })));
+    return { count: result.review.length };
+  });
+  const file = await step('file', () => buildFileStep(ctx, run, task, saved.versionId));
+  await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
+  return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, provisional: result.provisional };
+}
+
 async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
+  if (getWorkflowImpl(task.workflow_key)?.kind === 'collection') return opGenerateCollection(ctx, run, task, step);
   const p = await step('prepare', () => prepareFields(ctx, task));
   const composed = await step('compose', () => composeStep(ctx, run, task, p));
   const saved = await step('save_version', async () => {
@@ -231,6 +285,12 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
   const v = await ctx.store.getVersion(versionId, task.organization_id);
   if (!v || v.task_id !== task.id) throw new WorkError('NOT_FOUND', '판을 찾을 수 없습니다.', 404);
   await step('review', async () => {
+    const result = (v.content as { result?: CollectionResult } | null)?.result;
+    if (result?.schema === 'collection/1') {
+      // 취합 판(복구 등)은 그 판에 저장된 계산 결과의 확인 사항을 그대로 다시 건다
+      await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, result.review.map((r) => ({ ...r, field_ids: [] })));
+      return { count: result.review.length };
+    }
     const items = computeReviewItems({ fields: normalizeStoredFields(v.fields), missing: [], knownText: '', testMode: false });
     // 직접 수정한 판은 AI 숫자 대조 대상이 아니다(직원 글) — 필수 칸·자리 표시만 다시 본다
     await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, items.filter((i) => i.code !== 'UNVERIFIED_NUMBER'));

@@ -11,8 +11,10 @@ import type { FormValues } from './form';
  */
 export interface WorkflowImpl {
   key: WorkflowKey;
-  /** 기관 양식이 없을 때 쓰는 WORKON 표준 양식 */
-  defaultTemplateRef: string;
+  /** document = 양식 칸 채우기(HWPX), collection = 표 취합(XLSX, 숫자는 프로그램이 냄) */
+  kind: 'document' | 'collection';
+  /** 기관 양식이 없을 때 쓰는 WORKON 표준 양식(취합은 없음) */
+  defaultTemplateRef: string | null;
   /** 비면 '검토 완료'를 막는 칸(양식 자리 이름) */
   requiredFieldLabels: readonly string[];
   /** 결과 파일 키(카탈로그 outputs의 key) */
@@ -23,11 +25,9 @@ export interface WorkflowImpl {
   prefill(values: FormValues, ctx: { organizationName: string | null }): Record<string, string>;
 }
 
-const joinList = (v: FormValues[string] | undefined): string =>
-  Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : x.name)).join(', ') : typeof v === 'string' ? v : '';
-
 const officialLetter: WorkflowImpl = {
   key: 'official-letter',
+  kind: 'document',
   defaultTemplateRef: 'builtin:official_letter',
   requiredFieldLabels: ['수신', '제목', '본문', '발신명의'],
   documentOutputKey: 'letter',
@@ -46,8 +46,20 @@ const officialLetter: WorkflowImpl = {
   },
 };
 
+/** 자료 취합 — 부서별 제출 표를 항목별로 더해 통합 엑셀(workflows/collection). 모델을 부르지 않는다 */
+const collection: WorkflowImpl = {
+  key: 'collection',
+  kind: 'collection',
+  defaultTemplateRef: null,
+  requiredFieldLabels: [],
+  documentOutputKey: 'collection',
+  humanOnlyLabels: [],
+  prefill: () => ({}),
+};
+
 const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
   'official-letter': officialLetter,
+  collection,
 };
 
 export function getWorkflowImpl(key: string): WorkflowImpl | null {

@@ -82,11 +82,23 @@ export interface RunDto {
   finishedAt: string | null;
 }
 
+export interface CollectionResultDto {
+  schema: 'collection/1';
+  outputUnit: string;
+  fields: { name: string; kind: string; unit: string | null; derived: string | null }[];
+  departments: { name: string; status: 'submitted' | 'missing'; sourceIds: string[]; values: Record<string, number | null> }[];
+  totals: Record<string, number | null>;
+  provisional: boolean;
+  sources: { id: string; name: string; department: string | null; departmentBy: string | null; status: string; duplicateOf: string | null; table: string | null; columnMap: Record<string, string | null>; units: Record<string, string | null>; rowsUsed: number }[];
+  decisions: { excludedSourceIds: string[]; includedSourceIds: string[]; outputUnit: string; allowProvisional: boolean; departmentOverrides: Record<string, string> };
+}
+
 export interface TaskDetailDto {
   task: TaskDto;
+  kind: 'document' | 'collection';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[] } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];

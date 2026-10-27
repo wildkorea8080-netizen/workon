@@ -77,7 +77,7 @@ function NewTask() {
     setSaving(true);
     const r = await api<TaskDetailDto>('/api/work/tasks', {
       method: 'POST',
-      json: { workflowKey: workflow.key, title, form: cleaned, templateVersionId: templateId || undefined },
+      json: { workflowKey: workflow.key, title, form: cleaned, templateVersionId: workflow.inputs.some((i) => i.type === 'template') ? templateId || undefined : undefined },
     });
     setSaving(false);
     if (!r.ok) return setError(r.error.message);
@@ -90,6 +90,7 @@ function NewTask() {
       <ErrorNote message={error} />
       {workflow && (
         <form onSubmit={submit} className="mt-4 space-y-6" noValidate>
+          {workflow.inputs.some((i) => i.type === 'template') && (
           <Card>
             <h2 className="mb-4 text-[18px] font-semibold">1. 양식</h2>
             <label htmlFor="tpl" className="text-[15px] font-medium">
@@ -110,8 +111,9 @@ function NewTask() {
             {templateOptions.length === 0 && templates && <p className="mt-2 text-[14px] text-red-700">쓸 수 있는 양식이 없습니다. 관리자에게 문의하세요.</p>}
             <p className="mt-2 text-[13px] text-slate-500">결과는 이 양식에 글을 채운 한글(HWPX) 파일입니다. 작업을 만든 뒤에는 양식이 바뀌지 않습니다.</p>
           </Card>
+          )}
           <Card>
-            <h2 className="mb-4 text-[18px] font-semibold">2. 필수 정보</h2>
+            <h2 className="mb-4 text-[18px] font-semibold">{workflow.inputs.some((i) => i.type === 'template') ? '2. 필수 정보' : '필수 정보'}</h2>
             <div className="mb-5">
               <label htmlFor="title" className="text-[15px] font-medium">
                 작업 제목 <span className="text-[13px] text-red-700">(필수)</span>
@@ -134,7 +136,7 @@ function NewTask() {
             <Link href="/assistants" className="rounded-[10px] border border-[#DCE3EC] bg-white px-5 py-3 text-[15px]">
               취소
             </Link>
-            <button type="submit" disabled={saving || !templateId} className="rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300">
+            <button type="submit" disabled={saving || (workflow.inputs.some((i) => i.type === 'template') && !templateId)} className="rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300">
               {saving ? '저장 중…' : '작업 저장하고 작업실로'}
             </button>
           </div>

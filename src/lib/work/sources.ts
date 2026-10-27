@@ -1,5 +1,7 @@
 // src/lib/work/sources.ts
 import { createHash, randomUUID } from 'crypto';
+import { gzipSync, gunzipSync } from 'zlib';
+import type { ExtractedTable } from '@/lib/attachments/types';
 import { attachmentExtension, refusedFormatMessage, MAX_ATTACHMENT_BYTES, CONFIRM_WINDOW_MS, MAX_EXTRACT_CHARS } from '@/lib/attachments/limits';
 import { readAttachment, AttachmentReadError, tableAsMarkdown } from '@/lib/attachments/reader';
 import type { WorkContext } from './context';
@@ -98,7 +100,9 @@ export async function confirmSource(ctx: WorkContext, task: WorkTaskRow, sourceI
   const text = (extract.text || tableText).slice(0, MAX_EXTRACT_CHARS);
   const extractPath = sourceExtractPath(task.organization_id, task.id, src.id);
   try {
-    await ctx.files.put(extractPath, Buffer.from(JSON.stringify({ kind: extract.kind, text, warnings: extract.warnings })), 'application/json');
+    // 표는 계산용으로 그대로 둔다(취합 업무가 칸·병합·단위 캡션을 쓴다). 크기를 줄이려고 gzip(첨부 읽은 내용과 같은 방식)
+    const body = JSON.stringify({ kind: extract.kind, text, warnings: extract.warnings, tables: extract.tables });
+    await ctx.files.put(extractPath, gzipSync(Buffer.from(body)), 'application/gzip');
   } catch {
     throw new WorkError('STORAGE_FAILED', '읽은 내용을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
   }
@@ -114,22 +118,46 @@ export async function confirmSource(ctx: WorkContext, task: WorkTaskRow, sourceI
   return (await ctx.store.getSource(src.id, task.organization_id))!;
 }
 
-/** 생성에 넣을 원자료 글 — 읽힌 것만, 지금 작업의 것만 */
-export async function loadSourceTexts(ctx: WorkContext, task: WorkTaskRow): Promise<ComposeSource[]> {
+export interface SourceExtract extends ComposeSource {
+  sha256: string;
+  purpose: WorkSourceRow['purpose'];
+  tables: ExtractedTable[];
+  warnings: string[];
+  truncated: boolean;
+}
+
+/** 읽힌 원자료(글·표) — 지금 작업의 것만. gzip 머리(1f 8b)가 없으면 평문 JSON으로 읽는다 */
+export async function loadSourceExtracts(ctx: WorkContext, task: WorkTaskRow): Promise<SourceExtract[]> {
   const list = await ctx.store.listSources(task.id, task.organization_id);
-  const out: ComposeSource[] = [];
+  const out: SourceExtract[] = [];
   for (const s of list) {
     if (s.status !== 'ready' || !s.extract_path || s.task_id !== task.id) continue;
     const raw = await ctx.files.get(s.extract_path);
     if (!raw) throw new WorkError('STORAGE_FAILED', '원자료를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     try {
-      const parsed = JSON.parse(raw.toString('utf8')) as { text?: string };
-      out.push({ id: s.id, name: s.file_name, text: String(parsed.text ?? '') });
+      const buf = raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw) : raw;
+      const parsed = JSON.parse(buf.toString('utf8')) as { text?: string; tables?: ExtractedTable[]; warnings?: string[] };
+      const summary = (s.summary ?? {}) as { truncated?: boolean };
+      out.push({
+        id: s.id,
+        name: s.file_name,
+        text: String(parsed.text ?? ''),
+        sha256: s.sha256 ?? '',
+        purpose: s.purpose,
+        tables: Array.isArray(parsed.tables) ? parsed.tables : [],
+        warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+        truncated: Boolean(summary.truncated) || (parsed.tables ?? []).some((t) => Boolean(t.truncated)),
+      });
     } catch {
       throw new WorkError('STORAGE_FAILED', '원자료 읽은 내용이 손상되었습니다. 다시 올려 주세요.', 409);
     }
   }
   return out;
+}
+
+/** 생성에 넣을 원자료 글 */
+export async function loadSourceTexts(ctx: WorkContext, task: WorkTaskRow): Promise<ComposeSource[]> {
+  return (await loadSourceExtracts(ctx, task)).map((s) => ({ id: s.id, name: s.name, text: s.text }));
 }
 
 export function sourceDto(s: WorkSourceRow) {

@@ -93,6 +93,7 @@ export interface WorkDocumentVersionRow {
   template_version_id: string | null;
   source_ids: string[];
   fields: DocumentField[];
+  content: Record<string, unknown> | null;
   origin: 'generate' | 'edit' | 'revise' | 'restore' | 'import';
   change_reason: string;
   run_id: string | null;

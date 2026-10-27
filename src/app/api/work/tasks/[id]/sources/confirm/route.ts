@@ -19,6 +19,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const { task } = await svc.loadTask(ctx, actor, params.id, 'edit');
     const body = await readJson(request);
     if (typeof body.sourceId !== 'string') throw new WorkError('INVALID_INPUT', 'sourceId가 필요합니다.');
-    return ok(sourceDto(await confirmSource(ctx, task, body.sourceId)));
+    const src = await confirmSource(ctx, task, body.sourceId);
+    if (src.status === 'ready') await svc.refreshReadiness(ctx, task);
+    return ok(sourceDto(src));
   });
 }

@@ -99,17 +99,20 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
   if (def.inputs.some((i) => i.key === 'title') && !rawForm.title) rawForm.title = title;
   const dueDate = typeof input.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) ? input.dueDate : null;
 
-  let tv: TemplateVersionRow;
-  if (typeof input.templateVersionId === 'string' && input.templateVersionId) {
-    const found = await ctx.store.getTemplateVersion(input.templateVersionId, actor.organizationId);
-    if (!found || found.status === 'retired') throw new WorkError('TEMPLATE_MISSING', '고른 양식을 쓸 수 없습니다.', 404);
-    tv = found;
-  } else {
-    tv = await ensureBuiltinTemplateVersion(ctx.store, impl.defaultTemplateRef);
+  // 문서 업무만 양식을 고른다(취합은 양식 없이 엑셀을 만든다)
+  let tv: TemplateVersionRow | null = null;
+  if (impl.kind === 'document') {
+    if (typeof input.templateVersionId === 'string' && input.templateVersionId) {
+      const found = await ctx.store.getTemplateVersion(input.templateVersionId, actor.organizationId);
+      if (!found || found.status === 'retired') throw new WorkError('TEMPLATE_MISSING', '고른 양식을 쓸 수 없습니다.', 404);
+      tv = found;
+    } else {
+      tv = await ensureBuiltinTemplateVersion(ctx.store, impl.defaultTemplateRef!);
+    }
+    if (tv.status === 'draft') throw new WorkError('TEMPLATE_UNSUPPORTED', '이 양식은 아직 검증 전이라 쓸 수 없습니다.', 409);
   }
-  if (tv.status === 'draft') throw new WorkError('TEMPLATE_UNSUPPORTED', '이 양식은 아직 검증 전이라 쓸 수 없습니다.', 409);
   // 양식 입력은 서버가 고른 판으로 정한다(클라이언트가 보낸 값을 그대로 믿지 않는다)
-  const form = checkForm(def, { ...rawForm, templateVersion: tv.id });
+  const form = checkForm(def, tv ? { ...rawForm, templateVersion: tv.id } : rawForm);
 
   const task = await ctx.store.insertTask({
     organization_id: actor.organizationId,
@@ -119,12 +122,22 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
     workflow_version: CATALOG_VERSION,
     title,
     form: form.values,
-    template_version_id: tv.id,
+    template_version_id: tv?.id ?? null,
     due_date: dueDate,
     status: requiredReady(def, form.missing.length, 0) ? 'ready' : 'draft',
   });
   await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'task.created', details: { workflow_key: task.workflow_key } });
   return task;
+}
+
+/** 원자료가 읽힌 뒤 — 필수 입력·필수 원자료가 다 있으면 draft → ready(처리 중·검토 단계는 건드리지 않는다) */
+export async function refreshReadiness(ctx: WorkContext, task: WorkTaskRow): Promise<void> {
+  if (task.status !== 'draft' && task.status !== 'ready') return;
+  const def = definitionFor(task.workflow_key);
+  const form = checkForm(def, task.form);
+  const sources = await ctx.store.listSources(task.id, task.organization_id);
+  const next = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').length) ? 'ready' : 'draft';
+  if (next !== task.status) await ctx.store.setTaskStatus(task.id, task.organization_id, next);
 }
 
 /** 필수 폼 입력·필수 원자료가 다 있으면 ready */
@@ -202,9 +215,21 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
   const currentArtifacts = version ? artifacts.filter((a) => a.document_version_id === version.id) : [];
   return {
     task: taskDto(task, access),
+    kind: getWorkflowImpl(task.workflow_key)?.kind ?? 'document',
     workflow: { key: def.key, name: def.name, purpose: def.purpose, inputs: def.inputs, outputs: def.outputs, scopeNote: def.scopeNote, validationRules: def.validationRules },
     template: tv ? templateDto(tv) : null,
-    version: version ? { id: version.id, version: version.version, origin: version.origin, changeReason: version.change_reason, createdAt: version.created_at, fields: normalizeStoredFields(version.fields) } : null,
+    version: version
+      ? {
+          id: version.id,
+          version: version.version,
+          origin: version.origin,
+          changeReason: version.change_reason,
+          createdAt: version.created_at,
+          fields: normalizeStoredFields(version.fields),
+          // 취합 결과(부서·합계·원본 대응) — 원자료 저장 경로는 없다
+          collection: (version.content as { result?: unknown } | null)?.result ?? null,
+        }
+      : null,
     review: review.map((r) => ({ id: r.id, severity: r.severity, code: r.code, message: r.message, fieldIds: r.field_ids, state: r.state, resolutionNote: r.resolution_note })),
     artifacts: artifacts.map((a) => ({ ...artifactDto(a), current: Boolean(version && a.document_version_id === version.id) })),
     currentArtifacts: currentArtifacts.map(artifactDto),
@@ -231,8 +256,8 @@ export async function updateTaskMeta(ctx: WorkContext, actor: WorkActor, taskId:
     const def = definitionFor(task.workflow_key);
     const { templateVersion: _ignored, ...rest } = (input.form ?? {}) as Record<string, unknown>;
     // 양식은 작업을 만들 때 고정된다 — 폼으로 바꾸지 않고 작업의 양식 판을 그대로 둔다
-    const form = checkForm(def, { ...rest, templateVersion: task.template_version_id ?? undefined });
-    patch.form = { ...form.values, templateVersion: task.template_version_id };
+    const form = checkForm(def, task.template_version_id ? { ...rest, templateVersion: task.template_version_id } : rest);
+    patch.form = task.template_version_id ? { ...form.values, templateVersion: task.template_version_id } : form.values;
     const sources = await ctx.store.listSources(task.id, task.organization_id);
     if (task.status === 'draft' || task.status === 'ready') {
       patch.status = requiredReady(def, form.missing.length, sources.filter((s) => s.status === 'ready').length) ? 'ready' : 'draft';
@@ -250,7 +275,7 @@ async function currentVersionNumber(ctx: WorkContext, task: WorkTaskRow): Promis
 }
 
 /** '파일 만들기' — 초안 생성 실행. 같은 요청 번호면 같은 실행(연속 클릭 — A11) */
-export async function requestGenerate(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; idempotencyKey: unknown }) {
+export async function requestGenerate(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; idempotencyKey: unknown; decisions?: unknown }) {
   await requireNewTasksEnabled(ctx, actor);
   const { task } = await loadTask(ctx, actor, taskId, 'edit');
   const key = cleanKey(input.idempotencyKey);
@@ -259,7 +284,13 @@ export async function requestGenerate(ctx: WorkContext, actor: WorkActor, taskId
   const def = definitionFor(task.workflow_key);
   const form = checkForm(def, task.form);
   if (form.missing.length) throw new WorkError('REQUIRED_INPUT_MISSING', `필수 입력을 먼저 채워 주세요: ${form.missing.map((m) => m.label).join(', ')}`, 422, { missing: form.missing.map((m) => m.key) });
-  const payload = { operation: 'generate', baseVersion: cur.number, form: task.form, template: task.template_version_id, revision: task.revision };
+  if (def.inputs.some((i) => i.type === 'file-set' && i.required)) {
+    const ready = (await ctx.store.listSources(task.id, task.organization_id)).filter((s) => s.status === 'ready');
+    if (!ready.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다. 원자료를 먼저 올려 주세요.', 422);
+  }
+  // 취합의 직원 결정(중복 포함·제외·단위·잠정 승인)은 실행 내용에 실어 실행기가 다시 검사한다
+  const decisions = input.decisions !== undefined && input.decisions !== null && typeof input.decisions === 'object' ? input.decisions : undefined;
+  const payload = { operation: 'generate', baseVersion: cur.number, form: task.form, template: task.template_version_id, revision: task.revision, ...(decisions ? { decisions } : {}) };
   const { run, created } = await ctx.store.enqueueRun({
     taskId: task.id,
     organizationId: task.organization_id,
@@ -338,6 +369,7 @@ export async function restoreVersion(ctx: WorkContext, actor: WorkActor, taskId:
     actorId: actor.userId,
     runId: null,
     sourceIds: old.source_ids,
+    content: old.content,
   });
   await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
   const run = await enqueuePackage(ctx, task, v.id, actor.userId);

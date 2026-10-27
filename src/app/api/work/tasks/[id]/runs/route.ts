@@ -17,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const body = await readJson(request);
     if (body.operation !== undefined && body.operation !== 'generate') throw new WorkError('INVALID_INPUT', '지원하지 않는 실행입니다.');
     const key = request.headers.get('idempotency-key') ?? body.idempotencyKey;
-    const r = await svc.requestGenerate(ctx, actor, params.id, { baseVersion: body.baseVersion, idempotencyKey: key });
+    const r = await svc.requestGenerate(ctx, actor, params.id, { baseVersion: body.baseVersion, idempotencyKey: key, decisions: body.decisions });
     const base = `/api/work/tasks/${params.id}/runs/${r.run.id}`;
     return ok({ run: r.run, created: r.created, statusUrl: base, executeUrl: `${base}/execute` }, 202);
   });
