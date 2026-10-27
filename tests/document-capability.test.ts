@@ -35,7 +35,7 @@ describe('문서 만들기 — 목록·읽기', () => {
     const out = await run(d, 'list_templates', {});
     expect(out.ok).toBe(true);
     const list = JSON.parse(out.text) as { ref: string; kind: string; format: string }[];
-    expect(list.map((t) => t.ref)).toEqual(['builtin:official_letter', 'builtin:report', 'builtin:minutes', 'builtin:regulation_memo', 'builtin:handover', 'tpl-1']);
+    expect(list.map((t) => t.ref)).toEqual(['builtin:official_letter', 'builtin:report', 'builtin:minutes', 'builtin:regulation_memo', 'builtin:handover', 'builtin:reply', 'builtin:audit_response', 'tpl-1']);
     expect(list.find((t) => t.ref === 'tpl-1')).toMatchObject({ kind: 'agent', format: 'hwpx' });
     expect(d.listAgentTemplates).toHaveBeenCalledWith('agent-1');
   });

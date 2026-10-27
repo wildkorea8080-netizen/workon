@@ -6,8 +6,8 @@ import { BUILTIN_TEMPLATES, findBuiltinTemplate, loadBuiltinTemplate, BUILTIN_TE
 import { readHwpxMarkers } from '@/lib/doc-fill/hwpx';
 
 describe('기본 양식', () => {
-  it('다섯 가지이고 ref로 찾는다', () => {
-    expect(BUILTIN_TEMPLATES.map((t) => t.ref)).toEqual(['builtin:official_letter', 'builtin:report', 'builtin:minutes', 'builtin:regulation_memo', 'builtin:handover']);
+  it('일곱 가지이고 ref로 찾는다', () => {
+    expect(BUILTIN_TEMPLATES.map((t) => t.ref)).toEqual(['builtin:official_letter', 'builtin:report', 'builtin:minutes', 'builtin:regulation_memo', 'builtin:handover', 'builtin:reply', 'builtin:audit_response']);
     expect(findBuiltinTemplate('builtin:minutes')?.file).toBe('minutes.hwpx');
     expect(findBuiltinTemplate('builtin:없음')).toBeNull();
     expect(findBuiltinTemplate('3f1c…')).toBeNull();

@@ -75,6 +75,36 @@
         "pdfPages": 1
       },
       "filledSha256": "fce72a0a25c4e16dfef1b22411ce4fc8abfd010abdad1ad3a84a2dac015077cd"
+    },
+    {
+      "file": "reply.hwpx",
+      "sha256": "5bb05991a82692a8fe7a0ddc47054870cc116d279e62924beaa4b21ea0547179",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T17:22:56.8407999+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "19ce8dd7efa99e6063c868341d3fef429dc764a2f9e445cef52b85cca047a07b"
+    },
+    {
+      "file": "audit_response.hwpx",
+      "sha256": "05749e940f2de7dd55f3161f82747023854145304cfb2f9077469b175aa3bdd1",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T17:23:04.6621773+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "921169928147327a315bb5ebad8932f0ecf04a5983b864ba0a0eadbd59b358e8"
     }
   ]
 }

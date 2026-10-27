@@ -47,6 +47,18 @@ export const BUILTIN_TEMPLATES: readonly BuiltinTemplate[] = [
     file: 'handover.hwpx',
     markers: ['제목', '작성 기준일', '인계자', '인수자', '확인자', '업무 개요', '진행 중 업무', '미결 과제', '완료 업무', '반복 일정', '참고 자료', '유의 사항'],
   },
+  {
+    ref: 'builtin:reply',
+    name: '민원 회신 (표준 서식)',
+    file: 'reply.hwpx',
+    markers: ['제목', '수신', '회신일', '문의 요지', '답변', '관련 근거', '추가 확인 필요', '담당 부서', '연락처'],
+  },
+  {
+    ref: 'builtin:audit_response',
+    name: '요구자료 답변서 (표준 서식)',
+    file: 'audit_response.hwpx',
+    markers: ['제목', '제출 기관', '기준 기간', '요구 항목별 답변', '증빙 목록', '확인 필요 사항'],
+  },
 ];
 
 export function findBuiltinTemplate(ref: string): BuiltinTemplate | null {
