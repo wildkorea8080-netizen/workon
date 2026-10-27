@@ -61,12 +61,12 @@ const TRAILING_UNIT = /^(.*?)\s*[(（[]\s*(?:단위\s*[:：]?\s*)?([^()（）[\]
  * 열 이름·비교용 글 다듬기: NFC, 보이지 않는 서식 글자(U+200B·U+FEFF 등 \p{Cf}) 지우기, 공백(줄바꿈·전각 포함)을 하나로 접고 앞뒤를 뗀다.
  * 첨부 개요(oneLine)는 줄바꿈을 공백으로 보이므로 엔진도 같은 이름으로 맞춰야 모델이 본 이름으로 열을 찾는다
  */
-function normalizeName(text: string): string {
+export function normalizeName(text: string): string {
   return text.normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
 }
 
 /** 공백(전각 포함)과 보이지 않는 글자를 모두 지운다 — '소 계'와 '소계'를 같게 */
-function squash(text: string): string {
+export function squash(text: string): string {
   return text.normalize('NFC').replace(/\p{Cf}/gu, '').replace(/\s+/g, '');
 }
 
