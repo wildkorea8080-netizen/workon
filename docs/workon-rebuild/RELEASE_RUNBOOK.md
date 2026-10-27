@@ -128,3 +128,6 @@ npm run work:testdb -- stop
 5. 스테이징 DB에서 `npm run db:check`·`npm run isolation:check`
 6. 데이터 흐름 문서 갱신: 업무 원자료·발췌가 Claude로 가는 경로(공문·보고서·규정 의견·항목 뽑기·질문별 답변), 규정 확인의 NODA·법제처 경로. 정산·취합은 모델을 부르지 않는다
 7. 알려진 한계는 장부 5-3·5-5·5-7절(선택 산출물 3종 미구현 등)
+8. **S6-1 현행화 엔진**(장부 9절): 마이그레이션 `0035_work_prior_source.sql`(`work_sources.purpose`에 `prior` 추가)을 **코드 배포 전에** 적용 — `npm run db:migrate -- 0035`. 적용 뒤 `SELECT conname FROM pg_constraint WHERE conrelid = 'work_sources'::regclass AND contype = 'c';`로 용도 제약 확인
+9. Supabase Storage `documents` 버킷 `file_size_limit`을 **50MB 이상**으로 — 작년 파일(`prior`) 상한이 50MB다. 30MB면 큰 작년 파일의 직접 올리기가 저장소에서 막힌다(`allowed_mime_types`를 걸었다면 HWPX도 허용)
+10. 현행화는 가상 자료로만 실제 모델에 돌렸다(`work:llm-smoke -- --only currentize`). 실제 기관 작년 문서로 화면에서 한 번 — 서식 보존·단위 표기·분량을 본다. 한글에서 결과 HWPX를 열어 보는 것도 남음

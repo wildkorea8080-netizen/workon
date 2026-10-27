@@ -61,7 +61,7 @@ src/
 │   ├── super-auth.ts     # 슈퍼관리자 JWT (NextAuth와 별개)
 │   ├── llm/              # AI 연결부 — types.ts · anthropic.ts(어댑터) · index.ts(streamChat·complete)
 │   ├── assistant/        # 대화 실행기 — prepare.ts · stream.ts · prompt.ts · history.ts · persist.ts · attachments.ts(첨부 요청 검사·ref 매기기) · number-check.ts(숫자 확인)
-│   ├── work/             # 업무 작업(WORKON 개편) — 아래 '업무 작업' 절. services·admin·runs(executor·worker)·store(supabase·pg)·documents·workflows/{collection,regulations,items,settlement,qa}·file-sets·sources·artifacts
+│   ├── work/             # 업무 작업(WORKON 개편) — 아래 '업무 작업' 절. services·admin·runs(executor·worker)·store(supabase·pg)·documents·workflows/{collection,regulations,items,settlement,qa,currentize}·runs/currentize-op.ts·file-sets·sources·artifacts
 │   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image · document · file_read · table_merge (attachment-access.ts = 첨부 접근 공용 · doc-search-common.ts = 공통 자료실 근거 번호 밀기·맞추기, S5)
 │   ├── table-engine/     # 표 계산 엔진 — number · unit-names · units · types · combine · describe (DB·저장소·AI를 모름)
 │   ├── xlsx-export.ts    # 표 계산 결과 → 엑셀(결과·계산 근거 두 시트)
@@ -108,7 +108,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1692개 통과 — `WORK_TEST_DATABASE_URL`을 주면 업무 DB 시험 포함) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1922개 통과 — `WORK_TEST_DATABASE_URL`을 주면 업무 DB 시험 포함) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -121,7 +121,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | `npm run work:testdb -- start\|reset\|stop` | 업무 DB 시험용 임시 PostgreSQL(설치된 16 바이너리, 포트 54329, 0001~0034). `WORK_TEST_DATABASE_URL`을 주면 `npm test`가 업무 DB 시험도 돈다 | 아니오(로컬) |
 | `npm run work:template-check [-- --release]` | 표준 양식 파일·표시·엔진 방식·검증 기록. `--release`는 사람의 시각 검토 기록까지 | 아니오 |
 | `npm run work:template-verify [-- --only 이름]` | (Windows·한글) 표준 양식을 채워 한글 COM으로 열기·넣은 글·편집·다시 저장·PDF, 기록을 verification.json에 | 아니오 |
-| `npm run work:llm-smoke -- --yes-cost [--only 키,키] [--out 파일]` | 업무 8개를 가상 자료로 실제 Claude에 끝까지(시험 DB만, 모델 키만 .env.local에서). 비용이 든다(8개 약 170원) | 시험 DB(키 필요) |
+| `npm run work:llm-smoke -- --yes-cost [--only 키,키] [--out 파일]` | 업무 8개 + 현행화를 가상 자료로 실제 Claude에 끝까지(시험 DB만, 모델 키만 .env.local에서). 비용이 든다(8개 약 170원, 현행화 약 5원) | 시험 DB(키 필요) |
 | `npm run work:worker [-- --once \| --hancom \| --local-files 폴더]` | 업무 실행 상시 작업자(DB 직결). `--hancom`은 한글로 실제 미리보기 PDF | 예 |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
@@ -1044,6 +1044,24 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 - **기관 운영**: 슈퍼관리자 `/super/work`(기관별 업무 홈·새 작업 스위치), 기관 관리자 `/admin/work`(업무 켜고 끄기·기관 업무 양식 등록·업무 현황). 기관 양식 '시험 생성'은 **패키지 검사**뿐이라 한글 검증이라 표시하지 않고, '한글에서 확인함'은 관리자가 메모와 함께 남긴 기록(`admin-attested`, automated:false)으로만
 - **표준 양식**은 한글로 만든 진짜 HWPX(`assets/templates/`). 저장소 폴더 안 파일을 한글 COM으로 열면 숨은 확인 창 때문에 멈추므로 임시 폴더에서 처리한다(스크립트가 그렇게 함). 한글 텍스트 대조는 `GetTextFile('UNICODE')`('TEXT'는 ›·—를 버림)
 
+### 현행화 엔진 (S6-1, 2026-10-28)
+
+`report`(보고서·사업계획)에 **작년 파일**을 올리면 양식 채우기 대신 작년 HWPX를 올해 문서로 고친다(`workflows/index.ts` `usesCurrentizeWhenPrior`, 구현 `workflows/currentize/*`·`runs/currentize-op.ts`의 `opGenerateCurrentize`). 계획 `docs/superpowers/plans/2026-10-28-s6-1-currentize-engine.md`, 설계 `docs/superpowers/specs/2026-10-28-s6-currentization-assistants-design.md`(3·9절), 가상 사례 `docs/workon-rebuild/fixtures/currentize/README.md`, 마이그레이션 0035(원자료 용도 `prior` 추가).
+
+- **입력**: 작년 파일(원자료 용도 `prior`, **HWPX만**, 50MB — `MAX_PRIOR_BYTES`) + 올해 자료(엑셀 표·참고 글) + 메모(`emphasis`). 읽힌(`ready`) `prior`가 있으면 현행화, 없으면 평소 양식 채우기. `purpose !== 'template'` 식의 일반 원자료 고르기는 `prior`를 뺀다(`file-sets.ts`). 기준 연도는 `basisDate`·`period`·오늘 순, 작년 연도는 글에서 가장 많이 나온 연도(`dominantYear`), 올해가 작년 이하이면 작년+1
+- **단계**(`work_run_steps` 체크포인트): `load_prior`(작년 바이트·sha256·올해 입력 원자료 id를 **고정**) → `segments`(문단·표 칸 조각, `MAX_SEGMENTS` 5,000) → `classify`(연도·기간·수치·인용·사람·날짜·줄글) → `evidence`(「…」 인용을 법제처·공통 자료실 현재 조문과 대조 — 제공자 호출) → `rewrite_a`·`rewrite_b`…(줄글 50개 묶음마다 모델 한 번, 단계 이름은 DB 규칙 `^[a-z_]{1,40}$` 때문에 순번을 글자로) → `save_version` → `review` → `file`. **체크포인트에는 JSON만** 남긴다 — Map·Buffer는 작년 바이트에서 다시 계산한다(조각·분류·표 계산은 같은 바이트에서 언제나 같다). 바깥 호출(근거 제공자·모델)만 결과를 남겨 다시 부르지 않는다
+- **지키는 것**
+  - **글 수준만**: 문단·표 칸의 글을 제자리에서 바꾼다(공통 접두·접미를 뺀 가운데만 조각에 매핑 — 탭·줄바꿈·컨트롤을 안 건드림). 행·절을 넣고 빼는 구조 변경은 `structure` 변경으로 '확인 필요'만(HWPX 문단·행 복제는 컨트롤이 함께 복제돼 파일이 깨진다)
+  - **숫자·조문·사람·날짜는 프로그램이 정한다**: 연도 밀기(`shift.ts`)·표 열 밀기(`tables.ts` — 작년 당해 값 → 올해 전년도 칸, 당해는 올해 자료에서 찾고 증감·증감률은 표 엔진으로 다시 계산)·본문 수치 대조(`numbers.ts`)·인용 대조(`citations.ts`). 본문 수치는 프로그램도 모델도 **바꾸지 않는다** — 올해 자료·메모에서 확인되지 않은 숫자가 있으면 '확인 필요'. 단위를 모르는 행(`uncertain`)은 바뀐 칸이어도 '확인 필요'(1000배 어긋날 수 있음)
+  - **모델에는 연도를 민 글**을 준다(모델 우선이면 밀기가 따로 안 들어가므로). 모델 출력은 `verify.ts`가 거른다 — basis(올해 자료 id·바뀐 인용의 조각 id·메모가 있을 때 `memo`)가 맞고, 새 숫자가 없으며(모든 자릿수 숫자 런을 원문∪올해 자료 숫자와 대조), 조문·연도 토큰이 보존돼야 `accepted`(= 파일에 넣음). 하나라도 어긋나면 `proposed`(제안 — 파일에 안 넣고 보여만 줌). 조각당 적용 변경은 하나
+  - **원가 상한**: `ctx.costCapKrw ?? DEFAULT_COST_CAP_KRW`(2,000원) — 묶음을 보내기 **전에** 지금까지 쓴 원가 + 입력 어림이 넘으면 멈춘다(`costStopped`, 남은 줄글은 '원가 상한으로 멈춤' 확인 필요). 끝난 묶음의 원가는 체크포인트에서 오므로 다시 시도해도 같은 자리에서 멈춘다. **환경 변수는 새로 없다**(`.env.example` 불변)
+  - **재시도는 `load_prior`가 박은 것을 따른다**: 경로(`load_prior` 단계가 있으면 현행화, `prepare`가 있으면 양식 채우기)·작년 파일 id·sha256·올해 입력 원자료 id. 그 사이 올린 자료가 섞이거나 작년 파일을 바꿔 체크포인트의 모델 결과와 어긋나지 않게 한다. 파일을 적용하기 전 `priorSha256`를 다시 확인한다
+  - 읽기 예외·형식 불일치는 `PRIOR_UNSUPPORTED`(422, 재시도 없음 — HWP·DOCX·깨진 파일), 조각 id·칸 글이 작년 바이트와 안 맞으면 `PRIOR_MISMATCH`(409)
+- **산출**: 올해 HWPX(`report`) + **변경 내역표**(`changeLog` XLSX — 변경마다 위치·종류·상태·작년 글·올해 글·근거·안내, 인용 대조, 경고). 변경 상태는 `changed`(바꿈)·`needs_check`(확인 필요)·`proposed`(제안). 검토 코드: `NEEDS_CHECK`·`PROPOSED`(warning, 종류마다 20개 + `NEEDS_CHECK_MORE` 요약)·`INCOMPLETE`(blocking — 원가 상한·조각 상한으로 일부만 현행화한 판은 '검토 완료'가 막힘). 결과 파일은 적용 뒤 **출력 바이트를 `readSegments`로 다시 읽어** 적용 글을 확인한다
+- **화면**: 작업실 '대조' 보기(`CurrentizeView`, 순수 헬퍼 `currentize-view-helpers.ts`) — 조각마다 작년·올해 글, 위치, 상태, 확인 필요 처리. 직원이 올해 글을 고치면 `PATCH /api/work/tasks/[id]/currentize` → `applyChangeEdit`(saveDocument 꼴: `VERSION_CONFLICT`·`INVALID_INPUT`, 새 판 + 파일 다시 만들기). 규칙: **한 문단에는 사용자 행 하나**(그 조각의 `changed` 행이 있으면 그 행만 갱신, 둘째 행을 만들지 않고 흡수한 형제 변경은 `note`에 적음), 직접 고치면 그 조각의 **`proposed`는 `needs_check`로 내림**(제안이 낡음), 빈 칸(`structure`)·여러 문단 칸은 거부('빈 칸은 한글에서 직접 채워 주세요'). 판 내용에는 `content.currentize`(변경 목록·인용 대조)가 들어가고 직접 수정·AI 수정이 이 판에서 `TEMPLATE_MISSING`에 걸리지 않도록 `carriedContent`가 이어 받는다
+- **알려진 한계**(장부 `.superpowers/sdd/…/progress.md` deferred): 구조 변경(절·표 행 삽입·삭제) 없음 · 여러 문단 칸은 자동으로 안 바꾸고 거부 · 부정어('지급한다→지급하지 아니한다')·연혁은 대조하지 않음(인용은 '현재 조문 ↔ 작년 인용 글'의 낱말 겹침) · 표 열 밀기는 **연도 머리글만**(분기·반기 머리글은 연도로 읽어 틀릴 수 있음) · 단위를 모르는 표는 값을 그대로 넣고 '확인 필요' · 규정 이름은 낱말 경계 없이 부분 일치(짧은 이름 '규정'은 오탐) · 개수 기반 지난해 연도 안전망은 자리 바꿈·'2025 회계연도'를 못 봄 · 가져오기 경로(다른 작업 결과·대화 파일)는 `prior`를 지원하지 않음(**업로드 전용**) · 서버의 `prior` 확장자 검사는 올릴 때가 아니라 **실행 때**(`PRIOR_UNSUPPORTED`) · 작년 파일을 지운 작업은 다시 만들어야 함 · HWP·DOCX 작년 파일은 S6-2 이후 · 화면은 브라우저로 안 봄(자동 시험·점검 스크립트만) · 실제 지방공기업 샘플이 없어 '제공' 표시는 보류(설계 9절 9)
+- **명령**: `npm run work:llm-smoke -- --yes-cost --only currentize [--out 파일]` — 가상 작년 HWPX(보고서 양식 + 표) + 올해 xlsx + 방향 글로 실제 Claude를 한 번(약 5원). 시험: `tests/work-currentize-*.test.ts`(순수 규칙) · `work-currentize-flow.test.ts`(실제 Postgres·실제 양식·실제 HWPX), 작년 파일 만들기는 `tests/helpers/prior-fixture.ts`. **운영 전**: 0035는 코드 배포 전에 적용, Supabase `documents` 버킷 `file_size_limit`을 50MB로
+
 **새 업무를 더할 때**: 카탈로그(`workflow-catalog.json`)는 계약이라 고치지 않는다. `workflows/index.ts`에 구현(kind·양식·필수 칸·outputs)을 등록하고, 실행기(`runs/executor.ts`)·파일(`artifacts.ts`)·화면을 잇고, 실제 Postgres 흐름 시험(`tests/work-*-flow.test.ts`)으로 실제 파일까지 본다.
 
 **시험**: `tests/work-*.test.ts` — 순수 규칙과 실제 Postgres 흐름(시험 DB가 있을 때만). 흐름 시험은 실제 채우기 엔진·실제 표준 양식·실제 XLSX를 쓰고 모델·외부 검색만 가짜다.
@@ -1119,7 +1137,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-27 기준 1692개 통과 — 업무 시험 포함, `WORK_TEST_DATABASE_URL`이 없으면 업무 DB 시험은 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-28 기준 1922개 통과 — 업무 시험 포함, `WORK_TEST_DATABASE_URL`이 없으면 업무 DB 시험은 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 

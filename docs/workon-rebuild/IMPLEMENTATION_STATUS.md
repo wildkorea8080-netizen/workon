@@ -199,3 +199,64 @@
 5. ~~P5~~ 구현됨(2026-10-27). 남은 것: 5-7 한계, 선택 산출물 '정산 보고'
 6. ~~P6~~ 구현됨(2026-10-27). 남은 것: 슈퍼관리자 화면 브라우저 확인, 기관 양식 필드 대응을 사람이 고치는 화면(지금은 자리 이름 그대로), 실패 작업 재시도 관리 화면
 7. **운영 전 남은 항목은 RELEASE_RUNBOOK.md 8절**
+
+## 9. S6-1 현행화 엔진(2026-10-28)
+
+브랜치 `feat/s6-1-currentize`(`rebuild/workon-vnext` c726c81에서 갈라짐 — 사용자 가지는 건드리지 않음, main에 합치지 않음·푸시 안 함). 계획 `docs/superpowers/plans/2026-10-28-s6-1-currentize-engine.md`, 설계 `docs/superpowers/specs/2026-10-28-s6-currentization-assistants-design.md`, 진행 장부(결정·이연) `.superpowers/sdd/2026-10-28-s6-1-currentize-engine/progress.md`.
+
+### 9-1. 단계
+
+| 단계 | 코드 | 자동 시험 | 실제 파일 | 브라우저 | 스테이징·운영 |
+|---|---|---|---|---|---|
+| S6-1 현행화 엔진(`report` + 작년 파일) | **완료**(원자료 `prior`·0035, 조각·분류·연도 밀기·표 열 밀기·수치·인용·모델·검증, 적용(`applyChanges`)·변경 내역표·검토 코드, 실행기 `currentize-op.ts`, 작업실 '대조' 보기, `applyChangeEdit`·PATCH, 새 작업 화면의 작년 파일 올리기) | 완료(순수 규칙 10개 파일 + 실제 Postgres 흐름 `work-currentize-flow.test.ts` — 실제 양식·실제 HWPX·실제 XLSX, 모델·제공자만 가짜) | **실제 Claude 1건(가상 자료)**: 변경 10개(바꿈 6 / 확인 필요 4 / 제안 0), 5.0원, 결과 HWPX에 `2026년 ○○ 사업계획` 있음, 변경 내역표 XLSX 검사 통과. 기록 `evidence/llm-smoke-2026-10-28-currentize.md`. **한글에서 열어 본 것은 없음** | **미확인** — 화면(대조 보기·작년 파일 올리기)은 브라우저로 안 봤다. 순수 헬퍼 시험과 컴파일(`tsc`)만 | **0035 미적용**(사용자 몫) |
+
+### 9-2. 변경 파일(주요)
+
+- 엔진: `src/lib/work/workflows/currentize/`{limits·segments·classify·shift·tables·numbers·citations·model·verify·plan·apply·workbook·output·review}.ts
+- 실행: `src/lib/work/runs/currentize-op.ts`(새), `runs/executor.ts`(현행화 길·`file` 단계·검토 코드), `runs/shared.ts`, `context.ts`(`currentize: { model }`, `costCapKrw`), `server.ts`(모델 연결), `workflows/index.ts`(`usesCurrentizeWhenPrior`), `artifacts.ts`(주 HWPX + `changeLog` XLSX)
+- 서비스·API: `services.ts`(`applyChangeEdit`·DTO), `sources.ts`(용도 `prior`·50MB), `file-sets.ts`, `types.ts`, `app/api/work/tasks/[id]/currentize/route.ts`(PATCH)
+- 화면: `components/work/CurrentizeView.tsx`·`currentize-view-helpers.ts`(새), `TaskWorkbench.tsx`, `WorkflowCard.tsx`, `types.ts`, `lib/work/client.ts`
+- 카탈로그·DB: `workflow-catalog.json`(+ `docs/workon-rebuild/contracts/` 사본, 추가만), `supabase/migrations/0035_work_prior_source.sql`
+- 재사용을 위해 export만 더한 것: `table-engine/combine.ts`(`normalizeName`·`lookupColumn`), `assistant/number-check.ts`(`numberSpans`)
+- 시험: `tests/work-currentize-*.test.ts` 11개, `tests/helpers/prior-fixture.ts`, `work-db`·`work-core`·`work-client` 보강. 점검: `scripts/work-llm-smoke.mjs`(`currentize` 사례, 파일 원자료 지원)
+- 문서: `CLAUDE.md`('현행화 엔진' 절), `docs/workon-rebuild/fixtures/currentize/README.md`, 이 절, RELEASE_RUNBOOK 8절
+
+### 9-3. 시험 결과(2026-10-28 실행)
+
+| 명령 | 결과 |
+|---|---|
+| `npx tsc --noEmit` | 통과 |
+| `npm test`(`WORK_TEST_DATABASE_URL=postgresql://postgres@localhost:54329/workon_test`) | `Test Files  102 passed (102)` · `Tests  1922 passed (1922)` (개편 시점 1692 + 현행화 230) |
+| `npm run work:llm-smoke -- --yes-cost --only currentize` | 성공 · 모델 1회 · 5.0원 · 4초 |
+
+### 9-4. 결정(Ruling) 요약 — 전체는 진행 장부
+
+- 작년 파일은 **HWPX만**(`prior`). DOCX·HWP는 조각 읽기가 없어 `PRIOR_UNSUPPORTED`(S6-2에서 대체 경로). 틀렸다면: DOCX 작년 파일 기관은 그때까지 기다린다
+- `report`는 `kind: 'document'`를 유지하고 `usesCurrentizeWhenPrior` 플래그로 길을 가른다(새 kind를 만들지 않음). 읽힌 `prior`가 있을 때만 현행화
+- **글 수준만**: 구조 변경(행·절 삽입·삭제)은 `structure`로 '확인 필요' — 설계 9절 1번. 조각당 적용 변경 하나, 모델 수정이 있으면 그것이 이기고(연도 토큰은 검증기가 고정), 최소 편집(공통 접두·접미를 뺀 가운데만)
+- 모델에는 **연도를 민 글**을 준다. 모델 출력은 basis·새 숫자·조문/연도 토큰으로 거르고, 하나라도 어긋나면 `proposed`(파일에 안 넣음) — 올바른 수정도 basis를 빠뜨리면 제안으로 내려가는 보수적 선택
+- 본문 수치는 프로그램도 모델도 바꾸지 않는다(올해 자료에서 확인되지 않으면 '확인 필요'). 표 열 밀기는 작년 당해 → 올해 전년도, 당해는 올해 자료, 증감·증감률은 표 엔진. 단위는 환산(둘 다 알 때)·그대로+경고(한쪽)·`needs_check`(차원 다름/모름)
+- 인용 대조는 제목 **정확 일치**만(법↔시행령 혼동 방지), 숫자 든 낱말은 반드시 일치, 제공자 throw는 실행기 재시도. 시행일이 기준일 뒤면 `not_found`
+- 원가 상한은 `ctx.costCapKrw ?? 2,000원`뿐(환경 변수 없음), 묶음 전 추정. 단계 이름은 DB 규칙 때문에 `rewrite_a`… 글자
+- 재시도는 `load_prior`가 박은 경로·작년 파일 id·sha256·올해 입력 원자료 id를 따른다. 확인 사항은 종류마다 20개 + 요약
+- 화면: 한 문단에 사용자 행 하나, 직접 고치면 그 조각의 제안은 `needs_check`로, 빈 칸·여러 문단 칸은 거부. `Change.location`을 판에 저장(판이 조금 커짐)
+
+### 9-5. 알려진 한계
+
+- 구조 변경 없음(표 행·절 삽입/삭제는 한글에서 직접) · 여러 문단 칸 거부 · 부정어·연혁 비교 없음 · 열 밀기는 연도 머리글만(분기·반기는 연도로 읽음) · 단위를 모르면 '확인 필요' · 규정 이름 부분 일치 오탐 · 지난해 연도 안전망은 자리 바꿈·'2025 회계연도'를 못 봄
+- 작년 파일 가져오기(다른 작업 결과·대화 파일)는 `prior` 미지원(업로드 전용). 서버의 `prior` 확장자 검사는 실행 때. 작년 파일을 지운 작업은 다시 만들어야 함
+- **화면을 브라우저로 안 봤다.** 한글(Hancom)에서 현행화 결과를 열어 본 것도 없다(`work:template-verify` 방식의 확인은 미적용). 가상 사례뿐이고 **진짜 지방공기업 샘플은 아직 없다** — 샘플이 오기 전에는 '제공' 표시를 하지 않는다(설계 9절 9번). 점검에서는 근거 제공자를 붙이지 않아 인용 대조가 '현재 조문을 찾지 못함'까지만 확인됨
+- 단위: 점검 사례에서 올해 자료 표에 단위가 없으면 표 칸이 모두 '확인 필요'가 된다(보수적). 실제 문서의 단위 표기로 다시 확인
+
+### 9-6. 다음 계획
+
+- **S6-2** 비서 신설 3개(`business-plan`·`evaluation-report`·`regulation-amend`) + 지방공기업 유형(`local_enterprise`, 마이그레이션 0036) + 신구조문대비표·개정 이유서 표준 양식
+- **S6-3** 문서 달력(제목 목록 올리기 → `work_document_index` → 홈·시작 화면·인수인계 원자료)
+- **S6-4** 내 작업 틀(`work_task_presets`, 개인 전용)
+
+### 9-7. 운영 전 할 일(사용자 — 자동 실행하지 않음)
+
+1. 마이그레이션 **0035**(`npm run db:migrate -- 0035`) — **코드 배포 전**(`work_sources.purpose` 검사 제약에 `prior` 추가. 옛 코드는 영향 없음, 새 코드는 `prior` 행을 쓴다)
+2. Supabase Storage `documents` 버킷의 `file_size_limit`을 **50MB 이상**으로(작년 파일 상한이 50MB — 지금 30MB면 큰 작년 파일의 직접 올리기가 저장소에서 거절된다). `allowed_mime_types`를 걸었다면 HWPX(`application/hwp+zip` 등)가 들어 있는지
+3. 새 환경 변수는 없다(`.env.example` 불변)
+4. 위 화면·한글 확인 후 실제 샘플로 한 번(RELEASE_RUNBOOK 8절)
