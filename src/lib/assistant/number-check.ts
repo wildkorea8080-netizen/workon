@@ -108,6 +108,14 @@ function skippedSpans(text: string): [number, number][] {
  * 날짜·시각 꼴(두 자리 연도 '26.10.21' 포함), 줄머리 소제목 번호('## 1.1'), 'a1'·'t3' 같은 id. 오탐이 잦으면 안내를 아무도 읽지 않는다.
  */
 export function answerNumbers(text: string): { raw: string; value: number; decimals: number }[] {
+  return numberSpans(text).map(({ raw, value, decimals }) => ({ raw, value, decimals }));
+}
+
+/**
+ * `answerNumbers`와 같은 기준으로 고른 숫자를 **글 안의 위치**와 함께 낸다(`text.slice(start, end) === raw`).
+ * 위치가 필요한 쪽(현행화 조각 분류)이 같은 규칙을 복사하지 않고 쓰게 하려는 것이다.
+ */
+export function numberSpans(text: string): { raw: string; value: number; decimals: number; start: number; end: number }[] {
   if (!text) return [];
   const spans = skippedSpans(text);
   return tokens(text)
@@ -119,7 +127,7 @@ export function answerNumbers(text: string): { raw: string; value: number; decim
       if (t.decimals === 0 && t.plain && abs >= 1900 && abs <= 2100) return false;
       return true;
     })
-    .map(({ raw, value, decimals }) => ({ raw, value, decimals }));
+    .map(({ raw, value, decimals, start, end }) => ({ raw, value, decimals, start, end }));
 }
 
 /** 정렬된 배열에서 lo 이상인 첫 자리 */
