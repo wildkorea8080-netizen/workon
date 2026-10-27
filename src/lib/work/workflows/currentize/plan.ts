@@ -47,6 +47,9 @@ export interface PlanTableCell {
 
 export interface PlanInput {
   segments: Segment[];
+  /** 작년(밀기 전) · 올해 */
+  fromYear: number;
+  toYear: number;
   /** 조각 id → 분류 결과. 지금 규칙은 쓰지 않는다(연도 밀기 결과가 shifted로 온다) — 계획 입력의 계약으로 받는다 */
   findings: Map<string, Finding[]>;
   /** 조각 id → 연도를 민 글 */
@@ -61,6 +64,8 @@ export const NOTE_UNIT_UNKNOWN = '단위를 알 수 없어 그대로 넣었습�
 export const NOTE_CITATION_CHANGED = '근거 조문이 바뀜 — 문장을 확인하세요';
 export const NOTE_CITATION_NOT_FOUND = '현재 조문을 찾지 못함';
 export const NOTE_NUMBER = '올해 자료에서 확인되지 않은 숫자가 있습니다 — 확인하세요';
+export const NOTE_STALE_YEAR = '지난해 연도가 남아 있습니다 — 확인하세요';
+export const NOTE_DUPLICATE_CELL = '같은 칸에 변경이 둘 이상입니다';
 
 type Draft = Omit<Change, 'id'>;
 
@@ -79,20 +84,46 @@ function tableChange(t: PlanTableCell): Draft {
   };
 }
 
-/** 표 밖(또는 표 계산이 손대지 않은) 조각 하나의 변경들 */
-function segmentChanges(s: Segment, p: PlanInput, accepted: Map<string, RawRewrite>, proposed: Map<string, RawRewrite[]>): Draft[] {
-  const base = { segmentId: s.id, before: s.text, basis: [] as string[], note: null as string | null };
+/** 지난해 연도 표지(`2025년` · `'25`)의 개수 */
+function staleYearCount(text: string, fromYear: number): number {
+  const yy = String(fromYear % 100).padStart(2, '0');
+  const full = new RegExp(String.raw`(?<!\d)${fromYear}년`, 'g');
+  const short = new RegExp(String.raw`['’‘]\s?${yy}(?!\d)`, 'g');
+  return (text.match(full) ?? []).length + (text.match(short) ?? []).length;
+}
 
-  // 1) 받아들인 고치기가 이긴다 — 연도 표지는 검증이 이미 묶어 두었으므로 연도 밀기를 따로 하지 않는다
+/**
+ * 조각 하나의 변경들. tableCell이면 표 계산이 이 문단의 글을 정하므로 다른 changed(받아들인 고치기·연도 밀기)는 내지 않는다 —
+ * 받아들인 고치기는 제안으로 남기고, 확인 요청(숫자·인용)은 그대로 낸다.
+ */
+function segmentChanges(
+  s: Segment,
+  p: PlanInput,
+  accepted: Map<string, RawRewrite>,
+  proposed: Map<string, RawRewrite[]>,
+  tableCell: boolean
+): Draft[] {
+  const base = { segmentId: s.id, before: s.text, basis: [] as string[], note: null as string | null };
+  const shifted = p.shifted.get(s.id);
   const rewrite = accepted.get(s.id);
-  if (rewrite) return [{ ...base, kind: 'prose', after: rewrite.text, status: 'changed', basis: [...rewrite.basis] }];
+
+  // 1) 받아들인 고치기가 이긴다 — 모델은 연도를 민 글을 받아 고치므로 연도 밀기를 따로 하지 않는다.
+  //    다만 밀어 둔 글보다 지난해 연도가 많으면(모델이 옛 글을 따랐거나 연도를 되돌림) 넣지 않고 제안으로
+  if (rewrite && !tableCell) {
+    const stale = staleYearCount(rewrite.text, p.fromYear) > staleYearCount(shifted ?? s.text, p.fromYear);
+    return [
+      stale
+        ? { ...base, kind: 'prose', after: rewrite.text, status: 'proposed', basis: [...rewrite.basis], note: NOTE_STALE_YEAR }
+        : { ...base, kind: 'prose', after: rewrite.text, status: 'changed', basis: [...rewrite.basis] },
+    ];
+  }
 
   const out: Draft[] = [];
   // 2) 연도 밀기 — 글이 실제로 바뀐 때만
-  const shifted = p.shifted.get(s.id);
-  if (shifted !== undefined && shifted !== s.text) out.push({ ...base, kind: 'year', after: shifted, status: 'changed' });
+  if (!tableCell && shifted !== undefined && shifted !== s.text) out.push({ ...base, kind: 'year', after: shifted, status: 'changed' });
   // 3) 근거가 모자란 고치기는 제안으로만(파일에 넣지 않는다)
-  for (const r of proposed.get(s.id) ?? []) out.push({ ...base, kind: 'prose', after: r.text, status: 'proposed', basis: [...r.basis] });
+  const suggestions = [...(rewrite ? [rewrite] : []), ...(proposed.get(s.id) ?? [])];
+  for (const r of suggestions) out.push({ ...base, kind: 'prose', after: r.text, status: 'proposed', basis: [...r.basis] });
   // 4) 본문 숫자는 프로그램도 모델도 바꾸지 않는다 — 올해 자료에 없는 숫자는 사람이 본다
   if (p.numberStatus.get(s.id) === 'needs_check') out.push({ ...base, kind: 'number', after: null, status: 'needs_check', note: NOTE_NUMBER });
   // 5) 인용 — 같은 조각의 같은 상태는 하나로(바뀜 먼저)
@@ -103,16 +134,25 @@ function segmentChanges(s: Segment, p: PlanInput, accepted: Map<string, RawRewri
 }
 
 /**
- * 변경 목록. 조각 순서대로, 표 칸 조각은 표 계산 결과만 낸다(같은 칸에 연도 밀기·숫자 확인을 겹쳐 내면 한 문단에 두 번 적용된다).
- * 조각 목록에 없는 칸 조각은 맨 뒤에 입력 순서로 — 적용할 때 풀리지 않으면 PRIOR_MISMATCH로 드러난다.
+ * 변경 목록. 조각 순서대로 — 표 칸 조각은 표 변경을 먼저, 그다음 확인 요청·제안.
+ * 조각 목록에 없는 칸 조각은 맨 뒤에 입력 순서로(적용할 때 풀리지 않으면 PRIOR_MISMATCH로 드러난다).
+ * 한 조각에 changed는 하나뿐이다 — 둘째부터는 확인 요청으로 내린다(한 문단에 두 번 적용하면 XML이 깨진다).
  */
 export function buildPlan(p: PlanInput): Change[] {
   const accepted = new Map<string, RawRewrite>();
   for (const r of p.rewrites.accepted) if (!accepted.has(r.segmentId)) accepted.set(r.segmentId, r);
   const proposed = new Map<string, RawRewrite[]>();
-  for (const r of p.rewrites.proposed) proposed.set(r.segmentId, [...(proposed.get(r.segmentId) ?? []), r]);
+  for (const r of p.rewrites.proposed) {
+    const list = proposed.get(r.segmentId);
+    if (list) list.push(r);
+    else proposed.set(r.segmentId, [r]);
+  }
   const cellsBySegment = new Map<string, PlanTableCell[]>();
-  for (const t of p.tableCells) cellsBySegment.set(t.segmentId, [...(cellsBySegment.get(t.segmentId) ?? []), t]);
+  for (const t of p.tableCells) {
+    const list = cellsBySegment.get(t.segmentId);
+    if (list) list.push(t);
+    else cellsBySegment.set(t.segmentId, [t]);
+  }
 
   const drafts: Draft[] = [];
   const known = new Set<string>();
@@ -120,9 +160,18 @@ export function buildPlan(p: PlanInput): Change[] {
     known.add(s.id);
     const cells = cellsBySegment.get(s.id);
     if (cells) drafts.push(...cells.map(tableChange));
-    else drafts.push(...segmentChanges(s, p, accepted, proposed));
+    drafts.push(...segmentChanges(s, p, accepted, proposed, cells !== undefined));
   }
   for (const t of p.tableCells) if (!known.has(t.segmentId)) drafts.push(tableChange(t));
+
+  const hasChanged = new Set<string>();
+  for (const d of drafts) {
+    if (d.status !== 'changed') continue;
+    if (hasChanged.has(d.segmentId)) {
+      d.status = 'needs_check';
+      d.note = NOTE_DUPLICATE_CELL;
+    } else hasChanged.add(d.segmentId);
+  }
 
   return drafts.map((d, i) => ({ id: `c${i + 1}`, ...d }));
 }
