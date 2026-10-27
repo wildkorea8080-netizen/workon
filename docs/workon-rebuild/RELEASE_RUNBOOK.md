@@ -13,7 +13,7 @@
 | `npx tsc --noEmit` | 통과 | 전체 |
 | `npm test`(시험 DB 주소 포함) | **1692 통과 · 0 건너뜀** | 업무 시험은 실제 Postgres 16(0001~0034)·실제 채우기 엔진·실제 표준 양식 |
 | `npm test`(시험 DB 없이) | 업무 DB 시험은 건너뜀 | 순수 함수만 |
-| `npm run build` | **이 PC에서 못 돌림** — 커밋 메모리 부족(`Zone Allocation failed`), 개편 전 코드도 같음 | Vercel 빌드로 확인해야 함 |
+| `npm run build` | 이 PC에서는 못 돌림(커밋 메모리 부족) → **Vercel 미리보기 빌드 통과**(2026-10-27, 브랜치 푸시 `5b674b8`) | 운영 배포는 아님 — 운영 0034 적용 뒤 main 푸시 |
 | `npm run work:template-check` | 표준 양식 7종 ✓(사람의 시각 검토 기록 없음 경고) | `--release`는 사람 검토 기록이 있어야 통과 |
 | `npm run work:template-verify` | 7종 한글 2018 COM으로 열기·넣은 글 확인·편집·다시 저장·다시 열기·PDF 통과 | 쪽 배치·글꼴 시각 검토는 사람 몫 |
 | 로컬 Supabase(Docker, 포트 55321~) | 0001~0034 실제 Supabase Postgres 17에 적용 통과. 로그인 화면으로 공문·취합·규정·접수·정산·회신 생성, 결과 파일 가져오기, 기관 격리(동료·관리자·다른 기관 404), 스위치 꺼진 기관 403, 관리자 업무 관리(양식 등록·현황) 확인 | **시험 모드(모델 없음)**. 실제 모델 화면 생성은 공문 1건(서버 시험)뿐 |
@@ -124,7 +124,7 @@ npm run work:testdb -- stop
 1. 시험용 Supabase(또는 스테이징)에 0034 적용 뒤 실제 모델로 업무를 화면에서 — 서버 경로는 `npm run work:llm-smoke`로 8개 모두 확인함(가상 자료). 기관의 실제 자료 형태(긴 공문·스캔 PDF·큰 엑셀)로 한 번 더 보는 것을 권함
 2. 사람의 시각 검토: `docs/workon-rebuild/evidence/p0/*.pdf`(한글이 그린 표준 양식 7종) → `assets/templates/verification.json`에 `human-visual`
 3. 운영 렌더러 결정(ADR 0002), pg_cron 설정
-4. Vercel 빌드 확인(이 PC는 메모리 부족)
+4. ~~Vercel 빌드 확인~~ — 미리보기 빌드 통과(2026-10-27)
 5. 스테이징 DB에서 `npm run db:check`·`npm run isolation:check`
 6. 데이터 흐름 문서 갱신: 업무 원자료·발췌가 Claude로 가는 경로(공문·보고서·규정 의견·항목 뽑기·질문별 답변), 규정 확인의 NODA·법제처 경로. 정산·취합은 모델을 부르지 않는다
 7. 알려진 한계는 장부 5-3·5-5·5-7절(선택 산출물 3종 미구현 등)
