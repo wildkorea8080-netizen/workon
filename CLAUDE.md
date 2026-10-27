@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-10-27(업무 개편 — `rebuild/workon-vnext`, 운영 미반영)  
+**최종 업데이트**: 2026-10-28(현행화 엔진 S6-1 — feat/s6-1-currentize, 운영 미반영)  
 **분석 기준**: 코드베이스 전수 확인
 (`tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증, `next build`는 배포 때 Vercel이 확인)
 
@@ -43,7 +43,7 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 133개 (아래 "API 구조" 참조) — 업무 `api/work/**`·`api/workflows` 24개, 관리자 `api/admin/work-*` 4개
+│   ├── api/              # API 라우트 134개 (아래 "API 구조" 참조) — 업무 `api/work/**`·`api/workflows` 24개, 관리자 `api/admin/work-*` 4개
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증) — common-library/ = 공통 자료실 운영자 화면(S5)
 │   ├── my/stats/         # 내 사용현황
@@ -118,7 +118,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | `npm run noda:webhook -- register <주소> \| list \| ping <id> \| delete <id>` | NODA 웹훅 걸기·확인 — 키 하나에 하나. register의 서명 비밀값은 한 번만 보이므로 **사용자가 직접** 실행해 `NODA_WEBHOOK_SECRET`에 넣는다 | 아니오 (키 필요) |
 | `npm run noda:purge-deleted` | NODA 보관함을 비서 장부와 맞대기 — NODA `GET /tenants`(workon 키는 `workon`·`workon-…`만 보임)의 보관함 목록·파일 수·읽는 중·실패·권한 상태와 서비스 한도를 받아 살아 있는 비서·**지운 비서**·**DB에 없는 비서(고아)**·공통 자료실·그 밖으로 가른다(`noda-vaults.ts`). 그냥 돌리면 보기만, `-- --yes`면 지운 비서(보관함 → 남은 행 → 원본)와 고아 보관함만 비운다(**되돌릴 수 없음**, 사용자가 실행). 권한 상태 `broken`(규칙 파일이 깨져 보관함 전체가 잠김)은 경고. 여러 번 돌려도 안전 | 예 (키 필요) |
 | `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
-| `npm run work:testdb -- start\|reset\|stop` | 업무 DB 시험용 임시 PostgreSQL(설치된 16 바이너리, 포트 54329, 0001~0034). `WORK_TEST_DATABASE_URL`을 주면 `npm test`가 업무 DB 시험도 돈다 | 아니오(로컬) |
+| `npm run work:testdb -- start\|reset\|stop` | 업무 DB 시험용 임시 PostgreSQL(설치된 16 바이너리, 포트 54329, 0001~0035). `WORK_TEST_DATABASE_URL`을 주면 `npm test`가 업무 DB 시험도 돈다 | 아니오(로컬) |
 | `npm run work:template-check [-- --release]` | 표준 양식 파일·표시·엔진 방식·검증 기록. `--release`는 사람의 시각 검토 기록까지 | 아니오 |
 | `npm run work:template-verify [-- --only 이름]` | (Windows·한글) 표준 양식을 채워 한글 COM으로 열기·넣은 글·편집·다시 저장·PDF, 기록을 verification.json에 | 아니오 |
 | `npm run work:llm-smoke -- --yes-cost [--only 키,키] [--out 파일]` | 업무 8개 + 현행화를 가상 자료로 실제 Claude에 끝까지(시험 DB만, 모델 키만 .env.local에서). 비용이 든다(8개 약 170원, 현행화 약 5원) | 시험 DB(키 필요) |
@@ -131,7 +131,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 
 ---
 
-## API 구조 (133개 라우트)
+## API 구조 (134개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -139,7 +139,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]`, `/api/noda/webhook`(NODA 서명으로만 받음), `/api/cron/noda-events`(Vercel 예약 작업 — `CRON_SECRET`으로만 받음) | 없음 | 초대 토큰 검증만 · 웹훅은 HMAC 서명 · 예약 작업은 Bearer 비밀값 |
-| 직원 — 업무 | `/api/workflows`, `/api/work/**`(작업·원자료·실행·문서·판·AI 수정·검토·결과물·양식·대화 파일 가져오기) | NextAuth 세션 + `getWorkActor`(대리 접근·비활성·소속 없음은 막음) | 권한은 `work/access.ts`(주인·명시 구성원만 — 관리자도 남의 작업 404) |
+| 직원 — 업무 | `/api/workflows`, `/api/work/**`(작업·원자료·실행·문서·판·AI 수정·검토·결과물·양식·대화 파일 가져오기, `PATCH …/tasks/[id]/currentize` = 현행화 대조 보기 조각 수정) | NextAuth 세션 + `getWorkActor`(대리 접근·비활성·소속 없음은 막음) | 권한은 `work/access.ts`(주인·명시 구성원만 — 관리자도 남의 작업 404) |
 | 업무 작업자 | `/api/work/worker` | `WORK_WORKER_SECRET` Bearer(상수 시간 비교, 없으면 503) | pg_cron이 1분마다 부름 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/attachments/*` (채팅 첨부 — 올리기 주소·확인·목록·삭제), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
 | 기관 관리자 — 업무 | `/api/admin/work-templates`·`[id]`·`work-installations`·`work-overview` | NextAuth 세션 + `isAdminSession()` + `requireWorkAdmin` | 직원 작업 원문·파일은 안 보임 |
@@ -193,7 +193,8 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | 0030 | 채팅 첨부(`chat_attachments`) — 원본·읽은 내용 경로와 요약, 기관 채움 트리거, `CHECK (ready ⇔ extract_path)`. **코드 배포 전에 적용** (코드가 이 표에 쓴다) |
 | 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다). 순서는 **0031 → 코드 푸시(배포 확인) → `npm run noda:migrate`** — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면 고아가 남는다 |
 | 0032 | 옛 임베딩 값 비우기 — `noda_status`가 NULL이 아닌 행의 `embedding`을 NULL로, `metadata`에서 `chunks`를 뺌. **사용자가 적용한다 — `npm run noda:migrate -- --dry-run`이 0건(문서가 모두 NODA로 옮겨짐)인 것을 확인한 뒤.** **되돌릴 수 없다**(비운 값은 다시 만들 수 없다). 코드는 이 값을 읽지 않으므로 적용 전에도 돈다. `embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC는 **지우지 않는다**(값만 비움). 적용 뒤 확인: `SELECT count(*) FROM documents WHERE embedding IS NOT NULL OR metadata ? 'chunks';` |
-| 0034 | **업무 작업(WORKON 개편)** — `work_org_settings`(기관 스위치)·`workflow_installations`·`work_template_versions`·`work_tasks`·`work_task_members`·`work_sources`·`work_document_versions`·`work_runs`·`work_run_steps`·`work_artifacts`·`work_review_items`·`work_evidence`·`work_revision_proposals`·`work_events`(task_id NULL = 기관 단위 사건) + RPC(`work_save_document_version`·`work_enqueue_run`·`work_claim_runs`·`work_heartbeat_run`·`work_finish_run`). 추가만(기존 표 무변경), 겹 외래 키로 같은 기관 강제, RLS 켜고 정책 없음(서비스 키만). **아직 어디에도 적용 안 됨** — 순서는 RELEASE_RUNBOOK 5절(**코드 배포 전**에 적용) |
+| 0034 | **업무 작업(WORKON 개편)** — `work_org_settings`(기관 스위치)·`workflow_installations`·`work_template_versions`·`work_tasks`·`work_task_members`·`work_sources`·`work_document_versions`·`work_runs`·`work_run_steps`·`work_artifacts`·`work_review_items`·`work_evidence`·`work_revision_proposals`·`work_events`(task_id NULL = 기관 단위 사건) + RPC(`work_save_document_version`·`work_enqueue_run`·`work_claim_runs`·`work_heartbeat_run`·`work_finish_run`). 추가만(기존 표 무변경), 겹 외래 키로 같은 기관 강제, RLS 켜고 정책 없음(서비스 키만). **아직 어디에도 적용 안 됨** — 순서는 RELEASE_RUNBOOK 5절(**코드 배포 전**에 적용) (운영 적용은 RELEASE_RUNBOOK 1절 참조) |
+| 0035 | **현행화 작년 파일 용도** — `work_sources.purpose` CHECK(`work_sources_purpose_check`)에 `'prior'`를 더한다(값만 넓힘·추가만, 여러 번 적용해도 안전). 작년 HWPX를 올해 문서로 고치는 현행화 엔진(S6-1)이 쓴다. **코드 배포 전에 적용**(새 코드가 `purpose='prior'`로 올린다). 아직 어디에도 적용 안 됨 — RELEASE_RUNBOOK 8절 |
 | 0033 | 공통 자료실(`common_documents`) — 기관 유형(`org_type`, 여섯 값 CHECK)·이름·기준 연도(2000~2100)·이용 조건 확인 기록(비면 안 됨)·원본 경로·NODA 읽기 상태(`documents`와 같은 칸 + `retired`)·`replaces_id`·`retired_at`·`uploaded_by`. **기관·부서 칸이 없다**(유형 단위 자료라 `visibilityFilter`·기관 트리거 대상이 아님). **코드 배포 전에 적용**(코드가 이 표를 읽고 쓴다) |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
