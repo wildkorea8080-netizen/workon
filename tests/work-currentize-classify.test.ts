@@ -59,6 +59,16 @@ describe('classifySegment — 다섯 꼴', () => {
     expect(classifySegment('홍길동순 김민수', ctx)).toEqual([f('person', '김민수', 5)]);
   });
 
+  it('사람: 조사·호칭이 붙어도 이름만 잡는다', () => {
+    expect(classifySegment('담당자 홍길동이 작성', ctx)).toEqual([f('person', '홍길동', 4)]);
+    expect(classifySegment('담당자 홍길동은 부재', ctx)).toEqual([f('person', '홍길동', 4)]);
+    expect(classifySegment('담당자 홍길동에게 전달', ctx)).toEqual([f('person', '홍길동', 4)]);
+    expect(classifySegment('담당자 홍길동씨 확인', ctx)).toEqual([f('person', '홍길동', 4)]);
+    expect(classifySegment('담당자 홍길동님께 보고', ctx)).toEqual([f('person', '홍길동', 4)]);
+    expect(classifySegment('담당자 홍길동순 확인', ctx).filter((x) => x.kind === 'person')).toEqual([]);
+    expect(classifySegment('담당자 홍길동이다 확인', ctx).filter((x) => x.kind === 'person')).toEqual([]);
+  });
+
   it('prose: 10자 이상 + 다른 finding 없음 → 하나', () => {
     const t = '이 사업은 지역 주민의 편의를 위해 추진한다';
     expect(classifySegment(t, ctx)).toEqual([{ kind: 'prose', start: 0, end: t.length, text: t }]);
@@ -77,6 +87,11 @@ describe('classifySegment — 제외 셋 (Review Focus 1)', () => {
   it('문서번호 2025-123호는 연도가 아니다', () => {
     expect(classifySegment('문서번호 2025-123호 참조', ctx).filter((x) => x.kind === 'year')).toEqual([]);
     expect(classifySegment('문서번호 2025-123호 참조', ctx).filter((x) => x.kind !== 'prose')).toEqual([]);
+  });
+
+  it('문서번호 2025-1234호는 연도도 수치도 아니다', () => {
+    const r = classifySegment('문서번호 2025-1234호 참조', ctx);
+    expect(r.filter((x) => x.kind === 'year' || x.kind === 'number')).toEqual([]);
   });
 
   it('「…」 안의 연도는 연도가 아니다(인용 하나)', () => {

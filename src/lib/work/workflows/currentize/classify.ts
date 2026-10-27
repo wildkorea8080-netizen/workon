@@ -41,6 +41,8 @@ const YEAR_PATTERNS = [
 ];
 /** 문서번호 꼴 '2025-123호' — 연도처럼 보여도 번호다 */
 const DOC_NUMBER = /(?<!\d)\d{4}-\d+호/g;
+// 이름 바로 뒤에 붙는 조사·호칭(긴 것 먼저). 이 밖의 글자가 붙으면('홍길동순') 다른 낱말이다
+const NAME_SUFFIX = '님께|께서|에게|으로|이가|이|가|은|는|을|를|의|도|과|와|께|씨|님|로';
 const PERIOD = /전년도|금년도|당해연도|올해|작년/g;
 
 function escapeRegExp(s: string): string {
@@ -73,9 +75,12 @@ function collect(text: string, ctx: ClassifyContext): Finding[] {
   for (const m of text.matchAll(DATE)) push('date', m.index ?? 0, (m.index ?? 0) + m[0].length);
 
   // 수치 — number-check와 같은 기준(4자리 미만 정수·연도·날짜·id 제외). 단위는 줄글에 남기고 숫자 토큰만
-  for (const n of numberSpans(text)) push('number', n.start, n.end);
-
+  // 문서번호 '2025-1234호'의 일련번호는 값이 아니라 번호다 — 수치로도 연도로도 보지 않는다
   const docNumbers = [...text.matchAll(DOC_NUMBER)].map((m) => ({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }));
+  for (const n of numberSpans(text)) {
+    if (docNumbers.some((d) => overlaps(n, d))) continue;
+    push('number', n.start, n.end);
+  }
   for (const re of YEAR_PATTERNS) {
     for (const m of text.matchAll(re)) {
       const span = { start: m.index ?? 0, end: (m.index ?? 0) + m[0].length };
@@ -84,9 +89,9 @@ function collect(text: string, ctx: ClassifyContext): Finding[] {
     }
   }
 
-  // 사람 — 정확히 같은 이름이 다른 글자에 붙지 않은 낱말일 때만
+  // 사람 — 같은 이름이 낱말이거나 조사·호칭만 붙었을 때(finding은 이름 부분만)
   for (const name of new Set(ctx.personNames.map((n) => n.trim()).filter(Boolean))) {
-    const re = new RegExp(String.raw`(?<![가-힣A-Za-z0-9])${escapeRegExp(name)}(?![가-힣A-Za-z0-9])`, 'g');
+    const re = new RegExp(String.raw`(?<![가-힣A-Za-z0-9])${escapeRegExp(name)}(?=(?:${NAME_SUFFIX})?(?![가-힣A-Za-z0-9]))`, 'g');
     for (const m of text.matchAll(re)) push('person', m.index ?? 0, (m.index ?? 0) + m[0].length);
   }
 
