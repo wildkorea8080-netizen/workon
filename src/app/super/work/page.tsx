@@ -37,8 +37,8 @@ export default function SuperWorkPage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">업무 화면 전환</h1>
-        <p className="mt-1 text-sm text-gray-600">
+        <h1 className="text-2xl font-bold text-white">업무 화면 전환</h1>
+        <p className="mt-1 text-sm text-slate-400">
           기관마다 업무 홈과 새 작업을 켭니다. 대표 기관 하나부터 켜고 확인한 뒤 넓히세요. 끄면 새 작업만 막히고, 이미 만든 작업·파일은 읽기·내려받기가 남습니다. 바꾼 기록은 슈퍼관리자 로그에 남습니다.
         </p>
       </div>
