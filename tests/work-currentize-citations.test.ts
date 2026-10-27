@@ -144,9 +144,9 @@ describe('compareCitations', () => {
       },
     };
     const seg = '「공무원 여비 규정」 제64조 에 따라 지급한다.';
-    const call = () => compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], providers, scope, BASIS);
-    await expect(call()).rejects.toMatchObject({ code: 'SOURCE_UNAVAILABLE' });
-    await expect(call()).rejects.toBeInstanceOf(WorkError);
+    const err = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], providers, scope, BASIS).catch((e) => e);
+    expect(err).toBeInstanceOf(WorkError);
+    expect(err).toMatchObject({ code: 'SOURCE_UNAVAILABLE' });
   });
 
   it('쓸 수 없다고 한 제공자는 not_found로 이어 간다', async () => {
@@ -208,5 +208,129 @@ describe('compareCitations', () => {
   it('조문이 없으면 문장이 비어도 없음', async () => {
     const [pair] = await compareCitations([cite('s1', '「공무원 여비 규정」 제64조', '공무원 여비 규정', '제64조')], fakes([]), scope, BASIS);
     expect(pair.status).toBe('not_found');
+  });
+
+  // ── 이름은 같아야만 같은 규정 ──
+  it('법을 인용했는데 시행령에만 그 조문이 있으면 없음(이름이 비슷한 다른 규정으로 넘어가지 않는다)', async () => {
+    const decree = lawEvidence({ title: '지방공기업법 시행령', text: '제64조(예산) 예산을 편성한다.' });
+    const seg = '「지방공기업법」 제64조에 따라 예산을 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([decree]), scope, BASIS);
+    expect(pair.status).toBe('not_found');
+    expect(pair.current).toBeNull();
+  });
+
+  it('시행령을 인용했는데 법에만 그 조문이 있어도 없음', async () => {
+    const law = lawEvidence({ title: '지방공기업법', text: '제64조(예산) 예산을 편성한다.' });
+    const seg = '「지방공기업법 시행령」 제64조에 따라 예산을 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법 시행령', '제64조')], fakes([law]), scope, BASIS);
+    expect(pair.status).toBe('not_found');
+  });
+
+  it('법과 시행령이 다 있으면 이름이 같은 쪽과 맞댄다', async () => {
+    const decree = lawEvidence({ title: '지방공기업법 시행령', text: '제64조(결산) 결산을 작성한다.' });
+    const law = lawEvidence({ title: '지방공기업법', text: '제64조(예산) 예산을 편성한다.' });
+    const seg = '「지방공기업법」 제64조에 따라 예산을 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([decree, law]), scope, BASIS);
+    expect(pair.current?.title).toBe('지방공기업법');
+    expect(pair.status).toBe('same');
+  });
+
+  it('이름의 공백·(약칭) 괄호 차이는 같은 이름', async () => {
+    const law = lawEvidence({ title: '지방공기업법 (약칭: 지공법)', text: '제64조(예산) 예산을 편성한다.' });
+    const seg = '「지방 공기업법」 제64조에 따라 예산을 편성한다';
+    const [pair] = await compareCitations([cite('s1', seg, '지방 공기업법', '제64조')], fakes([law]), scope, BASIS);
+    expect(pair.status).toBe('same');
+  });
+
+  // ── 숫자는 꼭 맞아야 한다 ──
+  it('작년 문장의 수치가 조문에 없으면 다른 낱말이 맞아도 바뀜', async () => {
+    const seg = '「공무원 여비 규정」 제64조 철도운임의 70%만 지급하되 상한을 두지 아니한다';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([lawEvidence()]), scope, BASIS);
+    expect(pair.status).toBe('changed');
+  });
+
+  it('수치가 조문에 있고 낱말이 70% 이상 맞으면 같음', async () => {
+    const art = lawEvidence({ text: '제64조(운임) 철도운임은 70%를 지급하되 상한을 두지 아니한다.' });
+    const seg = '「공무원 여비 규정」 제64조 철도운임의 70%만 지급하되 상한을 두지 아니한다';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('same');
+  });
+
+  // ── 비율 경계 ──
+  const W = ['예산', '편성', '검토', '결의', '공고', '보고', '감사', '정산', '결산', '계획'];
+  async function ratio(total: number, present: number) {
+    const art = lawEvidence({ title: '지방공기업법', text: `제64조(총칙) ${W.slice(0, present).join(' ')}` });
+    // 앞 present개가 조문에 있고 나머지는 없다
+    const seg = `「지방공기업법」 제64조 ${W.slice(0, total).join(' ')}`;
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    return pair.status;
+  }
+  it('낱말 3개 중 2개가 있으면 바뀜', async () => {
+    expect(await ratio(3, 2)).toBe('changed');
+    expect(await ratio(3, 3)).toBe('same');
+  });
+  it('낱말 4개 중 3개(75%)면 같음', async () => {
+    expect(await ratio(4, 3)).toBe('same');
+  });
+  it('낱말 10개 중 7개면 같고 6개면 바뀜', async () => {
+    expect(await ratio(10, 7)).toBe('same');
+    expect(await ratio(10, 6)).toBe('changed');
+  });
+
+  // ── 조문 고르기 ──
+  it('제76조의2를 인용하면 제76조의2 조문과 맞댄다', async () => {
+    const art = lawEvidence({ text: '제76조의2(특례) 특례를 둔다.' });
+    const seg = '「공무원 여비 규정」 제76조의2에 따라 특례';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제76조의2')], fakes([art]), scope, BASIS);
+    expect(pair.current?.article).toBe('제76조의2');
+    expect(pair.status).toBe('same');
+  });
+
+  it('한 근거에 조문이 여럿이면 그 조문의 글만 쓴다(제65조의 낱말은 세지 않는다)', async () => {
+    const art = lawEvidence({ text: '제64조(운임) 철도운임은 실비로 지급한다.\n제65조(숙박비) 숙박비는 정액으로 지급한다.' });
+    const seg = '「공무원 여비 규정」 제64조 숙박비는 정액으로 지급한다';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.current?.text).toContain('철도운임');
+    expect(pair.current?.text).not.toContain('숙박비');
+    expect(pair.status).toBe('changed');
+  });
+
+  it('시행일을 모르는 근거도 쓴다(date_unknown)', async () => {
+    const art = lawEvidence({ effectiveDate: null });
+    const seg = '「공무원 여비 규정」 제64조 철도운임은 실비로 지급하되';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('same');
+    expect(pair.current?.enforced).toBeNull();
+  });
+
+  it('조문 구조 없는 기관 문서 조각은 그 조문을 언급만 해서는 쓰지 않는다', async () => {
+    const chunk = lawEvidence({ kind: 'org_doc', location: 'p.3', effectiveDate: null, text: '직원 여비는 공무원 여비 규정 제64조를 따르며 별도 안내문을 참고한다' });
+    const seg = '「공무원 여비 규정」 제64조 철도운임은 실비로 지급하되';
+    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([chunk]), scope, BASIS);
+    expect(pair.status).toBe('not_found');
+  });
+
+  // ── 연결 표현 ──
+  const connectorCases: [string, string][] = [
+    ['의 규정에 따라', '「지방공기업법」 제64조의 규정에 따라 예산'],
+    ['에서 정한', '「지방공기업법」 제64조에서 정한 예산'],
+    ['상의', '「지방공기업법」 제64조상의 예산'],
+  ];
+  it.each(connectorCases)('연결 표현 %s 는 대조에서 뗀다', async (_label, seg) => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(총칙) 예산을 편성한다.' });
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.status).toBe('same');
+  });
+
+  // ── 창 끊기 ──
+  it('다음 인용이나 문장 끝에서 창을 끊는다', async () => {
+    const art = lawEvidence({ title: 'A규정', text: '제1조(총칙) 예산을 편성한다.' });
+    const seg = '「A규정」 제1조 및 「B규정」 제2조에 따라 결산을 작성한다.';
+    const [pair] = await compareCitations([cite('s1', seg, 'A규정', '제1조')], fakes([art]), scope, BASIS);
+    expect(pair.cited.text).toBe('및');
+    expect(pair.status).toBe('same');
+    const seg2 = '「A규정」 제1조 예산을 편성한다. 결산을 작성한다.';
+    const [p2] = await compareCitations([cite('s1', seg2, 'A규정', '제1조')], fakes([art]), scope, BASIS);
+    expect(p2.cited.text).toBe('예산을 편성한다');
   });
 });

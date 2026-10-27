@@ -1,5 +1,4 @@
 // src/lib/work/workflows/currentize/citations.ts
-import { squash } from '@/lib/table-engine/combine';
 import { EVIDENCE_TEXT_MAX, assessEvidence, isUsable, type EvidenceKind, type RawEvidence } from '../regulations/evidence';
 import { gatherEvidence, splitArticles, type RegulationProviders, type RegulationScope } from '../regulations/gather';
 import type { RegulationPlan } from '../regulations/model';
@@ -59,17 +58,22 @@ export function contentTokens(text: string): string[] {
   return out;
 }
 
-/** 이름 비교용 — 공백·「」·괄호를 빼고 소문자로 */
+/**
+ * 이름 비교용 — NFC, 「」, 괄호 속 글('(약칭…)')과 공백을 뗀다.
+ * 같은 이름이어야만 같은 규정이다: 포함 관계로 보면 「지방공기업법」 인용이 「지방공기업법 시행령」의 같은 번호 조문과 맞대어진다
+ */
 function normName(s: string): string {
-  return s.normalize('NFC').replace(/[\s「」『』()（）·]/g, '').toLowerCase();
+  return s
+    .normalize('NFC')
+    .replace(/[「」『』]/g, '')
+    .replace(/[(（][^)）]*[)）]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
 }
 
-function titleScore(title: string, name: string): number {
+function sameTitle(title: string, name: string): boolean {
   const a = normName(title);
-  const b = normName(name);
-  if (a.length < 2 || b.length < 2) return 0;
-  if (a === b) return 2;
-  return a.includes(b) || b.includes(a) ? 1 : 0;
+  return a.length >= 2 && a === normName(name);
 }
 
 /** 조문 머리가 이 조문인가 — '제76조'는 '제76조의2'가 아니다 */
@@ -93,17 +97,22 @@ function resolveArticle(e: RawEvidence, article: string | null): Resolved | null
   if (!article) return { ...base, text: e.text };
   // 앞에 빈 줄을 붙인다 — splitArticles는 첫 줄을 '법령명 (시행 …)' 머리로 보고 버리는데,
   // 제공자가 준 조문 글은 머리 없이 '제64조(…)'로 시작한다
-  const { enforced, articles } = splitArticles(`\n${e.text}`);
+  const { articles } = splitArticles(`\n${e.text}`);
   const hit = articles.find((a) => headingIs(a.heading, article));
-  if (hit) return { ...base, text: hit.text, enforced: e.effectiveDate ?? enforced };
-  // 조문 구조가 없는 글(기관 문서 조각)은 그 조문 번호가 글 안에 있을 때만 쓴다
-  if (articles.length === 0 && squash(e.text).includes(article)) return { ...base, text: e.text };
+  if (hit) return { ...base, text: hit.text };
+  // 조문 구조가 없는 글(기관 문서 조각)은 그 조문 번호가 머리(글 첫머리나 줄머리)에 있을 때만 쓴다 — 본문에서 언급만 한 것은 그 조문이 아니다
+  if (articles.length === 0 && new RegExp(String.raw`(?:^|\n)\s*${article}(?![0-9의])`).test(e.text)) return { ...base, text: e.text };
   return null;
 }
 
-/** 인용 바로 뒤 30자 — 작년 문서가 그 조문을 어떻게 옮겼는지 */
+/**
+ * 인용 바로 뒤 30자 — 작년 문서가 그 조문을 어떻게 옮겼는지.
+ * 다음 인용(「)이나 문장 끝(마침표)에서 끊는다: 「A」 제1조 및 「B」 제2조에 따라 …에서 B의 낱말이 A의 것으로 들어가면 안 된다
+ */
 function citedWindow(input: CitationInput): string {
-  return input.segmentText.slice(input.finding.end, input.finding.end + WINDOW_CHARS).trim();
+  const w = input.segmentText.slice(input.finding.end, input.finding.end + WINDOW_CHARS);
+  const cut = w.search(/「|[.。](?=\s|$)/);
+  return (cut >= 0 ? w.slice(0, cut) : w).trim();
 }
 
 function planFor(name: string, articles: string[], windows: string[]): RegulationPlan {
@@ -145,12 +154,10 @@ export async function compareCitations(
     const window = citedWindow(input);
     const cited = { name, article, text: window };
 
-    // 이름이 가장 잘 맞는(같음 > 포함) 근거 가운데 이 조문이 있는 것 — 같은 점수면 제공자 순서
+    // 이름이 같은 근거 가운데 이 조문이 있는 첫 번째(제공자 순서). 이름이 비슷한 다른 규정(시행령 등)으로 넘어가지 않는다
     const hit = (evidenceByName.get(name) ?? [])
-      .map((e, i) => ({ e, i, score: titleScore(e.title, name) }))
-      .filter((x) => x.score > 0)
-      .sort((x, y) => y.score - x.score || x.i - y.i)
-      .map((x) => ({ e: x.e, r: resolveArticle(x.e, article) }))
+      .filter((e) => sameTitle(e.title, name))
+      .map((e) => ({ e, r: resolveArticle(e, article) }))
       .find((x) => x.r !== null);
     if (!hit?.r) return { segmentId: input.segmentId, cited, current: null, status: 'not_found' };
 
@@ -161,8 +168,10 @@ export async function compareCitations(
     const tokens = contentTokens(window.replace(LEADING_CONNECTOR, ''));
     const hay = r.text.normalize('NFC');
     const found = tokens.filter((t) => hay.includes(t)).length;
+    // 숫자가 든 낱말(70, 3년)은 하나라도 조문에 없으면 바뀜 — 다른 낱말이 맞아 비율을 채워도 바뀐 수치를 덮지 못하게 한다
+    const numbersHeld = tokens.filter((t) => /\d/.test(t)).every((t) => hay.includes(t));
     // 대조할 내용이 없으면 반박할 것도 없다(같음). 적으면 전부, 많으면 70% 이상
-    const same = tokens.length === 0 || (tokens.length <= ALL_REQUIRED_MAX ? found === tokens.length : found / tokens.length >= SAME_RATIO);
+    const same = numbersHeld && (tokens.length === 0 || (tokens.length <= ALL_REQUIRED_MAX ? found === tokens.length : found / tokens.length >= SAME_RATIO));
     return { segmentId: input.segmentId, cited, current, status: same ? 'same' : 'changed' };
   });
 }
