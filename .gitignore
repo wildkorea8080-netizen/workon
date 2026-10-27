@@ -27,3 +27,6 @@ temp-login-test.mjs
 
 # Claude Code 로컬 설정 (launch.json 등)
 .claude/
+
+# superpowers 작업 장부(세션 임시)
+.superpowers/
