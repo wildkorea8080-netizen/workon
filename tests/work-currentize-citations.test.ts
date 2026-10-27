@@ -256,6 +256,18 @@ describe('compareCitations', () => {
     expect(pair.status).toBe('same');
   });
 
+  it('숫자 낱말은 숫자 경계에서만 맞는다 — 70은 170에, 5년은 15년에 들지 않는다(T8)', async () => {
+    const art = lawEvidence({ text: '제64조(운임) 철도운임은 170%를 지급하되 상한을 두지 아니한다.' });
+    const seg = '「공무원 여비 규정」 제64조 철도운임의 70%만 지급하되 상한을 두지 아니한다';
+    expect((await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([art]), scope, BASIS))[0].status).toBe('changed');
+    const art2 = lawEvidence({ text: '제64조(보존) 문서는 15년간 보존하되 상한을 두지 아니한다.' });
+    const seg2 = '「공무원 여비 규정」 제64조 문서는 5년간 보존하되 상한을 두지 아니한다';
+    expect((await compareCitations([cite('s1', seg2, '공무원 여비 규정', '제64조')], fakes([art2]), scope, BASIS))[0].status).toBe('changed');
+    // 경계가 맞으면 같음(170 ↔ 170)
+    const seg3 = '「공무원 여비 규정」 제64조 철도운임의 170%만 지급하되 상한을 두지 아니한다';
+    expect((await compareCitations([cite('s1', seg3, '공무원 여비 규정', '제64조')], fakes([art]), scope, BASIS))[0].status).toBe('same');
+  });
+
   // ── 비율 경계 ──
   const W = ['예산', '편성', '검토', '결의', '공고', '보고', '감사', '정산', '결산', '계획'];
   async function ratio(total: number, present: number) {

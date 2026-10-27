@@ -133,6 +133,16 @@ function planFor(name: string, articles: string[], windows: string[]): Regulatio
   };
 }
 
+/**
+ * 조문 글에 이 낱말이 있는가. 숫자가 든 낱말은 숫자 경계에서만 맞는다 — '70'이 '170'에, '5년'이 '15년'에 들면
+ * 바뀐 수치가 같음으로 보인다. 글자 낱말은 들어 있기만 하면 된다('편성' ↔ '편성하여')
+ */
+function holds(hay: string, token: string): boolean {
+  if (!/\d/.test(token)) return hay.includes(token);
+  // 낱말은 contentTokens가 한글·영숫자만 남긴 것이라 정규식 특수 글자가 없다
+  return new RegExp(String.raw`(?<!\d)${token}(?!\d)`).test(hay);
+}
+
 export async function compareCitations(
   findings: CitationInput[],
   providers: RegulationProviders,
@@ -175,9 +185,9 @@ export async function compareCitations(
     // 낱말은 조문 글에 들어 있기만 하면 된다('편성' ↔ '편성하여' — 어미가 달라진 것은 바뀜이 아니다)
     const tokens = contentTokens(window.replace(LEADING_SUBCLAUSES, '').trim().replace(LEADING_CONNECTOR, ''));
     const hay = r.text.normalize('NFC');
-    const found = tokens.filter((t) => hay.includes(t)).length;
+    const found = tokens.filter((t) => holds(hay, t)).length;
     // 숫자가 든 낱말(70, 3년)은 하나라도 조문에 없으면 바뀜 — 다른 낱말이 맞아 비율을 채워도 바뀐 수치를 덮지 못하게 한다
-    const numbersHeld = tokens.filter((t) => /\d/.test(t) && !REFERENCE_TOKEN.test(t)).every((t) => hay.includes(t));
+    const numbersHeld = tokens.filter((t) => /\d/.test(t) && !REFERENCE_TOKEN.test(t)).every((t) => holds(hay, t));
     // 대조할 내용이 없으면 반박할 것도 없다(같음). 적으면 전부, 많으면 70% 이상
     const same = numbersHeld && (tokens.length === 0 || (tokens.length <= ALL_REQUIRED_MAX ? found === tokens.length : found / tokens.length >= SAME_RATIO));
     return { segmentId: input.segmentId, cited, current, status: same ? 'same' : 'changed' };
