@@ -101,6 +101,12 @@
           "required": true
         },
         {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
+        },
+        {
           "key": "facts",
           "label": "핵심 내용",
           "type": "long-text",
@@ -175,6 +181,12 @@
           "label": "기관 양식",
           "type": "template",
           "required": true
+        },
+        {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
         },
         {
           "key": "sourceFiles",
@@ -447,6 +459,12 @@
           "required": true
         },
         {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
+        },
+        {
           "key": "meetingOn",
           "label": "회의일",
           "type": "date",
@@ -509,6 +527,12 @@
           "label": "회신 양식",
           "type": "template",
           "required": true
+        },
+        {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
         },
         {
           "key": "sourceFiles",
@@ -577,6 +601,12 @@
           "required": true
         },
         {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
+        },
+        {
           "key": "priorResponses",
           "label": "과거 제출본",
           "type": "file-set",
@@ -636,6 +666,12 @@
           "label": "인수인계 양식",
           "type": "template",
           "required": true
+        },
+        {
+          "key": "prior",
+          "label": "작년 파일",
+          "type": "file-set",
+          "required": false
         },
         {
           "key": "confirmedStatus",

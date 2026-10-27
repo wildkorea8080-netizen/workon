@@ -31,6 +31,16 @@ describe('업무 카탈로그', () => {
     expect(isWorkflowKey('collection')).toBe(true);
     expect(isWorkflowKey('없음')).toBe(false);
   });
+
+  it('현행화 대상 업무 6개에 선택 입력 prior가 있고 기존 필수 입력은 그대로다', () => {
+    for (const k of ['report', 'official-letter', 'meeting', 'reply', 'audit-response', 'handover']) {
+      const w = getWorkflow(k)!;
+      expect(w.inputs.find((i) => i.key === 'prior')).toMatchObject({ type: 'file-set', required: false });
+    }
+    // 0034 배포 당시 필수 입력 — prior를 더해도 바뀌면 안 된다
+    expect(getWorkflow('official-letter')!.inputs.filter((i) => i.required).map((i) => i.key)).toEqual(['title', 'templateVersion', 'facts', 'recipients']);
+    expect(getWorkflow('report')!.inputs.filter((i) => i.required).map((i) => i.key)).toEqual(['title', 'reportType', 'templateVersion', 'sourceFiles', 'period']);
+  });
 });
 
 describe('작업 권한(access.ts)', () => {
