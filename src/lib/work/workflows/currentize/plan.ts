@@ -2,7 +2,7 @@
 // 현행화 — 앞 단계 결과(연도 밀기·표 열 밀기·고치기·인용 맞대기·숫자 확인)를 변경 목록 하나로 모은다. 순수 함수(입출력 없음).
 // 원칙: 프로그램이 확신하는 것만 changed다. 사람이 봐야 하는 것은 needs_check(after 없음이 기본), 모델 제안은 proposed — 둘 다 파일에 넣지 않는다.
 import type { Segment } from './segments';
-import type { Finding, FindingKind } from './classify';
+import { currentizeNumberSpans, type Finding, type FindingKind } from './classify';
 import type { ShiftedCell } from './tables';
 import type { CitationPair } from './citations';
 import type { RawRewrite } from './model';
@@ -155,6 +155,8 @@ export const NOTE_UNIT_UNKNOWN = '단위를 알 수 없어 그대로 넣었습�
 export const NOTE_CITATION_CHANGED = '근거 조문이 바뀜 — 문장을 확인하세요';
 export const NOTE_CITATION_NOT_FOUND = '현재 조문을 찾지 못함';
 export const NOTE_NUMBER = '올해 자료에서 확인되지 않은 숫자가 있습니다 — 확인하세요';
+/** 받아들인 고치기가 작년 글(밀린 글)에 없던 수치를 넣었다 — 올해 자료에 있는 값이어도 맞는 자리의 값인지 사람이 본다 */
+export const NOTE_NUMBER_REWRITTEN = 'AI가 고친 문장의 수치가 바뀌었습니다 — 올해 자료와 맞는지 확인하세요';
 export const NOTE_STALE_YEAR = '지난해 연도가 남아 있습니다 — 확인하세요';
 export const NOTE_DUPLICATE_CELL = '같은 칸에 변경이 둘 이상입니다';
 /** 밀린 날짜 — 요일·날짜가 올해에도 맞는지 프로그램은 모른다 */
@@ -223,6 +225,10 @@ function segmentChanges(
       const tokens = p.numberTokens?.get(s.id);
       const stays = text === null || !tokens || tokens.length === 0 || tokens.some((t) => stillHasNumber(text, t));
       if (stays) out.push({ ...base, kind: 'number', after: null, status: 'needs_check', note: NOTE_NUMBER });
+    }
+    // 고친 글이 밀린 글에 없던 수치를 넣었으면(1,200 → 1,300) 올해 자료에 있는 값이어도 확인 요청 — 본문 수치는 사람이 정한다
+    if (text !== null && !out.some((d) => d.kind === 'number') && currentizeNumberSpans(text).some((n) => !stillHasNumber(shiftedText, n.raw))) {
+      out.push({ ...base, kind: 'number', after: null, status: 'needs_check', note: NOTE_NUMBER_REWRITTEN });
     }
     const pairs = p.citations.filter((c) => c.segmentId === s.id);
     const citeStays = (status: CitationPair['status']) =>

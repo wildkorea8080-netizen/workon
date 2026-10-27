@@ -423,12 +423,34 @@ describe('buildPlan — 변경 계획', () => {
       ['prose', 'changed'],
       ['number', 'needs_check'],
     ]);
-    // 숫자 경계 — 11,200은 1,200이 남은 것이 아니다
-    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 11,200백만원으로 추진한다.', basis: ['src1'] }];
+    // 고친 글에서 그 수치가 사라졌으면 수치 확인 요청을 내리지 않는다
+    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 새 지침으로 추진한다.', basis: ['src1'] }];
     expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => x.kind)).toEqual(['prose']);
+    // 숫자 경계 — 11,200은 1,200이 남은 것이 아니다(다만 새 수치라 '수치가 바뀜' 확인 요청)
+    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 11,200백만원으로 추진한다.', basis: ['src1'] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => x.note)).toEqual([null, 'AI가 고친 문장의 수치가 바뀌었습니다 — 올해 자료와 맞는지 확인하세요']);
+    input.rewrites.accepted = [{ segmentId: '0:10', text: '2026년 사업을 1,200백만원으로 추진한다.', basis: ['src1'] }];
     // 어느 수치인지 기록이 없으면 언제나 남긴다
     input.numberTokens.delete('0:10');
     expect(buildPlan(input).filter((x) => x.segmentId === '0:10').map((x) => x.kind)).toEqual(['prose', 'number']);
+  });
+
+  it('고친 글이 밀린 글에 없던 수치를 넣으면(1,200 → 1,300) 올해 자료에 있는 값이어도 수치 확인 요청(실제 모델 점검에서 드러남)', () => {
+    const input = planInput();
+    input.segments[3] = seg('0:40', '2025년 예산은 1,200백만원이다.');
+    input.shifted.set('0:40', '2026년 예산은 1,200백만원이다.');
+    input.rewrites.accepted = [{ segmentId: '0:40', text: '2026년 예산은 1,300백만원이다.', basis: ['src1'] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:40').map((x) => [x.kind, x.status, x.note])).toEqual([
+      ['prose', 'changed', null],
+      ['number', 'needs_check', 'AI가 고친 문장의 수치가 바뀌었습니다 — 올해 자료와 맞는지 확인하세요'],
+    ]);
+    // 원래 수치 확인이 없던 문장이어도 새 수치를 넣으면 같다
+    input.numberStatus.set('0:30', 'ok');
+    input.rewrites.accepted = [{ segmentId: '0:30', text: '새 방식으로 35명이 운영한다.', basis: ['memo'] }];
+    expect(buildPlan(input).filter((x) => x.segmentId === '0:30').map((x) => [x.kind, x.status])).toEqual([
+      ['prose', 'changed'],
+      ['number', 'needs_check'],
+    ]);
   });
 
   it('밀어 둔 글과 같은 고치기는 고치기가 아니다 — 연도 밀기·확인 요청이 그대로 남는다(C2)', () => {
