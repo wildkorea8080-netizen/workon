@@ -1,0 +1,50 @@
+{
+  "note": "기본 양식 실제 한글 검증 기록. hancom-automation = scripts/work-template-verify.mjs(한글 COM 자동화로 열기·넣은 글 확인·편집·다시 저장·다시 열기·PDF). human-visual = 사람이 PDF/한글 화면으로 쪽 배치·글꼴·잘림을 본 기록(직접 더한다).",
+  "records": [
+    {
+      "file": "official_letter.hwpx",
+      "sha256": "189c989ba62c1cb9f8e563c9ed1bc02e3f66a801c03d224af626e807fcfe06ee",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T09:30:29.0181154+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "ee7157e9387e0922434485666ba373aaa64447b26cc4cb855f213f647cf99ef8"
+    },
+    {
+      "file": "report.hwpx",
+      "sha256": "5f9a3a8882f82e64f09cc6820edce6c781e924778e4334b4e5d1e637b6d3996a",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T09:30:33.5162851+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "78cb4b369b6e0481ddb5fcc014de76880959845ba826070e4c7c9c3320531a94"
+    },
+    {
+      "file": "minutes.hwpx",
+      "sha256": "a89d89b3c5b0c3553150b9a6d372de137487e78358508ba2017e51639b406834",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T09:30:37.8679549+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "f80fcb7c96b87db8a3d3adc5df722e6b5927dd5e3d512353c50120306fb48c37"
+    }
+  ]
+}

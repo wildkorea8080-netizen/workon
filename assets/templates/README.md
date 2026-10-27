@@ -19,6 +19,18 @@
 - 일반 보고서는 `□ 개요` 같은 제목 아래 문단에 표시를 둔다
 - `report.hwpx`는 표시 없는 양식을 채울 수 없을 때의 **대체 경로**에도 쓰인다(`{{제목}}`·`{{주요 내용}}`이 없으면 대체가 실패한다)
 
+## 지금 들어 있는 파일 (2026-10-27, WORKON 개편 P0)
+
+세 파일은 `src/*.html`(서식·표시 위치)을 **한글 2018이 열어 HWPX로 저장**한 것이다(`scripts/build-standard-templates.ps1`, 한글 COM 자동화).
+코드로 XML을 짜 맞춘 파일이 아니다. 서식을 고치려면 HTML을 고쳐 다시 만들거나, 한글에서 직접 고쳐 저장한다(그때는 아래 검증을 다시 돌린다).
+
+- 실제 한글 검증: `npm run work:template-verify` — 실제 입구(readTemplate·fillTemplate)로 모든 표시를 채운 뒤 한글이 열기 → 넣은 글 확인 → 편집 → 다시 저장 → 다시 열기 → PDF.
+  결과는 `verification.json`에 파일 SHA-256과 함께 남는다(`hancom-automation`). 파일이 바뀌면 기록이 맞지 않아 다시 돌려야 한다
+- **사람의 시각 검토는 아직 없다.** 채운 결과의 한글 PDF는 `docs/workon-rebuild/evidence/p0/`에 있다. 쪽 배치·글꼴·잘림을 사람이 보고
+  `verification.json`에 `{ "file", "sha256", "kind": "human-visual", "result": "passed", "reviewer", "checkedAt" }`를 더해야 출시 관문(`npm run work:template-check -- --release`)을 통과한다
+- 공문 기안문은 표준 서식의 **초안**이다 — 기관 서식(행정업무운영 편람 기안문 서식)과의 세부 차이는 기관이 제 양식을 올려 쓰는 것이 우선이다(개편 02 문서 '문서 생성 우선순위')
+- 한글 자동화는 보안 모듈·레지스트리를 쓰지 않는다. 그래서 한글이 접근 확인을 띄우는 위치(이 PC에서는 저장소 폴더)에서는 멈춘다 — 스크립트는 임시 폴더에서 열고 저장한다
+
 ## 확인
 
 `npm run hwpx:probe -- report.hwpx 확인.hwpx` → `확인.hwpx`를 한글에서 열어 본다.

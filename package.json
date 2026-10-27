@@ -21,7 +21,9 @@
     "noda:migrate": "tsx scripts/noda-migrate.mjs",
     "noda:check": "tsx scripts/noda-check.mjs",
     "noda:webhook": "tsx scripts/noda-webhook.mjs",
-    "noda:purge-deleted": "tsx scripts/noda-purge-deleted.mjs"
+    "noda:purge-deleted": "tsx scripts/noda-purge-deleted.mjs",
+    "work:template-check": "tsx scripts/work-template-check.mjs",
+    "work:template-verify": "tsx scripts/work-template-verify.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",
