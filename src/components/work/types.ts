@@ -99,7 +99,7 @@ export interface TaskDetailDto {
   kind: 'document' | 'collection' | 'regulations' | 'items' | 'settlement' | 'qa';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null; currentize: CurrentizeDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];
@@ -155,4 +155,40 @@ export interface SettlementDto {
 export interface QaDto {
   kind: 'reply' | 'audit';
   pairs: { id: string; question: string; quote: string; sourceName: string | null; answer: string; evidence: { id: string; label: string }[]; priorDiffs: { label: string; current: string; prior: string; reason: string }[]; flags: string[] }[];
+}
+
+export interface CurrentizeChangeDto {
+  id: string;
+  segmentId: string;
+  kind: 'year' | 'period' | 'number' | 'citation' | 'person' | 'date' | 'prose' | 'table' | 'structure';
+  before: string;
+  after: string | null;
+  status: 'changed' | 'needs_check' | 'proposed';
+  basis: string[];
+  note: string | null;
+  /** 사람이 읽는 위치(제목 사슬·'표 N (행,열)'). 옛 판은 null */
+  location: string | null;
+}
+
+export interface CurrentizeCitationDto {
+  segmentId: string;
+  cited: { name: string; article: string | null; text: string };
+  current: { kind: string; title: string; article: string | null; text: string; enforced: string | null } | null;
+  status: 'same' | 'changed' | 'not_found';
+}
+
+/** 현행화 판(작년 파일 + 변경 목록) — src/lib/work/workflows/currentize/plan.ts의 CurrentizeContent와 같은 꼴 + 경고 */
+export interface CurrentizeDto {
+  schema: 'currentize/1';
+  priorSourceId: string;
+  priorSha256: string;
+  fromYear: number;
+  toYear: number;
+  changes: CurrentizeChangeDto[];
+  citations: CurrentizeCitationDto[];
+  truncated: boolean;
+  costStopped: boolean;
+  mode: 'llm' | 'mock';
+  /** 표 위치를 못 맞춤·근거를 못 찾는 환경 등 실행기 경고 */
+  warnings: string[];
 }

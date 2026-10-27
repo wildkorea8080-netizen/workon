@@ -23,6 +23,35 @@ export interface Change {
   /** 근거 — 원자료 id·바뀐 인용의 조각 id·'memo' */
   basis: string[];
   note: string | null;
+  /** 사람이 읽는 위치(제목 사슬·'표 N (행,열)') — 실행기가 계획 뒤에 채운다(화면 '대조' 보기용) */
+  location?: string;
+}
+
+/** 종류·상태의 한국어 이름 — 변경 내역표와 작업실 '대조' 보기가 함께 쓴다 */
+export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
+  year: '연도',
+  period: '기간',
+  number: '수치',
+  citation: '근거 인용',
+  person: '담당자',
+  date: '날짜',
+  prose: '문장',
+  table: '표 칸',
+  structure: '구조',
+};
+export const CHANGE_STATUS_LABEL: Record<Change['status'], string> = { changed: '바꿈', needs_check: '확인 필요', proposed: '제안' };
+
+export const EDIT_BLANK_CELL = '빈 칸은 한글에서 직접 채워 주세요';
+export const EDIT_MULTI_PARAGRAPH_CELL = '여러 줄 칸은 한글에서 직접 고쳐 주세요';
+
+/**
+ * 직원이 이 변경에 올해 글을 넣을 수 없는 이유(없으면 null). 적용은 있는 문단의 글만 바꾼다 —
+ * 글 없는 빈 칸(structure, 이웃 조각에 붙어 있음)과 여러 문단 칸은 문단 하나로 쓸 수 없어 파일 만들기가 PRIOR_MISMATCH로 멈춘다.
+ */
+export function changeEditBlock(c: Pick<Change, 'kind' | 'before'>): string | null {
+  if (c.kind === 'structure') return EDIT_BLANK_CELL;
+  if (c.kind === 'table' && c.before.includes('\n')) return EDIT_MULTI_PARAGRAPH_CELL;
+  return null;
 }
 
 export interface CurrentizeContent {

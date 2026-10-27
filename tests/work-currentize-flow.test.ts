@@ -245,6 +245,68 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     expect(rows[0].n).toBe(0);
   });
 
+  it('대조 보기 수정: 확인 필요 변경에 올해 글을 넣으면 새 판·파일을 다시 만들고, 낡은 판·모르는 변경·빈 칸은 거절한다', async () => {
+    let task = await reportTask('2026년 대조 수정');
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': PROGRESS, '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const d1 = await generate(task);
+    const c1 = d1.version!.currentize!;
+    // 화면 DTO — 변경마다 사람이 읽는 위치(표 칸은 '표 N (행,열)')
+    expect(c1.changes.every((x) => typeof x.location === 'string' && x.location.length > 0)).toBe(true);
+    expect(c1.changes.find((x) => x.kind === 'table')!.location).toMatch(/^표 \d+ \(\d+,\d+\)$/);
+    expect(c1.toYear).toBe(2026);
+    expect(d1.producedOutputs).toEqual(['report', 'changeLog']);
+
+    const number = c1.changes.find((x) => x.kind === 'number' && x.before === PROSE)!;
+    expect(number.status).toBe('needs_check');
+    // 같은 문단에 연도 바꿈이 이미 있다 — 직원 글이 문단 전체를 대신한다
+    const sibling = c1.changes.find((x) => x.kind === 'year' && x.before === PROSE)!;
+    expect(sibling.status).toBe('changed');
+    const typed = '2026년 예산은 1,300백만원이다. 「지방공기업법」 제64조에 따라 편성한다.';
+
+    // 낡은 판·모르는 변경·빈 칸·빈 글은 거절
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 0, changeId: number.id, after: typed })).rejects.toMatchObject({ code: 'VERSION_CONFLICT', status: 409 });
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: 'c999', after: typed })).rejects.toMatchObject({ code: 'INVALID_INPUT', status: 400 });
+    const structure = c1.changes.find((x) => x.kind === 'structure')!;
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: structure.id, after: '500' })).rejects.toMatchObject({ code: 'INVALID_INPUT', message: '빈 칸은 한글에서 직접 채워 주세요' });
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: number.id, after: '  \n ' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: number.id, after: 'x'.repeat(6001) })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+    const r = await svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 1, changeId: number.id, after: `${typed}  ` });
+    expect(r.version!.version).toBe(2);
+    expect((await runWorker(ctx, { workerId: 'w', runId: r.run!.id }))[0]).toMatchObject({ finish: 'succeeded' });
+
+    const d2 = await svc.getTaskDetail(ctx, actor, task.id);
+    expect(d2.version!.version).toBe(2);
+    expect(d2.version!.origin).toBe('edit');
+    expect(d2.version!.fields).toEqual([]);
+    const c2 = (await contentOf(d2.version!.id))!;
+    expect(c2.changes.find((x) => x.id === number.id)).toMatchObject({ status: 'changed', after: typed, basis: ['user'], note: null });
+    // 같은 문단의 다른 바꿈은 직원 글에 담겼다 — 한 문단에 두 번 적용하지 않게 목록에서 뺀다
+    expect(c2.changes.some((x) => x.id === sibling.id)).toBe(false);
+    expect(c2.changes.filter((x) => x.segmentId === number.segmentId && x.status === 'changed')).toHaveLength(1);
+    expect(c2.priorSha256).toBe(c1.priorSha256);
+    // 파일 둘 다 2판으로 다시, 넣은 글이 HWPX에 있다
+    expect(d2.currentArtifacts.map((a) => [a.output_key, a.document_version_id])).toEqual([['report', d2.version!.id], ['changeLog', d2.version!.id]]);
+    const out = await readSegments(await fileOf(d2.currentArtifacts[0].id));
+    expect(out.segments.some((s) => s.text === typed)).toBe(true);
+    // 확인 사항은 2판의 변경 목록으로 다시 — 직원이 넣은 수치는 더 확인 필요가 아니다
+    expect(d2.review.filter((x) => x.code === 'NEEDS_CHECK')).toHaveLength(d1.review.filter((x) => x.code === 'NEEDS_CHECK').length - 1);
+    const events = await pool.query("SELECT details FROM work_events WHERE task_id = $1 AND type = 'document.edited'", [task.id]);
+    expect(events.rows.map((e) => e.details)).toEqual([{ version: 2, change: number.id }]);
+
+    // 바꿈인 변경에 같은 글을 다시 넣으면 새 판을 만들지 않는다
+    expect(await svc.applyChangeEdit(ctx, actor, task.id, { baseVersion: 2, changeId: number.id, after: typed })).toMatchObject({ version: null, run: null, unchanged: true });
+
+    // 다른 수정 길(복구)도 현행화 내용을 잃지 않는다
+    const restored = await svc.restoreVersion(ctx, actor, task.id, d1.version!.id, { baseVersion: 2 });
+    expect((await runWorker(ctx, { workerId: 'w', runId: restored.run.id }))[0]).toMatchObject({ finish: 'succeeded' });
+    const d3 = await svc.getTaskDetail(ctx, actor, task.id);
+    expect(d3.version!.currentize!.changes.find((x) => x.id === sibling.id)).toMatchObject({ status: 'changed' });
+    expect(d3.currentArtifacts.map((a) => a.output_key)).toEqual(['report', 'changeLog']);
+  });
+
   it('prior가 HWP 5.0이면 TEMPLATE_UNSUPPORTED가 아니라 PRIOR_UNSUPPORTED로 실패하고 작년 파일·입력은 남는다', async () => {
     let task = await reportTask('옛 한글 작년 파일');
     task = await upload(task, '2025 사업계획.hwp', buildHwp(hwpPara('2025년 사업계획')), 'prior');

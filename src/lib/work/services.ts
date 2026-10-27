@@ -5,7 +5,10 @@ import { taskAccess, type TaskAccess } from './access';
 import { getWorkflow, isWorkflowKey, CATALOG_VERSION } from './catalog';
 import { getWorkflowImpl, summarizeWorkflows, definitionFor, outputKeysOf } from './workflows';
 import { checkForm } from './workflows/form';
-import { applyPatches, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
+import { applyPatches, cleanFieldValue, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
+import { MAX_SLOT_TEXT } from '@/lib/doc-fill';
+import { changeEditBlock, type CurrentizeContent } from './workflows/currentize/plan';
+import { CHANGE_LOG_KEY } from './workflows/currentize/output';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
 import { satisfiesFileSet } from './file-sets';
@@ -225,9 +228,12 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
   const run = activeRun ?? currentRun;
   const review = version ? await ctx.store.listReviewItems(version.id, task.organization_id) : [];
   // 지금 판의 결과 파일 — 주 결과가 먼저(머리의 '내려받기'가 주 결과를 가리키게), 그다음 함께 만든 파일 순
+  const currentize = (version?.content as { currentize?: CurrentizeContent } | null)?.currentize;
   const order = (() => {
     const impl = getWorkflowImpl(task.workflow_key);
-    return impl ? outputKeysOf(impl) : [];
+    if (!impl) return [];
+    // 현행화 판은 작년 파일을 고친 주 결과 + 변경 내역표(buildFileStep과 같은 목록)
+    return currentize?.schema === 'currentize/1' ? [impl.documentOutputKey, CHANGE_LOG_KEY] : outputKeysOf(impl);
   })();
   const rank = (k: string) => (order.indexOf(k) < 0 ? order.length : order.indexOf(k));
   const currentArtifacts = version ? artifacts.filter((a) => a.document_version_id === version.id).sort((x, y) => rank(x.output_key) - rank(y.output_key)) : [];
@@ -254,6 +260,8 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
           settlement: (version.content as { settlement?: SettlementResult } | null)?.settlement ?? null,
           // 질문별 답변(근거·확인 표시)
           qa: ((version.content as { qa?: QaContent } | null)?.qa?.result as QaResult | undefined) ?? null,
+          // 현행화 — 변경 목록(작년 글·올해 글·위치)·인용 대조(직원 자신의 파일 글이라 감출 것 없음)
+          currentize: currentizeDto(currentize, (version.content as { currentizeWarnings?: unknown } | null)?.currentizeWarnings),
         }
       : null,
     review: review.map((r) => ({ id: r.id, severity: r.severity, code: r.code, message: r.message, fieldIds: r.field_ids, state: r.state, resolutionNote: r.resolution_note })),
@@ -264,6 +272,23 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
     generatorMode: ctx.generatorMode,
     // 실제로 만드는 결과 파일 키(카탈로그 outputs 중 구현된 것 — 선택 산출물을 아직 안 만들면 빠진다)
     producedOutputs: order,
+  };
+}
+
+function currentizeDto(c: CurrentizeContent | undefined, warnings: unknown) {
+  if (!c || c.schema !== 'currentize/1') return null;
+  return {
+    schema: c.schema,
+    priorSourceId: c.priorSourceId,
+    priorSha256: c.priorSha256,
+    fromYear: c.fromYear,
+    toYear: c.toYear,
+    changes: c.changes.map((x) => ({ id: x.id, segmentId: x.segmentId, kind: x.kind, before: x.before, after: x.after, status: x.status, basis: x.basis, note: x.note, location: x.location ?? null })),
+    citations: c.citations,
+    truncated: c.truncated,
+    costStopped: c.costStopped,
+    mode: c.mode,
+    warnings: Array.isArray(warnings) ? warnings.filter((w): w is string => typeof w === 'string') : [],
   };
 }
 
@@ -343,6 +368,8 @@ function carriedContent(content: Record<string, unknown> | null): Record<string,
   if ('regulations' in content) return { regulations: content.regulations };
   if ('items' in content) return { items: content.items };
   if ('qa' in content) return { qa: content.qa };
+  // 현행화 판은 칸이 없고 변경 목록이 곧 문서다 — 다른 수정 길이 판을 이어도 잃지 않게
+  if ('currentize' in content) return { currentize: content.currentize, currentizeWarnings: content.currentizeWarnings ?? [] };
   return null;
 }
 
@@ -420,6 +447,53 @@ export async function saveDocument(ctx: WorkContext, actor: WorkActor, taskId: s
   await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
   const run = await enqueuePackage(ctx, task, v.id, actor.userId);
   await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, fields: applied.changed } });
+  return { version: { id: v.id, version: v.version }, run: runDto(run), unchanged: false };
+}
+
+/**
+ * 현행화 판의 변경 하나에 직원이 올해 글을 넣는다(작업실 '대조' 보기) — 확인 필요에 올해 글, 제안 받아들이기, 바꿈 고치기.
+ * 기준 판이 지금 판이어야 한다(아니면 409). 그 변경은 바꿈·근거 'user'가 되고, 같은 문단의 다른 바꿈은 뺀다 —
+ * 직원 글이 문단 전체를 대신하고(입력칸은 그 바꿈 글로 시작한다), 한 문단에 두 번 적용하면 XML이 깨진다. 새 판 → 파일 만들기 실행.
+ */
+export async function applyChangeEdit(ctx: WorkContext, actor: WorkActor, taskId: string, input: { baseVersion: unknown; changeId: unknown; after: unknown }) {
+  const { task } = await loadTask(ctx, actor, taskId, 'edit');
+  if (typeof input.baseVersion !== 'number') throw new WorkError('INVALID_INPUT', 'baseVersion이 필요합니다.');
+  const cur = await currentVersionNumber(ctx, task);
+  if (!cur.id) throw new WorkError('INVALID_INPUT', '아직 만든 문서가 없습니다. 먼저 파일을 만들어 주세요.', 409);
+  if (input.baseVersion !== cur.number) throw new WorkError('VERSION_CONFLICT', '그 사이 문서가 바뀌었습니다. 최신 판을 불러온 뒤 다시 저장해 주세요.', 409, { currentVersion: cur.number });
+  const content = (cur.content as { currentize?: CurrentizeContent } | null)?.currentize;
+  if (content?.schema !== 'currentize/1') throw new WorkError('INVALID_INPUT', '작년 문서를 현행화한 판이 아닙니다.');
+  const change = typeof input.changeId === 'string' ? content.changes.find((c) => c.id === input.changeId) : undefined;
+  if (!change) throw new WorkError('INVALID_INPUT', '변경을 찾을 수 없습니다. 새로고침해 주세요.');
+  const blocked = changeEditBlock(change);
+  if (blocked) throw new WorkError('INVALID_INPUT', blocked);
+  const after = typeof input.after === 'string' ? cleanFieldValue(input.after) : '';
+  if (!after.trim()) throw new WorkError('INVALID_INPUT', '올해 글을 적어 주세요.');
+  if (after.length > MAX_SLOT_TEXT) throw new WorkError('INVALID_INPUT', `한 곳에 ${MAX_SLOT_TEXT.toLocaleString()}자까지 넣을 수 있습니다.`);
+  if (change.status === 'changed' && change.after === after) return { version: null, run: null, unchanged: true };
+
+  const updated: CurrentizeContent = {
+    ...content,
+    changes: content.changes
+      .filter((c) => c.id === change.id || c.segmentId !== change.segmentId || c.status !== 'changed')
+      .map((c) => (c.id === change.id ? { ...c, after, status: 'changed' as const, basis: ['user'], note: null } : c)),
+  };
+  const v = await ctx.store.saveVersion({
+    taskId: task.id,
+    organizationId: task.organization_id,
+    baseVersion: cur.number,
+    fields: [],
+    content: carriedContent({ ...cur.content, currentize: updated }),
+    templateVersionId: null,
+    origin: 'edit',
+    reason: `변경 ${change.id} 직접 수정`,
+    actorId: actor.userId,
+    runId: null,
+    sourceIds: [],
+  });
+  await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
+  const run = await enqueuePackage(ctx, task, v.id, actor.userId);
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'document.edited', details: { version: v.version, change: change.id } });
   return { version: { id: v.id, version: v.version }, run: runDto(run), unchanged: false };
 }
 

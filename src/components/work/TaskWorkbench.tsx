@@ -21,6 +21,7 @@ import QaView from './QaView';
 import { satisfiesFileSet, uploadPurposeOf } from '@/lib/work/file-sets';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
+import CurrentizeView from './CurrentizeView';
 import type { ArtifactDto, FieldDto, RegulationEvidenceDto, RegulationsDto, RunDto, TaskDetailDto } from './types';
 
 /**
@@ -130,6 +131,20 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
     await refresh();
   }
 
+  // 현행화 '대조' 보기 — 변경 하나에 올해 글. 기준 판과 함께 보내 다른 화면이 먼저 고쳤으면 덮어쓰지 않는다(409)
+  async function editChange(changeId: string, after: string) {
+    if (!version) return;
+    const r = await api<{ version: { version: number } | null; run: RunDto | null; unchanged: boolean }>(`/api/work/tasks/${taskId}/currentize`, {
+      method: 'PATCH',
+      json: { baseVersion: version.version, changeId, after },
+    });
+    if (!r.ok) return setError(r.error.message);
+    setError(null);
+    setNotice(r.data.version ? `${r.data.version.version}판으로 저장했습니다. 이 판의 파일을 만들고 있습니다.` : '바뀐 내용이 없습니다.');
+    if (r.data.run) void startRun(r.data.run);
+    await refresh();
+  }
+
   return (
     <div className="flex h-full flex-col">
       {/* 위쪽 — 제목·상태·판·내려받기·검토 완료 */}
@@ -180,7 +195,11 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
         <aside className="order-2 lg:order-1">
           <Tabs<LeftTab> value={left} onChange={setLeft} items={[['outline', '목차'], ['files', '파일'], ['sources', '원자료']]} label="작업 항목" />
           <Card className="mt-2 p-3">
-            {left === 'outline' && (version ? (
+            {left === 'outline' && (version?.currentize ? (
+              <p className="text-[14px] text-slate-600">
+                작년 파일을 고친 판입니다({version.currentize.fromYear}년 → {version.currentize.toYear}년, 변경 {version.currentize.changes.length}건). 가운데 &lsquo;대조&rsquo;에서 변경을 확인하세요.
+              </p>
+            ) : version ? (
               <ol className="space-y-1 text-[14px]">
                 {version.fields.map((f) => (
                   <li key={f.id}>
@@ -214,6 +233,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
               {version.items && <ItemsView data={version.items} />}
               {version.settlement && <SettlementView data={version.settlement} />}
               {version.qa && <QaView data={version.qa} />}
+              {version.currentize && <CurrentizeView key={version.id} content={version.currentize} canEdit={task.access.edit} busy={busy} onEdit={editChange} />}
               {version.fields.length > 0 && <FieldEditor
                 key={version.id}
                 detail={detail}

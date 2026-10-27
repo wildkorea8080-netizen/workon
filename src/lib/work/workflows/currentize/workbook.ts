@@ -1,6 +1,6 @@
 // src/lib/work/workflows/currentize/workbook.ts
 import { safeText } from '@/lib/xlsx-export';
-import type { Change, CurrentizeContent } from './plan';
+import { CHANGE_KIND_LABEL, CHANGE_STATUS_LABEL, type Change, type CurrentizeContent } from './plan';
 
 /**
  * 현행화 변경 내역표(XLSX). 취합 엑셀(collection/workbook.ts)과 같은 원칙: **값만 쓴다(수식 없음)**,
@@ -9,18 +9,6 @@ import type { Change, CurrentizeContent } from './plan';
  */
 const t = (s: string | null | undefined) => safeText(s ?? '');
 
-const KIND_LABEL: Record<Change['kind'], string> = {
-  year: '연도',
-  period: '기간',
-  number: '수치',
-  citation: '근거 인용',
-  person: '담당자',
-  date: '날짜',
-  prose: '문장',
-  table: '표 칸',
-  structure: '구조',
-};
-const STATUS_LABEL: Record<Change['status'], string> = { changed: '바꿈', needs_check: '확인 필요', proposed: '제안' };
 const CITATION_STATUS_LABEL: Record<CurrentizeContent['citations'][number]['status'], string> = {
   same: '같음',
   changed: '바뀜',
@@ -47,7 +35,7 @@ export async function buildChangeLogWorkbook(content: CurrentizeContent, opts: C
   const ws = wb.addWorksheet('변경 내역', { views: [{ state: 'frozen', ySplit: 1 }] });
   ws.addRow(['번호', '위치', '종류', '작년 글', '올해 글', '상태', '근거', '비고']).font = { bold: true };
   for (const c of content.changes) {
-    ws.addRow([t(c.id), t(label(c.segmentId)), t(KIND_LABEL[c.kind] ?? c.kind), t(c.before), t(c.after), t(STATUS_LABEL[c.status] ?? c.status), t(c.basis.join(', ')), t(c.note)]);
+    ws.addRow([t(c.id), t(label(c.segmentId)), t(CHANGE_KIND_LABEL[c.kind] ?? c.kind), t(c.before), t(c.after), t(CHANGE_STATUS_LABEL[c.status] ?? c.status), t(c.basis.join(', ')), t(c.note)]);
   }
   [8, 24, 12, 40, 40, 12, 24, 40].forEach((w, i) => (ws.getColumn(i + 1).width = w));
 

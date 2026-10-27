@@ -21,7 +21,7 @@ import { MAX_REWRITE_SOURCE_CHARS, type RawRewrite, type RewriteInput } from '..
 import { verifyRewrites } from '../workflows/currentize/verify';
 import { buildPlan, type Change, type CurrentizeContent, type PlanTableCell } from '../workflows/currentize/plan';
 import { currentizeReviewItems } from '../workflows/currentize/review';
-import { loadPriorFile, type PriorFile } from '../workflows/currentize/output';
+import { loadPriorFile, segmentLabels, type PriorFile } from '../workflows/currentize/output';
 import { buildFileStep, writeModelUsage, type StepFn } from './shared';
 
 /**
@@ -348,7 +348,12 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
       if (isProse(s)) extra.push({ segmentId: s.id, kind: 'prose', before: s.text, after: null, status: 'needs_check', basis: [], note: NOTE_COST_STOPPED });
     }
   }
-  const changes: Change[] = [...planned, ...extra.map((c, i) => ({ id: `c${planned.length + i + 1}`, ...c }))];
+  // 위치(제목 사슬·표 좌표)는 판에 남긴다 — 화면이 작년 파일을 다시 읽지 않고 '어디'를 보이게
+  const labels = segmentLabels(segments);
+  const changes: Change[] = [...planned, ...extra.map((c, i) => ({ id: `c${planned.length + i + 1}`, ...c }))].map((c) => {
+    const location = labels.get(c.segmentId);
+    return location === undefined ? c : { ...c, location };
+  });
   const content: CurrentizeContent = {
     schema: 'currentize/1',
     priorSourceId: prior.source.id,
