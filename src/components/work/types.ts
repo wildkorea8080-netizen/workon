@@ -1,0 +1,101 @@
+// 업무 화면이 받는 응답 꼴(src/lib/work/services.ts의 DTO와 맞춘다)
+export interface WorkflowInputDto {
+  key: string;
+  label: string;
+  type: 'string' | 'long-text' | 'date' | 'enum' | 'file-set' | 'template' | 'string-list' | 'record-list';
+  required: boolean;
+  options?: string[];
+}
+
+export interface WorkflowSummaryDto {
+  key: string;
+  name: string;
+  group: 'A' | 'B' | 'C';
+  purpose: string;
+  outputs: { key: string; label: string; format: 'hwpx' | 'xlsx'; required: boolean }[];
+  inputs: WorkflowInputDto[];
+  scopeNote: string;
+  available: boolean;
+  reason: string | null;
+}
+
+export interface TaskDto {
+  id: string;
+  title: string;
+  workflowKey: string;
+  workflowName: string;
+  status: string;
+  revision: number;
+  dueDate: string | null;
+  form: Record<string, unknown>;
+  templateVersionId: string | null;
+  currentDocumentVersionId: string | null;
+  currentRunId: string | null;
+  approvedVersionId: string | null;
+  isOwner: boolean;
+  role: string | null;
+  access: { edit: boolean; review: boolean; download: boolean };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FieldDto {
+  id: string;
+  label: string;
+  kind: 'marker' | 'section' | 'cell';
+  type: 'text' | 'paragraph';
+  value: string;
+  required: boolean;
+  locked: boolean;
+  origin: 'empty' | 'form' | 'ai' | 'user' | 'restore';
+  evidenceIds: string[];
+  hint: string | null;
+}
+
+export interface ArtifactDto {
+  id: string;
+  document_version_id: string;
+  output_key: string;
+  format: string;
+  file_name: string;
+  size_bytes: number;
+  sha256: string;
+  validation_status: 'pending' | 'valid' | 'invalid';
+  preview_status: 'pending' | 'ready' | 'failed' | 'unsupported';
+  preview: { pageCount: number | null; renderer: { name: string; version: string } | null; reason: string | null; hasPdf: boolean };
+  created_at: string;
+  current?: boolean;
+  taskTitle?: string;
+}
+
+export interface RunDto {
+  id: string;
+  operation: string;
+  status: string;
+  attempt: number;
+  maxAttempts: number;
+  error: { code: string; message: string; retryable: boolean } | null;
+  result: Record<string, unknown> | null;
+  cancelRequested: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface TaskDetailDto {
+  task: TaskDto;
+  workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
+  template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[] } | null;
+  review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
+  artifacts: ArtifactDto[];
+  currentArtifacts: ArtifactDto[];
+  sources: { id: string; file_name: string; file_ext: string; size_bytes: number | null; status: string; failure_reason: string | null; purpose: string; summary: Record<string, unknown> | null; created_at: string }[];
+  run: RunDto | null;
+  generatorMode: 'llm' | 'mock';
+}
+
+export interface TemplatesDto {
+  builtin: { ref: string; name: string; status: string; label: string; id: string | null; reason: string | null }[];
+  organization: { id: string; name: string; format: string; status: string; label: string; fieldCount: number }[];
+}

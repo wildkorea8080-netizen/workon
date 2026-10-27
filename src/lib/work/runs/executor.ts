@@ -127,7 +127,10 @@ async function prepareFields(ctx: WorkContext, task: WorkTaskRow): Promise<Prepa
   const organizationName = await ctx.store.getOrganizationName(task.organization_id);
   fields = applyPrefill(fields, impl.prefill(form.values, { organizationName }));
   const sources = await loadSourceTexts(ctx, task);
-  const targetIds = fields.filter((f) => !f.locked && f.origin !== 'user' && f.origin !== 'form').map((f) => f.id);
+  // AI가 채울 칸: 잠기지 않았고, 직원이 고치거나 폼에서 채우지 않았으며, 직원이 정할 칸이 아닌 것
+  const targetIds = fields
+    .filter((f) => !f.locked && f.origin !== 'user' && f.origin !== 'form' && !impl.humanOnlyLabels.includes(f.label))
+    .map((f) => f.id);
   return {
     fields,
     targetIds,
@@ -197,7 +200,13 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
     const v = (await ctx.store.getVersion(saved.versionId, task.organization_id))!;
     const items = computeReviewItems({
       fields: normalizeStoredFields(v.fields),
-      missing: composed.missing as { fieldId: string; reason: string }[],
+      missing: [
+        ...(composed.missing as { fieldId: string; reason: string }[]),
+        // 직원이 정할 칸이 비었으면 알린다(AI가 채우지 않는다)
+        ...normalizeStoredFields(v.fields)
+          .filter((f) => getWorkflowImpl(task.workflow_key)!.humanOnlyLabels.includes(f.label) && !f.value.trim())
+          .map((f) => ({ fieldId: f.id, reason: '직원이 정하는 칸입니다(AI가 채우지 않음). 해당이 없으면 비워 두세요.' })),
+      ],
       knownText: [...p.facts.map((f) => f.value), ...p.sources.map((s) => s.text)].join('\n'),
       testMode: composed.mode === 'mock',
     });

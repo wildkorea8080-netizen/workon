@@ -53,3 +53,9 @@ export const NODA_API_KEY = getEnv('NODA_API_KEY', false);
 export const NODA_WEBHOOK_SECRET = getEnv('NODA_WEBHOOK_SECRET', false);
 // Vercel 예약 작업(cron)이 부를 때 싣는 비밀값(`Authorization: Bearer …`) — 없으면 예약 작업 받는 곳이 503(목록을 열 때 다시 받기는 그대로 돈다)
 export const CRON_SECRET = getEnv('CRON_SECRET', false);
+
+// ── 업무 작업(WORKON 개편) ──
+// 업무 작업자 엔드포인트(/api/work/worker) 비밀값 — 예약 작업·pg_cron이 `Authorization: Bearer …`로 싣는다. 없으면 그 엔드포인트만 503
+export const WORK_WORKER_SECRET = getEnv('WORK_WORKER_SECRET', false);
+// 'mock'이면 모델을 부르지 않는 시험 모드(운영 NODE_ENV=production에서는 무시하고 실제 모델을 쓴다)
+export const WORK_GENERATOR = process.env.WORK_GENERATOR === 'mock' && process.env.NODE_ENV !== 'production' ? 'mock' : 'llm';

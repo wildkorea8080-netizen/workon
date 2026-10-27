@@ -17,6 +17,8 @@ export interface WorkflowImpl {
   requiredFieldLabels: readonly string[];
   /** 결과 파일 키(카탈로그 outputs의 key) */
   documentOutputKey: string;
+  /** 직원이 정하는 칸 — AI가 쓰지 않는다(공개구분·경유처럼 행정 판단이 필요한 값). 비면 확인 사항으로 알린다 */
+  humanOnlyLabels: readonly string[];
   /** 폼 값으로 바로 채울 수 있는 칸 — 모델을 거치지 않는다(지어낼 여지를 줄인다) */
   prefill(values: FormValues, ctx: { organizationName: string | null }): Record<string, string>;
 }
@@ -29,6 +31,7 @@ const officialLetter: WorkflowImpl = {
   defaultTemplateRef: 'builtin:official_letter',
   requiredFieldLabels: ['수신', '제목', '본문', '발신명의'],
   documentOutputKey: 'letter',
+  humanOnlyLabels: ['공개구분', '경유'],
   prefill(values, { organizationName }) {
     const out: Record<string, string> = {};
     if (typeof values.title === 'string') out['제목'] = values.title;
