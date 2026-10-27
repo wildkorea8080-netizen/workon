@@ -1,7 +1,7 @@
 // src/lib/work/store/pg.ts
 import type { Pool, PoolClient } from 'pg';
 import { mapDbError } from './errors';
-import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow } from './types';
+import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow, WorkflowInstallationRow, LegacyFileRow, WorkStatsRow } from './types';
 import type {
   WorkArtifactRow,
   WorkDocumentVersionRow,
@@ -325,6 +325,80 @@ export function createPgWorkStore(db: Pool): WorkStore {
         'SELECT * FROM work_template_versions WHERE id = $1 AND (organization_id IS NULL OR organization_id = $2)',
         [id, organizationId]
       );
+    },
+    async listOrgTemplatesAdmin(organizationId) {
+      const { rows } = await db.query('SELECT * FROM work_template_versions WHERE organization_id = $1 ORDER BY created_at DESC', [organizationId]);
+      return rows as TemplateVersionRow[];
+    },
+    async updateTemplateVersion(id, organizationId, patch) {
+      return one<TemplateVersionRow>(
+        db,
+        `UPDATE work_template_versions SET status = COALESCE($3, status), verification = CASE WHEN $4::jsonb IS NULL THEN verification ELSE $4::jsonb END, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [id, organizationId, patch.status ?? null, patch.verification ? JSON.stringify(patch.verification) : null]
+      );
+    },
+    async upsertOrgSettings(organizationId, s) {
+      await db.query(
+        `INSERT INTO work_org_settings (organization_id, home_enabled, new_tasks_enabled, updated_by, updated_at) VALUES ($1,$2,$3,$4,now())
+         ON CONFLICT (organization_id) DO UPDATE SET home_enabled = EXCLUDED.home_enabled, new_tasks_enabled = EXCLUDED.new_tasks_enabled, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+        [organizationId, s.homeEnabled, s.newTasksEnabled, s.updatedBy]
+      );
+      return { homeEnabled: s.homeEnabled, newTasksEnabled: s.newTasksEnabled };
+    },
+    async listInstallations(organizationId) {
+      const { rows } = await db.query('SELECT workflow_key, workflow_version, status, installed_by, updated_at FROM workflow_installations WHERE organization_id = $1', [organizationId]);
+      return rows as WorkflowInstallationRow[];
+    },
+    async upsertInstallation(organizationId, workflowKey, s) {
+      return (await one<WorkflowInstallationRow>(
+        db,
+        `INSERT INTO workflow_installations (organization_id, workflow_key, workflow_version, status, installed_by) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (organization_id, workflow_key) DO UPDATE SET status = EXCLUDED.status, workflow_version = EXCLUDED.workflow_version, installed_by = EXCLUDED.installed_by, updated_at = now()
+         RETURNING workflow_key, workflow_version, status, installed_by, updated_at`,
+        [organizationId, workflowKey, s.workflowVersion, s.status, s.installedBy]
+      ))!;
+    },
+    async listLegacyFiles(userId, organizationId) {
+      const { rows } = await db.query(
+        `(SELECT 'generated' AS kind, id, file_name, size_bytes, created_at FROM generated_files WHERE user_id = $1 AND organization_id = $2 ORDER BY created_at DESC LIMIT 50)
+         UNION ALL
+         (SELECT 'attachment' AS kind, id, file_name, size_bytes, created_at FROM chat_attachments WHERE user_id = $1 AND organization_id = $2 AND status = 'ready' ORDER BY created_at DESC LIMIT 50)
+         ORDER BY created_at DESC`,
+        [userId, organizationId]
+      );
+      return rows as LegacyFileRow[];
+    },
+    async getLegacyFile(kind, id, userId, organizationId) {
+      const table = kind === 'generated' ? 'generated_files' : 'chat_attachments';
+      const extra = kind === 'attachment' ? " AND status = 'ready'" : '';
+      return one<{ file_name: string; storage_path: string; mime_type: string | null }>(
+        db,
+        `SELECT file_name, storage_path, mime_type FROM ${table} WHERE id = $1 AND user_id = $2 AND organization_id = $3${extra}`,
+        [id, userId, organizationId]
+      );
+    },
+    async listOrgAgentTemplates(organizationId) {
+      const { rows } = await db.query(
+        `SELECT t.id, t.name, t.file_name, t.storage_path, a.name AS agent_name FROM agent_templates t JOIN agents a ON a.id = t.agent_id
+         WHERE a.organization_id = $1 AND a.deleted_at IS NULL AND t.retired_at IS NULL ORDER BY t.created_at DESC LIMIT 100`,
+        [organizationId]
+      );
+      return rows as { id: string; name: string; file_name: string; storage_path: string; agent_name: string }[];
+    },
+    async workStats(organizationId, sinceIso) {
+      const { rows } = await db.query(
+        `SELECT t.workflow_key,
+                count(*)::int AS tasks,
+                count(*) FILTER (WHERE t.status = 'completed')::int AS completed,
+                count(*) FILTER (WHERE t.status = 'needs_review')::int AS needs_review,
+                (SELECT count(*)::int FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2) AS failed_runs_30d,
+                (SELECT r.error->>'code' FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2
+                  GROUP BY r.error->>'code' ORDER BY count(*) DESC LIMIT 1) AS top_error
+           FROM work_tasks t WHERE t.organization_id = $1 GROUP BY t.workflow_key ORDER BY t.workflow_key`,
+        [organizationId, sinceIso]
+      );
+      return rows as WorkStatsRow[];
     },
     async listTemplateVersions(organizationId) {
       const { rows } = await db.query(

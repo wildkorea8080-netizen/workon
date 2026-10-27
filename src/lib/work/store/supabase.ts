@@ -1,7 +1,7 @@
 // src/lib/work/store/supabase.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { mapDbError } from './errors';
-import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow } from './types';
+import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow, WorkflowInstallationRow, LegacyFileRow, WorkStatsRow } from './types';
 import type {
   WorkArtifactRow,
   WorkDocumentVersionRow,
@@ -373,6 +373,100 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
         .maybeSingle();
       if (error) fail(error);
       return (data as TemplateVersionRow) ?? null;
+    },
+    async listOrgTemplatesAdmin(organizationId) {
+      const { data, error } = await db.from('work_template_versions').select('*').eq('organization_id', organizationId).order('created_at', { ascending: false });
+      if (error) fail(error);
+      return (data ?? []) as TemplateVersionRow[];
+    },
+    async updateTemplateVersion(id, organizationId, patch) {
+      const upd: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (patch.status) upd.status = patch.status;
+      if (patch.verification) upd.verification = patch.verification;
+      const { data, error } = await db.from('work_template_versions').update(upd).eq('id', id).eq('organization_id', organizationId).select('*').maybeSingle();
+      if (error) fail(error);
+      return (data as TemplateVersionRow) ?? null;
+    },
+    async upsertOrgSettings(organizationId, s) {
+      const { error } = await db
+        .from('work_org_settings')
+        .upsert({ organization_id: organizationId, home_enabled: s.homeEnabled, new_tasks_enabled: s.newTasksEnabled, updated_by: s.updatedBy, updated_at: new Date().toISOString() }, { onConflict: 'organization_id' });
+      if (error) fail(error);
+      return { homeEnabled: s.homeEnabled, newTasksEnabled: s.newTasksEnabled };
+    },
+    async listInstallations(organizationId) {
+      const { data, error } = await db.from('workflow_installations').select('workflow_key, workflow_version, status, installed_by, updated_at').eq('organization_id', organizationId);
+      if (error) fail(error);
+      return (data ?? []) as WorkflowInstallationRow[];
+    },
+    async upsertInstallation(organizationId, workflowKey, s) {
+      const { data, error } = await db
+        .from('workflow_installations')
+        .upsert({ organization_id: organizationId, workflow_key: workflowKey, workflow_version: s.workflowVersion, status: s.status, installed_by: s.installedBy, updated_at: new Date().toISOString() }, { onConflict: 'organization_id,workflow_key' })
+        .select('workflow_key, workflow_version, status, installed_by, updated_at')
+        .single();
+      if (error) fail(error);
+      return data as WorkflowInstallationRow;
+    },
+    async listLegacyFiles(userId, organizationId) {
+      const [g, a] = await Promise.all([
+        db.from('generated_files').select('id, file_name, size_bytes, created_at').eq('user_id', userId).eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(50),
+        db.from('chat_attachments').select('id, file_name, size_bytes, created_at').eq('user_id', userId).eq('organization_id', organizationId).eq('status', 'ready').order('created_at', { ascending: false }).limit(50),
+      ]);
+      if (g.error) fail(g.error);
+      if (a.error) fail(a.error);
+      return [
+        ...((g.data ?? []) as Omit<LegacyFileRow, 'kind'>[]).map((r) => ({ ...r, kind: 'generated' as const })),
+        ...((a.data ?? []) as Omit<LegacyFileRow, 'kind'>[]).map((r) => ({ ...r, kind: 'attachment' as const })),
+      ].sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+    },
+    async getLegacyFile(kind, id, userId, organizationId) {
+      let q = db.from(kind === 'generated' ? 'generated_files' : 'chat_attachments').select('file_name, storage_path, mime_type').eq('id', id).eq('user_id', userId).eq('organization_id', organizationId);
+      if (kind === 'attachment') q = q.eq('status', 'ready');
+      const { data, error } = await q.maybeSingle();
+      if (error) fail(error);
+      return (data as { file_name: string; storage_path: string; mime_type: string | null }) ?? null;
+    },
+    async listOrgAgentTemplates(organizationId) {
+      const { data, error } = await db
+        .from('agent_templates')
+        .select('id, name, file_name, storage_path, agents!inner(name, organization_id, deleted_at)')
+        .eq('agents.organization_id', organizationId)
+        .is('agents.deleted_at', null)
+        .is('retired_at', null)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) fail(error);
+      return ((data ?? []) as unknown as { id: string; name: string; file_name: string; storage_path: string; agents: { name: string } }[]).map((r) => ({ id: r.id, name: r.name, file_name: r.file_name, storage_path: r.storage_path, agent_name: r.agents.name }));
+    },
+    async workStats(organizationId, sinceIso) {
+      const [tasks, runs] = await Promise.all([
+        db.from('work_tasks').select('workflow_key, status').eq('organization_id', organizationId).limit(10000),
+        db.from('work_runs').select('task_id, error, work_tasks!inner(workflow_key, organization_id)').eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).limit(10000),
+      ]);
+      if (tasks.error) fail(tasks.error);
+      if (runs.error) fail(runs.error);
+      const by = new Map<string, WorkStatsRow>();
+      for (const t of (tasks.data ?? []) as { workflow_key: string; status: string }[]) {
+        const r = by.get(t.workflow_key) ?? { workflow_key: t.workflow_key, tasks: 0, completed: 0, needs_review: 0, failed_runs_30d: 0, top_error: null };
+        r.tasks += 1;
+        if (t.status === 'completed') r.completed += 1;
+        if (t.status === 'needs_review') r.needs_review += 1;
+        by.set(t.workflow_key, r);
+      }
+      const errors = new Map<string, Map<string, number>>();
+      for (const x of (runs.data ?? []) as unknown as { error: { code?: string } | null; work_tasks: { workflow_key: string } }[]) {
+        const k = x.work_tasks.workflow_key;
+        const r = by.get(k) ?? { workflow_key: k, tasks: 0, completed: 0, needs_review: 0, failed_runs_30d: 0, top_error: null };
+        r.failed_runs_30d += 1;
+        by.set(k, r);
+        const m = errors.get(k) ?? new Map<string, number>();
+        const code = x.error?.code ?? 'UNKNOWN';
+        m.set(code, (m.get(code) ?? 0) + 1);
+        errors.set(k, m);
+      }
+      for (const [k, m] of errors) by.get(k)!.top_error = [...m].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      return [...by.values()].sort((a, b) => a.workflow_key.localeCompare(b.workflow_key));
     },
     async listTemplateVersions(organizationId) {
       const { data, error } = await db

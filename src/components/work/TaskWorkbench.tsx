@@ -698,6 +698,22 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
   const [setKey, setSetKey] = useState(fileSets[0]?.key ?? '');
   const purpose = uploadPurposeOf(setKey);
   const [picking, setPicking] = useState<{ id: string; label: string }[] | null>(null);
+  const [legacy, setLegacy] = useState<{ kind: 'generated' | 'attachment'; id: string; label: string }[] | null>(null);
+  async function openLegacy() {
+    setErr(null);
+    setPicking(null);
+    const r = await api<{ kind: 'generated' | 'attachment'; id: string; file_name: string; created_at: string }[]>('/api/work/legacy-files');
+    if (!r.ok) return setErr(r.error.message);
+    setLegacy(r.data.map((f) => ({ kind: f.kind, id: f.id, label: `${f.kind === 'generated' ? '대화에서 만든 파일' : '대화 첨부'} — ${f.file_name} (${formatDateTime(f.created_at)})` })));
+  }
+  async function importLegacy(f: { kind: 'generated' | 'attachment'; id: string }) {
+    setStage('대화 파일을 가져와 읽는 중');
+    const r = await api(`/api/work/tasks/${taskId}/sources/import-legacy`, { method: 'POST', json: { kind: f.kind, id: f.id, purpose } });
+    setStage(null);
+    setLegacy(null);
+    if (!r.ok) setErr(r.error.message);
+    await onChanged();
+  }
   async function openImport() {
     setErr(null);
     const r = await api<({ id: string; file_name: string; taskTitle: string; task_id: string; current: boolean; validation_status: string })[]>('/api/work/files');
@@ -732,6 +748,7 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
             <div className="break-all font-medium">{s.file_name}</div>
             {fileSets.length > 1 && <div className="text-[12px] text-slate-500">{fileSets.find((f) => satisfiesFileSet(f.key, s.purpose) && uploadPurposeOf(f.key) === s.purpose)?.label ?? fileSets.find((f) => satisfiesFileSet(f.key, s.purpose))?.label ?? '자료'}</div>}
             {(s as { origin?: { type?: string } | null }).origin?.type === 'work_artifact' && <div className="text-[12px] text-[#003087]">다른 작업의 결과 파일에서 가져옴</div>}
+            {['chat_generated_file', 'chat_attachment'].includes((s as { origin?: { type?: string } | null }).origin?.type ?? '') && <div className="text-[12px] text-[#003087]">AI 대화 파일에서 가져옴</div>}
             <div className="text-[12px] text-slate-500">
               {s.status === 'ready' ? '읽음' : s.status === 'pending' ? '확인 전' : `읽지 못함 — ${s.failure_reason ?? ''}`} · {formatBytes(s.size_bytes)}
               {(s.summary as { truncated?: boolean } | null)?.truncated ? ' · 길어서 앞부분만 읽음' : ''}
@@ -755,7 +772,23 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
           <div className="flex flex-wrap gap-2">
             <label htmlFor="src-file" className="inline-block cursor-pointer rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">파일 선택</label>
             <button type="button" onClick={openImport} className="rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">내 결과물에서 가져오기</button>
+            <button type="button" onClick={openLegacy} className="rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">대화 파일에서 가져오기</button>
           </div>
+          {legacy && (
+            <div className="rounded-lg border border-[#DCE3EC] p-2">
+              <p className="text-[13px] text-slate-600">AI 대화에서 만든 파일·대화에 올린 첨부 중 내 것을 원자료로 복사합니다(대화를 지워도 이 작업의 원자료는 남음).</p>
+              {legacy.length === 0 ? <p className="text-slate-500">가져올 대화 파일이 없습니다.</p> : (
+                <ul className="mt-1 max-h-60 space-y-1 overflow-y-auto">
+                  {legacy.map((f) => (
+                    <li key={`${f.kind}-${f.id}`}>
+                      <button type="button" onClick={() => importLegacy(f)} className="w-full rounded px-2 py-1 text-left hover:bg-slate-100">{f.label}</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={() => setLegacy(null)} className="mt-1 text-[13px] text-slate-500 underline">닫기</button>
+            </div>
+          )}
           {picking && (
             <div className="rounded-lg border border-[#DCE3EC] p-2">
               <p className="text-[13px] text-slate-600">다른 작업의 지금 판 결과 파일을 원자료로 복사해 읽습니다(원래 작업은 바뀌지 않음).</p>

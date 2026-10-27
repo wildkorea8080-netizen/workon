@@ -9,11 +9,12 @@ import { applyPatches, mergeGenerated, normalizeStoredFields, parsePatches } fro
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
 import { satisfiesFileSet } from './file-sets';
+import { disabledWorkflows } from './admin';
 import type { RegulationContent, ItemsContent, QaContent } from './runs/executor';
 import type { SettlementResult } from './workflows/settlement/reconcile';
 import type { QaResult } from './workflows/qa/verify';
 import { artifactDto } from './artifacts';
-import { sourceDto, copyArtifactToSource } from './sources';
+import { sourceDto, copyArtifactToSource, copyBytesToSource } from './sources';
 import { WorkError, type WorkActor, type WorkTaskRow, type WorkRunRow, type DocumentField } from './types';
 import type { TemplateVersionRow } from './store/types';
 
@@ -49,8 +50,10 @@ function cleanKey(key: unknown): string {
 }
 
 export async function listWorkflowsForActor(ctx: WorkContext, actor: WorkActor) {
-  const settings = await ctx.store.getOrgSettings(actor.organizationId);
-  return { settings, workflows: summarizeWorkflows() };
+  const [settings, off] = await Promise.all([ctx.store.getOrgSettings(actor.organizationId), disabledWorkflows(ctx, actor.organizationId)]);
+  // 기관 관리자가 끈 업무는 목록에 남기되 시작할 수 없게(이미 만든 작업은 그대로 열린다)
+  const workflows = summarizeWorkflows().map((w) => (off.has(w.key) && w.available ? { ...w, available: false, reason: '기관에서 이 업무를 쓰지 않도록 설정했습니다.' } : w));
+  return { settings, workflows };
 }
 
 export async function listTemplates(ctx: WorkContext, actor: WorkActor) {
@@ -96,6 +99,7 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
   if (!isWorkflowKey(input.workflowKey)) throw new WorkError('INVALID_INPUT', '알 수 없는 업무입니다.');
   const impl = getWorkflowImpl(input.workflowKey);
   if (!impl) throw new WorkError('WORKFLOW_NOT_READY', '이 업무는 아직 준비 중입니다.', 409);
+  if ((await disabledWorkflows(ctx, actor.organizationId)).has(input.workflowKey)) throw new WorkError('FEATURE_DISABLED', '기관에서 이 업무를 쓰지 않도록 설정했습니다. 기관 관리자에게 문의하세요.', 403);
   const def = getWorkflow(input.workflowKey)!;
   const title = typeof input.title === 'string' ? input.title.replace(/\s+/g, ' ').trim() : '';
   if (!title || title.length > 200) throw new WorkError('INVALID_INPUT', '작업 제목을 1~200자로 적어 주세요.');
@@ -637,6 +641,32 @@ export async function importArtifactAsSource(ctx: WorkContext, actor: WorkActor,
   const src = await copyArtifactToSource(ctx, task, actor.userId, art, purpose);
   if (src.status === 'ready') await refreshReadiness(ctx, task);
   await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'source.imported', details: { source_id: src.id, from_task_id: art.task_id, artifact_id: art.id } });
+  return sourceDto(src);
+}
+
+/** 대화에서 만든 파일·대화 첨부 중 본인 것 — 업무 원자료로 가져올 목록(이름·크기·때만) */
+export async function listLegacyFiles(ctx: WorkContext, actor: WorkActor) {
+  return ctx.store.listLegacyFiles(actor.userId, actor.organizationId);
+}
+
+/**
+ * 대화에서 만든 파일(generated_files)·대화 첨부(chat_attachments)를 이 작업의 원자료로 — 본인 것·같은 기관만(06 문서 M4).
+ * 바이트를 복사한다: 원래 대화를 지워도(연쇄 삭제·첨부 정리) 이 작업의 원자료는 남는다. 원본 참조는 origin에만
+ */
+export async function importLegacyFile(ctx: WorkContext, actor: WorkActor, taskId: string, input: { kind: unknown; id: unknown; purpose?: unknown }) {
+  const { task } = await loadTask(ctx, actor, taskId, 'edit');
+  if (input.kind !== 'generated' && input.kind !== 'attachment') throw new WorkError('INVALID_INPUT', 'kind는 generated 또는 attachment여야 합니다.');
+  if (typeof input.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.id)) throw new WorkError('INVALID_INPUT', 'id가 필요합니다.');
+  const row = await ctx.store.getLegacyFile(input.kind, input.id, actor.userId, actor.organizationId);
+  // 남의 것·다른 기관 것이면 있는지도 알리지 않는다
+  if (!row) throw new WorkError('NOT_FOUND', '파일을 찾을 수 없습니다.', 404);
+  const bytes = await ctx.files.get(row.storage_path);
+  if (!bytes) throw new WorkError('NOT_FOUND', '원래 파일이 지워져 가져오지 못했습니다.', 404);
+  const purpose = (['reference', 'data', 'request', 'template', 'evidence'] as const).find((p) => p === input.purpose) ?? 'reference';
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const src = await copyBytesToSource(ctx, task, actor.userId, { fileName: row.file_name, bytes, mimeType: row.mime_type ?? 'application/octet-stream', purpose, origin: { type: input.kind === 'generated' ? 'chat_generated_file' : 'chat_attachment', id: input.id, sha256 } });
+  if (src.status === 'ready') await refreshReadiness(ctx, task);
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'source.imported_legacy', details: { source_id: src.id, kind: input.kind } });
   return sourceDto(src);
 }
 

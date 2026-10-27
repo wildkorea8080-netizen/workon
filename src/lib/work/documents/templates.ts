@@ -101,6 +101,15 @@ export async function loadTemplateBytes(files: WorkFiles, tv: TemplateVersionRow
   return bytes;
 }
 
-export function templateLabel(tv: Pick<TemplateVersionRow, 'status'>): string {
-  return tv.status === 'verified' ? '한글 검증 완료' : tv.status === 'mapped' ? '한글 자동 검증 통과 · 시각 검토 전' : tv.status === 'draft' ? '검증 전' : '사용 중지';
+/**
+ * 양식 상태 표시 — 실제로 한 검사만 말한다. 기관이 올린 양식의 '시험 생성'은 패키지 검사뿐이라 한글 검증이라 하지 않고,
+ * 관리자의 확인 표시는 관리자가 한글에서 연 기록(관리자 확인)으로만 적는다(05 문서 — 단순 클릭을 실제 한글 검증으로 기록하지 않음)
+ */
+export function templateLabel(tv: Pick<TemplateVersionRow, 'status'> & { verification?: Record<string, unknown> | null }): string {
+  const kind = (tv.verification as { kind?: string } | null | undefined)?.kind;
+  if (tv.status === 'retired') return '사용 중지';
+  if (tv.status === 'draft') return '검증 전';
+  if (kind === 'admin-attested') return '자동 검사 통과 · 관리자가 한글에서 확인함';
+  if (kind === 'package-test') return '자동 검사(시험 생성) 통과 · 한글 확인 전';
+  return tv.status === 'verified' ? '한글 검증 완료' : '한글 자동 검증 통과 · 시각 검토 전';
 }

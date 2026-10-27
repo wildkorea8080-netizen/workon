@@ -308,8 +308,8 @@ CREATE TABLE IF NOT EXISTS work_revision_proposals (
 -- 본문·파일 이름 원문·비밀값·서명 주소는 싣지 않는다
 CREATE TABLE IF NOT EXISTS work_events (
   id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  organization_id  uuid NOT NULL,
-  task_id          uuid NOT NULL,
+  organization_id  uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  task_id          uuid,   -- NULL = 작업 없는 기관 단위 사건(기관 양식 등록·업무 켜고 끄기 — 관리자)
   actor_id         uuid,
   type             text NOT NULL CHECK (type ~ '^[a-z_.]{1,60}$'),
   details          jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (pg_column_size(details) <= 8192),
@@ -317,6 +317,7 @@ CREATE TABLE IF NOT EXISTS work_events (
   FOREIGN KEY (task_id, organization_id) REFERENCES work_tasks (id, organization_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS work_events_task_idx ON work_events (task_id, id);
+CREATE INDEX IF NOT EXISTS work_events_org_idx ON work_events (organization_id, id) WHERE task_id IS NULL;
 
 -- ── 기관 일치 트리거 ───────────────────────────────────────────
 -- 서버가 넣은 organization_id가 부서의 기관과 같아야 한다(작업)

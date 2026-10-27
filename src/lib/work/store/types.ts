@@ -158,6 +158,33 @@ export interface OrgWorkSettings {
   newTasksEnabled: boolean;
 }
 
+export interface WorkflowInstallationRow {
+  workflow_key: string;
+  workflow_version: string;
+  status: 'preparing' | 'available' | 'disabled';
+  installed_by: string | null;
+  updated_at: string;
+}
+
+/** 대화에서 만든 파일·대화 첨부 — 본인 것만(가져오기 목록) */
+export interface LegacyFileRow {
+  kind: 'generated' | 'attachment';
+  id: string;
+  file_name: string;
+  size_bytes: number | null;
+  created_at: string;
+}
+
+/** 기관 관리자 현황 — 원문 없이 숫자만 */
+export interface WorkStatsRow {
+  workflow_key: string;
+  tasks: number;
+  completed: number;
+  needs_review: number;
+  failed_runs_30d: number;
+  top_error: string | null;
+}
+
 export interface UsageRecord {
   departmentId: string;
   userId: string;
@@ -226,6 +253,20 @@ export interface WorkStore {
   insertTemplateVersion(row: Omit<TemplateVersionRow, 'id' | 'created_at'>): Promise<TemplateVersionRow>;
   getTemplateVersion(id: string, organizationId: string): Promise<TemplateVersionRow | null>;
   listTemplateVersions(organizationId: string): Promise<TemplateVersionRow[]>;
+  /** 관리자 — 이 기관 양식 전부(사용 중지 포함) */
+  listOrgTemplatesAdmin(organizationId: string): Promise<TemplateVersionRow[]>;
+  updateTemplateVersion(id: string, organizationId: string, patch: Partial<Pick<TemplateVersionRow, 'status' | 'verification'>>): Promise<TemplateVersionRow | null>;
+  /** 기관 스위치(슈퍼관리자) */
+  upsertOrgSettings(organizationId: string, s: { homeEnabled: boolean; newTasksEnabled: boolean; updatedBy: string | null }): Promise<OrgWorkSettings>;
+  listInstallations(organizationId: string): Promise<WorkflowInstallationRow[]>;
+  upsertInstallation(organizationId: string, workflowKey: string, s: { status: WorkflowInstallationRow['status']; workflowVersion: string; installedBy: string | null }): Promise<WorkflowInstallationRow>;
+  /** 본인이 대화에서 만든 파일·올린 첨부(읽힘) — 최근 것부터 */
+  listLegacyFiles(userId: string, organizationId: string): Promise<LegacyFileRow[]>;
+  /** 본인 것·같은 기관일 때만 */
+  getLegacyFile(kind: LegacyFileRow['kind'], id: string, userId: string, organizationId: string): Promise<{ file_name: string; storage_path: string; mime_type: string | null } | null>;
+  /** 이 기관 비서에 올린 대화용 양식(지운 비서·사용 중지 제외) */
+  listOrgAgentTemplates(organizationId: string): Promise<{ id: string; name: string; file_name: string; storage_path: string; agent_name: string }[]>;
+  workStats(organizationId: string, sinceIso: string): Promise<WorkStatsRow[]>;
 
   // AI 수정 후보
   insertProposal(p: Omit<ProposalRow, 'id' | 'created_at' | 'proposal' | 'applied_version_id' | 'status' | 'run_id'>): Promise<ProposalRow>;
@@ -233,6 +274,7 @@ export interface WorkStore {
   updateProposal(id: string, organizationId: string, patch: Partial<ProposalRow>, expectStatus?: ProposalRow['status']): Promise<ProposalRow | null>;
 
   // 기록
-  insertEvent(e: { organizationId: string; taskId: string; actorId: string | null; type: string; details?: Record<string, unknown> }): Promise<void>;
+  /** taskId null = 기관 단위 사건(관리자) */
+  insertEvent(e: { organizationId: string; taskId: string | null; actorId: string | null; type: string; details?: Record<string, unknown> }): Promise<void>;
   writeUsage(u: UsageRecord): Promise<void>;
 }

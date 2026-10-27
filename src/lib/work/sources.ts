@@ -186,27 +186,44 @@ export async function copyArtifactToSource(
   const bytes = await ctx.files.get(art.storage_path);
   if (!bytes) throw new WorkError('STORAGE_FAILED', '가져올 결과 파일을 찾지 못했습니다.', 409);
   if (createHash('sha256').update(bytes).digest('hex') !== art.sha256) throw new WorkError('OUTPUT_INVALID', '결과 파일이 기록과 달라 가져오지 않았습니다.', 409);
-  const ext = attachmentExtension(art.file_name) ?? art.format;
+  return copyBytesToSource(ctx, task, userId, {
+    fileName: art.file_name,
+    bytes,
+    mimeType: art.mime_type,
+    purpose,
+    origin: { type: 'work_artifact', taskId: art.task_id, artifactId: art.id, versionId: art.document_version_id, sha256: art.sha256 },
+  });
+}
+
+/** 바이트 → 새 원자료(같은 확인·읽기 과정). 형식·크기·개수 검사는 직접 올리기와 같다. 같은 출처(origin.id)를 두 번 가져오면 있던 것 */
+export async function copyBytesToSource(
+  ctx: WorkContext,
+  task: WorkTaskRow,
+  userId: string,
+  input: { fileName: string; bytes: Buffer; mimeType: string; purpose: WorkSourceRow['purpose']; origin: Record<string, unknown> }
+): Promise<WorkSourceRow> {
+  const existing = await ctx.store.listSources(task.id, task.organization_id);
+  const originId = (input.origin as { id?: string }).id;
+  if (originId) {
+    const same = existing.find((s) => s.status !== 'failed' && (s.origin as { id?: string } | null)?.id === originId);
+    if (same) return same;
+  }
+  if (existing.filter((s) => s.status !== 'failed').length >= MAX_SOURCES_PER_TASK) {
+    throw new WorkError('INVALID_INPUT', `한 작업에 원자료는 ${MAX_SOURCES_PER_TASK}개까지 올릴 수 있습니다.`, 429);
+  }
+  const name = cleanSourceName(input.fileName);
+  const ext = name ? attachmentExtension(name) : null;
+  if (!name || !ext) throw new WorkError('INVALID_INPUT', '원자료로 읽을 수 없는 형식입니다(엑셀·CSV·한글·워드·PDF·파워포인트·TXT).');
+  if (input.bytes.length > MAX_SOURCE_BYTES) throw new WorkError('INVALID_INPUT', `파일 하나는 ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)}MB까지 가져올 수 있습니다.`, 413);
   const sourceId = randomUUID();
   const path = sourceStoragePath(task.organization_id, task.id, sourceId, ext);
   try {
-    await ctx.files.put(path, bytes, art.mime_type);
+    await ctx.files.put(path, input.bytes, input.mimeType);
   } catch {
-    throw new WorkError('STORAGE_FAILED', '결과 파일을 복사하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    throw new WorkError('STORAGE_FAILED', '파일을 복사하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
   }
   try {
-    await ctx.store.insertSource({
-      id: sourceId,
-      task_id: task.id,
-      organization_id: task.organization_id,
-      uploaded_by: userId,
-      purpose,
-      file_name: cleanSourceName(art.file_name) ?? `결과 파일.${ext}`,
-      file_ext: ext,
-      size_bytes: bytes.length,
-      storage_path: path,
-      origin: { type: 'work_artifact', taskId: art.task_id, artifactId: art.id, versionId: art.document_version_id, sha256: art.sha256 },
-    });
+    await ctx.store.insertSource({ id: sourceId, task_id: task.id, organization_id: task.organization_id, uploaded_by: userId, purpose: input.purpose, file_name: name, file_ext: ext, size_bytes: input.bytes.length, storage_path: path, origin: input.origin });
   } catch (e) {
     await ctx.files.remove([path]).catch(() => undefined);
     throw e;
