@@ -50,7 +50,8 @@ function commonEnds(a: string, b: string): { prefix: number; suffix: number } {
  * 문단 글을 first로 바꾸는 가장 작은 편집. 같은 앞·뒷부분은 두고 바뀐 가운데만 조각에 얹는다 —
  * 조각 사이의 탭·줄바꿈·컨트롤이 제자리에 남는다(통째로 첫 조각에 넣으면 '□<탭>2025년'이 '□2026년<탭>'이 된다).
  * 바뀐 범위에 걸친 첫 조각이 새 가운데 글을 모두 받고, 걸친 다른 조각은 걸친 부분만 잃는다.
- * 넣기만 하는 변경(옛 가운데가 빔)은 그 자리를 품은 조각 — 경계면 앞 조각의 끝 — 에 넣는다.
+ * 넣기만 하는 변경(옛 가운데가 빔)은 그 자리에서 시작하는 조각 — 경계면 **뒤 조각**(탭·컨트롤 뒤) — 에 넣는다
+ * ('1.<탭>사업' → '1.<탭>신규 사업'). 문단 끝이면 뒤 조각이 없으니 마지막 조각에.
  */
 function textEdits(para: Para, first: string): Edit[] {
   const old = para.text;
@@ -66,7 +67,8 @@ function textEdits(para: Para, first: string): Edit[] {
   for (let i = 0; i < para.pieces.length; i++) {
     const pStart = offsets[i];
     const pEnd = pStart + texts[i].length;
-    const hit = from < to ? pEnd > from && pStart < to : (pStart < from && from <= pEnd) || (from === 0 && i === 0);
+    const last = i === para.pieces.length - 1;
+    const hit = from < to ? pEnd > from && pStart < to : (pStart <= from && from < pEnd) || (last && from === pEnd);
     if (!hit) continue;
     const localStart = Math.max(from, pStart) - pStart;
     const localEnd = Math.min(to, pEnd) - pStart;
@@ -97,18 +99,20 @@ function paragraphEdits(para: Para, after: string, prefix: string): Edit[] {
   return edits;
 }
 
-const squash = (s: string) => s.replace(/[\s,]/g, '');
+const squash = (s: string) => s.replace(/\s/g, '');
 
 /**
  * 표 칸의 before는 표 읽기 결과(ShiftedCell.before — 숫자 칸은 '1200'처럼 쉼표 없이 올 수 있다)라 문단 글과 꼴이 다를 수 있다.
- * 공백·쉼표를 뺀 글이 같거나 둘 다 같은 숫자로 읽혀야 같은 칸이다. 여러 문단 칸(줄바꿈)은 문단 하나로 쓸 수 없어 받지 않는다.
+ * 공백을 뺀 글이 같거나, 둘 다 숫자로 읽히고 값·단위·백분율 표시가 같아야 같은 칸이다('1200원'과 '1200명'은 다른 칸).
+ * 쉼표는 숫자 읽기가 자리(3자리씩)까지 보므로 글 비교에서 지우지 않는다('12,00'은 '1,200'이 아니다).
+ * 여러 문단 칸(줄바꿈)은 문단 하나로 쓸 수 없어 받지 않는다.
  */
 function sameCell(paraText: string, before: string): boolean {
   if (before.includes('\n')) return false;
   if (squash(paraText) === squash(before)) return true;
   const a = parseNumber(paraText);
   const b = parseNumber(before);
-  return a.kind === 'number' && b.kind === 'number' && a.value === b.value;
+  return a.kind === 'number' && b.kind === 'number' && a.value === b.value && a.unit === b.unit && !!a.percent === !!b.percent;
 }
 
 /**
@@ -160,5 +164,7 @@ export async function applyChanges(priorBytes: Buffer, changes: Change[]): Promi
     const out = applyEdits(xml, dedupeDeletes(edits));
     if (out !== xml) edited.set(name, out);
   }
+  // 모두 같은 글이었으면 다시 묶지 않는다 — 원래 바이트 그대로
+  if (edited.size === 0) return priorBytes;
   return writeHwpx(doc, edited);
 }

@@ -160,9 +160,14 @@ describe('applyChanges — 작년 HWPX에 변경 적용', () => {
     expect(xml).toContain('<hp:t>올해 실적<hp:tab/>비고</hp:t>');
   });
 
-  it('넣기만 하는 변경은 앞 조각 끝에 붙는다', async () => {
-    const xml = await applyOne(rawPara('가<hp:tab/>나'), '가다나');
-    expect(xml).toContain('<hp:t>가다<hp:tab/>나</hp:t>');
+  it('조각 경계에 넣기만 하는 변경은 뒤 조각(탭 뒤)에 붙는다', async () => {
+    const xml = await applyOne(rawPara('1.<hp:tab/>사업'), '1.신규 사업');
+    expect(xml).toContain('<hp:t>1.<hp:tab/>신규 사업</hp:t>');
+  });
+
+  it('문단 끝에 넣기만 하는 변경은 마지막 조각에 붙는다', async () => {
+    const xml = await applyOne(rawPara('가<hp:tab/>나'), '가나다');
+    expect(xml).toContain('<hp:t>가<hp:tab/>나다</hp:t>');
   });
 
   it('서로게이트 쌍을 가르지 않는다', async () => {
@@ -182,7 +187,8 @@ describe('applyChanges — 작년 HWPX에 변경 적용', () => {
     const bytes = await buildHwpx(secPrPara() + para('가'));
     const [a] = (await readSegments(bytes)).segments;
     const out = await applyChanges(bytes, [change({ segmentId: a.id, before: '가', after: '가' })]);
-    expect(await sectionXml(out)).toBe(await sectionXml(bytes));
+    // 다시 묶지도 않는다 — 바이트 그대로
+    expect(out.equals(bytes)).toBe(true);
   });
 
   it('표 칸 before는 쉼표·공백·숫자 값으로 맞대고, 다르면 PRIOR_MISMATCH', async () => {
@@ -193,11 +199,29 @@ describe('applyChanges — 작년 HWPX에 변경 적용', () => {
       const out = await applyChanges(bytes, [change({ kind: 'table', segmentId: c.id, before, after: '1,500' })]);
       expect((await readSegments(out)).segments.some((s) => s.text === '1,500')).toBe(true);
     }
-    for (const before of ['1,300', '1,200\n300', '']) {
+    for (const before of ['1,300', '1,200\n300', '', '12,00']) {
       await expect(applyChanges(bytes, [change({ kind: 'table', segmentId: c.id, before, after: '1,500' })])).rejects.toMatchObject({
         code: 'PRIOR_MISMATCH',
       });
     }
+  });
+
+  it('표 칸 숫자 맞대기는 단위·백분율까지 같아야 한다', async () => {
+    const body = secPrPara() + tableAt([['1200원', '85%', '1,200천원']], { addr: true });
+    const bytes = await buildHwpx(body);
+    const segs = (await readSegments(bytes)).segments;
+    const at = (t: string) => segs.find((s) => s.text === t)!.id;
+    for (const [text, before] of [
+      ['1200원', '1200명'],
+      ['85%', '85'],
+      ['1200원', '1200천원'],
+    ]) {
+      await expect(applyChanges(bytes, [change({ kind: 'table', segmentId: at(text), before, after: 'x' })])).rejects.toMatchObject({
+        code: 'PRIOR_MISMATCH',
+      });
+    }
+    const out = await applyChanges(bytes, [change({ kind: 'table', segmentId: at('1,200천원'), before: '1200천원', after: '1,500천원' })]);
+    expect(texts((await readSegments(out)).segments)).toEqual(['1200원', '85%', '1,500천원']);
   });
 
   it('같은 표의 두 칸을 한 번에 고치면 바깥 문단 캐시는 한 번만 지운다', async () => {
@@ -448,11 +472,16 @@ describe('buildPlan — 변경 계획', () => {
 
   it('한 칸에 바뀐 값이 둘이면 첫째만 changed, 나머지는 확인 요청', () => {
     const input = planInput();
-    input.tableCells.push({ segmentId: '0:90', cell: cell(1, 2, '900', '1,300', 'changed'), uncertain: false });
+    input.tableCells.push(
+      { segmentId: '0:90', cell: cell(1, 2, '900', '1,300', 'changed'), uncertain: false },
+      { segmentId: '0:90', cell: cell(1, 2, '900', '1,400', 'changed', '원래 메모'), uncertain: false }
+    );
     const c = buildPlan(input).filter((x) => x.segmentId === '0:90');
     expect(c).toEqual([
       expect.objectContaining({ status: 'changed', after: '1,200' }),
       expect.objectContaining({ status: 'needs_check', after: '1,300', note: '같은 칸에 변경이 둘 이상입니다' }),
+      // 원래 메모는 지우지 않고 잇는다
+      expect.objectContaining({ status: 'needs_check', after: '1,400', note: '원래 메모 · 같은 칸에 변경이 둘 이상입니다' }),
     ]);
   });
 

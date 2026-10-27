@@ -169,7 +169,8 @@ export function buildPlan(p: PlanInput): Change[] {
     if (d.status !== 'changed') continue;
     if (hasChanged.has(d.segmentId)) {
       d.status = 'needs_check';
-      d.note = NOTE_DUPLICATE_CELL;
+      // 표 계산이 단 메모는 지우지 않고 잇는다
+      d.note = d.note ? `${d.note} · ${NOTE_DUPLICATE_CELL}` : NOTE_DUPLICATE_CELL;
     } else hasChanged.add(d.segmentId);
   }
 
