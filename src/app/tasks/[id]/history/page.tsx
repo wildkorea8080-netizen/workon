@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
-import { api, formatDateTime } from '@/lib/work/client';
+import { api, executeRun, formatDateTime } from '@/lib/work/client';
 import type { ArtifactDto } from '@/components/work/types';
 
 interface VersionRow {
@@ -35,9 +35,12 @@ export default function HistoryPage({ params }: { params: { id: string } }) {
   const currentVersion = rows?.find((r) => r.current)?.version ?? 0;
 
   async function restore(row: VersionRow) {
-    const r = await api(`/api/work/tasks/${params.id}/versions/${row.id}/restore`, { method: 'POST', json: { baseVersion: currentVersion } });
+    const r = await api<{ run: { id: string; status: string } | null }>(`/api/work/tasks/${params.id}/versions/${row.id}/restore`, { method: 'POST', json: { baseVersion: currentVersion } });
     if (!r.ok) return setError(r.error.message);
     setError(null);
+    await load();
+    // 복구한 판의 파일 만들기를 바로 건다(끊겨도 작업자가 이어 받음)
+    await executeRun(params.id, r.data.run);
     await load();
   }
 

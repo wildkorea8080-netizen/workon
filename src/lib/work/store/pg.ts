@@ -165,6 +165,13 @@ export function createPgWorkStore(db: Pool): WorkStore {
     async getRun(id, organizationId) {
       return one<WorkRunRow>(db, 'SELECT * FROM work_runs WHERE id = $1 AND organization_id = $2', [id, organizationId]);
     },
+    async getActiveRun(taskId, organizationId) {
+      return one<WorkRunRow>(
+        db,
+        "SELECT * FROM work_runs WHERE task_id = $1 AND organization_id = $2 AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1",
+        [taskId, organizationId],
+      );
+    },
     async claimRuns(worker, leaseSeconds, limit, runId = null) {
       const { rows } = await db.query('SELECT * FROM work_claim_runs($1,$2,$3,$4)', [worker, leaseSeconds, limit, runId]);
       return rows as WorkRunRow[];

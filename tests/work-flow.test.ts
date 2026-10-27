@@ -287,7 +287,11 @@ describe.skipIf(!url)('업무 흐름 통합(실제 Postgres·실제 HWPX)', () =
     const d = await svc.getTaskDetail(ctx, a.actor, task.id);
     const body = d.version!.fields.find((f) => f.label === '본문')!;
     const s = await svc.saveDocument(ctx, a.actor, task.id, { baseVersion: 1, patches: [{ fieldId: body.id, operation: 'set_value', value: '바꾼 본문' }] });
+    // 저장이 건 '이 판의 파일 만들기'는 작업 상세에 보여야 화면을 다시 열어도 처리를 이어 건다(로그인 화면 확인에서 찾은 빈틈)
+    const pending = await svc.getTaskDetail(ctx, a.actor, task.id);
+    expect(pending.run).toMatchObject({ id: s.run!.id, operation: 'package', status: 'queued' });
     await runWorker(ctx, { workerId: 'w', runId: s.run!.id });
+    expect((await svc.getTaskDetail(ctx, a.actor, task.id)).run?.id).not.toBe(s.run!.id);
     const r = await svc.restoreVersion(ctx, a.actor, task.id, d.version!.id, { baseVersion: 2 });
     await runWorker(ctx, { workerId: 'w', runId: r.run.id });
     const versions = await svc.listVersions(ctx, a.actor, task.id);

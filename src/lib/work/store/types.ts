@@ -192,6 +192,8 @@ export interface WorkStore {
   // 실행
   enqueueRun(input: EnqueueInput): Promise<{ run: WorkRunRow; created: boolean }>;
   getRun(id: string, organizationId: string): Promise<WorkRunRow | null>;
+  /** 이 작업에서 아직 끝나지 않은(대기·처리 중) 가장 최근 실행 — 저장·복구가 건 파일 만들기를 다시 열어도 보이게 */
+  getActiveRun(taskId: string, organizationId: string): Promise<WorkRunRow | null>;
   claimRuns(worker: string, leaseSeconds: number, limit: number, runId?: string | null): Promise<WorkRunRow[]>;
   heartbeat(runId: string, worker: string, leaseSeconds: number): Promise<boolean>;
   finishRun(runId: string, worker: string, status: 'succeeded' | 'failed', error: WorkRunError | null, result: Record<string, unknown> | null, retryDelaySeconds: number): Promise<string>;

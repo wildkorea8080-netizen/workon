@@ -204,13 +204,16 @@ export function runDto(r: WorkRunRow) {
 export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: string) {
   const { task, access } = await loadTask(ctx, actor, taskId);
   const def = definitionFor(task.workflow_key);
-  const [version, artifacts, sources, run, tv] = await Promise.all([
+  const [version, artifacts, sources, currentRun, activeRun, tv] = await Promise.all([
     task.current_document_version_id ? ctx.store.getVersion(task.current_document_version_id, task.organization_id) : null,
     ctx.store.listArtifacts(task.id, task.organization_id),
     ctx.store.listSources(task.id, task.organization_id),
     task.current_run_id ? ctx.store.getRun(task.current_run_id, task.organization_id) : null,
+    ctx.store.getActiveRun(task.id, task.organization_id),
     task.template_version_id ? ctx.store.getTemplateVersion(task.template_version_id, task.organization_id) : null,
   ]);
+  // 끝나지 않은 실행(저장·복구가 건 파일 만들기 포함)이 먼저, 없으면 마지막 '파일 만들기' 결과
+  const run = activeRun ?? currentRun;
   const review = version ? await ctx.store.listReviewItems(version.id, task.organization_id) : [];
   const currentArtifacts = version ? artifacts.filter((a) => a.document_version_id === version.id) : [];
   return {

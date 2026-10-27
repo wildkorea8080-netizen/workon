@@ -159,6 +159,19 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
       if (error) fail(error);
       return (data as WorkRunRow) ?? null;
     },
+    async getActiveRun(taskId, organizationId) {
+      const { data, error } = await db
+        .from('work_runs')
+        .select('*')
+        .eq('task_id', taskId)
+        .eq('organization_id', organizationId)
+        .in('status', ['queued', 'running'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) fail(error);
+      return (data as WorkRunRow) ?? null;
+    },
     async claimRuns(worker, leaseSeconds, limit, runId = null) {
       const { data, error } = await db.rpc('work_claim_runs', { p_worker: worker, p_lease_seconds: leaseSeconds, p_limit: limit, p_run_id: runId });
       if (error) fail(error);

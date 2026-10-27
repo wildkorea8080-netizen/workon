@@ -6,6 +6,7 @@ import {
   api,
   newIdempotencyKey,
   uploadSource,
+  executeRun,
   formatBytes,
   formatDateTime,
   TASK_STATUS_LABEL,
@@ -55,14 +56,31 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
   // 실행 중이면 서버 상태를 본다(화면이 꾸민 진행률이 아님)
   useEffect(() => {
     if (!run || !['queued', 'running'].includes(run.status)) return;
+    let kicking = false;
     const t = setInterval(async () => {
       const r = await api<RunDto>(`/api/work/tasks/${taskId}/runs/${run.id}`);
       if (!r.ok) return;
       setRun(r.data);
       if (!['queued', 'running'].includes(r.data.status)) void refresh();
+      // 아직 아무도 안 잡은 실행(새로고침·끊긴 요청)이면 이 화면이 처리를 건다 — 잡기는 원자적이라 겹쳐도 한 번만 돈다
+      if (r.data.status === 'queued' && !kicking) {
+        kicking = true;
+        void executeRun<RunDto>(taskId, r.data).finally(() => {
+          kicking = false;
+        });
+      }
     }, 2500);
     return () => clearInterval(t);
   }, [run, taskId, refresh]);
+
+  // 저장·적용이 만든 '이 판의 파일 만들기' 실행 — 바로 처리를 건다(끊겨도 작업자가 이어 받음)
+  async function startRun(r: RunDto | null) {
+    if (!r) return;
+    setRun(r);
+    const done = await executeRun<RunDto>(taskId, r);
+    if (done?.ok) setRun(done.data);
+    await refresh();
+  }
 
   async function generate(decisions?: unknown) {
     if (!detail) return;
@@ -198,7 +216,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
                   await refresh();
                 }}
                 setError={setError}
-                onRun={setRun}
+                onRun={(r) => void startRun(r)}
               />
               {task.access.edit && (
                 <Card>
@@ -220,7 +238,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
             {right === 'review' && <ReviewPanel detail={detail} taskId={taskId} onChanged={refresh} setError={setError} />}
             {right === 'evidence' && <EvidencePanel detail={detail} selected={selected} />}
             {right === 'revise' && (
-              <RevisePanel detail={detail} taskId={taskId} selected={selected} onApplied={async (msg) => { setNotice(msg); await refresh(); }} setError={setError} />
+              <RevisePanel detail={detail} taskId={taskId} selected={selected} onApplied={async (msg) => { setNotice(msg); await refresh(); }} onRun={(r) => void startRun(r)} setError={setError} />
             )}
           </Card>
         </aside>
@@ -488,7 +506,7 @@ function EvidencePanel({ detail, selected }: { detail: TaskDetailDto; selected: 
 
 const QUICK = ['핵심만 3줄로', '공문체로 다듬기', '더 간결하게', '항목을 개조식으로'];
 
-function RevisePanel({ detail, taskId, selected, onApplied, setError }: { detail: TaskDetailDto; taskId: string; selected: string[]; onApplied: (m: string) => Promise<void>; setError: (m: string | null) => void }) {
+function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: { detail: TaskDetailDto; taskId: string; selected: string[]; onApplied: (m: string) => Promise<void>; onRun: (r: RunDto) => void; setError: (m: string | null) => void }) {
   const [instruction, setInstruction] = useState('');
   const [proposal, setProposal] = useState<{ id: string; status: string; changes: { fieldId: string; before: string; after: string }[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -528,10 +546,11 @@ function RevisePanel({ detail, taskId, selected, onApplied, setError }: { detail
 
   async function apply() {
     if (!proposal) return;
-    const r = await api<{ version: { version: number } }>(`/api/work/tasks/${taskId}/revision-proposals/${proposal.id}/apply`, { method: 'POST', json: { baseVersion: version!.version } });
+    const r = await api<{ version: { version: number }; run: RunDto | null }>(`/api/work/tasks/${taskId}/revision-proposals/${proposal.id}/apply`, { method: 'POST', json: { baseVersion: version!.version } });
     if (!r.ok) return setError(r.error.message);
     setProposal(null);
     setInstruction('');
+    if (r.data.run) onRun(r.data.run);
     await onApplied(`AI 수정을 적용해 ${r.data.version.version}판을 만들었습니다.`);
   }
 

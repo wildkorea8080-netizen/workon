@@ -30,6 +30,15 @@ export async function api<T>(url: string, init?: RequestInit & { json?: unknown;
   }
 }
 
+/**
+ * 저장·복구·AI 수정 적용이 만든 '이 판의 파일 만들기' 실행을 바로 처리한다.
+ * 이 요청이 끊기거나 실패해도 실행은 서버에 남아 작업자가 이어 받는다(그래서 결과를 기다리지 않아도 된다).
+ */
+export async function executeRun<T>(taskId: string, run: { id: string; status: string } | null | undefined): Promise<ApiResult<T> | null> {
+  if (!run || run.status !== 'queued') return null;
+  return api<T>(`/api/work/tasks/${taskId}/runs/${run.id}/execute`, { method: 'POST' });
+}
+
 export function newIdempotencyKey(): string {
   return (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`).replace(/[^A-Za-z0-9_-]/g, '');
 }
