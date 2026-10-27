@@ -54,7 +54,7 @@ export function headerYear(cell: Cell | undefined): number | null {
 }
 
 /** 열 머리글 글: columns가 있으면 그것, 없으면 머리글 칸을 이어 붙인다 */
-function columnName(table: ExtractedTable, col: number): string {
+export function columnName(table: ExtractedTable, col: number): string {
   const named = table.columns[col];
   if (typeof named === 'string' && named.trim() !== '') return named;
   const parts: string[] = [];

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Cell, ExtractedTable } from '@/lib/attachments/types';
 import { classifySegment } from '@/lib/work/workflows/currentize/classify';
+import type { Finding } from '@/lib/work/workflows/currentize/classify';
 import { matchRowValues, proseNumberStatus } from '@/lib/work/workflows/currentize/numbers';
 import type { Segment } from '@/lib/work/workflows/currentize/segments';
 
@@ -117,6 +118,61 @@ describe('matchRowValues', () => {
     const d = makeTable('t1', ['사업', '2026년(천원)'], [['사업 A', '미정']]);
     expect(matchRowValues(prior, [d], '2025년(천원)').values.get(1)).toBeNull();
   });
+
+  it('올해 열 없이 지난해 열만 있는 표는 쓰지 않는다 (옛 수치를 올해 것으로 넣지 않는다)', () => {
+    const prior = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200]]);
+    const d = makeTable('t1', ['사업', '2024년(천원)', '2025년(천원)'], [['사업 A', 1000, 1200]]);
+    const { values, warnings } = matchRowValues(prior, [d], '2025년(천원)');
+    expect(values.get(1)).toBeNull();
+    expect(warnings).toEqual(['표 t1에 올해(2026년) 열이 없습니다']);
+  });
+
+  it('쓰지 않는 표에 같은 행 머리가 있으면 유일하지 않다 (null)', () => {
+    const prior = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200]]);
+    const ok = makeTable('t1', ['사업', '2026년(천원)'], [['사업 A', 1300]]);
+    const rejected = makeTable('t2', ['사업', '2025년(천원)'], [['사업 A', 1200]]);
+    expect(matchRowValues(prior, [ok, rejected], '2025년(천원)').values.get(1)).toBeNull();
+  });
+
+  it('단위를 모르는 열에서 온 값은 uncertain (한쪽만 모르거나 둘 다 모르거나)', () => {
+    const known = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200], ['사업 B', 1, 2, 1]]);
+    const d = makeTable('t1', ['사업', '2026년'], [['사업 A', 1300], ['사업 B', 3]]);
+    const one = matchRowValues(known, [d], '2025년(천원)');
+    expect([...one.uncertain].sort()).toEqual([1, 2]);
+
+    const unitless = makeTable('p', ['구분', '2024년', '2025년', '증감'], [['사업 A', 1000, 1200, 200]]);
+    const both = matchRowValues(unitless, [d], '2025년');
+    expect(both.values.get(1)).toBe(1300);
+    expect([...both.uncertain]).toEqual([1]);
+    expect(both.warnings).toEqual(['작년 표와 올해 자료 모두 단위를 알 수 없어 그대로 넣었습니다: 표 t1']);
+
+    // 작년 단위 모름 / 올해 단위 앎
+    const dKnown = makeTable('t1', ['사업', '2026년(천원)'], [['사업 A', 1300]]);
+    const prior = matchRowValues(unitless, [dKnown], '2025년');
+    expect(prior.values.get(1)).toBe(1300);
+    expect([...prior.uncertain]).toEqual([1]);
+    expect(prior.warnings).toEqual(['작년 표의 단위를 알 수 없어 그대로 넣었습니다: 표 t1']);
+  });
+
+  it('단위를 아는 행은 uncertain이 아니다', () => {
+    const prior = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200]]);
+    const d = makeTable('t1', ['사업', '2026년(원)'], [['사업 A', 1300000]]);
+    expect(matchRowValues(prior, [d], '2025년(천원)').uncertain.size).toBe(0);
+  });
+
+  it('작년 표에 당해 열 이름이 없으면 전부 null + 경고', () => {
+    const prior = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200]]);
+    const d = makeTable('t1', ['사업', '2026년(천원)'], [['사업 A', 1300]]);
+    const { values, warnings } = matchRowValues(prior, [d], '2030년');
+    expect(values.get(1)).toBeNull();
+    expect(warnings.length).toBe(1);
+  });
+
+  it('괄호로 적힌 올해 값은 음수인지 몰라 null', () => {
+    const prior = makeTable('p', PRIOR_COLS, [['사업 A', 1000, 1200, 200]]);
+    const d = makeTable('t1', ['사업', '2026년(천원)'], [['사업 A', '(1,300)']]);
+    expect(matchRowValues(prior, [d], '2025년(천원)').values.get(1)).toBeNull();
+  });
 });
 
 const SEG: Segment = { id: '0:0', section: 0, text: '', path: [], nested: false, cell: null };
@@ -141,5 +197,20 @@ describe('proseNumberStatus', () => {
 
   it('절댓값으로 비교한다 (△는 부호)', () => {
     expect(status('전년 대비 △1,200 감소', [1200])).toBe('ok');
+  });
+
+  it('큰 금액은 1 차이도 같은 수가 아니다 (절대 오차)', () => {
+    expect(status('사업비는 1,234,567,890원이다.', [1234567891])).toBe('needs_check');
+    expect(status('사업비는 1,234,567,891원이다.', [1234567891])).toBe('ok');
+  });
+
+  it('수치가 여럿이면 하나만 몰라도 needs_check', () => {
+    expect(status('A는 1,200백만원, B는 3,400백만원이다.', [1200, 3400])).toBe('ok');
+    expect(status('A는 1,200백만원, B는 3,400백만원이다.', [1200])).toBe('needs_check');
+  });
+
+  it('읽지 못한 수치 조각은 needs_check', () => {
+    const finding: Finding = { kind: 'number', start: 0, end: 3, text: '007' };
+    expect(proseNumberStatus(SEG, [finding], new Set([7]))).toBe('needs_check');
   });
 });
