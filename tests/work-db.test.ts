@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import pg from 'pg';
 import { randomUUID, createHash } from 'crypto';
+import { mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
+import { createPgWorkStore } from '@/lib/work/store/pg';
+import { createLocalWorkFiles } from '@/lib/work/files';
+import { createSourceUpload } from '@/lib/work/sources';
+import type { WorkContext } from '@/lib/work/context';
 
 /**
  * 업무 도메인 DB 시험 (0034) — 실제 PostgreSQL에서 제약·트리거·RPC를 본다.
@@ -251,5 +258,25 @@ describe.skipIf(!url)('업무 도메인 DB (0034)', () => {
       );
     await ins();
     expect(await code(ins())).toBe('23505');
+  });
+
+  it('원자료 용도 prior(0035) — createSourceUpload가 prior로 저장하고, 모르는 용도는 DB가 거절한다', async () => {
+    const a = await org('A');
+    const t = await task(a);
+    const store = createPgWorkStore(new pg.Pool({ connectionString: url, max: 1 }));
+    const ctx = { store, files: createLocalWorkFiles(mkdtempSync(path.join(tmpdir(), 'workon-prior-'))) } as unknown as WorkContext;
+    const row = (await store.getTask(t, a.orgId))!;
+    const up = await createSourceUpload(ctx, row, a.userId, { fileName: '작년 사업계획.hwpx', size: 1000, purpose: 'prior' });
+    const { rows } = await db.query('SELECT purpose FROM work_sources WHERE id = $1', [up.sourceId]);
+    expect(rows[0].purpose).toBe('prior');
+    expect(
+      await code(
+        db.query(
+          `INSERT INTO work_sources (task_id, organization_id, uploaded_by, purpose, file_name, file_ext, storage_path)
+           VALUES ($1, $2, $3, 'bogus', 'x.xlsx', 'xlsx', $4)`,
+          [t, a.orgId, a.userId, `p/${randomUUID()}`]
+        )
+      )
+    ).toBe('23514');
   });
 });

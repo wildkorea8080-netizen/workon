@@ -8,6 +8,7 @@ import type { WorkContext } from './context';
 import { WorkError, type WorkSourceRow, type WorkTaskRow } from './types';
 import { sourceExtractPath, sourceStoragePath } from './files';
 import type { ComposeSource } from './generation/compose';
+import { MAX_PRIOR_BYTES } from './workflows/currentize/limits';
 
 /**
  * 작업 원자료 — 대화 첨부와 수명이 따로다(24시간 정리·대화 삭제가 건드리지 않는다).
@@ -16,7 +17,12 @@ import type { ComposeSource } from './generation/compose';
  */
 export const MAX_SOURCES_PER_TASK = 30;
 export const MAX_SOURCE_BYTES = MAX_ATTACHMENT_BYTES;
-const PURPOSES: readonly WorkSourceRow['purpose'][] = ['reference', 'data', 'request', 'template', 'evidence'];
+const PURPOSES: readonly WorkSourceRow['purpose'][] = ['reference', 'data', 'request', 'template', 'evidence', 'prior'];
+
+/** 용도별 파일 크기 상한 — 작년 파일(prior)만 더 크게 받는다 */
+export function maxSourceBytes(purpose: string): number {
+  return purpose === 'prior' ? MAX_PRIOR_BYTES : MAX_SOURCE_BYTES;
+}
 
 export function cleanSourceName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -43,8 +49,9 @@ export async function createSourceUpload(
   if (!ext) throw new WorkError('INVALID_INPUT', '엑셀·CSV·한글·워드·PDF·파워포인트·TXT 파일만 올릴 수 있습니다.');
   const size = Number(input.size);
   if (!Number.isFinite(size) || size <= 0) throw new WorkError('INVALID_INPUT', '파일 크기를 알 수 없습니다.');
-  if (size > MAX_SOURCE_BYTES) throw new WorkError('INVALID_INPUT', `파일 하나는 ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)}MB까지 올릴 수 있습니다.`, 413);
   const purpose = (PURPOSES as readonly unknown[]).includes(input.purpose) ? (input.purpose as WorkSourceRow['purpose']) : 'reference';
+  const maxBytes = maxSourceBytes(purpose);
+  if (size > maxBytes) throw new WorkError('INVALID_INPUT', `파일 하나는 ${Math.round(maxBytes / 1024 / 1024)}MB까지 올릴 수 있습니다.`, 413);
   const existing = await ctx.store.listSources(task.id, task.organization_id);
   if (existing.filter((s) => s.status !== 'failed').length >= MAX_SOURCES_PER_TASK) {
     throw new WorkError('INVALID_INPUT', `한 작업에 원자료는 ${MAX_SOURCES_PER_TASK}개까지 올릴 수 있습니다.`, 429);
@@ -82,7 +89,7 @@ export async function confirmSource(ctx: WorkContext, task: WorkTaskRow, sourceI
   }
   const bytes = await ctx.files.get(src.storage_path);
   if (!bytes) throw new WorkError('STORAGE_FAILED', '올린 파일을 찾지 못했습니다. 다시 올려 주세요.', 409);
-  if (bytes.length > MAX_SOURCE_BYTES) {
+  if (bytes.length > maxSourceBytes(src.purpose)) {
     await ctx.files.remove([src.storage_path]).catch(() => undefined);
     await ctx.store.updateSource(src.id, task.organization_id, { status: 'failed', failure_reason: '파일이 너무 큽니다.' });
     throw new WorkError('INVALID_INPUT', '파일이 너무 큽니다.', 413);

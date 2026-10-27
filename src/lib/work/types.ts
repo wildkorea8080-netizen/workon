@@ -173,7 +173,7 @@ export interface WorkSourceRow {
   task_id: string;
   organization_id: string;
   uploaded_by: string;
-  purpose: 'reference' | 'data' | 'request' | 'template' | 'evidence';
+  purpose: 'reference' | 'data' | 'request' | 'template' | 'evidence' | 'prior';
   file_name: string;
   file_ext: string;
   size_bytes: number | null;

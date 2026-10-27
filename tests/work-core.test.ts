@@ -9,6 +9,8 @@ import { checkPackage } from '@/lib/work/documents/package-check';
 import { generateDocumentFile, readFillableTemplate } from '@/lib/work/documents/generate-file';
 import { WorkError, type WorkActor } from '@/lib/work/types';
 import { computeReviewItems, TEST_MODE_MARKER } from '@/lib/work/review';
+import { satisfiesFileSet, uploadPurposeOf } from '@/lib/work/file-sets';
+import { MAX_SOURCE_BYTES, maxSourceBytes } from '@/lib/work/sources';
 
 const TPL = path.join(process.cwd(), 'assets', 'templates');
 const actor = (over: Partial<WorkActor> = {}): WorkActor => ({
@@ -163,5 +165,17 @@ describe('여러 줄 칸 이름', () => {
     const fields = fieldsFromSlots(labels.map((label, i) => ({ id: `s${i}`, label, kind: 'marker' as const, path: [], hint: null })));
     expect(fields.filter((f) => f.type !== 'paragraph').map((f) => f.label)).toEqual([]);
     expect(fieldsFromSlots([{ id: 'x', label: '수신', kind: 'marker', path: [], hint: null }])[0].type).toBe('text');
+  });
+});
+
+describe('원자료 용도 prior(작년 파일)', () => {
+  it('prior 용도는 file-set 키 prior에만 붙고 50MB까지 받는다', () => {
+    expect(uploadPurposeOf('prior')).toBe('prior');
+    expect(satisfiesFileSet('prior', 'prior')).toBe(true);
+    expect(satisfiesFileSet('sourceFiles', 'prior')).toBe(false); // prior는 '아무 원자료'가 아니다
+    expect(satisfiesFileSet('sourceFiles', 'data')).toBe(true);
+    expect(satisfiesFileSet('sourceFiles', 'template')).toBe(false);
+    expect(maxSourceBytes('prior')).toBe(50 * 1024 * 1024);
+    expect(maxSourceBytes('data')).toBe(MAX_SOURCE_BYTES);
   });
 });
