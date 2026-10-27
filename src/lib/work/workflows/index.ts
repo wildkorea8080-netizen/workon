@@ -28,6 +28,11 @@ export interface WorkflowImpl {
   outputs?: readonly { key: string; format: 'hwpx' | 'xlsx' }[];
   /** 직원이 정하는 칸 — AI가 쓰지 않는다(공개구분·경유처럼 행정 판단이 필요한 값). 비면 확인 사항으로 알린다 */
   humanOnlyLabels: readonly string[];
+  /**
+   * 작년 파일(원자료 용도 prior)이 읽혀 있으면 양식 채우기 대신 현행화(작년 HWPX를 올해로 고치기, runs/currentize-op.ts)로 만든다.
+   * 작년 파일이 없으면 kind대로 간다
+   */
+  usesCurrentizeWhenPrior?: true;
   /** 폼 값으로 바로 채울 수 있는 칸 — 모델을 거치지 않는다(지어낼 여지를 줄인다) */
   prefill(values: FormValues, ctx: { organizationName: string | null; departmentName: string | null; today: string }): Record<string, string>;
 }
@@ -86,6 +91,7 @@ const report: WorkflowImpl = {
   defaultTemplateRef: 'builtin:report',
   requiredFieldLabels: ['제목', '개요', '주요 내용'],
   documentOutputKey: 'report',
+  usesCurrentizeWhenPrior: true,
   humanOnlyLabels: [],
   prefill(values, { departmentName, today }) {
     const out: Record<string, string> = {};

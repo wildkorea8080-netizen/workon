@@ -214,6 +214,8 @@ export const WORK_ERROR_CODES = {
   CANCELED: 'CANCELED',
   // 현행화 — 변경을 만든 뒤 작년 파일 바이트가 달라져 조각 id가 풀리지 않는다
   PRIOR_MISMATCH: 'PRIOR_MISMATCH',
+  // 현행화 — 작년 파일이 HWPX가 아니다(HWP 5.0·DOCX). 다시 시도해도 같으니 바로 실패
+  PRIOR_UNSUPPORTED: 'PRIOR_UNSUPPORTED',
 } as const;
 export type WorkErrorCode = keyof typeof WORK_ERROR_CODES;
 

@@ -2,7 +2,7 @@
 import { buildUsageDetails } from '@/lib/assistant/persist';
 import type { WorkContext } from '../context';
 import { WorkError, type DocumentField, type WorkRunRow, type WorkTaskRow, type WorkRunError } from '../types';
-import { definitionFor, getWorkflowImpl, applyPrefill, outputKeysOf } from '../workflows';
+import { definitionFor, getWorkflowImpl, applyPrefill } from '../workflows';
 import { checkForm, formFacts } from '../workflows/form';
 import { fieldsFromSlots, mergeGenerated, normalizeStoredFields } from '../documents/fields';
 import { loadTemplateBytes } from '../documents/templates';
@@ -10,9 +10,7 @@ import { readFillableTemplate } from '../documents/generate-file';
 import { computeReviewItems } from '../review';
 import { loadSourceTexts, loadSourceExtracts } from '../sources';
 import { aggregateCollection, parseDecisions, type CollectionResult } from '../workflows/collection/aggregate';
-import { buildArtifact } from '../artifacts';
 import type { ComposeSource } from '../generation/compose';
-import type { LlmUsage } from '@/lib/llm';
 import type { NewReviewItem } from '../store/types';
 import { gatherEvidence } from '../workflows/regulations/gather';
 import { numberEvidence, isUsable, type RegulationEvidence } from '../workflows/regulations/evidence';
@@ -23,6 +21,10 @@ import { ITEMS_WORKFLOWS, departmentCandidates, flagReviewItems, type ItemsWorkf
 import { reconcile, type SettlementResult } from '../workflows/settlement/reconcile';
 import { factLines, qaReviewItems, verifyQa, type QaResult } from '../workflows/qa/verify';
 import { auditFieldValues, replyFieldValues } from '../workflows/qa/output';
+import { writeModelUsage, buildFileStep, type StepFn } from './shared';
+import { opGenerateCurrentize, findPriorSource } from './currentize-op';
+import { currentizeReviewItems } from '../workflows/currentize/review';
+import type { CurrentizeContent } from '../workflows/currentize/plan';
 
 /**
  * 실행 하나를 끝까지 처리한다 — 작업자(runs/worker.ts)가 lease를 잡은 실행만 넘긴다.
@@ -101,8 +103,6 @@ export async function processRun(ctx: WorkContext, run: WorkRunRow, workerId: st
     return { runId: run.id, finish, error: err };
   }
 }
-
-type StepFn = <T extends Record<string, unknown>>(name: string, fn: () => Promise<T>) => Promise<T>;
 
 interface Prepared extends Record<string, unknown> {
   fields: DocumentField[];
@@ -251,17 +251,6 @@ export interface RegulationContent {
   unavailable: string[];
   review: NewReviewItem[];
   mode: 'llm' | 'mock';
-}
-
-async function writeModelUsage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, usage: LlmUsage | null, stage: string) {
-  if (!usage) return;
-  await ctx.store.writeUsage({
-    departmentId: task.department_id,
-    userId: run.requested_by,
-    action: 'work_generate',
-    resourceId: run.id,
-    details: buildUsageDetails(usage, { task_id: task.id, run_id: run.id, attempt: run.attempt, workflow_key: task.workflow_key, agent_id: task.agent_id, stage }),
-  });
 }
 
 /** 규정 판의 확인 사항 — 유보·제외 근거·시행일 미확인·쓸 수 없던 자료 범위 */
@@ -633,6 +622,8 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
   if (kind === 'items') return opGenerateItems(ctx, run, task, step);
   if (kind === 'collection') return opGenerateCollection(ctx, run, task, step);
   if (kind === 'regulations') return opGenerateRegulations(ctx, run, task, step);
+  // 보고서 등: 작년 파일이 읽혀 있으면 양식 채우기 대신 현행화(작년 HWPX를 올해로)
+  if (getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior && (await findPriorSource(ctx, task))) return opGenerateCurrentize(ctx, run, task, step);
   const p = await step('prepare', () => prepareFields(ctx, task));
   const composed = await step('compose', () => composeStep(ctx, run, task, p));
   const saved = await step('save_version', async () => {
@@ -676,14 +667,6 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
   return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, review, mode: composed.mode };
 }
 
-async function buildFileStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, versionId: string) {
-  const impl = getWorkflowImpl(task.workflow_key)!;
-  // 주 결과를 먼저 — 함께 만드는 파일(후속조치표 등)도 같은 판으로. 같은 판·같은 키는 한 벌이라 다시 시도해도 겹치지 않는다
-  const built = [];
-  for (const key of outputKeysOf(impl)) built.push(await buildArtifact(ctx, task, versionId, key, run.id));
-  return { artifactId: built[0].id, sha256: built[0].sha256, previewStatus: built[0].preview_status, artifactIds: built.map((a) => a.id) };
-}
-
 /** 직접 수정·복구·후보 적용으로 생긴 판의 파일 만들기 */
 async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
   const versionId = typeof run.payload.versionId === 'string' ? run.payload.versionId : run.input_document_version_id;
@@ -692,6 +675,13 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
   if (!v || v.task_id !== task.id) throw new WorkError('NOT_FOUND', '판을 찾을 수 없습니다.', 404);
   await step('review', async () => {
     const result = (v.content as { result?: CollectionResult } | null)?.result;
+    const currentize = (v.content as { currentize?: CurrentizeContent } | null)?.currentize;
+    if (currentize?.schema === 'currentize/1') {
+      // 현행화 판(복구 등)은 그 판에 저장된 변경 목록의 확인 사항을 그대로 다시 건다
+      const items = currentizeReviewItems(currentize);
+      await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, items);
+      return { count: items.length };
+    }
     const settled = (v.content as { settlement?: SettlementResult } | null)?.settlement;
     if (settled?.schema === 'settlement/1') {
       await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, settled.review.map((r) => ({ ...r, field_ids: [] })));

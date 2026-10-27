@@ -28,6 +28,8 @@ export interface WorkContext {
   qa?: { model: QaModel };
   /** 현행화(작년 문서 고치기) 모델 */
   currentize?: { model: CurrentizeModel };
+  /** 현행화 한 번에 쓸 모델 비용 상한(원). 없으면 DEFAULT_COST_CAP_KRW */
+  costCapKrw?: number;
   /** 기관 허용 모델로 확정(model-policy) */
   resolveModel(departmentId: string): Promise<string>;
   /** 기관 정지·한도(usage-limit) */

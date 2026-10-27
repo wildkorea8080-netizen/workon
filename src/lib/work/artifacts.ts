@@ -18,12 +18,15 @@ import type { ItemsContent, QaContent } from './runs/executor';
 import { buildSettlementWorkbook } from './workflows/settlement/workbook';
 import type { SettlementResult } from './workflows/settlement/reconcile';
 import { buildAuditIndexWorkbook } from './workflows/qa/output';
+import { CHANGE_LOG_KEY, CHANGE_LOG_LABEL, buildChangeLogFile, buildCurrentizedDocument } from './workflows/currentize/output';
+import type { CurrentizeContent } from './workflows/currentize/plan';
 import { createHash } from 'crypto';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** 함께 만드는 파일의 이름 꼬리 — 카탈로그 outputs의 label(후속조치표 등) */
 function outputLabel(workflowKey: string, outputKey: string): string {
+  if (outputKey === CHANGE_LOG_KEY) return CHANGE_LOG_LABEL;
   return getWorkflow(workflowKey)?.outputs.find((o) => o.key === outputKey)?.label ?? outputKey;
 }
 
@@ -97,7 +100,18 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
   let gen: BuiltFile;
   const impl = getWorkflowImpl(task.workflow_key);
   const format = impl?.outputs?.find((o) => o.key === outputKey)?.format;
-  if (impl?.kind === 'collection') {
+  const currentize = (v.content as { currentize?: CurrentizeContent } | null)?.currentize;
+  if (currentize?.schema === 'currentize/1') {
+    // 현행화 판 — 작년 파일 원본 + 판의 변경 목록(양식 판이 없다)
+    if (outputKey === CHANGE_LOG_KEY) {
+      const warnings = (v.content as { currentizeWarnings?: unknown }).currentizeWarnings;
+      gen = await buildChangeLogFile(ctx, task, currentize, Array.isArray(warnings) ? warnings.filter((w): w is string => typeof w === 'string') : []);
+    } else if (outputKey === impl?.documentOutputKey) {
+      gen = await buildCurrentizedDocument(ctx, task, currentize);
+    } else {
+      throw new WorkError('OUTPUT_INVALID', '현행화 판에서 만들 수 없는 결과 파일입니다.', 422);
+    }
+  } else if (impl?.kind === 'collection') {
     gen = await buildCollectionFile(task, v.content);
   } else if (impl?.kind === 'items' && format === 'xlsx') {
     gen = await buildItemsFile(task, v.content);
