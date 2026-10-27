@@ -160,16 +160,53 @@ describe('compareCitations', () => {
     expect(pair.status).toBe('not_found');
   });
 
-  it('작년 문장이 비어 있으면 조문이 있어도 바뀜(대조할 문장이 없어 사람이 본다)', async () => {
-    const seg = '「공무원 여비 규정」 제64조';
-    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([lawEvidence()]), scope, BASIS);
-    expect(pair.cited.text).toBe('');
+  it('연결 표현(에 따라)을 떼고 내용 낱말로 맞댄다 — 예산·편성이 조문에 있으면 같음', async () => {
+    const seg = '사업비는 「지방공기업법」 제64조에 따라 예산을 편성한다';
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(예산) 지방공기업은 매 회계연도 예산을 편성하여 제출한다.' });
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(pair.cited.text).toBe('에 따라 예산을 편성한다');
+    expect(pair.status).toBe('same');
+  });
+
+  it('같은 인용이라도 조문이 결산만 말하면 바뀜', async () => {
+    const seg = '사업비는 「지방공기업법」 제64조에 따라 예산을 편성한다';
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(결산) 지방공기업은 매 회계연도 결산을 작성하여 제출한다.' });
+    const [pair] = await compareCitations([cite('s1', seg, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
     expect(pair.status).toBe('changed');
   });
 
-  it('작년 문장이 짧으면(6자 미만) 인용 자체가 현재 글에 있는지만 본다', async () => {
-    const seg = '「공무원 여비 규정」 제64조 에 따라';
-    const [pair] = await compareCitations([cite('s1', seg, '공무원 여비 규정', '제64조')], fakes([lawEvidence()]), scope, BASIS);
-    expect(pair.status).toBe('same');
+  it('짧은 문장은 낱말 하나만 있어도 같음, 없으면 바뀜', async () => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(예산) 지방공기업은 예산을 편성한다.' });
+    const present = '「지방공기업법」 제64조에 따라 예산';
+    const absent = '「지방공기업법」 제64조에 따라 결산';
+    const [a] = await compareCitations([cite('s1', present, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    const [b] = await compareCitations([cite('s1', absent, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(a.status).toBe('same');
+    expect(b.status).toBe('changed');
+  });
+
+  it('낱말이 많으면 70% 이상 있을 때 같음', async () => {
+    const art = lawEvidence({ title: '지방공기업법', text: '제64조(예산) 예산 편성 심의 의결 공고를 한다.' });
+    const ok = '「지방공기업법」 제64조 예산 편성 심의 의결 결산'; // 5개 중 4개
+    const bad = '「지방공기업법」 제64조 예산 결산 감사 정산 보고'; // 5개 중 1개
+    const [a] = await compareCitations([cite('s1', ok, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    const [b] = await compareCitations([cite('s1', bad, '지방공기업법', '제64조')], fakes([art]), scope, BASIS);
+    expect(a.status).toBe('same');
+    expect(b.status).toBe('changed');
+  });
+
+  it('연결 표현만 있거나 문장이 없으면 반박할 내용이 없어 같음(조문이 있을 때)', async () => {
+    const empty = '「공무원 여비 규정」 제64조';
+    const connectorOnly = '「공무원 여비 규정」 제64조에 따라';
+    const [a] = await compareCitations([cite('s1', empty, '공무원 여비 규정', '제64조')], fakes([lawEvidence()]), scope, BASIS);
+    const [b] = await compareCitations([cite('s1', connectorOnly, '공무원 여비 규정', '제64조')], fakes([lawEvidence()]), scope, BASIS);
+    expect(a.cited.text).toBe('');
+    expect(a.status).toBe('same');
+    expect(b.status).toBe('same');
+  });
+
+  it('조문이 없으면 문장이 비어도 없음', async () => {
+    const [pair] = await compareCitations([cite('s1', '「공무원 여비 규정」 제64조', '공무원 여비 규정', '제64조')], fakes([]), scope, BASIS);
+    expect(pair.status).toBe('not_found');
   });
 });

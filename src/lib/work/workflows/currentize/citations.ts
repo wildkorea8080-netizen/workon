@@ -28,9 +28,36 @@ export interface CitationInput {
 
 /** 인용 뒤에서 떼는 글자 수 */
 const WINDOW_CHARS = 30;
-/** 이보다 짧은 문장은 '그대로 있다'는 말이 아무것도 보장하지 못한다(예: '에 따라') */
-const MIN_COMPARABLE = 6;
 const KEYWORD_NOUNS = 3;
+/** 이 수 이하의 내용 낱말은 전부 있어야 같음, 넘으면 비율로 본다 */
+const ALL_REQUIRED_MAX = 3;
+const SAME_RATIO = 0.7;
+
+/**
+ * 조문 번호 바로 뒤에 붙는 연결 표현('제64조에 따라', '제3조의 규정에 의하여', '제5조에서 정한', '제2조상의').
+ * 작년 문장의 내용은 이 뒤부터이고, 연결 표현은 법 본문에 없으므로 대조 전에 뗀다. 연결 표현 뒤의 쉼표도 함께 뗀다.
+ */
+const LEADING_CONNECTOR =
+  /^(?:에\s*(?:따라서?|따른|따르면|의하여|의해서?|의한|의거하여|의거한|의거|근거하여|근거한|근거하면|규정된|규정한|정한|정하는)|의\s*규정에\s*(?:따라서?|의하여|의해서?|따른)|의\s*규정|에서\s*정(?:한|하는)|상의(?=\s|$))\s*[,，]?\s*/;
+
+/** 낱말 끝에 붙어 남는 조사·어미 — 떼어도 두 글자 이상 남을 때만 뗀다 */
+const TRAILING_SUFFIX = /(?:으로|에서|에게|한다|된다|이다|은|는|이|가|을|를|의|에|로|와|과|도|만)$/;
+/** 낱말로 세지 않는 말(조사·접속·상투 어미) */
+const STOP_WORDS = new Set(['및', '등', '또는', '그', '이', '가', '은', '는', '을', '를', '의', '에', '로', '으로', '와', '과', '있다', '한다', '된다', '하여', '하고', '하는']);
+
+/** 글에서 내용 낱말을 뽑는다 — 한글·영숫자 덩어리 중 두 글자 이상이고 상투어가 아닌 것(끝의 조사는 뗀다) */
+export function contentTokens(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.normalize('NFC').match(/[가-힣A-Za-z0-9]+/g) ?? []) {
+    let t = m;
+    if (STOP_WORDS.has(t)) continue;
+    const stripped = t.replace(TRAILING_SUFFIX, '');
+    if (stripped.length >= 2) t = stripped;
+    if (t.length < 2 || STOP_WORDS.has(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
 
 /** 이름 비교용 — 공백·「」·괄호를 빼고 소문자로 */
 function normName(s: string): string {
@@ -129,20 +156,13 @@ export async function compareCitations(
 
     const r = hit.r;
     const current = { kind: r.kind, title: r.title, article: r.article, text: r.text.slice(0, EVIDENCE_TEXT_MAX), enforced: r.enforced };
-    const now = squash(r.text);
-    const sentence = squash(window);
-
-    let same: boolean;
-    if (sentence.length >= MIN_COMPARABLE) {
-      same = now.includes(sentence);
-    } else if (sentence.length === 0) {
-      // 인용 뒤에 대조할 문장이 없다. 조문 번호가 있으면 그 조문 글이 달라졌는지 알 수 없어 사람이 보게 'changed'로 두고,
-      // 조문 번호도 없으면 규정이 지금 있다는 것밖에 확인할 게 없어 'same'
-      same = article === null;
-    } else {
-      // 6자 미만의 짧은 문장은 어느 글에나 있어 의미가 없다 — 인용 자체(조문 번호, 없으면 규정 이름)가 현재 글에 있는지만 본다
-      same = article ? now.includes(squash(article)) : titleScore(r.title, name) > 0;
-    }
+    // 연결 표현을 뗀 인용 뒤 문장의 내용 낱말이 현재 조문 글에 얼마나 있는가.
+    // 낱말은 조문 글에 들어 있기만 하면 된다('편성' ↔ '편성하여' — 어미가 달라진 것은 바뀜이 아니다)
+    const tokens = contentTokens(window.replace(LEADING_CONNECTOR, ''));
+    const hay = r.text.normalize('NFC');
+    const found = tokens.filter((t) => hay.includes(t)).length;
+    // 대조할 내용이 없으면 반박할 것도 없다(같음). 적으면 전부, 많으면 70% 이상
+    const same = tokens.length === 0 || (tokens.length <= ALL_REQUIRED_MAX ? found === tokens.length : found / tokens.length >= SAME_RATIO);
     return { segmentId: input.segmentId, cited, current, status: same ? 'same' : 'changed' };
   });
 }
