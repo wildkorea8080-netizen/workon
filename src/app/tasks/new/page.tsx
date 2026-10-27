@@ -125,11 +125,15 @@ function NewTask() {
                 maxLength={200}
                 className="mt-1 w-full rounded-[10px] border border-[#DCE3EC] px-3 py-2.5 text-[15px] focus:border-[#003087] focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
               />
-              {workflow.inputs.some((i) => i.key === 'title') && <p className="mt-1 text-[13px] text-slate-500">문서 제목으로도 씁니다.</p>}
+              {workflow.inputs.some((i) => i.key === 'title') && (
+                <p className="mt-1 text-[13px] text-slate-500">{workflow.outputs.some((o) => o.format === 'hwpx') ? '문서 제목으로도 씁니다.' : '결과 파일 이름으로도 씁니다.'}</p>
+              )}
             </div>
             <FormFields inputs={workflow.inputs} value={form} onChange={setForm} missing={missing} />
             {workflow.inputs.some((i) => i.type === 'file-set') && (
-              <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2 text-[14px] text-slate-600">참고 자료 파일은 작업을 저장한 뒤 작업실에서 올립니다.</p>
+              <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2 text-[14px] text-slate-600">
+                {workflow.inputs.filter((i) => i.type === 'file-set').map((i) => i.label).join('·')} 파일은 작업을 저장한 뒤 작업실에서 올립니다.
+              </p>
             )}
           </Card>
           <div className="flex justify-end gap-3">

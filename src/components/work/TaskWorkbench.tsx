@@ -320,11 +320,19 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
         >
           {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : 'HWPX 만들기'}
         </button>
-        {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">필수 입력을 먼저 채워 저장해 주세요.</p>}
+        {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">{draftReason(detail)}</p>}
         {dirty && <p className="mt-2 text-[13px] text-amber-800">바꾼 입력을 먼저 저장해 주세요.</p>}
       </Card>
     </>
   );
+}
+
+/** '만들 준비 안 됨'의 실제 이유 — 입력은 다 있는데 필수 원자료만 없을 때 '입력을 채우라'고 하지 않는다 */
+function draftReason(detail: TaskDetailDto): string {
+  const fileSet = detail.workflow.inputs.find((i) => i.type === 'file-set' && i.required);
+  const readySources = detail.sources.filter((s) => s.status === 'ready').length;
+  if (fileSet && readySources === 0) return `왼쪽 ‘원자료’ 탭에서 ${fileSet.label}을(를) 먼저 올려 주세요. 필수 입력도 모두 채웠는지 확인하세요.`;
+  return '필수 입력을 먼저 채워 저장해 주세요.';
 }
 
 function PreviewCard({ artifact, canDownload }: { artifact: ArtifactDto | null; canDownload: boolean }) {
@@ -341,14 +349,18 @@ function PreviewCard({ artifact, canDownload }: { artifact: ArtifactDto | null; 
             {artifact.preview.renderer ? ` · ${artifact.preview.renderer.name}` : ''}
           </p>
           {artifact.preview_status === 'unsupported' && (
-            <p className="mt-1 text-slate-600">아래 &lsquo;문서 구조&rsquo;는 편집용 보기이며 실제 쪽 배치와 다를 수 있습니다. 쪽 배치는 파일을 내려받아 한글에서 확인하세요.</p>
+            <p className="mt-1 text-slate-600">
+              {artifact.format === 'xlsx'
+                ? '화면의 표는 결과 요약입니다. 시트 모양은 파일을 내려받아 엑셀에서 확인하세요.'
+                : <>아래 &lsquo;문서 구조&rsquo;는 편집용 보기이며 실제 쪽 배치와 다를 수 있습니다. 쪽 배치는 파일을 내려받아 한글에서 확인하세요.</>}
+            </p>
           )}
           <p className="mt-1 text-[13px] text-slate-500">
             {artifact.file_name} · {formatBytes(artifact.size_bytes)} · 구조 검사 {artifact.validation_status === 'valid' ? '통과' : '실패'} · 해시 {artifact.sha256.slice(0, 12)}
           </p>
           {canDownload && artifact.validation_status === 'valid' && (
             <a href={`/api/work/artifacts/${artifact.id}/download`} className="mt-2 inline-block text-[#003087] underline">
-              이 판의 HWPX 내려받기
+              이 판의 {artifact.format.toUpperCase()} 내려받기
             </a>
           )}
         </div>

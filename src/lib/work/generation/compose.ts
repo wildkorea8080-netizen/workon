@@ -2,6 +2,7 @@
 import { complete, type LlmUsage } from '@/lib/llm';
 import type { DocumentField } from '../types';
 import { WorkError } from '../types';
+import { TEST_MODE_MARKER } from '../review';
 
 /**
  * 필드 내용 만들기 — 모델은 **필드 값만** 정한다. 파일·XML은 프로그램이 만든다(개편 04 문서 4절 3~4단계).
@@ -149,7 +150,7 @@ export const mockGenerator: FieldGenerator = {
       const direct = fact(f.label);
       if (direct) values[f.id] = { value: direct, evidenceIds: [] };
       else if (f.type === 'paragraph') {
-        values[f.id] = { value: `[시험 모드] ${f.label}\n${input.facts.map((x) => `○ ${x.label}: ${x.value}`).join('\n')}`.slice(0, 2000), evidenceIds: [] };
+        values[f.id] = { value: `${TEST_MODE_MARKER} ${f.label}\n${input.facts.map((x) => `○ ${x.label}: ${x.value}`).join('\n')}`.slice(0, 2000), evidenceIds: [] };
       } else missing.push({ fieldId: f.id, reason: `${f.label} 정보가 없습니다` });
     }
     return { values, missing, usage: null, mode: 'mock' };

@@ -10,9 +10,12 @@ import type { NewReviewItem } from './store/types';
  *  - INFO_NEEDED(warning): AI가 정보가 없어 비워 둔 칸
  *  - UNVERIFIED_NUMBER(warning): AI가 쓴 칸의 숫자가 직원 입력·원자료 어디에도 없다(숫자 확인 규칙 재사용)
  *  - PLACEHOLDER(warning): '○○○'·'[확인 필요]' 같은 자리 표시가 남았다
- *  - TEST_MODE(info): 모델 없이 시험 모드로 만든 판
+ *  - TEST_MODE(info): 모델 없이 시험 모드로 만든 판, 또는 시험 모드 글이 아직 남은 판
  * '확인할 사항 없음'은 이 검사 범위에서 없다는 뜻이지 사실 무오류 인증이 아니다 — 화면도 그렇게 적는다.
  */
+/** 시험 모드 생성기가 칸 앞에 붙이는 표시 — 저장·복구로 새 판이 되어도 이 글이 남아 있으면 시험 모드 판으로 본다 */
+export const TEST_MODE_MARKER = '[시험 모드]';
+
 const PLACEHOLDER = /○{2,}|O{3,}|X{3,}|\[\s*확인\s*필요[^\]]*\]|\(\s*내용\s*\)/;
 
 export interface ReviewInput {
@@ -54,7 +57,8 @@ export function computeReviewItems(input: ReviewInput): NewReviewItem[] {
       items.push({ severity: 'warning', code: 'PLACEHOLDER', message: `'${f.label}'에 채우지 않은 자리 표시가 남아 있습니다.`, field_ids: [f.id] });
     }
   }
-  if (input.testMode) {
+  // 직원이 다른 칸만 고쳐 저장한 판도 시험 모드 글이 남아 있으면 계속 알린다(그대로 최종본이 되지 않게)
+  if (input.testMode || input.fields.some((f) => f.value.includes(TEST_MODE_MARKER))) {
     items.push({ severity: 'info', code: 'TEST_MODE', message: '시험 모드로 만든 판입니다(AI를 부르지 않음). 실제 업무에 쓰지 마세요.', field_ids: [] });
   }
   return items;

@@ -8,6 +8,20 @@ import type { WorkflowInputDto } from './types';
  */
 export type FormState = Record<string, unknown>;
 
+/** 여러 줄 입력의 예시 — 입력마다 다르다(붙임 예시를 항목 정의에 보이면 무엇을 적을지 헷갈린다) */
+const LIST_EXAMPLES: Record<string, string> = {
+  attachments: '실적 제출 양식 1부',
+  fieldDefinitions: '예산액',
+  indicatorDefinitions: '민원 처리 기간(2026년 1~9월)',
+  expectedDepartments: '기획팀',
+  recipients: '각 부서장',
+};
+
+function listHint(key: string): string {
+  const ex = LIST_EXAMPLES[key];
+  return ex ? `한 줄에 하나씩 적습니다(예: ${ex}).` : '한 줄에 하나씩 적습니다.';
+}
+
 export default function FormFields({
   inputs,
   value,
@@ -64,7 +78,7 @@ export default function FormFields({
                     value={Array.isArray(value[i.key]) ? (value[i.key] as string[]).join('\n') : String(value[i.key] ?? '')}
                     onChange={(e) => set(i.key, e.target.value.split('\n'))}
                   />
-                  <p className="mt-1 text-[13px] text-slate-500">한 줄에 하나씩 적습니다.</p>
+                  <p className="mt-1 text-[13px] text-slate-500">{listHint(i.key)}</p>
                 </>
               )}
               {i.type === 'record-list' && (
@@ -75,7 +89,7 @@ export default function FormFields({
                     value={Array.isArray(value[i.key]) ? (value[i.key] as { name: string }[]).map((r) => (typeof r === 'string' ? r : r.name)).join('\n') : ''}
                     onChange={(e) => set(i.key, e.target.value.split('\n').map((name) => ({ name })))}
                   />
-                  <p className="mt-1 text-[13px] text-slate-500">한 줄에 하나씩 적습니다(예: 실적 제출 양식 1부).</p>
+                  <p className="mt-1 text-[13px] text-slate-500">{listHint(i.key)}</p>
                 </>
               )}
               {isMissing && (

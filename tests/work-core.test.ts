@@ -8,6 +8,7 @@ import { applyPatches, fieldsFromSlots, mergeGenerated, normalizeStoredFields, p
 import { checkPackage } from '@/lib/work/documents/package-check';
 import { generateDocumentFile, readFillableTemplate } from '@/lib/work/documents/generate-file';
 import { WorkError, type WorkActor } from '@/lib/work/types';
+import { computeReviewItems, TEST_MODE_MARKER } from '@/lib/work/review';
 
 const TPL = path.join(process.cwd(), 'assets', 'templates');
 const actor = (over: Partial<WorkActor> = {}): WorkActor => ({
@@ -142,5 +143,15 @@ describe('실제 표준 양식으로 HWPX 만들기(doc-fill 어댑터)', () => 
     await expect(
       generateDocumentFile(bytes, 'report.hwpx', fieldsFromSlots([{ id: 's1', label: '제목', kind: 'marker', path: [], hint: null }]))
     ).rejects.toMatchObject({ code: 'TEMPLATE_UNSUPPORTED' });
+  });
+});
+
+describe('확인할 사항 — 시험 모드 글', () => {
+  // 로그인 화면 확인에서 찾음: 시험 모드 판의 다른 칸만 고쳐 저장하면 새 판에서 '시험 모드' 알림이 사라졌다
+  it('직원이 고쳐 저장한 판(testMode=false)도 시험 모드 글이 남아 있으면 알린다', () => {
+    const fields = fieldsFromSlots([{ id: 's1', label: '본문', kind: 'marker', path: [], hint: null }]).map((f) => ({ ...f, value: `${TEST_MODE_MARKER} 본문`, origin: 'ai' as const }));
+    expect(computeReviewItems({ fields, missing: [], knownText: '', testMode: false }).map((i) => i.code)).toContain('TEST_MODE');
+    const clean = fields.map((f) => ({ ...f, value: '실제 본문', origin: 'user' as const }));
+    expect(computeReviewItems({ fields: clean, missing: [], knownText: '', testMode: false }).map((i) => i.code)).not.toContain('TEST_MODE');
   });
 });
