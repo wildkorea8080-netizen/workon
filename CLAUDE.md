@@ -121,6 +121,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | `npm run work:testdb -- start\|reset\|stop` | 업무 DB 시험용 임시 PostgreSQL(설치된 16 바이너리, 포트 54329, 0001~0034). `WORK_TEST_DATABASE_URL`을 주면 `npm test`가 업무 DB 시험도 돈다 | 아니오(로컬) |
 | `npm run work:template-check [-- --release]` | 표준 양식 파일·표시·엔진 방식·검증 기록. `--release`는 사람의 시각 검토 기록까지 | 아니오 |
 | `npm run work:template-verify [-- --only 이름]` | (Windows·한글) 표준 양식을 채워 한글 COM으로 열기·넣은 글·편집·다시 저장·PDF, 기록을 verification.json에 | 아니오 |
+| `npm run work:llm-smoke -- --yes-cost [--only 키,키] [--out 파일]` | 업무 8개를 가상 자료로 실제 Claude에 끝까지(시험 DB만, 모델 키만 .env.local에서). 비용이 든다(8개 약 170원) | 시험 DB(키 필요) |
 | `npm run work:worker [-- --once \| --hancom \| --local-files 폴더]` | 업무 실행 상시 작업자(DB 직결). `--hancom`은 한글로 실제 미리보기 PDF | 예 |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
