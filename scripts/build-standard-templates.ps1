@@ -1,5 +1,5 @@
 ﻿<#
-  WORKON 표준 양식 3종을 한글로 만든다 (WORKON 개편 P0).
+  WORKON 표준 양식(공문·보고서·회의록·근거 검토 메모)을 한글로 만든다 (WORKON 개편 P0).
 
     & .\scripts\build-standard-templates.ps1            # assets/templates/src/*.html → assets/templates/*.hwpx
 
@@ -10,7 +10,8 @@
   보안 모듈·레지스트리는 건드리지 않는다. 그래서 한글이 접근 확인 창을 띄우는 위치(이 PC에서는 저장소 폴더)에서는
   자동화가 멈춘다 — 임시 폴더에서 변환한 뒤 결과만 assets/templates/로 복사한다.
 #>
-param([int]$TimeoutSec = 90)
+# -Names로 일부만 만든다 — 이미 검증한 양식을 다시 만들면 sha256이 바뀌어 검증 기록이 무효가 된다
+param([int]$TimeoutSec = 90, [string[]]$Names = @('official_letter', 'report', 'minutes', 'regulation_memo'))
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $src = Join-Path $root 'assets\templates\src'
@@ -19,7 +20,7 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ('workon-templates-' + [guid]::NewG
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
 try {
-  foreach ($name in @('official_letter', 'report', 'minutes')) {
+  foreach ($name in $Names) {
     $html = Join-Path $work "$name.html"
     $out = Join-Path $work "$name.hwpx"
     Copy-Item (Join-Path $src "$name.html") $html -Force

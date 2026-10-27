@@ -49,7 +49,8 @@ $job = Start-Job -ArgumentList $workInput, $edited, $pdf, $marker {
     $r.version = $h.Version
     $r.opened = [bool]$h.Open($inputPath, 'HWPX', 'forceopen:true')
     if (-not $r.opened) { throw '한글이 파일을 열지 못함' }
-    $r.text = [string]$h.GetTextFile('TEXT', '')
+    # 'TEXT'는 옛 한국어 인코딩이라 ›·— 같은 글자를 버린다(실측) — 넣은 글 대조는 'UNICODE'로
+    $r.text = [string]$h.GetTextFile('UNICODE', '')
     $h.Run('MoveDocEnd') | Out-Null
     $h.Run('BreakPara') | Out-Null
     $act = $h.CreateAction('InsertText'); $set = $act.CreateSet(); $act.GetDefault($set); $set.SetItem('Text', $marker); $act.Execute($set) | Out-Null
@@ -57,7 +58,7 @@ $job = Start-Job -ArgumentList $workInput, $edited, $pdf, $marker {
     $h.Clear(1)
     $r.reopened = [bool]$h.Open($edited, 'HWPX', 'forceopen:true')
     if ($r.reopened) {
-      $r.editKept = ([string]$h.GetTextFile('TEXT', '')).Contains($marker)
+      $r.editKept = ([string]$h.GetTextFile('UNICODE', '')).Contains($marker)
       $r.pdf = [bool]$h.SaveAs($pdf, 'PDF', '')
       $r.pages = [int]$h.PageCount
     }

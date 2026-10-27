@@ -35,6 +35,12 @@ export const BUILTIN_TEMPLATES: readonly BuiltinTemplate[] = [
     file: 'minutes.hwpx',
     markers: ['회의명', '일시', '장소', '주관', '참석자', '안건', '논의 내용', '결정 사항', '향후 계획', '작성자'],
   },
+  {
+    ref: 'builtin:regulation_memo',
+    name: '근거 검토 메모 (표준 서식)',
+    file: 'regulation_memo.hwpx',
+    markers: ['제목', '작성일', '작성부서', '검토 질문', '적용 기준', '검토 의견', '근거', '유보·확인 필요', '검토 범위'],
+  },
 ];
 
 export function findBuiltinTemplate(ref: string): BuiltinTemplate | null {

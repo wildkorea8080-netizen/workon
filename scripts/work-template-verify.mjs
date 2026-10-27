@@ -3,6 +3,7 @@
  *
  *   npm run work:template-verify            -- 세 양식을 채워 한글에서 열기·편집·다시 저장·PDF, 기록 남김
  *   npm run work:template-verify -- --out 폴더  -- 채운 파일·PDF를 그 폴더에 둔다(기본: 임시 폴더)
+ *   npm run work:template-verify -- --only regulation_memo  -- 한 양식만(다른 양식의 기록은 그대로 둔다)
  *
  * 1. 실제 입구(readTemplate·fillTemplate)로 양식마다 모든 표시에 예시 글(여러 줄 포함)을 넣는다
  * 2. scripts/hancom-verify.ps1로 한글이 연다 → 넣은 글이 보이는지 → 편집 → 다시 저장 → 다시 열기 → PDF
@@ -52,6 +53,12 @@ const SAMPLE = {
   '논의 내용': '○ 집행률이 낮은 사업 원인 확인\n○ 미제출 부서 독려 방안',
   '결정 사항': '○ 운영팀 자료 10. 30.까지 제출',
   작성자: '기획팀 주무관',
+  '검토 질문': '출장 중 숙박비가 상한을 넘으면 차액을 지급할 수 있는가',
+  '적용 기준': '적용 기준일 2026. 10. 27. · 범위: 국내 출장 여비',
+  '검토 의견': '○ 숙박비는 상한액 범위에서 실비로 지급하는 것이 원칙임[E1]\n○ 상한을 넘는 차액 지급의 예외 요건은 확인한 근거에서 찾지 못해 유보함',
+  근거: '[E1] 여비 규정 · p.12 · 제3장 › 숙박비 (기관 문서, 시행일 확인 필요)\n[E2] 공무원 여비 규정 제17조 (법령, 시행 2026. 1. 1.)',
+  '유보·확인 필요': '○ 상한 초과 차액 지급의 예외 요건 — 근거 없음',
+  '검토 범위': '확인한 자료: 기관 문서 1건 · 법령 1건. 법률적 최종 판단이 아닙니다.',
 };
 
 const verificationPath = path.join(BUILTIN_TEMPLATE_DIR, 'verification.json');
@@ -60,7 +67,10 @@ ledger.note =
   '기본 양식 실제 한글 검증 기록. hancom-automation = scripts/work-template-verify.mjs(한글 COM 자동화로 열기·넣은 글 확인·편집·다시 저장·다시 열기·PDF). human-visual = 사람이 PDF/한글 화면으로 쪽 배치·글꼴·잘림을 본 기록(직접 더한다).';
 let failed = 0;
 
-for (const t of BUILTIN_TEMPLATES) {
+const onlyIdx = process.argv.indexOf('--only');
+const only = onlyIdx > 0 ? process.argv[onlyIdx + 1] : null;
+
+for (const t of BUILTIN_TEMPLATES.filter((x) => !only || x.file === only || x.ref === only || x.file === `${only}.hwpx`)) {
   const file = path.join(BUILTIN_TEMPLATE_DIR, t.file);
   if (!existsSync(file)) {
     console.log(`✗ ${t.file} 없음`);

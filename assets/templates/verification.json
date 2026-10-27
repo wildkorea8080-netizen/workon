@@ -7,14 +7,14 @@
       "kind": "hancom-automation",
       "result": "passed",
       "application": "Hancom 10, 0, 0, 11808",
-      "checkedAt": "2026-10-27T09:30:29.0181154+09:00",
+      "checkedAt": "2026-10-27T15:58:57.1759064+09:00",
       "checks": {
         "opened": true,
         "valuesVisible": true,
         "editSavedReopened": true,
         "pdfPages": 1
       },
-      "filledSha256": "ee7157e9387e0922434485666ba373aaa64447b26cc4cb855f213f647cf99ef8"
+      "filledSha256": "5a170424871d75c6d7be93ce23e223b4c0bdc9596a73dfe5d8d2326af938dd00"
     },
     {
       "file": "report.hwpx",
@@ -22,14 +22,14 @@
       "kind": "hancom-automation",
       "result": "passed",
       "application": "Hancom 10, 0, 0, 11808",
-      "checkedAt": "2026-10-27T09:30:33.5162851+09:00",
+      "checkedAt": "2026-10-27T15:59:01.9644483+09:00",
       "checks": {
         "opened": true,
         "valuesVisible": true,
         "editSavedReopened": true,
         "pdfPages": 1
       },
-      "filledSha256": "78cb4b369b6e0481ddb5fcc014de76880959845ba826070e4c7c9c3320531a94"
+      "filledSha256": "7a3e68deea9bd5b6d60998b1d21c202b683dd47af77851c9263064dfce5c3765"
     },
     {
       "file": "minutes.hwpx",
@@ -37,14 +37,29 @@
       "kind": "hancom-automation",
       "result": "passed",
       "application": "Hancom 10, 0, 0, 11808",
-      "checkedAt": "2026-10-27T09:30:37.8679549+09:00",
+      "checkedAt": "2026-10-27T15:59:06.3539685+09:00",
       "checks": {
         "opened": true,
         "valuesVisible": true,
         "editSavedReopened": true,
         "pdfPages": 1
       },
-      "filledSha256": "f80fcb7c96b87db8a3d3adc5df722e6b5927dd5e3d512353c50120306fb48c37"
+      "filledSha256": "913a2fb63401172d6c39459cba19c83f3d4316ad264a8d0111c344b019cd4fbe"
+    },
+    {
+      "file": "regulation_memo.hwpx",
+      "sha256": "ee47b6493459740947b196613e6dd80bccb3aa361dbc9a28101d9e2b5feb4c64",
+      "kind": "hancom-automation",
+      "result": "passed",
+      "application": "Hancom 10, 0, 0, 11808",
+      "checkedAt": "2026-10-27T15:59:11.0287681+09:00",
+      "checks": {
+        "opened": true,
+        "valuesVisible": true,
+        "editSavedReopened": true,
+        "pdfPages": 1
+      },
+      "filledSha256": "284c908fb3e21068eac1c74af8e2f1bb5c8afb2c58f8b618e3b564191359c944"
     }
   ]
 }
