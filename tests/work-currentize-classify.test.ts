@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifySegment, type Finding } from '@/lib/work/workflows/currentize/classify';
+import { classifySegment, currentizeNumberSpans, type Finding } from '@/lib/work/workflows/currentize/classify';
 import { numberSpans, answerNumbers } from '@/lib/assistant/number-check';
 
 const ctx = {
@@ -32,9 +32,9 @@ describe('classifySegment — 다섯 꼴', () => {
     expect(classifySegment('금년도와 당해연도, 작년', ctx).map((x) => x.text)).toEqual(['금년도', '당해연도', '작년']);
   });
 
-  it('수치: 4자리 미만 정수는 제외, 단위는 prose에 남고 토큰만', () => {
+  it('수치: 단위는 prose에 남고 토큰만 — 4자리 미만도 수치다(현행화 전용 판정)', () => {
     expect(classifySegment('예산은 1,200백만원 이다', ctx)).toEqual([f('number', '1,200', 4)]);
-    expect(classifySegment('직원 12명 배치', ctx)).toEqual([]);
+    expect(classifySegment('직원 12명 배치', ctx)).toEqual([f('number', '12', 3)]);
     expect(classifySegment('증가율 3.5% 로 확대', ctx)).toEqual([f('number', '3.5', 4)]);
   });
 
@@ -104,6 +104,54 @@ describe('classifySegment — 제외 셋 (Review Focus 1)', () => {
     expect(classifySegment('2025년부터 3년간 추진', ctx).filter((x) => x.kind === 'year')).toEqual([]);
     expect(classifySegment('2025년 부터 시행', ctx).filter((x) => x.kind === 'year')).toEqual([]);
     expect(classifySegment('2025년까지 시행', ctx)).toEqual([f('year', '2025년', 0)]);
+  });
+});
+
+describe('currentizeNumberSpans — 현행화 수치 판정(C1)', () => {
+  const nums = (t: string) => currentizeNumberSpans(t).map((n) => n.raw);
+  it('단위·%·%p가 붙었거나 정수 두 자리 이상이면 수치', () => {
+    expect(nums('예산 850백만원')).toEqual(['850']);
+    expect(nums('직원 35명')).toEqual(['35']);
+    expect(nums('달성률 85%')).toEqual(['85']);
+    expect(nums('달성률 85 ％')).toEqual(['85']);
+    expect(nums('0.3%p 상승')).toEqual(['0.3']);
+    expect(nums('3명 배치')).toEqual(['3']);
+    expect(nums('1.5배 확대')).toEqual(['1.5']);
+    expect(nums('사업 12개소')).toEqual(['12']);
+    expect(nums('총 48 과제')).toEqual(['48']);
+    // 한 자리 수에 단위가 없으면 수치가 아니다
+    expect(nums('1단계 사업')).toEqual([]);
+    // 공백 뒤 단위 글자로 시작하는 다른 낱말은 단위가 아니다
+    expect(nums('그중 2 일반 과제')).toEqual([]);
+  });
+  it('자리(start·end)가 글 그대로', () => {
+    const t = '예산은 850백만원, 인원 35명, 달성률 85%이다';
+    for (const n of currentizeNumberSpans(t)) expect(t.slice(n.start, n.end)).toBe(n.raw);
+    expect(currentizeNumberSpans(t).map((n) => n.raw)).toEqual(['850', '35', '85']);
+  });
+  it('제목 번호·조문·날짜·문서번호·연도·「」 안은 수치가 아니다', () => {
+    expect(nums('1. 개요')).toEqual([]);
+    expect(nums('12. 추진 일정')).toEqual([]);
+    expect(nums('(10) 세부 과제')).toEqual([]);
+    expect(nums('「지방공기업법」 제64조제1항제2호에 따라')).toEqual([]);
+    expect(nums('제3조의2 준용')).toEqual([]);
+    expect(nums('문서번호 2025-123호')).toEqual([]);
+    expect(nums('2025. 1. 1. 시행')).toEqual([]);
+    expect(nums('2025-01-01 시행')).toEqual([]);
+    expect(nums('10월 3일 개최')).toEqual([]);
+    expect(nums('12월까지')).toEqual([]);
+    expect(nums('10:30 회의')).toEqual([]);
+    expect(nums('2025년부터 추진')).toEqual([]);
+    expect(nums("'25 사업")).toEqual([]);
+    expect(nums('2025 예산')).toEqual([]);
+    expect(nums('「2024년 개정 12개 조례」')).toEqual([]);
+    expect(nums('표 a12 참조')).toEqual([]);
+  });
+  it('분류에서도 같은 판정 — 850백만원·35명·85%는 number, 제목·조문·문서번호는 아님', () => {
+    expect(classifySegment('예산 850백만원, 35명, 85% 달성', ctx).filter((x) => x.kind === 'number').map((x) => x.text)).toEqual(['850', '35', '85']);
+    expect(classifySegment('1. 추진 배경과 필요성 검토', ctx).filter((x) => x.kind === 'number')).toEqual([]);
+    expect(classifySegment('「국가재정법」 제64조에 따라 편성', ctx).filter((x) => x.kind === 'number')).toEqual([]);
+    expect(classifySegment('문서번호 2025-123호 참조', ctx).filter((x) => x.kind === 'number')).toEqual([]);
   });
 });
 

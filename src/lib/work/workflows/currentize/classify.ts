@@ -1,5 +1,6 @@
 // src/lib/work/workflows/currentize/classify.ts
-import { numberSpans } from '@/lib/assistant/number-check';
+import { numberedHeadingLevel } from '@/lib/doc-fill/slots';
+import { KNOWN_UNITS, normalizeUnit } from '@/lib/table-engine/unit-names';
 
 /**
  * 조각 한 문단의 글에서 현행화 때 바뀔 수 있는 자리를 찾는다(S6-1). 글만 보는 순수 함수 —
@@ -74,13 +75,10 @@ function collect(text: string, ctx: ClassifyContext): Finding[] {
 
   for (const m of text.matchAll(DATE)) push('date', m.index ?? 0, (m.index ?? 0) + m[0].length);
 
-  // 수치 — number-check와 같은 기준(4자리 미만 정수·연도·날짜·id 제외). 단위는 줄글에 남기고 숫자 토큰만
-  // 문서번호 '2025-1234호'의 일련번호는 값이 아니라 번호다 — 수치로도 연도로도 보지 않는다
+  // 수치 — 현행화 전용 판정(numberSpans의 4자리 하한을 쓰지 않는다: 850백만원·35명·85%도 올해 값인지 사람이 봐야 한다).
+  // 단위는 줄글에 남기고 숫자 토큰만. 문서번호 '2025-1234호'의 일련번호는 값이 아니라 번호다
   const docNumbers = [...text.matchAll(DOC_NUMBER)].map((m) => ({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }));
-  for (const n of numberSpans(text)) {
-    if (docNumbers.some((d) => overlaps(n, d))) continue;
-    push('number', n.start, n.end);
-  }
+  for (const n of currentizeNumberSpans(text)) push('number', n.start, n.end);
   for (const re of YEAR_PATTERNS) {
     for (const m of text.matchAll(re)) {
       const span = { start: m.index ?? 0, end: (m.index ?? 0) + m[0].length };
@@ -96,6 +94,77 @@ function collect(text: string, ctx: ClassifyContext): Finding[] {
   }
 
   for (const m of text.matchAll(PERIOD)) push('period', m.index ?? 0, (m.index ?? 0) + m[0].length);
+  return out;
+}
+
+/** 숫자 덩어리 — 쉼표를 3자리마다 낀 수 또는 일반 수(소수 포함) */
+const DIGIT_RUN = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g;
+/** 조문·항·호·목(과 장·절·관·편)의 번호 — 값이 아니다 */
+const LEGAL_NUMBER = /제\d+(?:조|항|호|목|장|절|관|편)(?:의\d+)?/g;
+/** 「…」 안의 글 — 규정 이름의 숫자는 값이 아니다 */
+const BRACKETED = /「[^」]*」/g;
+/**
+ * 날짜·시각 꼴(값이 아니다): 2025. 1. 1. · 2025-01-01 · 26. 3. 5. · 10월 3일 · 3월 · 10:30
+ * 날짜를 읽는 일은 date 분류가 하고, 여기서는 숫자로 세지 않기만 한다
+ */
+const DATE_LIKE = [
+  /(?<!\d)\d{4}[.\-/]\s?\d{1,2}[.\-/]\s?\d{1,2}\.?/g,
+  /(?<!\d)\d{2}\.\s?\d{1,2}\.\s?\d{1,2}\./g,
+  /(?<!\d)\d{1,2}월(?:\s?\d{1,2}일)?/g,
+  /(?<!\d)\d{1,2}:\d{2}(?!\d)/g,
+];
+/** 연도 꼴: 2025년(부터 포함) · '25 · 2025. 3. — 숫자로 세지 않는다(연도 밀기가 맡는다) */
+const YEAR_LIKE = [/(?<!\d)(?:19|20)\d\d년/g, /['’‘]\d\d(?!\d)/g, /(?<!\d)20\d\d\.\s?\d{1,2}\./g];
+/** 문단 맨 앞의 번호 기호('12. ' · '3) ' · '(10) ') */
+const LEADING_MARKER = /^\s*\(?\d{1,2}[.)](?=\s)/;
+/** 긴 단위 먼저 — '개월'이 '개'로, '백만원'이 '백만'으로 잘리지 않게 */
+const UNIT_CANDIDATES = [...new Set([...KNOWN_UNITS, '억', '조', '㎏', '㏊', '㎞'])].sort((a, b) => b.length - a.length);
+
+/** 숫자 바로 뒤(공백은 건너뜀)에 단위·%·%p가 붙었는가. 공백을 건넜으면 단위 뒤가 낱말로 이어지면 안 된다('2 일반') */
+function followedByUnit(text: string, end: number): boolean {
+  let i = end;
+  while (i < text.length && /[ 	 　]/.test(text[i])) i++;
+  const spaced = i > end;
+  const rest = text.slice(i).replace(/^％/, '%');
+  if (rest.startsWith('%')) return true;
+  for (const u of UNIT_CANDIDATES) {
+    if (!rest.startsWith(u) || normalizeUnit(u) === null) continue;
+    if (spaced && /^[\p{L}\p{N}]/u.test(rest.slice(u.length))) continue;
+    return true;
+  }
+  return false;
+}
+
+function spansOf(text: string, patterns: RegExp[]): { start: number; end: number }[] {
+  return patterns.flatMap((re) => [...text.matchAll(re)].map((m) => ({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length })));
+}
+
+/**
+ * 현행화가 '수치'로 보는 숫자 덩어리(S6-1 C1). 단위·%·%p가 붙었거나 정수 자리가 둘 이상이면 수치다 —
+ * 단, 문단 앞 번호 기호·조문 번호(제N조·항·호·목)·날짜·시각·문서번호(2025-123호)·연도(2025년·'25·1900~2100의 네 자리 정수)·「…」 안의 숫자는 아니다.
+ * 영문자에 붙은 숫자(a1·t3)는 id다. 자리(start·end)는 글 그대로다.
+ */
+export function currentizeNumberSpans(text: string): { start: number; end: number; raw: string }[] {
+  const excluded = [
+    ...spansOf(text, [DOC_NUMBER, LEGAL_NUMBER, BRACKETED, ...DATE_LIKE, ...YEAR_LIKE]),
+  ];
+  const marker = LEADING_MARKER.exec(text);
+  if (marker || numberedHeadingLevel(text) !== null) {
+    const lead = /^\s*\(?\d{1,2}[.)]/.exec(text);
+    if (lead) excluded.push({ start: 0, end: lead[0].length });
+  }
+  const out: { start: number; end: number; raw: string }[] = [];
+  for (const m of text.matchAll(DIGIT_RUN)) {
+    const raw = m[0];
+    const start = m.index ?? 0;
+    const span = { start, end: start + raw.length };
+    if (excluded.some((e) => overlaps(span, e))) continue;
+    if (/[A-Za-z]/.test(text[start - 1] ?? '')) continue;
+    // 연도 꼴 네 자리 정수(쉼표·소수 없음)
+    if (/^\d{4}$/.test(raw) && Number(raw) >= 1900 && Number(raw) <= 2100) continue;
+    const intDigits = raw.split('.')[0].replace(/,/g, '').length;
+    if (intDigits >= 2 || followedByUnit(text, span.end)) out.push({ ...span, raw });
+  }
   return out;
 }
 
