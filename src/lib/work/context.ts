@@ -7,6 +7,7 @@ import type { RegulationProviders } from './workflows/regulations/gather';
 import type { RegulationModel } from './workflows/regulations/model';
 import type { ItemsModel } from './workflows/items/model';
 import type { QaModel } from './workflows/qa/model';
+import type { CurrentizeModel } from './workflows/currentize/model';
 
 /**
  * 업무 서비스·실행기가 쓰는 의존성 묶음. 운영 기본값은 defaultWorkContext(server-context.ts),
@@ -25,6 +26,8 @@ export interface WorkContext {
   items?: { model: ItemsModel };
   /** 질문별 답변(회신·감사) 모델 */
   qa?: { model: QaModel };
+  /** 현행화(작년 문서 고치기) 모델 */
+  currentize?: { model: CurrentizeModel };
   /** 기관 허용 모델로 확정(model-policy) */
   resolveModel(departmentId: string): Promise<string>;
   /** 기관 정지·한도(usage-limit) */
