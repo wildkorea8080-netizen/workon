@@ -23,7 +23,8 @@
     "noda:webhook": "tsx scripts/noda-webhook.mjs",
     "noda:purge-deleted": "tsx scripts/noda-purge-deleted.mjs",
     "work:template-check": "tsx scripts/work-template-check.mjs",
-    "work:template-verify": "tsx scripts/work-template-verify.mjs"
+    "work:template-verify": "tsx scripts/work-template-verify.mjs",
+    "work:testdb": "tsx scripts/work-testdb.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",
@@ -52,6 +53,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "20.14.2",
     "@types/pako": "^2.0.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "18.2.66",
     "@types/react-dom": "18.2.22",
     "autoprefixer": "10.4.19",

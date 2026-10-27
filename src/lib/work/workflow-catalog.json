@@ -1,0 +1,681 @@
+{
+  "schemaVersion": "1.0.0",
+  "product": "WORKON",
+  "authoredAt": "2026-10-26",
+  "sourceCommit": "702cc436b895c278ba1fc6eb13673e88d07c3091",
+  "note": "구현 명세이며 실제 구현 완료를 의미하지 않는다. 기관별 설치·양식·검증 준비 상태는 서버에서 판정한다. 새 capability ID로 직접 저장하지 않는다.",
+  "inputTypes": [
+    "string",
+    "long-text",
+    "date",
+    "enum",
+    "file-set",
+    "template",
+    "string-list",
+    "record-list"
+  ],
+  "commonRules": [
+    "현재 기관·작업·자료 접근 권한 확인",
+    "입력·양식·워크플로 버전 고정",
+    "없는 사실·근거·좌표를 생성하지 않음",
+    "필수 실제 파일이 있어야 업무 완료",
+    "검토 항목과 실제 파일 버전 연결"
+  ],
+  "workflows": [
+    {
+      "key": "intake",
+      "name": "접수공문 처리",
+      "group": "B",
+      "purpose": "본문·붙임에서 요청사항과 제출물을 추출한다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "requestFiles",
+          "label": "공문·붙임",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "title",
+          "label": "업무 제목",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "departmentMap",
+          "label": "업무분장표",
+          "type": "file-set",
+          "required": false
+        },
+        {
+          "key": "receivedOn",
+          "label": "접수일",
+          "type": "date",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "actionSheet",
+          "label": "요청사항·처리표",
+          "format": "xlsx",
+          "required": true
+        },
+        {
+          "key": "intakeMemo",
+          "label": "접수 검토 메모",
+          "format": "hwpx",
+          "required": false
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "document"
+      ],
+      "validationRules": [
+        "본문·붙임 기한 충돌",
+        "대상 기간·필수 제출물 누락",
+        "명시 없는 담당자·상대 기한은 확인 필요"
+      ],
+      "scopeNote": "담당 부서 배부는 후보 제안까지만"
+    },
+    {
+      "key": "official-letter",
+      "name": "공문 기안",
+      "group": "A",
+      "purpose": "사실·원자료를 승인 양식의 공문으로 만든다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "title",
+          "label": "제목",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "facts",
+          "label": "핵심 내용",
+          "type": "long-text",
+          "required": true
+        },
+        {
+          "key": "recipients",
+          "label": "수신처",
+          "type": "string-list",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "참고 자료",
+          "type": "file-set",
+          "required": false
+        },
+        {
+          "key": "attachments",
+          "label": "붙임 목록",
+          "type": "record-list",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "letter",
+          "label": "공문 기안문",
+          "format": "hwpx",
+          "required": true
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "document",
+        "doc_search"
+      ],
+      "validationRules": [
+        "수신·본문·붙임 일치",
+        "날짜·금액 근거",
+        "미확인 문서번호·결재정보 임의 생성 금지"
+      ],
+      "scopeNote": "파일 초안 생성. 전자결재 등록·발송은 별도"
+    },
+    {
+      "key": "report",
+      "name": "보고서·사업계획",
+      "group": "B",
+      "purpose": "검증된 자료에서 본문·표·요약을 생성한다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "title",
+          "label": "제목",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "reportType",
+          "label": "보고 유형",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "진행 현황",
+            "결과보고",
+            "사업계획"
+          ]
+        },
+        {
+          "key": "templateVersion",
+          "label": "기관 양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "근거 자료",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "period",
+          "label": "대상 기간",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "emphasis",
+          "label": "중점 사항",
+          "type": "long-text",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "report",
+          "label": "보고서",
+          "format": "hwpx",
+          "required": true
+        },
+        {
+          "key": "summary",
+          "label": "1쪽 요약",
+          "format": "hwpx",
+          "required": false
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "document",
+        "table_merge",
+        "doc_search"
+      ],
+      "validationRules": [
+        "본문·표·요약 수치 일치",
+        "실적·계획·제안 구분",
+        "기간·지표 정의 일치"
+      ],
+      "scopeNote": "반복 보고 3종부터. 자유 주제 연구는 확장"
+    },
+    {
+      "key": "collection",
+      "name": "자료 취합·엑셀 정리",
+      "group": "A",
+      "purpose": "부서 회신을 기준에 맞춰 모으고 원본과 대조한다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "title",
+          "label": "업무 제목",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "회신 파일",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "expectedDepartments",
+          "label": "제출 대상 부서",
+          "type": "string-list",
+          "required": true
+        },
+        {
+          "key": "period",
+          "label": "대상 기간",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "fieldDefinitions",
+          "label": "항목·단위·집계 기준",
+          "type": "record-list",
+          "required": true
+        },
+        {
+          "key": "baseForm",
+          "label": "기준 양식",
+          "type": "file-set",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "collection",
+          "label": "통합·제출현황·오류·근거",
+          "format": "xlsx",
+          "required": true
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "table_merge"
+      ],
+      "validationRules": [
+        "중복 후보 확인",
+        "미제출·필수값 누락",
+        "단위·소계·기간·잘림 처리",
+        "읽지 못한 값을 0으로 변환 금지",
+        "확인되지 않은 원본 셀 주소 생성 금지"
+      ],
+      "scopeNote": "지원한 양식 변형·파일 상한 안에서. 미제출은 잠정 집계 표시"
+    },
+    {
+      "key": "settlement",
+      "name": "예산·정산 대사",
+      "group": "C",
+      "purpose": "집행과 증빙의 불일치를 찾고 정산 초안을 만든다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "title",
+          "label": "정산 제목",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "budgetFiles",
+          "label": "승인 예산·집행 자료",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "evidenceFiles",
+          "label": "증빙",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "rules",
+          "label": "적용 기준",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "period",
+          "label": "정산 기간",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "정산 양식",
+          "type": "template",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "reconciliation",
+          "label": "예산·집행·증빙 대사표",
+          "format": "xlsx",
+          "required": true
+        },
+        {
+          "key": "settlementReport",
+          "label": "정산 보고",
+          "format": "hwpx",
+          "required": false
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "table_merge",
+        "document",
+        "doc_search"
+      ],
+      "validationRules": [
+        "취소·중복·분할 집행",
+        "부가세·단위·OCR 불확실성",
+        "거래·증빙 대응과 잔액"
+      ],
+      "scopeNote": "비용 인정 확정·지급·전표 입력은 제외"
+    },
+    {
+      "key": "regulations",
+      "name": "규정·지침 확인",
+      "group": "A",
+      "purpose": "기관·기준일에 맞는 근거를 찾아 검토 메모를 만든다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "question",
+          "label": "확인할 업무 질문",
+          "type": "long-text",
+          "required": true
+        },
+        {
+          "key": "basisDate",
+          "label": "적용 기준일",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "scope",
+          "label": "업무·적용 범위",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "추가 자료",
+          "type": "file-set",
+          "required": false
+        },
+        {
+          "key": "templateVersion",
+          "label": "검토 메모 양식",
+          "type": "template",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "regulationMemo",
+          "label": "근거 검토 메모",
+          "format": "hwpx",
+          "required": true
+        }
+      ],
+      "reuseCapabilities": [
+        "doc_search",
+        "public_data",
+        "document",
+        "file_read"
+      ],
+      "validationRules": [
+        "기관·지역·효력일·별표·예외",
+        "충돌·근거 부족 유보",
+        "실제 확인한 원문 위치만"
+      ],
+      "scopeNote": "법률적 최종 판단을 자동 확정하지 않음"
+    },
+    {
+      "key": "meeting",
+      "name": "회의·위원회 정리",
+      "group": "B",
+      "purpose": "메모·전사문으로 회의록과 후속조치를 만든다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "meetingName",
+          "label": "회의명",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "meetingSource",
+          "label": "회의 메모·전사문",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "회의록 양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "meetingOn",
+          "label": "회의일",
+          "type": "date",
+          "required": false
+        },
+        {
+          "key": "participants",
+          "label": "확인된 참석자",
+          "type": "string-list",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "minutes",
+          "label": "회의록",
+          "format": "hwpx",
+          "required": true
+        },
+        {
+          "key": "followups",
+          "label": "후속조치표",
+          "format": "xlsx",
+          "required": false
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "document"
+      ],
+      "validationRules": [
+        "제안·결정·미결 구분",
+        "조건·반대 의견 누락",
+        "화자·담당·기한 추측 금지"
+      ],
+      "scopeNote": "음성 녹음·받아쓰기 외부 서비스 추가는 제외"
+    },
+    {
+      "key": "reply",
+      "name": "민원·문의 회신",
+      "group": "C",
+      "purpose": "확인된 사실과 기준으로 질문별 회신을 작성한다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "inquiry",
+          "label": "문의 내용",
+          "type": "long-text",
+          "required": true
+        },
+        {
+          "key": "confirmedFacts",
+          "label": "담당자가 확인한 사실",
+          "type": "long-text",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "회신 양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "근거 자료",
+          "type": "file-set",
+          "required": false
+        },
+        {
+          "key": "recipient",
+          "label": "수신 대상",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "reply",
+          "label": "회신 초안",
+          "format": "hwpx",
+          "required": true
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "doc_search",
+        "document"
+      ],
+      "validationRules": [
+        "질문별 응답 누락",
+        "근거 없는 조치·기한 약속",
+        "타 민원인 정보 혼입",
+        "담당자 사실 확인"
+      ],
+      "scopeNote": "일반 문의·정형 회신. 처분·자격·자동 발송 제외"
+    },
+    {
+      "key": "audit-response",
+      "name": "감사·평가 요구자료",
+      "group": "C",
+      "purpose": "요구 항목과 답변·증빙·수치를 대응시킨다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "requestFiles",
+          "label": "요구서",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "evidenceFiles",
+          "label": "실적·증빙",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "indicatorDefinitions",
+          "label": "지표·기간 정의",
+          "type": "record-list",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "제출 양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "priorResponses",
+          "label": "과거 제출본",
+          "type": "file-set",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "key": "response",
+          "label": "요구 항목별 답변",
+          "format": "hwpx",
+          "required": true
+        },
+        {
+          "key": "evidenceIndex",
+          "label": "증빙목록·수치 대조",
+          "format": "xlsx",
+          "required": true
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "table_merge",
+        "doc_search",
+        "document"
+      ],
+      "validationRules": [
+        "질의·증빙 대응",
+        "연도·대상·지표 기준 혼합",
+        "과거 수치 차이의 근거",
+        "증빙 없는 주장 표시"
+      ],
+      "scopeNote": "하나의 반복 제출 유형부터 지원"
+    },
+    {
+      "key": "handover",
+      "name": "인수인계",
+      "group": "B",
+      "purpose": "확인된 업무 자료로 절차·일정·미결 과제를 정리한다.",
+      "implementationStatus": "specification",
+      "defaultTaskVisibility": "private",
+      "inputs": [
+        {
+          "key": "title",
+          "label": "담당 업무",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "sourceFiles",
+          "label": "매뉴얼·결과·미결 자료",
+          "type": "file-set",
+          "required": true
+        },
+        {
+          "key": "templateVersion",
+          "label": "인수인계 양식",
+          "type": "template",
+          "required": true
+        },
+        {
+          "key": "confirmedStatus",
+          "label": "담당자 확인 현황",
+          "type": "long-text",
+          "required": true
+        },
+        {
+          "key": "basisDate",
+          "label": "작성 기준일",
+          "type": "date",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "key": "handover",
+          "label": "인수인계서",
+          "format": "hwpx",
+          "required": true
+        },
+        {
+          "key": "calendar",
+          "label": "반복 일정·미결 과제",
+          "format": "xlsx",
+          "required": false
+        }
+      ],
+      "reuseCapabilities": [
+        "file_read",
+        "doc_search",
+        "document"
+      ],
+      "validationRules": [
+        "종료·진행 업무 구분",
+        "담당·기한 최신성",
+        "원자료 접근 범위",
+        "비밀번호·계정 비밀 제외"
+      ],
+      "scopeNote": "개인 메일·채팅 전체 수집 및 권한 자동 승계 제외"
+    }
+  ]
+}
