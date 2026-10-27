@@ -212,6 +212,8 @@ export const WORK_ERROR_CODES = {
   FORBIDDEN: 'FORBIDDEN',
   INVALID_INPUT: 'INVALID_INPUT',
   CANCELED: 'CANCELED',
+  // 현행화 — 변경을 만든 뒤 작년 파일 바이트가 달라져 조각 id가 풀리지 않는다
+  PRIOR_MISMATCH: 'PRIOR_MISMATCH',
 } as const;
 export type WorkErrorCode = keyof typeof WORK_ERROR_CODES;
 

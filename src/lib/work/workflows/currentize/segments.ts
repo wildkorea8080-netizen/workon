@@ -1,5 +1,5 @@
 // src/lib/work/workflows/currentize/segments.ts
-import { openHwpx, readEntry, scanParagraphs } from '@/lib/doc-fill/hwpx-core';
+import { openHwpx, readEntry, scanParagraphs, type Para } from '@/lib/doc-fill/hwpx-core';
 import { paragraphPrefix, scanTags } from '@/lib/doc-fill/xml-scan';
 import { numberedHeadingLevel, isPlaceholderText } from '@/lib/doc-fill/slots';
 import { MAX_SEGMENTS } from './limits';
@@ -78,6 +78,19 @@ function cellOfParagraphs(xml: string, prefix: string): Map<number, CellRef> {
   return out;
 }
 
+/** 조각 id. 같은 바이트에서 언제나 같다 */
+export function segmentId(section: number, paraStart: number): string {
+  return `${section}:${paraStart}`;
+}
+
+/**
+ * 조각이 되는 문단(글이 있는 문단)을 시작 위치 순으로. readSegments와 고치기 적용(apply.ts)이
+ * **같은 훑기**로 문단을 찾도록 한 곳에 둔다 — 둘이 갈리면 id가 엉뚱한 문단을 가리킨다.
+ */
+export function scanSegmentParas(xml: string, prefix: string): Para[] {
+  return scanParagraphs(xml, prefix).filter((p) => p.text.trim() !== '');
+}
+
 export async function readSegments(bytes: Buffer): Promise<{ segments: Segment[]; truncated: boolean }> {
   const { zip, sections } = await openHwpx(bytes);
   const segments: Segment[] = [];
@@ -89,18 +102,18 @@ export async function readSegments(bytes: Buffer): Promise<{ segments: Segment[]
     /** 열린 번호 제목 사슬(위 급 → 아래 급). hwpx-auto.ts와 같은 규칙: 최상위 문단만, 자리 표시 글은 제목이 아니다 */
     const chain: { level: number; label: string }[] = [];
 
-    for (const p of scanParagraphs(xml, prefix)) {
+    // 글 없는 문단은 번호 제목이 될 수 없어(자리 표시 글로 보거나 번호가 없음) 사슬에도 영향이 없다
+    for (const p of scanSegmentParas(xml, prefix)) {
       const nested = p.ancestors.length > 0;
       const level = !nested && !isPlaceholderText(p.text) ? numberedHeadingLevel(p.text) : null;
       if (level !== null) while (chain.length > 0 && chain[chain.length - 1].level >= level) chain.pop();
       const path = chain.map((h) => h.label);
       if (level !== null) chain.push({ level, label: p.text.trim() });
 
-      if (!p.text.trim()) continue;
       if (segments.length >= MAX_SEGMENTS) return { segments, truncated: true };
       const cell = cellOf.get(p.start);
       segments.push({
-        id: `${section}:${p.start}`,
+        id: segmentId(section, p.start),
         section,
         text: p.text,
         path,
