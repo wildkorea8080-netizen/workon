@@ -6,8 +6,10 @@ import { WorkError, type WorkSourceRow, type WorkTaskRow } from '../../types';
 import { checkPackage } from '../../documents/package-check';
 import { applyChanges } from './apply';
 import { readSegments, type Segment } from './segments';
+import { MAX_SEGMENTS } from './limits';
+import { valueLines } from '@/lib/doc-fill/hwpx-core';
 import { buildChangeLogWorkbook } from './workbook';
-import type { CurrentizeContent } from './plan';
+import type { Change, CurrentizeContent } from './plan';
 
 /**
  * 현행화 판 → 파일. 실행기(runs/currentize-op.ts)와 파일 만들기(artifacts.ts)가 함께 쓴다.
@@ -66,18 +68,48 @@ export interface CurrentizeFile {
   uncompressedBytes: number;
 }
 
-async function checked(bytes: Buffer, format: 'hwpx' | 'xlsx', values: string[]): Promise<CurrentizeFile> {
+/** 패키지(zip·필수 항목·XML·남은 표시) 검사. values를 주면 그 글이 파일 글에 있는지도 본다 */
+async function checked(bytes: Buffer, format: 'hwpx' | 'xlsx', values?: string[]): Promise<CurrentizeFile> {
   const check = await checkPackage(bytes, { format, values });
   if (!check.valid) throw new WorkError('OUTPUT_INVALID', `만든 파일이 검사를 통과하지 못했습니다: ${check.problems.slice(0, 3).join('; ')}`, 422, { problems: check.problems });
   return { bytes, format, mimeType: format === 'hwpx' ? HWPX_MIME : XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
 }
 
-/** 현행화한 HWPX — 작년 원본 바이트 + 판의 변경 목록(바꿈만 적용). 넣은 글이 파일에 있는지까지 본다 */
+/**
+ * 적용한 변경이 만든 파일에 그대로 들어갔는지 — 조각을 다시 읽어 본다. 패키지 검사의 글 대조(values)는 태그 없는 <hp:t>만 읽어
+ * 탭·전각 공백(<hp:tab/>·<hp:fwSpace/>)이 든 문단을 '없음'으로 보므로 쓰지 않는다.
+ * 고친 문단 뒤의 조각 id(바이트 위치)는 밀리므로 작년 조각의 **문서 순서**로 찾는다: 여러 줄 변경은 뒤에 새 조각을 더하고,
+ * 첫 줄이 빈 변경은 조각이 사라진다 — 그만큼 순서를 옮긴다.
+ */
+async function verifyApplied(priorBytes: Buffer, outBytes: Buffer, changes: Change[]): Promise<void> {
+  const applied = new Map(changes.filter((c) => c.status === 'changed' && c.after !== null).map((c) => [c.segmentId, c.after as string]));
+  if (applied.size === 0) return;
+  const before = (await readSegments(priorBytes)).segments;
+  const after = (await readSegments(outBytes)).segments;
+  let shift = 0;
+  let bad = 0;
+  before.forEach((s, i) => {
+    const value = applied.get(s.id);
+    if (value === undefined) return;
+    const lines = valueLines(value);
+    if (lines[0].trim() === '') shift -= 1;
+    else {
+      const got = after[i + shift];
+      // 조각 상한(MAX_SEGMENTS)에서 잘린 뒷부분은 볼 수 없다
+      if (got ? got.text !== lines[0] : after.length < MAX_SEGMENTS) bad++;
+    }
+    shift += lines.slice(1).filter((l) => l.trim() !== '').length;
+  });
+  if (bad > 0) throw new WorkError('OUTPUT_INVALID', `고친 글 ${bad}곳이 만든 파일에 그대로 들어가지 않았습니다. 다시 만들어 주세요.`, 422);
+}
+
+/** 현행화한 HWPX — 작년 원본 바이트 + 판의 변경 목록(바꿈만 적용). 넣은 글이 파일에 있는지는 조각을 다시 읽어 본다 */
 export async function buildCurrentizedDocument(ctx: WorkContext, task: WorkTaskRow, content: CurrentizeContent): Promise<CurrentizeFile> {
   const prior = await loadPriorFile(ctx, task, content.priorSourceId, content.priorSha256);
   const bytes = await applyChanges(prior.bytes, content.changes);
-  const values = content.changes.filter((c) => c.status === 'changed' && c.after).map((c) => c.after as string);
-  return checked(bytes, 'hwpx', values);
+  const file = await checked(bytes, 'hwpx');
+  await verifyApplied(prior.bytes, bytes, content.changes);
+  return file;
 }
 
 /** 변경 내역표(XLSX) — 판의 변경 목록·인용 대조 그대로 */

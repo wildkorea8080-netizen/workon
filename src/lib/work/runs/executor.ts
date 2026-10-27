@@ -22,7 +22,7 @@ import { reconcile, type SettlementResult } from '../workflows/settlement/reconc
 import { factLines, qaReviewItems, verifyQa, type QaResult } from '../workflows/qa/verify';
 import { auditFieldValues, replyFieldValues } from '../workflows/qa/output';
 import { writeModelUsage, buildFileStep, type StepFn } from './shared';
-import { opGenerateCurrentize, findPriorSource } from './currentize-op';
+import { opGenerateCurrentize, usesCurrentize } from './currentize-op';
 import { currentizeReviewItems } from '../workflows/currentize/review';
 import type { CurrentizeContent } from '../workflows/currentize/plan';
 
@@ -84,6 +84,8 @@ export async function processRun(ctx: WorkContext, run: WorkRunRow, workerId: st
     if (e instanceof LeaseLost) return { runId: run.id, finish: 'lost' };
     const err = toRunError(e);
     if (err.code === 'SUPERSEDED' || err.code === 'VERSION_CONFLICT') err.retryable = false;
+    // 일시 장애 코드라도 다시 시도해도 같은 경우(고정한 원자료가 지워짐 등)는 던진 쪽이 details.retryable=false로 알린다
+    if (e instanceof WorkError && (e.details as { retryable?: unknown } | undefined)?.retryable === false) err.retryable = false;
     if (!(e instanceof WorkError)) {
       await ctx.log({ level: 'error', category: 'work', message: '업무 실행 중 예외', details: { run_id: run.id, operation: run.operation, error: e instanceof Error ? e.message.slice(0, 300) : String(e).slice(0, 300) } });
     }
@@ -623,7 +625,8 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
   if (kind === 'collection') return opGenerateCollection(ctx, run, task, step);
   if (kind === 'regulations') return opGenerateRegulations(ctx, run, task, step);
   // 보고서 등: 작년 파일이 읽혀 있으면 양식 채우기 대신 현행화(작년 HWPX를 올해로)
-  if (getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior && (await findPriorSource(ctx, task))) return opGenerateCurrentize(ctx, run, task, step);
+  // (다시 시도는 첫 시도의 길 — usesCurrentize)
+  if (getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior && (await usesCurrentize(ctx, run, task))) return opGenerateCurrentize(ctx, run, task, step);
   const p = await step('prepare', () => prepareFields(ctx, task));
   const composed = await step('compose', () => composeStep(ctx, run, task, p));
   const saved = await step('save_version', async () => {

@@ -11,19 +11,20 @@ import { unavailableRenderer } from '@/lib/work/documents/renderer';
 import { mockGenerator } from '@/lib/work/generation/compose';
 import { confirmSource, createSourceUpload } from '@/lib/work/sources';
 import type { WorkContext } from '@/lib/work/context';
-import type { WorkActor, WorkTaskRow } from '@/lib/work/types';
+import { WorkError, type WorkActor, type WorkTaskRow } from '@/lib/work/types';
 import type { RegulationProviders } from '@/lib/work/workflows/regulations/gather';
 import type { RawEvidence } from '@/lib/work/workflows/regulations/evidence';
 import { mockRegulationModel } from '@/lib/work/workflows/regulations/model';
 import { mockCurrentizeModel, type CurrentizeModel, type RewriteInput } from '@/lib/work/workflows/currentize/model';
-import type { CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
+import type { Change, CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
+import { currentizeReviewItems } from '@/lib/work/workflows/currentize/review';
 import { readSegments } from '@/lib/work/workflows/currentize/segments';
 import { readHwpxTables } from '@/lib/attachments/tables-hwpx';
 import * as svc from '@/lib/work/services';
 import { runWorker } from '@/lib/work/runs/worker';
 import { rewriteStepName } from '@/lib/work/runs/currentize-op';
 import { priorFixture } from './helpers/prior-fixture';
-import { para, tableAt } from './fixtures/hwpx';
+import { para, tableAt, sectionXml } from './fixtures/hwpx';
 import { buildHwp, para as hwpPara } from './fixtures/hwp5';
 
 /**
@@ -36,7 +37,10 @@ const key = () => `k-${randomUUID()}`;
 const PROSE = '2025년 예산은 1,200백만원이다. 「지방공기업법」 제64조에 따라 편성한다.';
 const PROGRESS = '상반기에는 관계 기관과 협의를 거쳐 세부 추진 방향을 정하고 현장 점검을 실시하였으며 하반기에는 지원 대상을 선정하였다.';
 // 사업 B는 작년 전년도·증감 칸이 비었다(글 없는 칸 — 조각이 없어 글자 단위로 고칠 수 없다)
+// 한글은 탭·전각 공백을 <hp:t> 안의 태그로 쓴다 — 고친 문단에 그대로 남아야 한다
+const TABBED = para('○ 기간 2025년<hp:tab/>3월까지<hp:fwSpace/>추진');
 const TABLE =
+  TABBED +
   para('(단위: 백만원)') +
   tableAt([['구분', '2024년', '2025년', '증감'], ['사업 A', '1,100', '1,200', '100'], ['사업 B', '', '500', '']], { addr: true });
 
@@ -66,6 +70,19 @@ class CountingModel implements CurrentizeModel {
   }
 }
 
+/** 둘째 호출에서 한 번 던지는 모델(첫 묶음은 체크포인트, 둘째 묶음에서 실행이 다시 시도됨) */
+class FlakyModel implements CurrentizeModel {
+  calls = 0;
+  async rewrite() {
+    this.calls += 1;
+    if (this.calls === 2) throw new WorkError('LLM_UNAVAILABLE', 'AI 연결이 잠시 원활하지 않습니다.', 503);
+    return { rewrites: [], usage: { model: 'claude-sonnet-4-6', input_tokens: 100, output_tokens: 10 }, mode: 'llm' as const };
+  }
+}
+
+/** 숫자·연도 없는 줄글 n줄(모두 prose 조각) — 묶음(50조각)을 둘로 나누려고 */
+const proseLines = (n: number) => Array.from({ length: n }, (_, i) => `${String.fromCharCode(0xac00 + i * 28)} 과제는 관계 기관과 협의를 마쳤다.`);
+
 async function dataWorkbook(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('2026');
@@ -82,6 +99,21 @@ describe('현행화 묶음 단계 이름', () => {
     expect(rewriteStepName(26)).toBe('rewrite_ba');
     expect(names.every((n) => /^[a-z_]{1,40}$/.test(n))).toBe(true);
     expect(new Set(names).size).toBe(200);
+  });
+});
+
+describe('현행화 확인 사항', () => {
+  const change = (i: number, status: Change['status']): Change => ({ id: `c${i}`, segmentId: `0:${i}`, kind: 'number', before: 'x', after: null, status, basis: [], note: `확인 ${i}` });
+  const base: Omit<CurrentizeContent, 'changes'> = { schema: 'currentize/1', priorSourceId: 'p', priorSha256: 'h', fromYear: 2025, toYear: 2026, citations: [], truncated: false, costStopped: false, mode: 'llm' };
+  it('확인 필요·제안은 각 20개까지만 싣고 넘으면 요약 한 줄', () => {
+    const items = currentizeReviewItems({ ...base, changes: [...Array.from({ length: 25 }, (_, i) => change(i, 'needs_check')), ...Array.from({ length: 22 }, (_, i) => change(100 + i, 'proposed'))] });
+    expect(items.filter((i) => i.code === 'NEEDS_CHECK')).toHaveLength(20);
+    expect(items.filter((i) => i.code === 'PROPOSED')).toHaveLength(20);
+    expect(items.filter((i) => i.message === '확인 필요 47건 — 변경 내역표에서 전체를 보세요')).toHaveLength(1);
+  });
+  it('넘지 않으면 요약이 없다', () => {
+    const items = currentizeReviewItems({ ...base, changes: [change(1, 'needs_check'), change(2, 'proposed')] });
+    expect(items.map((i) => i.code)).toEqual(['NEEDS_CHECK', 'PROPOSED']);
   });
 });
 
@@ -177,6 +209,9 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     const out = await readSegments(hwpx);
     expect(out.segments.some((s) => s.text.includes('2026년 ○○ 사업계획'))).toBe(true);
     expect(out.segments.some((s) => s.text === PROSE.replace('2025년', '2026년'))).toBe(true);
+    // 탭·전각 공백 태그가 든 문단도 고쳐지고 태그는 제자리에 남는다(패키지 검사가 <hp:t> 속 태그 때문에 막지 않는다)
+    expect(c.changes.find((x) => x.before === '○ 기간 2025년3월까지추진')).toMatchObject({ kind: 'year', status: 'changed', after: '○ 기간 2026년3월까지추진' });
+    expect(await sectionXml(hwpx)).toContain('2026년<hp:tab/>3월까지<hp:fwSpace/>추진');
     // 표: 열 머리가 한 해씩 밀리고, 전년도 칸 ← 옛 당해, 당해 칸 ← 올해 자료(1,300), 증감 다시 계산
     const [t] = (await readHwpxTables(hwpx)).tables;
     expect(t.cells).toEqual([
@@ -246,6 +281,41 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     expect(c.changes.some((x) => x.kind === 'year' && x.status === 'changed')).toBe(true);
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM usage_logs WHERE details->>'task_id' = $1", [task.id]);
     expect(rows[0].n).toBe(0);
+  });
+
+  it('다시 시도는 첫 시도에 고정한 원자료로 — 그 사이 올린 자료를 쓰지 않고, 끝난 묶음은 다시 부르지 않는다', async () => {
+    const model = new FlakyModel();
+    ctx.currentize = { model };
+    let task = await reportTask('다시 시도 고정');
+    const lines = ['추가 지침에 따라 세부 절차를 정비하였다.', ...proseLines(55)];
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': lines.join(String.fromCharCode(10)), '주요 내용': PROSE }, { appendXml: TABLE });
+    task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
+    task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
+    const r = await svc.requestGenerate(ctx, actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    const first = await runWorker(ctx, { workerId: 'w', runId: r.run.id });
+    expect(first[0]).toMatchObject({ finish: 'requeued', error: { code: 'LLM_UNAVAILABLE' } });
+    expect(model.calls).toBe(2);
+    // 실행이 기다리는 사이 직원이 참고 자료를 더 올렸다(이름이 작년 글에 있어 규정 이름으로 잡힐 수 있다)
+    const extraUp = await createSourceUpload(ctx, task, actor.userId, { fileName: '추가 지침.txt', size: 30, purpose: 'reference' });
+    await ctx.files.put(extraUp.path, Buffer.from('추가 지침 본문이다. 새 기준을 적용한다.', 'utf8'), 'text/plain');
+    await confirmSource(ctx, task, extraUp.sourceId);
+    await pool.query('UPDATE work_runs SET available_at = now() WHERE id = $1', [r.run.id]);
+    expect((await runWorker(ctx, { workerId: 'w', runId: r.run.id }))[0]).toMatchObject({ finish: 'succeeded' });
+    expect(model.calls).toBe(3); // 첫 묶음(rewrite_a)은 다시 부르지 않았다
+
+    const d = await svc.getTaskDetail(ctx, actor, task.id);
+    const v = (await ctx.store.getVersion(d.version!.id, actor.organizationId))!;
+    expect(v.source_ids).not.toContain(extraUp.sourceId);
+    const c = (v.content as { currentize: CurrentizeContent }).currentize;
+    expect(c.citations.some((x) => x.cited.name.includes('추가 지침'))).toBe(false);
+    expect(JSON.stringify((v.content as { currentizeWarnings: string[] }).currentizeWarnings)).not.toContain('추가 지침');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await fileOf(d.currentArtifacts.find((a) => a.output_key === 'changeLog')!.id)) as unknown as ArrayBuffer);
+    const sheetText = JSON.stringify(wb.worksheets.map((ws) => ws.getSheetValues()));
+    expect(sheetText).not.toContain('추가 지침.txt');
+    // 묶음마다 사용 기록 한 줄(실패한 호출은 기록 없음)
+    const { rows } = await pool.query("SELECT details->>'stage' AS stage FROM usage_logs WHERE details->>'task_id' = $1", [task.id]);
+    expect(rows.map((x) => x.stage)).toEqual(['rewrite', 'rewrite']);
   });
 
   it('prior가 없는 report는 지금처럼 양식 채우기(document) 경로다', async () => {

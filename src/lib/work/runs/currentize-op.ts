@@ -54,6 +54,26 @@ export function rewriteStepName(index: number): string {
 /** 모델 지시·틀의 글자 수 어림(원가 예상용) */
 const PROMPT_OVERHEAD_CHARS = 1500;
 
+/**
+ * 이 실행이 현행화로 가는가. 다시 시도는 첫 시도의 길을 따른다 — 'load_prior' 단계가 있으면 현행화, 'prepare'가 있으면 양식 채우기.
+ * 처음이면 지금 원자료(읽힌 작년 파일이 있는가)로 정한다
+ */
+export async function usesCurrentize(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow): Promise<boolean> {
+  if (await ctx.store.getStep(run.id, 'load_prior')) return true;
+  if (await ctx.store.getStep(run.id, 'prepare')) return false;
+  return Boolean(await findPriorSource(ctx, task));
+}
+
+/** 작년 파일 읽기(조각·표)의 일반 오류는 다시 시도해도 같다 — 안내 문구가 있는 PRIOR_UNSUPPORTED로 바꿔 바로 멈춘다 */
+async function readPrior<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof WorkError) throw e;
+    throw new WorkError('PRIOR_UNSUPPORTED', '작년 파일을 읽지 못했습니다. 한글에서 다시 저장해 올려 주세요.', 422);
+  }
+}
+
 /** 이 작업의 읽힌 작년 파일 — 여럿이면 가장 나중에 올린 것 */
 export async function findPriorSource(ctx: WorkContext, task: WorkTaskRow): Promise<WorkSourceRow | null> {
   const list = (await ctx.store.listSources(task.id, task.organization_id)).filter((s) => s.task_id === task.id && s.status === 'ready' && s.purpose === 'prior');
@@ -211,15 +231,26 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   // 1) 작년 파일 — 원본 바이트·해시·형식(HWPX만). 다시 시도하면 처음 고른 파일·해시 그대로
   const priorRow = await findPriorSource(ctx, task);
   let first = null as PriorFile | null;
+  // 올해 자료(작년 파일·기준 양식이 아닌 읽힌 원자료)도 여기서 고정한다 — 실행이 기다리는 사이 올린 자료가 다시 시도에 섞이면
+  // 체크포인트의 모델 결과를 다른 입력으로 검증하거나 묶음이 밀린다
   const loaded = await step('load_prior', async () => {
     if (!priorRow) throw new WorkError('REQUIRED_INPUT_MISSING', '작년 파일이 없습니다. 작년 파일을 올려 주세요.', 422);
     first = await loadPriorFile(ctx, task, priorRow.id);
-    return { priorSourceId: first.source.id, priorSha256: first.sha256 };
+    const inputSourceIds = (await ctx.store.listSources(task.id, task.organization_id))
+      .filter((s) => s.task_id === task.id && s.status === 'ready' && s.purpose !== 'prior' && s.purpose !== 'template')
+      .map((s) => s.id)
+      .sort();
+    return { priorSourceId: first.source.id, priorSha256: first.sha256, inputSourceIds };
   });
   const prior = first ?? (await loadPriorFile(ctx, task, loaded.priorSourceId, loaded.priorSha256));
 
-  // 올해 자료 — 작년 파일·기준 양식은 원자료가 아니다
-  const inputs = (await loadSourceExtracts(ctx, task)).filter((s) => s.purpose !== 'prior' && s.purpose !== 'template');
+  // 올해 자료 — 첫 시도에 고정한 원자료만, 고정한 순서대로. 그 사이 지워졌으면 다시 시도해도 같으니 멈춘다
+  const extracts = new Map((await loadSourceExtracts(ctx, task)).map((s) => [s.id, s]));
+  const inputs = loaded.inputSourceIds.map((id) => {
+    const s = extracts.get(id);
+    if (!s) throw new WorkError('SOURCE_UNAVAILABLE', '원자료가 그 사이 지워졌습니다. 다시 만들어 주세요.', 409, { retryable: false });
+    return s;
+  });
   const dataTables = inputs.flatMap((s) => s.tables);
   const memo = typeof form.values.emphasis === 'string' ? form.values.emphasis : '';
   const formBasis = typeof form.values.basisDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(form.values.basisDate) ? form.values.basisDate : null;
@@ -231,7 +262,7 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   const regulationNames = inputs.filter((s) => s.purpose === 'reference').map((s) => s.name.replace(/\.[^.]+$/, '').trim()).filter((n) => n.length >= 2);
 
   // 2) 조각 — 같은 바이트에서 언제나 같다
-  const { segments, truncated } = await readSegments(prior.bytes);
+  const { segments, truncated } = await readPrior(() => readSegments(prior.bytes));
   await step('segments', async () => ({ count: segments.length, truncated }));
 
   // 3) 분류·연도
@@ -243,7 +274,7 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   });
   const { fromYear, toYear } = years;
 
-  const tables = await tableWork(prior.bytes, segments, findings, dataTables, toYear);
+  const tables = await readPrior(() => tableWork(prior.bytes, segments, findings, dataTables, toYear));
   const shifted = new Map<string, string>(segments.map((s) => [s.id, tables.headerShifted.get(s.id) ?? shiftYears(s.text, findings.get(s.id) ?? [], fromYear, toYear).text]));
 
   // 본문 수치 대조의 기준 — 올해 자료 표의 숫자 + 표 계산의 새 값 + 직원 메모의 숫자
