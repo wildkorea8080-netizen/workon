@@ -1,6 +1,6 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-10-25  
+**최종 업데이트**: 2026-10-27(업무 개편 — `rebuild/workon-vnext`, 운영 미반영)  
 **분석 기준**: 코드베이스 전수 확인
 (`tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증, `next build`는 배포 때 Vercel이 확인)
 
@@ -10,6 +10,11 @@
 
 WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.  
 내부 문서를 올려 NODA(국내 문서 읽기 서비스)로 읽히고, AI 비서로 RAG 기반 대화를 제공하며, 보고서 템플릿을 관리합니다.
+
+**업무 개편(2026-10-27, 브랜치 `rebuild/workon-vnext`, 운영 미반영)**: 직원이 업무 비서 10개 중 하나를 골라 원자료·양식을 넣으면
+실제 한글(HWPX)·엑셀(XLSX) 파일을 만들고, 검토·수정·새 판으로 내려받는 **업무 작업**(`src/lib/work/`, 마이그레이션 0034)을 더했습니다.
+작업·판·파일은 대화와 따로 삽니다. 대화·관리자·슈퍼관리자·브랜딩은 그대로이고, **기관 스위치(`work_org_settings`)를 켠 기관만** 홈이 업무 홈이 됩니다
+(아래 '업무 작업' 절, 출시 자료 `docs/workon-rebuild/RELEASE_RUNBOOK.md`, 진행 장부 `docs/workon-rebuild/IMPLEMENTATION_STATUS.md`).
 
 ---
 
@@ -38,22 +43,25 @@ WORKON은 부서(Department) 기반 멀티테넌트 SaaS 플랫폼입니다.
 ```
 src/
 ├── app/
-│   ├── api/              # API 라우트 105개 (아래 "API 구조" 참조)
+│   ├── api/              # API 라우트 133개 (아래 "API 구조" 참조) — 업무 `api/work/**`·`api/workflows` 24개, 관리자 `api/admin/work-*` 4개
 │   ├── admin/            # 기관 관리자 포털
 │   ├── super/            # 슈퍼관리자 포털 (독립 인증) — common-library/ = 공통 자료실 운영자 화면(S5)
 │   ├── my/stats/         # 내 사용현황
 │   ├── shared/[token]/   # 대화 공개 공유 페이지 (비인증)
 │   ├── login/ signin/ signup/ register/  # 인증 페이지
 │   ├── maintenance/      # 점검 모드 안내
-│   └── page.tsx          # 직원 메인 (비서 선택 + 채팅)
+│   ├── page.tsx          # 직원 홈 — 기관 스위치가 켜지면 업무 홈, 아니면 대화(ChatHome)
+│   ├── chat/             # AI 대화(옛 홈 — `/?conv=`는 업무 홈 기관에서 `/chat?conv=`로)
+│   └── assistants/ tasks/ files/ templates/  # 업무 화면 — 업무 비서·내 작업함·작업실(tasks/[id])·결과물·양식
 ├── components/
-│   ├── admin/   chat/   super/   layout/
+│   ├── admin/   chat/   super/   layout/   work/(업무 화면 — TaskWorkbench·ItemsView·SettlementView·QaView·CollectionView)
 ├── lib/
 │   ├── auth.ts           # getServerAuthSession, isAdminSession
 │   ├── nextAuthOptions.ts # NextAuth 설정
 │   ├── super-auth.ts     # 슈퍼관리자 JWT (NextAuth와 별개)
 │   ├── llm/              # AI 연결부 — types.ts · anthropic.ts(어댑터) · index.ts(streamChat·complete)
 │   ├── assistant/        # 대화 실행기 — prepare.ts · stream.ts · prompt.ts · history.ts · persist.ts · attachments.ts(첨부 요청 검사·ref 매기기) · number-check.ts(숫자 확인)
+│   ├── work/             # 업무 작업(WORKON 개편) — 아래 '업무 작업' 절. services·admin·runs(executor·worker)·store(supabase·pg)·documents·workflows/{collection,regulations,items,settlement,qa}·file-sets·sources·artifacts
 │   ├── capabilities/     # 비서 능력 레지스트리 — doc_search · public_data · image · document · file_read · table_merge (attachment-access.ts = 첨부 접근 공용 · doc-search-common.ts = 공통 자료실 근거 번호 밀기·맞추기, S5)
 │   ├── table-engine/     # 표 계산 엔진 — number · unit-names · units · types · combine · describe (DB·저장소·AI를 모름)
 │   ├── xlsx-export.ts    # 표 계산 결과 → 엑셀(결과·계산 근거 두 시트)
@@ -87,7 +95,7 @@ src/
 │   └── supabaseAdmin.ts  # 서버 Supabase (service role key)
 └── middleware.ts         # NextAuth + 슈퍼관리자 + 점검 모드
 
-assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다)
+assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록·근거 검토 메모·인수인계서·민원 회신·요구자료 답변서) — src/*.html을 한글 2018이 HWPX로 저장(`scripts/build-standard-templates.ps1`), 한글 자동 검증 기록 verification.json
 ```
 
 ---
@@ -100,7 +108,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 | 명령 | 보는 것 | DB 필요 |
 |---|---|---|
-| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1580개 통과·3개 건너뜀) | 아니오 |
+| `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1692개 통과 — `WORK_TEST_DATABASE_URL`을 주면 업무 DB 시험 포함) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
@@ -110,6 +118,10 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | `npm run noda:webhook -- register <주소> \| list \| ping <id> \| delete <id>` | NODA 웹훅 걸기·확인 — 키 하나에 하나. register의 서명 비밀값은 한 번만 보이므로 **사용자가 직접** 실행해 `NODA_WEBHOOK_SECRET`에 넣는다 | 아니오 (키 필요) |
 | `npm run noda:purge-deleted` | NODA 보관함을 비서 장부와 맞대기 — NODA `GET /tenants`(workon 키는 `workon`·`workon-…`만 보임)의 보관함 목록·파일 수·읽는 중·실패·권한 상태와 서비스 한도를 받아 살아 있는 비서·**지운 비서**·**DB에 없는 비서(고아)**·공통 자료실·그 밖으로 가른다(`noda-vaults.ts`). 그냥 돌리면 보기만, `-- --yes`면 지운 비서(보관함 → 남은 행 → 원본)와 고아 보관함만 비운다(**되돌릴 수 없음**, 사용자가 실행). 권한 상태 `broken`(규칙 파일이 깨져 보관함 전체가 잠김)은 경고. 여러 번 돌려도 안전 | 예 (키 필요) |
 | `npm run noda:migrate` | 옮기기 전(`noda_status` NULL) 문서를 NODA로 읽힘(0032 적용 전에 `-- --dry-run`이 0건인지 본다). `-- --dry-run`은 대상 수만. 출력은 id 앞 8자·상태·이유뿐(파일 이름·키 없음) | 예 (키 필요) |
+| `npm run work:testdb -- start\|reset\|stop` | 업무 DB 시험용 임시 PostgreSQL(설치된 16 바이너리, 포트 54329, 0001~0034). `WORK_TEST_DATABASE_URL`을 주면 `npm test`가 업무 DB 시험도 돈다 | 아니오(로컬) |
+| `npm run work:template-check [-- --release]` | 표준 양식 파일·표시·엔진 방식·검증 기록. `--release`는 사람의 시각 검토 기록까지 | 아니오 |
+| `npm run work:template-verify [-- --only 이름]` | (Windows·한글) 표준 양식을 채워 한글 COM으로 열기·넣은 글·편집·다시 저장·PDF, 기록을 verification.json에 | 아니오 |
+| `npm run work:worker [-- --once \| --hancom \| --local-files 폴더]` | 업무 실행 상시 작업자(DB 직결). `--hancom`은 한글로 실제 미리보기 PDF | 예 |
 | `npm run db:test-agents` | `save_agent` 저장·되돌리기·동시 수정·양식 상한·승인 판 도장(대기로 바뀌면 `approval_version`이 현재 판으로 참) (트랜잭션 + ROLLBACK) | 예 |
 
 `db:check`와 `isolation:check`는 **증상을 봅니다.** PostgREST로는 `pg_trigger`를
@@ -118,7 +130,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 
 ---
 
-## API 구조 (105개 라우트)
+## API 구조 (133개 라우트)
 
 라우트가 많아 개별 나열 대신 그룹과 인증 방식만 정리합니다.
 정확한 목록은 `src/app/api/` 디렉토리를 직접 확인하세요.
@@ -126,9 +138,12 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
 | 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]`, `/api/noda/webhook`(NODA 서명으로만 받음), `/api/cron/noda-events`(Vercel 예약 작업 — `CRON_SECRET`으로만 받음) | 없음 | 초대 토큰 검증만 · 웹훅은 HMAC 서명 · 예약 작업은 Bearer 비밀값 |
+| 직원 — 업무 | `/api/workflows`, `/api/work/**`(작업·원자료·실행·문서·판·AI 수정·검토·결과물·양식·대화 파일 가져오기) | NextAuth 세션 + `getWorkActor`(대리 접근·비활성·소속 없음은 막음) | 권한은 `work/access.ts`(주인·명시 구성원만 — 관리자도 남의 작업 404) |
+| 업무 작업자 | `/api/work/worker` | `WORK_WORKER_SECRET` Bearer(상수 시간 비교, 없으면 503) | pg_cron이 1분마다 부름 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/attachments/*` (채팅 첨부 — 올리기 주소·확인·목록·삭제), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
+| 기관 관리자 — 업무 | `/api/admin/work-templates`·`[id]`·`work-installations`·`work-overview` | NextAuth 세션 + `isAdminSession()` + `requireWorkAdmin` | 직원 작업 원문·파일은 안 보임 |
 | 기관 관리자 | `/api/documents/*`(올리기 주소 발급 `upload-url`·확인 `confirm`·붙이기 `assign`·읽기 `[id]/read`·목록·삭제), `/api/users`, `/api/departments/*`, `/api/admin/audit-logs`, `GET /api/templates`(옛 보고서 템플릿, 읽기 전용), `/api/forbidden-words/*`, `/api/security-logs`, `/api/stats`, `/api/rag-test`, `/api/admin/**` | NextAuth 세션 + `isAdminSession()` | |
-| 슈퍼관리자 | `/api/super/**` (38개 — 공통 자료실 `/api/super/common-documents/**` 4개 포함) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
+| 슈퍼관리자 | `/api/super/**` (39개 — 공통 자료실 `/api/super/common-documents/**` 4개, 업무 화면 전환 `/api/super/work-settings` 포함) | `super_token` 쿠키 JWT (`getSuperAdminFromRequest`) | NextAuth와 완전 분리 |
 | 시스템 | `/api/system/maintenance` | 없음 | 점검 모드 상태 조회 |
 
 **관리자 전용 라우트를 추가할 때는 GET/POST/PUT/DELETE 각 핸들러마다
@@ -177,6 +192,7 @@ assets/templates/         # 기본 양식 HWPX (사용자가 한글로 만든다
 | 0030 | 채팅 첨부(`chat_attachments`) — 원본·읽은 내용 경로와 요약, 기관 채움 트리거, `CHECK (ready ⇔ extract_path)`. **코드 배포 전에 적용** (코드가 이 표에 쓴다) |
 | 0031 | 참고 문서의 NODA 읽기 상태(`documents.noda_status`·`noda_reason`·`noda_filename`(유일)·`noda_doc_id`·`noda_read_started_at`·`noda_last_attempt_at`·`noda_read_at`). **코드 배포 전에 적용**(코드가 이 칸을 읽고 쓴다). 순서는 **0031 → 코드 푸시(배포 확인) → `npm run noda:migrate`** — 옛 코드는 문서를 지울 때 NODA 사본을 지우지 않아, 먼저 옮기면 고아가 남는다 |
 | 0032 | 옛 임베딩 값 비우기 — `noda_status`가 NULL이 아닌 행의 `embedding`을 NULL로, `metadata`에서 `chunks`를 뺌. **사용자가 적용한다 — `npm run noda:migrate -- --dry-run`이 0건(문서가 모두 NODA로 옮겨짐)인 것을 확인한 뒤.** **되돌릴 수 없다**(비운 값은 다시 만들 수 없다). 코드는 이 값을 읽지 않으므로 적용 전에도 돈다. `embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC는 **지우지 않는다**(값만 비움). 적용 뒤 확인: `SELECT count(*) FROM documents WHERE embedding IS NOT NULL OR metadata ? 'chunks';` |
+| 0034 | **업무 작업(WORKON 개편)** — `work_org_settings`(기관 스위치)·`workflow_installations`·`work_template_versions`·`work_tasks`·`work_task_members`·`work_sources`·`work_document_versions`·`work_runs`·`work_run_steps`·`work_artifacts`·`work_review_items`·`work_evidence`·`work_revision_proposals`·`work_events`(task_id NULL = 기관 단위 사건) + RPC(`work_save_document_version`·`work_enqueue_run`·`work_claim_runs`·`work_heartbeat_run`·`work_finish_run`). 추가만(기존 표 무변경), 겹 외래 키로 같은 기관 강제, RLS 켜고 정책 없음(서비스 키만). **아직 어디에도 적용 안 됨** — 순서는 RELEASE_RUNBOOK 5절(**코드 배포 전**에 적용) |
 | 0033 | 공통 자료실(`common_documents`) — 기관 유형(`org_type`, 여섯 값 CHECK)·이름·기준 연도(2000~2100)·이용 조건 확인 기록(비면 안 됨)·원본 경로·NODA 읽기 상태(`documents`와 같은 칸 + `retired`)·`replaces_id`·`retired_at`·`uploaded_by`. **기관·부서 칸이 없다**(유형 단위 자료라 `visibilityFilter`·기관 트리거 대상이 아님). **코드 배포 전에 적용**(코드가 이 표를 읽고 쓴다) |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성
@@ -997,6 +1013,40 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 
 ---
 
+## 업무 작업 (WORKON 개편, 2026-10-27)
+
+직원이 업무 비서를 골라 원자료·양식을 넣으면 실제 HWPX·XLSX를 만들고 검토·수정·새 판으로 내려받는다. 명세 `docs/workon-rebuild/`(00~10), 장부 `IMPLEMENTATION_STATUS.md`, 출시 자료 `RELEASE_RUNBOOK.md`, 결정 `adr/0001~0003`.
+
+**업무 10개**(`src/lib/work/workflows/index.ts` — 등록부에 없으면 '준비 중'):
+
+| 업무 | 방식(kind) | 결과 |
+|---|---|---|
+| 공문 기안 | document — 양식 칸 채우기(모델) | HWPX |
+| 보고서·사업계획 | document — 숫자는 원자료와 대조 | HWPX |
+| 자료 취합 | collection — **모델 없음**, 표 엔진 계산 | XLSX |
+| 규정·지침 확인 | regulations — NODA·공통 자료실·법제처 근거, 근거 없는 판단은 유보 | HWPX |
+| 접수공문 처리 | items — 요청사항(원문 인용) | XLSX |
+| 회의·위원회 정리 | items — 결정·조건부·미결·후속조치 | HWPX + XLSX |
+| 인수인계 | items — 진행·미결·반복 일정, 비밀값 지움 | HWPX + XLSX |
+| 예산·정산 대사 | settlement — **모델 없음**, 취소 짝·중복·분할·부가세·잔액 | XLSX |
+| 민원·문의 회신 | qa — 질문별 답(근거 F번호), 약속·다른 사람 정보 검사 | HWPX |
+| 감사·평가 요구자료 | qa — 증빙·과거 수치 차이·연도 혼합 | HWPX + XLSX |
+
+**지키는 것**
+- **파일·XML은 프로그램이 만든다.** 모델은 칸 글·항목·근거 번호만 낸다. 위치(쪽·조문)·날짜·사람은 원자료에 적힌 것만 남기고(`workflows/items/verify.ts`), 숫자는 원자료 숫자와 대조한다(`review.ts` — 숫자 확인 규칙 재사용). 취합·정산의 숫자는 프로그램만 낸다
+- **권한은 작업마다**: 주인·명시 구성원(viewer·editor·reviewer)만. 같은 기관 관리자도 남의 작업은 404(`work/access.ts`). 모든 API·작업자·파일·내려받기에서 서버가 다시 확인(RLS에 기대지 않음). 내려받기는 60초 서명 주소
+- **내구성 실행**(ADR 0003): `work_runs` lease(`FOR UPDATE SKIP LOCKED`)·단계 체크포인트(`work_run_steps` — 끝난 모델 호출은 다시 부르지 않음)·같은 요청 번호는 같은 실행·판 저장은 기준 판·현재 실행을 DB가 원자적으로 확인. 화면이 실행을 바로 걸고, 화면을 닫으면 pg_cron(`/api/work/worker`)이 이어 받는다
+- **과금 규약**: 업무의 모델 호출도 `usage_logs`(`work_generate`·`work_revise`, model·토큰·원가·run_id·stage)
+- **결과 파일은 판에서 만든 불변 결과**(같은 판·같은 키 한 벌, sha256). 업무 하나가 파일 여럿이면(`outputs`) 모두 지금 판일 때만 '검토 완료'. 렌더러가 없으면 '실제 파일 미리보기 없음'(구조 보기로 꾸미지 않음, ADR 0002)
+- **원자료 갈래**: 파일 입력 키 → 원자료 용도 표는 `work/file-sets.ts` 한 곳(화면·서버 공용). 필수 파일 입력마다 그 용도 원자료가 있어야 '만들 준비됨'
+- **가져오기**: 다른 작업의 결과 파일(이 작업 편집 + 원래 작업 내려받기 권한)·대화에서 만든 파일·대화 첨부(본인 것만)는 **바이트를 복사**해 원자료로(origin에 출처·해시). 원래 기록이 지워져도 남는다
+- **기관 운영**: 슈퍼관리자 `/super/work`(기관별 업무 홈·새 작업 스위치), 기관 관리자 `/admin/work`(업무 켜고 끄기·기관 업무 양식 등록·업무 현황). 기관 양식 '시험 생성'은 **패키지 검사**뿐이라 한글 검증이라 표시하지 않고, '한글에서 확인함'은 관리자가 메모와 함께 남긴 기록(`admin-attested`, automated:false)으로만
+- **표준 양식**은 한글로 만든 진짜 HWPX(`assets/templates/`). 저장소 폴더 안 파일을 한글 COM으로 열면 숨은 확인 창 때문에 멈추므로 임시 폴더에서 처리한다(스크립트가 그렇게 함). 한글 텍스트 대조는 `GetTextFile('UNICODE')`('TEXT'는 ›·—를 버림)
+
+**새 업무를 더할 때**: 카탈로그(`workflow-catalog.json`)는 계약이라 고치지 않는다. `workflows/index.ts`에 구현(kind·양식·필수 칸·outputs)을 등록하고, 실행기(`runs/executor.ts`)·파일(`artifacts.ts`)·화면을 잇고, 실제 Postgres 흐름 시험(`tests/work-*-flow.test.ts`)으로 실제 파일까지 본다.
+
+**시험**: `tests/work-*.test.ts` — 순수 규칙과 실제 Postgres 흐름(시험 DB가 있을 때만). 흐름 시험은 실제 채우기 엔진·실제 표준 양식·실제 XLSX를 쓰고 모델·외부 검색만 가짜다.
+
 ## 환경 변수
 
 전체 목록은 `.env.example` 참조. 필수/선택 구분:
@@ -1025,6 +1075,10 @@ NODA_API_URL=                     # 비우면 https://api.readlayer.kr
 NODA_API_KEY=
 NODA_WEBHOOK_SECRET=              # 웹훅 서명 비밀값(noda:webhook register가 한 번 보여 줌). 비우면 웹훅 받는 곳이 503 — 문서 목록이 상태를 맞춘다
 CRON_SECRET=                      # Vercel 예약 작업(하루 한 번 놓친 웹훅 다시 받기)의 비밀값 — Vercel 환경 변수에 넣으면 Vercel이 Authorization에 싣는다. 비우면 예약 작업만 503
+
+# 선택 (업무 작업 — WORKON 개편)
+WORK_WORKER_SECRET=               # 업무 작업자 엔드포인트(/api/work/worker) Bearer 비밀값 — pg_cron이 싣는다. 비우면 그 엔드포인트만 503
+WORK_GENERATOR=                   # 'mock'이면 모델 없이 시험 모드(운영 NODE_ENV=production에서는 무시)
 
 # 선택 (메일 발송) — 둘 다 있어야 자동 발송, 없으면 링크 수동 전달로 폴백
 RESEND_API_KEY=
@@ -1064,7 +1118,7 @@ MAIL_FROM=
    격리를 일부러 깨뜨려 실제로 잡히는 것까지 확인했습니다.
 
 2. **테스트 부분 도입** (2026-08-19)
-   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-26 기준 1580개 통과·3개 건너뜀).
+   `npm test`로 순수 함수·실행기 회귀 테스트가 돕니다 (`tests/`, 2026-10-27 기준 1692개 통과 — 업무 시험 포함, `WORK_TEST_DATABASE_URL`이 없으면 업무 DB 시험은 건너뜀).
    대상은 "동작하는가"가 아니라 **"조용히 틀리지 않는가"**입니다 — 이 프로젝트에서
    실제로 난 버그는 전부 오류 없이 결과만 틀리는 종류였습니다.
 
