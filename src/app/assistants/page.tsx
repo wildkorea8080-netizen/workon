@@ -17,10 +17,18 @@ export default function AssistantsPage() {
     });
   }, []);
   const ready = data?.workflows.filter((w) => w.available).length ?? 0;
+  const total = data?.workflows.length ?? 0;
+  const subtitle = !data
+    ? undefined
+    : !data.canStart
+      ? '이 기관은 아직 새 작업이 켜지지 않았습니다. 운영자가 켜면 업무를 시작할 수 있습니다.'
+      : ready === total
+        ? '업무를 골라 시작하세요. 원자료와 양식을 넣으면 한글·엑셀 파일을 만듭니다.'
+        : `${total}개 중 ${ready}개를 지금 쓸 수 있습니다. 나머지는 처리·검수·파일 산출 구현이 끝나면 열립니다.`;
   return (
     <WorkShell>
       <div className="mx-auto max-w-6xl px-4 py-8 md:px-8">
-        <PageTitle title="업무 비서" subtitle={data ? `10개 중 ${ready}개를 지금 쓸 수 있습니다. 나머지는 처리·검수·파일 산출 구현이 끝나면 열립니다.` : undefined} />
+        <PageTitle title="업무 비서" subtitle={subtitle} />
         <ErrorNote message={error} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {data?.workflows.map((w) => (
