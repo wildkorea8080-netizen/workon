@@ -167,6 +167,14 @@ describe('질문별 답변 — A19', () => {
     expect((wb.worksheets[0].getRow(5).values as string[]).slice(1)[3]).toBe('증빙 없음');
   });
 
+  it('확인 사실에 없는 「나중에 안내하겠다」도 약속으로 본다(실제 모델 점검에서 놓침)', () => {
+    const r = verifyQa(
+      { questions: [{ text: '연장', quote: '주차장 이용 시간을 늘릴 수 있나요?', sourceId: 'inquiry' }], answers: [{ question: 1, text: '연장 계획은 확정되지 않았습니다. 변경되면 별도로 안내드리겠습니다.', evidence: ['F1'], status: 'answered' }], priorDiffs: [] },
+      { kind: 'reply', questionSources: q, evidenceSources: [], priorSources: [], facts, inquiryText: inquiry, definitionsText: '' }
+    );
+    expect(r.pairs[0].flags).toEqual(['promise_unsupported']);
+  });
+
   it('모델 출력 다듬기·시험 모드', async () => {
     expect(parseQa('x {"questions":[{"text":"a","quote":"b","sourceId":"s"},{"text":""}],"answers":[{"question":"1","text":"t","evidence":["F1",3]}]}')).toEqual({
       questions: [{ text: 'a', quote: 'b', sourceId: 's' }],

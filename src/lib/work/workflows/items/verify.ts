@@ -93,7 +93,8 @@ export function dateAppearsIn(iso: string, text: string): boolean {
   return new RegExp(`(^|[^0-9.])${mo}\\.${d}\\.`).test(hay);
 }
 
-const RELATIVE = /(이내|후|부터|전까지|즉시|지체\s*없이|경과|익월|다음\s*달|매월|매주|매년|분기\s*말)/;
+/** 어떤 사건(접수·통보…)을 기준으로 한 기한 — 날짜가 사건에 달려 있어 확인이 필요하다. 주기('매월 5일')는 여기 들지 않는다 */
+const RELATIVE = /(이내|후\s|후$|부터|전까지|즉시|지체\s*없이|경과|익월|다음\s*달)/;
 
 /** 비밀번호·계정 비밀 — '비밀번호: abc', 'PW=1234', 'ID/PW : a / b' 의 값 부분 */
 const SECRET = /((?:비밀\s*번호|패스\s*워드|암호|password|passwd|pwd|pw|비번|접속\s*키|api\s*key|토큰|token)\s*[:=：]\s*)(\S+)/gi;
@@ -147,6 +148,8 @@ export function verifyItems(raw: RawItem[], sources: VerifySource[], spec: Items
           if (RELATIVE.test(v)) {
             flags.add('relative_deadline');
             notes.push(`${c.label}: '${v}' — 날짜로 바꾸지 않음(상대 기한)`);
+          } else if (squash(ground).includes(squash(v))) {
+            // 원문에 그대로 적힌 주기('매월 5일')·해 없는 날짜('11. 10.') — 지어낸 값이 아니므로 원문 글로 둔다(날짜 칸은 비움)
           } else {
             flags.add('date_unverified');
             notes.push(`${c.label}: '${v}' — 날짜로 읽지 못함`);

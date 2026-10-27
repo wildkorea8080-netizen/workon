@@ -25,7 +25,8 @@
     "work:template-check": "tsx scripts/work-template-check.mjs",
     "work:template-verify": "tsx scripts/work-template-verify.mjs",
     "work:testdb": "tsx scripts/work-testdb.mjs",
-    "work:worker": "tsx scripts/work-worker.mjs"
+    "work:worker": "tsx scripts/work-worker.mjs",
+    "work:llm-smoke": "tsx scripts/work-llm-smoke.mjs"
   },
   "dependencies": {
     "@fontsource/pretendard": "^5.2.5",

@@ -217,3 +217,32 @@ describe('모델 출력·시험 모드·엑셀', () => {
     expect(formulas).toBe(0);
   });
 });
+
+describe('실제 모델 점검에서 찾은 것(2026-10-27)', () => {
+  it('원문에 그대로 적힌 주기·해 없는 날짜는 원문 글로 두고 확인 필요로 표시하지 않는다 — 원문에 없는 글·사건 기준 기한만 표시', () => {
+    const src: VerifySource = { id: 'm', name: '메모', text: '기획예산과가 11. 10.까지 재배정안 작성\n위원회는 매 분기 마지막 달 둘째 주' };
+    const items = verifyItems(
+      [
+        { type: '후속조치', sourceId: 'm', quote: '기획예산과가 11. 10.까지 재배정안 작성', values: { content: '재배정안', owner: '기획예산과', due: '11. 10.' } },
+        { type: '후속조치', sourceId: 'm', quote: '위원회는 매 분기 마지막 달 둘째 주', values: { content: '위원회', due: '매 분기 마지막 달 둘째 주' } },
+        { type: '후속조치', sourceId: 'm', quote: '기획예산과가 11. 10.까지 재배정안 작성', values: { content: 'x', due: '다음 주 중' } },
+        { type: '후속조치', sourceId: 'm', quote: '기획예산과가 11. 10.까지 재배정안 작성', values: { content: 'y', due: '통보 후 7일 이내' } },
+      ],
+      [src],
+      meetingSpec.spec
+    );
+    expect(items.map((i) => [i.values.due, i.values.dueText, i.flags])).toEqual([
+      ['', '11. 10.', []],
+      ['', '매 분기 마지막 달 둘째 주', []],
+      ['', '다음 주 중', ['date_unverified']],
+      ['', '통보 후 7일 이내', ['relative_deadline']],
+    ]);
+    expect(meetingSpec.fieldValues!({ form: { meetingName: 'm' }, items, meta: {}, summary: '' })['향후 계획']).toContain('○ 재배정안 (기획예산과 / 11. 10.)');
+  });
+
+  it('인수인계 현황이 업무 이름으로 시작하면 되풀이를 뗀다', () => {
+    const src: VerifySource = { id: 'confirmed', name: '확인', text: '3분기 실적 취합 진행 중 — 운영팀 자료 대기' };
+    const items = verifyItems([{ type: '진행 중', sourceId: 'confirmed', quote: '3분기 실적 취합 진행 중 — 운영팀 자료 대기', values: { task: '3분기 실적 취합', status: '3분기 실적 취합 진행 중 — 운영팀 자료 대기' } }], [src], handoverSpec.spec);
+    expect(handoverSpec.fieldValues!({ form: { title: 't', basisDate: '2026-10-27' }, items, meta: {}, summary: '' })['진행 중 업무']).toBe('○ 3분기 실적 취합 — 진행 중 — 운영팀 자료 대기');
+  });
+});

@@ -38,7 +38,8 @@ const officialLetter: WorkflowImpl = {
   defaultTemplateRef: 'builtin:official_letter',
   requiredFieldLabels: ['수신', '제목', '본문', '발신명의'],
   documentOutputKey: 'letter',
-  humanOnlyLabels: ['공개구분', '경유'],
+  // 발신명의도 직원이 정한다 — 실제 모델이 기관 이름으로 '○○시청장'을 지어 넣었다(2026-10-27 점검, A05)
+  humanOnlyLabels: ['공개구분', '경유', '발신명의'],
   prefill(values, { organizationName }) {
     const out: Record<string, string> = {};
     if (typeof values.title === 'string') out['제목'] = values.title;

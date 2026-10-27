@@ -219,8 +219,15 @@ export const handoverSpec: ItemsWorkflowSpec = {
   fieldValues(c) {
     const by = (t: string) => c.items.filter((i) => i.type === t);
     const row = (i: ExtractedItem) => {
-      const tail = [i.values.owner, i.values.due || i.values.dueText].filter(Boolean).join(' / ');
-      return `○ ${line(i.values.task)}${i.values.status ? ` — ${line(i.values.status)}` : ''}${tail ? ` (${tail})` : ''}`;
+      const task = line(i.values.task);
+      const statusRaw = line(i.values.status ?? '');
+      const due = i.values.due || i.values.dueText || '';
+      // 주기·기한이 이미 현황 글에 있으면 괄호에 다시 적지 않는다
+      const tail = [i.values.owner, due && !statusRaw.includes(line(due)) ? due : ''].filter(Boolean).join(' / ');
+      // 현황이 업무 이름으로 시작하면 되풀이를 뗀다('3분기 실적 취합 — 3분기 실적 취합 진행 중' → '… — 진행 중')
+      let status = statusRaw;
+      if (task && status.startsWith(task)) status = status.slice(task.length).replace(/^[\s—:,·-]+/, '');
+      return `○ ${task}${status ? ` — ${status}` : ''}${tail ? ` (${tail})` : ''}`;
     };
     const refs = [...new Set(c.items.map((i) => i.values.reference).filter(Boolean).map(line))];
     return {
