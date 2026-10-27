@@ -6,6 +6,7 @@
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config-public';
 import { storageClient } from '@/lib/browser-storage';
 import { MAX_ATTACHMENT_BYTES, attachmentExtension, refusedFormatMessage } from '@/lib/attachments/limits';
+import { MAX_PRIOR_BYTES } from '@/lib/work/workflows/currentize/limits';
 
 export interface ApiError {
   code: string;
@@ -85,7 +86,14 @@ export function formatBytes(n: number | null | undefined): string {
   return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
-export function checkSourceFile(file: { name: string; size: number }): string | null {
+export function checkSourceFile(file: { name: string; size: number }, purpose: string): string | null {
+  if (purpose === 'prior') {
+    // 작년 파일은 현행화 대상이라 HWPX만, 크기 상한도 따로다(limits.ts 한 곳)
+    if (!file.name.toLowerCase().endsWith('.hwpx')) return '작년 파일은 HWPX여야 합니다. 한글에서 HWPX로 저장해 올려 주세요.';
+    if (file.size <= 0) return '빈 파일입니다.';
+    if (file.size > MAX_PRIOR_BYTES) return `파일이 너무 큽니다. ${Math.round(MAX_PRIOR_BYTES / 1024 / 1024)}MB 이하로 올려 주세요.`;
+    return null;
+  }
   const refused = refusedFormatMessage(file.name);
   if (refused) return refused;
   if (!attachmentExtension(file.name)) return '엑셀·CSV·한글·워드·PDF·파워포인트·TXT 파일만 올릴 수 있습니다.';
@@ -96,7 +104,7 @@ export function checkSourceFile(file: { name: string; size: number }): string | 
 
 /** 원자료 올리기: 주소 발급 → 저장소에 직접 → 서버 확인(읽기). 바이트는 함수 본문을 거치지 않는다 */
 export async function uploadSource(taskId: string, file: File, purpose: string, onStage: (s: 'uploading' | 'reading') => void): Promise<{ ok: true; source: unknown } | { ok: false; message: string }> {
-  const local = checkSourceFile(file);
+  const local = checkSourceFile(file, purpose);
   if (local) return { ok: false, message: local };
   if (!PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY) return { ok: false, message: '파일 올리기 설정이 없습니다. 관리자에게 문의하세요.' };
   const issued = await api<{ sourceId: string; path: string; token: string }>(`/api/work/tasks/${taskId}/sources/upload-url`, {

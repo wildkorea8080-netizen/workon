@@ -20,6 +20,7 @@ export default function WorkflowCard({ workflow, canStart }: { workflow: Workflo
       </div>
       <p className="text-[14px] text-slate-600">{workflow.purpose}</p>
       <p className="mt-2 text-[13px] text-slate-500">필요한 것: {needs.join(', ')}</p>
+      {workflow.inputs.some((i) => i.key === 'prior') && <p className="mt-1 text-[13px] text-slate-500">작년 파일이 있으면 올해 판으로 현행화합니다</p>}
       <div className="mt-auto pt-4">
         {workflow.available ? (
           canStart ? (

@@ -19,6 +19,7 @@ import ItemsView from './ItemsView';
 import SettlementView from './SettlementView';
 import QaView from './QaView';
 import { satisfiesFileSet, uploadPurposeOf } from '@/lib/work/file-sets';
+import { MAX_PRIOR_BYTES } from '@/lib/work/workflows/currentize/limits';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
 import CurrentizeView from './CurrentizeView';
@@ -792,7 +793,8 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
               </select>
             </div>
           )}
-          <input ref={inputRef} id="src-file" type="file" multiple className="sr-only" accept=".xlsx,.xlsm,.csv,.hwpx,.hwp,.docx,.pdf,.pptx,.txt" onChange={(e) => onFiles(e.target.files)} />
+          {purpose === 'prior' && <p className="text-[13px] text-slate-600">작년 파일(HWPX)을 올리면 올해 판으로 현행화합니다 — {MAX_PRIOR_BYTES / 1024 / 1024}MB까지</p>}
+          <input ref={inputRef} id="src-file" type="file" multiple className="sr-only" accept={purpose === 'prior' ? '.hwpx' : '.xlsx,.xlsm,.csv,.hwpx,.hwp,.docx,.pdf,.pptx,.txt'} onChange={(e) => onFiles(e.target.files)} />
           <div className="flex flex-wrap gap-2">
             <label htmlFor="src-file" className="inline-block cursor-pointer rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">파일 선택</label>
             <button type="button" onClick={openImport} className="rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">내 결과물에서 가져오기</button>
