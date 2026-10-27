@@ -170,6 +170,8 @@ export interface WorkStore {
   // 기관·사용자
   getOrgSettings(organizationId: string): Promise<OrgWorkSettings>;
   getOrganizationName(organizationId: string): Promise<string | null>;
+  /** 그 기관의 부서일 때만 이름(다른 기관 부서 id면 null) */
+  getDepartmentName(departmentId: string, organizationId: string): Promise<string | null>;
   isUserActive(userId: string): Promise<boolean>;
 
   // 작업

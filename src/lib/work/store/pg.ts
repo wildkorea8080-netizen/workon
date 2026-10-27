@@ -66,6 +66,9 @@ export function createPgWorkStore(db: Pool): WorkStore {
     async getOrganizationName(organizationId) {
       return (await one<{ name: string }>(db, 'SELECT name FROM organizations WHERE id = $1', [organizationId]))?.name ?? null;
     },
+    async getDepartmentName(departmentId, organizationId) {
+      return (await one<{ name: string }>(db, 'SELECT name FROM departments WHERE id = $1 AND organization_id = $2', [departmentId, organizationId]))?.name ?? null;
+    },
     async isUserActive(userId) {
       const r = await one<{ is_active: boolean | null }>(db, 'SELECT is_active FROM users WHERE id = $1', [userId]);
       return Boolean(r) && r!.is_active !== false;

@@ -11,8 +11,11 @@ import type { FormValues } from './form';
  */
 export interface WorkflowImpl {
   key: WorkflowKey;
-  /** document = 양식 칸 채우기(HWPX), collection = 표 취합(XLSX, 숫자는 프로그램이 냄) */
-  kind: 'document' | 'collection';
+  /**
+   * document = 양식 칸 채우기(HWPX), collection = 표 취합(XLSX, 숫자는 프로그램이 냄),
+   * regulations = 근거를 찾아 검토 메모(HWPX — 양식 칸이지만 근거 모으기·유보 판정을 거친다)
+   */
+  kind: 'document' | 'collection' | 'regulations';
   /** 기관 양식이 없을 때 쓰는 WORKON 표준 양식(취합은 없음) */
   defaultTemplateRef: string | null;
   /** 비면 '검토 완료'를 막는 칸(양식 자리 이름) */
@@ -57,9 +60,24 @@ const collection: WorkflowImpl = {
   prefill: () => ({}),
 };
 
+/**
+ * 규정·지침 확인 — 기관 문서·공통 기준·법령·추가 자료에서 근거를 찾아 근거 검토 메모(workflows/regulations).
+ * 칸은 프로그램이 찾은 근거로 쓰고 '검토 의견'만 모델 초안(근거 번호가 없는 문장은 유보로 옮긴다)
+ */
+const regulations: WorkflowImpl = {
+  key: 'regulations',
+  kind: 'regulations',
+  defaultTemplateRef: 'builtin:regulation_memo',
+  requiredFieldLabels: ['제목', '검토 질문', '적용 기준', '검토 의견'],
+  documentOutputKey: 'regulationMemo',
+  humanOnlyLabels: [],
+  prefill: () => ({}),
+};
+
 const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
   'official-letter': officialLetter,
   collection,
+  regulations,
 };
 
 export function getWorkflowImpl(key: string): WorkflowImpl | null {
@@ -77,6 +95,8 @@ export interface WorkflowSummary {
   available: boolean;
   /** 준비 중이면 그 이유 */
   reason: string | null;
+  /** 새 작업 화면이 먼저 고를 표준 양식 */
+  defaultTemplateRef: string | null;
 }
 
 export function summarizeWorkflows(): WorkflowSummary[] {
@@ -92,6 +112,7 @@ export function summarizeWorkflows(): WorkflowSummary[] {
       scopeNote: w.scopeNote,
       available: Boolean(impl),
       reason: impl ? null : '업무 처리·검수·결과 파일 구현이 아직 끝나지 않았습니다.',
+      defaultTemplateRef: impl?.defaultTemplateRef ?? null,
     };
   });
 }

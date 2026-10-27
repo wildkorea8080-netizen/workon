@@ -11,7 +11,7 @@ import { WorkError, type DocumentField } from '../types';
  */
 
 /** 여러 문단이 들어가는 자리로 보는 이름(그 밖은 한 줄 글) */
-const PARAGRAPH_LABELS = /본문|내용|개요|경과|계획|사항|안건|결정|논의|검토|의견|요지|배경|현황|목적|붙임/;
+const PARAGRAPH_LABELS = /본문|내용|개요|경과|계획|사항|안건|결정|논의|검토|의견|요지|배경|현황|목적|붙임|근거|유보/;
 
 export function fieldsFromSlots(slots: Slot[], requiredLabels: readonly string[] = []): DocumentField[] {
   return slots.map((s) => ({
@@ -128,11 +128,12 @@ export function normalizeStoredFields(input: unknown): DocumentField[] {
       id: String(f.id),
       label: typeof f.label === 'string' ? f.label : String(f.id),
       kind: f.kind === 'section' || f.kind === 'cell' ? f.kind : 'marker',
-      type: f.type === 'paragraph' ? 'paragraph' : 'text',
+      // 칸 이름 규칙이 넓어지면 예전에 저장한 판도 여러 줄 칸으로 읽는다(여러 줄 → 한 줄로 좁히지는 않는다)
+      type: f.type === 'paragraph' || (typeof f.label === 'string' && PARAGRAPH_LABELS.test(f.label)) ? 'paragraph' : 'text',
       value: typeof f.value === 'string' ? f.value : '',
       required: f.required === true,
       locked: f.locked === true,
-      origin: (['empty', 'form', 'ai', 'user', 'restore'] as const).includes(f.origin as never) ? (f.origin as DocumentField['origin']) : 'empty',
+      origin: (['empty', 'form', 'ai', 'user', 'restore', 'system'] as const).includes(f.origin as never) ? (f.origin as DocumentField['origin']) : 'empty',
       evidenceIds: Array.isArray(f.evidenceIds) ? f.evidenceIds.filter((x): x is string => typeof x === 'string') : [],
       hint: typeof f.hint === 'string' ? f.hint : null,
     }));

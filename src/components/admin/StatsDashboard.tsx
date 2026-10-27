@@ -56,6 +56,8 @@ export default function StatsDashboard() {
       chat_query: '질문하기',
       conversation_title: '대화 제목 생성',
       document_generated: '문서 파일 생성',
+      work_generate: '업무 파일 만들기(AI)',
+      work_revise: '업무 문서 AI 수정',
       prompt_enhance: '프롬프트 다듬기',
     };
     return labels[action] || action;

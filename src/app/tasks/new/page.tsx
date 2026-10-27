@@ -46,7 +46,7 @@ function NewTask() {
 
   useEffect(() => {
     if (!templateId && templateOptions.length && workflow) {
-      const preferred = templateOptions.find((o) => o.ref === `builtin:${workflow.key === 'official-letter' ? 'official_letter' : workflow.key === 'meeting' ? 'minutes' : 'report'}`);
+      const preferred = templateOptions.find((o) => o.ref === (workflow.defaultTemplateRef ?? 'builtin:report'));
       setTemplateId((preferred ?? templateOptions[0]).id);
     }
   }, [templateOptions, templateId, workflow]);

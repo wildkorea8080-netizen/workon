@@ -10,6 +10,8 @@ import { createSupabaseWorkStore } from './store/supabase';
 import { createSupabaseWorkFiles } from './files';
 import { llmGenerator, mockGenerator } from './generation/compose';
 import { getRenderer } from './documents/renderer';
+import { defaultRegulationProviders } from './workflows/regulations/providers';
+import { llmRegulationModel, mockRegulationModel } from './workflows/regulations/model';
 import type { WorkContext } from './context';
 import { WorkError, type WorkActor } from './types';
 
@@ -24,6 +26,7 @@ export function defaultWorkContext(): WorkContext {
     generator: WORK_GENERATOR === 'mock' ? mockGenerator : llmGenerator,
     generatorMode: WORK_GENERATOR,
     renderer: getRenderer(),
+    regulations: { providers: defaultRegulationProviders, model: WORK_GENERATOR === 'mock' ? mockRegulationModel : llmRegulationModel },
     resolveModel: (departmentId) => resolveModelForDepartment(departmentId),
     async checkLimit(departmentId, userId) {
       const s = await checkTokenLimit(departmentId, userId);

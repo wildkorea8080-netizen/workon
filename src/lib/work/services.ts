@@ -7,6 +7,8 @@ import { getWorkflowImpl, summarizeWorkflows, definitionFor } from './workflows'
 import { checkForm } from './workflows/form';
 import { applyPatches, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
+import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
+import type { RegulationContent } from './runs/executor';
 import { artifactDto } from './artifacts';
 import { sourceDto } from './sources';
 import { WorkError, type WorkActor, type WorkTaskRow, type WorkRunRow, type DocumentField } from './types';
@@ -51,7 +53,7 @@ export async function listWorkflowsForActor(ctx: WorkContext, actor: WorkActor) 
 export async function listTemplates(ctx: WorkContext, actor: WorkActor) {
   // 표준 양식은 파일이 있으면 판 행을 맞춰 둔다(없으면 '준비 안 됨'으로)
   const builtin: { ref: string; name: string; status: string; label: string; id: string | null; reason: string | null }[] = [];
-  for (const ref of ['builtin:official_letter', 'builtin:report', 'builtin:minutes']) {
+  for (const ref of BUILTIN_TEMPLATES.map((t) => t.ref)) {
     try {
       const tv = await ensureBuiltinTemplateVersion(ctx.store, ref);
       builtin.push({ ref, name: tv.name, status: tv.status, label: templateLabel(tv), id: tv.id, reason: null });
@@ -101,7 +103,7 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
 
   // 문서 업무만 양식을 고른다(취합은 양식 없이 엑셀을 만든다)
   let tv: TemplateVersionRow | null = null;
-  if (impl.kind === 'document') {
+  if (impl.kind !== 'collection') {
     if (typeof input.templateVersionId === 'string' && input.templateVersionId) {
       const found = await ctx.store.getTemplateVersion(input.templateVersionId, actor.organizationId);
       if (!found || found.status === 'retired') throw new WorkError('TEMPLATE_MISSING', '고른 양식을 쓸 수 없습니다.', 404);
@@ -231,6 +233,8 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
           fields: normalizeStoredFields(version.fields),
           // 취합 결과(부서·합계·원본 대응) — 원자료 저장 경로는 없다
           collection: (version.content as { result?: unknown } | null)?.result ?? null,
+          // 규정 확인 — 그 판이 찾은 근거·적용 판정·유보(보관함·파일 이름 앞부분 없음)
+          regulations: regulationsDto((version.content as { regulations?: RegulationContent } | null)?.regulations),
         }
       : null,
     review: review.map((r) => ({ id: r.id, severity: r.severity, code: r.code, message: r.message, fieldIds: r.field_ids, state: r.state, resolutionNote: r.resolution_note })),
@@ -239,6 +243,29 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
     sources: sources.filter((s) => s.status !== 'failed' || s.failure_reason).map(sourceDto),
     run: run ? runDto(run) : null,
     generatorMode: ctx.generatorMode,
+  };
+}
+
+function regulationsDto(c: RegulationContent | undefined) {
+  if (!c || c.schema !== 'regulations/1') return null;
+  return {
+    basisDate: c.basisDate,
+    mode: c.mode,
+    unavailable: c.unavailable,
+    findings: c.outcome.findings,
+    reservations: c.outcome.reservations,
+    evidence: c.evidence.map((e) => ({
+      id: e.id,
+      kind: e.kind,
+      title: e.title,
+      location: e.location,
+      effectiveDate: e.effectiveDate,
+      editionYear: e.editionYear,
+      applicability: e.applicability,
+      note: e.note,
+      text: e.text,
+      url: e.url && /^https:\/\/www\.law\.go\.kr\//.test(e.url) ? e.url : null,
+    })),
   };
 }
 
@@ -271,10 +298,15 @@ export async function updateTaskMeta(ctx: WorkContext, actor: WorkActor, taskId:
   return updated;
 }
 
-async function currentVersionNumber(ctx: WorkContext, task: WorkTaskRow): Promise<{ number: number; id: string | null; fields: DocumentField[] }> {
-  if (!task.current_document_version_id) return { number: 0, id: null, fields: [] };
+async function currentVersionNumber(ctx: WorkContext, task: WorkTaskRow): Promise<{ number: number; id: string | null; fields: DocumentField[]; content: Record<string, unknown> | null }> {
+  if (!task.current_document_version_id) return { number: 0, id: null, fields: [], content: null };
   const v = await ctx.store.getVersion(task.current_document_version_id, task.organization_id);
-  return { number: v?.version ?? 0, id: v?.id ?? null, fields: normalizeStoredFields(v?.fields) };
+  return { number: v?.version ?? 0, id: v?.id ?? null, fields: normalizeStoredFields(v?.fields), content: (v?.content as Record<string, unknown> | null) ?? null };
+}
+
+/** 칸만 고친 새 판이 이어 받는 내용 — 규정 판의 근거·판정(무엇을 보고 썼나)은 칸을 고쳐도 그대로다 */
+function carriedContent(content: Record<string, unknown> | null): Record<string, unknown> | null {
+  return content && 'regulations' in content ? { regulations: content.regulations } : null;
 }
 
 /** '파일 만들기' — 초안 생성 실행. 같은 요청 번호면 같은 실행(연속 클릭 — A11) */
@@ -340,6 +372,7 @@ export async function saveDocument(ctx: WorkContext, actor: WorkActor, taskId: s
     organizationId: task.organization_id,
     baseVersion: cur.number,
     fields: applied.fields,
+    content: carriedContent(cur.content),
     templateVersionId: task.template_version_id,
     origin: 'edit',
     reason: `직접 수정: ${applied.fields.filter((f) => applied.changed.includes(f.id)).map((f) => f.label).join(', ')}`.slice(0, 500),
@@ -451,6 +484,7 @@ export async function applyProposal(ctx: WorkContext, actor: WorkActor, taskId: 
     organizationId: task.organization_id,
     baseVersion: cur.number,
     fields: merged.fields,
+    content: carriedContent(cur.content),
     templateVersionId: task.template_version_id,
     origin: 'revise',
     reason: `AI 수정 적용: ${p.instruction}`.slice(0, 500),

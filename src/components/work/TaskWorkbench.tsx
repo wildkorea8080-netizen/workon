@@ -17,7 +17,7 @@ import {
 import { Card, ErrorNote, StatusBadge, statusTone } from './WorkShell';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
-import type { ArtifactDto, FieldDto, RunDto, TaskDetailDto } from './types';
+import type { ArtifactDto, FieldDto, RegulationEvidenceDto, RegulationsDto, RunDto, TaskDetailDto } from './types';
 
 /**
  * 업무 작업실 — 결과 파일·확인 사항·근거·수정이 한 화면에 있다(개편 03 문서 '업무 작업실').
@@ -30,7 +30,7 @@ import type { ArtifactDto, FieldDto, RunDto, TaskDetailDto } from './types';
 type LeftTab = 'outline' | 'files' | 'sources';
 type RightTab = 'review' | 'evidence' | 'revise';
 
-const ORIGIN_LABEL: Record<FieldDto['origin'], string> = { empty: '빈 칸', form: '입력값', ai: 'AI 초안', user: '직접 수정', restore: '복구' };
+const ORIGIN_LABEL: Record<FieldDto['origin'], string> = { empty: '빈 칸', form: '입력값', ai: 'AI 초안', user: '직접 수정', restore: '복구', system: '찾은 근거로 정리' };
 
 export default function TaskWorkbench({ taskId }: { taskId: string }) {
   const [detail, setDetail] = useState<TaskDetailDto | null>(null);
@@ -130,11 +130,11 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
     <div className="flex h-full flex-col">
       {/* 위쪽 — 제목·상태·판·내려받기·검토 완료 */}
       <div className="flex flex-wrap items-center gap-3 border-b border-[#DCE3EC] bg-white px-4 py-3 md:px-6">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 basis-full md:basis-0 md:flex-1">
           <div className="text-[13px] text-slate-500">
             <Link href="/tasks" className="hover:underline">내 작업함</Link> · {task.workflowName}
           </div>
-          <h1 className="truncate text-[22px] font-bold">{task.title}</h1>
+          <h1 className="break-keep text-[22px] font-bold md:truncate">{task.title}</h1>
         </div>
         <StatusBadge label={TASK_STATUS_LABEL[task.status] ?? task.status} tone={statusTone(task.status)} />
         {version && <span className="text-[14px] text-slate-600">{version.version}판</span>}
@@ -310,7 +310,9 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
         <p className="mt-1 text-[14px] text-slate-600">
           {detail.kind === 'collection'
             ? '올린 원자료의 표를 부서·항목별로 더해 통합 엑셀(XLSX)을 만듭니다. 숫자는 프로그램이 계산하고, 중복·미제출·단위 차이는 확인할 사항으로 알립니다.'
-            : '입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.'}
+            : detail.kind === 'regulations'
+              ? '기관 문서·공통 기준 자료·국가법령정보·올린 추가 자료에서 근거를 찾아 근거 검토 메모(HWPX)를 만듭니다. 적용 기준일 뒤에 시행된 근거·다른 기관 자료는 빼고, 근거로 받치지 못한 판단은 유보로 적습니다. 법률적 최종 판단이 아닙니다.'
+              : '입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.'}
         </p>
         {detail.kind === 'collection' && <p className="mt-1 text-[13px] text-slate-500">원자료는 왼쪽 &lsquo;원자료&rsquo; 탭에서 올립니다(부서별 파일 — 파일 이름에 부서명이 있으면 부서를 알아봅니다).</p>}
         <button
@@ -318,7 +320,7 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
           disabled={!task.access.edit || busy || dirty || task.status === 'draft'}
           className="mt-4 rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300"
         >
-          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : 'HWPX 만들기'}
+          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : detail.kind === 'regulations' ? '근거 찾아 메모 만들기' : 'HWPX 만들기'}
         </button>
         {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">{draftReason(detail)}</p>}
         {dirty && <p className="mt-2 text-[13px] text-amber-800">바꾼 입력을 먼저 저장해 주세요.</p>}
@@ -499,7 +501,58 @@ function ReviewPanel({ detail, taskId, onChanged, setError }: { detail: TaskDeta
   );
 }
 
+const APPLICABILITY_LABEL: Record<RegulationEvidenceDto['applicability'], string> = {
+  applicable: '근거로 씀',
+  date_unknown: '근거로 씀 · 시행일 확인 필요',
+  after_basis: '제외 · 기준일 뒤 시행',
+  other_org: '제외 · 다른 기관',
+};
+const EVIDENCE_KIND_LABEL: Record<RegulationEvidenceDto['kind'], string> = { org_doc: '기관 문서', common: '공통 기준', law: '법령', ordinance: '자치법규', upload: '추가 자료' };
+
+/** 규정 확인 판의 근거 목록 — 위치·시행일은 찾은 자료가 알려 준 것만, 판정 이유를 그대로 보인다 */
+function RegulationEvidenceList({ reg }: { reg: RegulationsDto }) {
+  return (
+    <div className="space-y-3 text-[14px]">
+      <p className="text-slate-600">적용 기준일 {reg.basisDate} 기준으로 찾은 근거입니다. 위치·시행일은 자료가 알려 준 것만 적었습니다.</p>
+      {reg.unavailable.map((u) => (
+        <p key={u} className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">찾지 못한 범위 — {u}</p>
+      ))}
+      {reg.evidence.length === 0 && <p className="text-slate-500">찾은 근거가 없습니다.</p>}
+      <ul className="space-y-2">
+        {reg.evidence.map((e) => {
+          const usable = e.applicability === 'applicable' || e.applicability === 'date_unknown';
+          return (
+            <li key={e.id} className={`rounded-lg border px-3 py-2 ${usable ? 'border-[#DCE3EC]' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">[{e.id}]</span>
+                <span className="font-medium">{e.title}</span>
+                <span className="text-[12px] text-slate-500">{EVIDENCE_KIND_LABEL[e.kind]}</span>
+              </div>
+              <div className="mt-0.5 text-[13px] text-slate-600">
+                {e.location ?? '위치 정보 없음'} · {e.effectiveDate ? `시행 ${e.effectiveDate}` : e.editionYear ? `${e.editionYear}년 판` : '시행일 확인 필요'}
+              </div>
+              <div className={`mt-1 text-[13px] ${usable ? 'text-emerald-800' : 'text-slate-600'}`}>{APPLICABILITY_LABEL[e.applicability]}{e.note && !usable ? ` — ${e.note}` : ''}</div>
+              {e.text && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[13px] text-[#003087]">원문 보기</summary>
+                  <p className="mt-1 whitespace-pre-wrap text-[13px] text-slate-700">{e.text}</p>
+                </details>
+              )}
+              {e.url && (
+                <a href={e.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[13px] text-[#003087] underline">
+                  국가법령정보에서 보기
+                </a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function EvidencePanel({ detail, selected }: { detail: TaskDetailDto; selected: string[] }) {
+  if (detail.version?.regulations) return <RegulationEvidenceList reg={detail.version.regulations} />;
   const fields = detail.version?.fields.filter((f) => selected.includes(f.id)) ?? [];
   const sourceName = (id: string) => detail.sources.find((s) => s.id === id)?.file_name ?? '(지운 원자료)';
   return (

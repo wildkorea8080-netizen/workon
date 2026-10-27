@@ -3,6 +3,8 @@ import type { WorkStore } from './store/types';
 import type { WorkFiles } from './files';
 import type { FieldGenerator } from './generation/compose';
 import type { DocumentRenderer } from './documents/renderer';
+import type { RegulationProviders } from './workflows/regulations/gather';
+import type { RegulationModel } from './workflows/regulations/model';
 
 /**
  * 업무 서비스·실행기가 쓰는 의존성 묶음. 운영 기본값은 defaultWorkContext(server-context.ts),
@@ -15,6 +17,8 @@ export interface WorkContext {
   /** 시험 모드 생성기를 쓰는 중인지(결과에 표시) */
   generatorMode: 'llm' | 'mock';
   renderer: DocumentRenderer;
+  /** 규정·지침 확인의 근거 제공자·모델 — 없으면 그 업무는 준비 중으로 실패한다 */
+  regulations?: { providers: RegulationProviders; model: RegulationModel };
   /** 기관 허용 모델로 확정(model-policy) */
   resolveModel(departmentId: string): Promise<string>;
   /** 기관 정지·한도(usage-limit) */

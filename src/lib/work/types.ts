@@ -77,7 +77,7 @@ export interface DocumentField {
   value: string;
   required: boolean;
   locked: boolean;
-  origin: 'empty' | 'form' | 'ai' | 'user' | 'restore';
+  origin: 'empty' | 'form' | 'ai' | 'user' | 'restore' | 'system';
   /** 이 값의 근거가 된 원자료(work_sources.id) — 실제로 쓴 것만 */
   evidenceIds: string[];
   /** 자리 주변 글(양식이 준 힌트) */
@@ -202,6 +202,8 @@ export const WORK_ERROR_CODES = {
   LLM_INVALID_OUTPUT: 'LLM_INVALID_OUTPUT',
   USAGE_LIMIT: 'USAGE_LIMIT',
   STORAGE_FAILED: 'STORAGE_FAILED',
+  // 근거 제공자(문서 검색·법령) 일시 장애 — 다시 시도한다
+  SOURCE_UNAVAILABLE: 'SOURCE_UNAVAILABLE',
   WORKFLOW_NOT_READY: 'WORKFLOW_NOT_READY',
   FEATURE_DISABLED: 'FEATURE_DISABLED',
   NOT_FOUND: 'NOT_FOUND',

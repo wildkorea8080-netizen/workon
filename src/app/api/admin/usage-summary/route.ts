@@ -62,6 +62,8 @@ const ACTION_LABELS: Record<string, string> = {
   document_generated: '문서 파일 생성',
   file_attached: '파일 첨부',
   table_merged: '표 합치기',
+  work_generate: '업무 파일 만들기(AI)',
+  work_revise: '업무 문서 AI 수정',
   prompt_enhance: '프롬프트 다듬기',
 };
 

@@ -17,6 +17,7 @@ export interface WorkflowSummaryDto {
   scopeNote: string;
   available: boolean;
   reason: string | null;
+  defaultTemplateRef: string | null;
 }
 
 export interface TaskDto {
@@ -47,7 +48,7 @@ export interface FieldDto {
   value: string;
   required: boolean;
   locked: boolean;
-  origin: 'empty' | 'form' | 'ai' | 'user' | 'restore';
+  origin: 'empty' | 'form' | 'ai' | 'user' | 'restore' | 'system';
   evidenceIds: string[];
   hint: string | null;
 }
@@ -95,10 +96,10 @@ export interface CollectionResultDto {
 
 export interface TaskDetailDto {
   task: TaskDto;
-  kind: 'document' | 'collection';
+  kind: 'document' | 'collection' | 'regulations';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];
@@ -110,4 +111,26 @@ export interface TaskDetailDto {
 export interface TemplatesDto {
   builtin: { ref: string; name: string; status: string; label: string; id: string | null; reason: string | null }[];
   organization: { id: string; name: string; format: string; status: string; label: string; fieldCount: number }[];
+}
+
+export interface RegulationEvidenceDto {
+  id: string;
+  kind: 'org_doc' | 'common' | 'law' | 'ordinance' | 'upload';
+  title: string;
+  location: string | null;
+  effectiveDate: string | null;
+  editionYear: number | null;
+  applicability: 'applicable' | 'date_unknown' | 'after_basis' | 'other_org';
+  note: string | null;
+  text: string;
+  url: string | null;
+}
+
+export interface RegulationsDto {
+  basisDate: string;
+  mode: 'llm' | 'mock';
+  unavailable: string[];
+  findings: { text: string; evidenceIds: string[]; dateCheck: boolean }[];
+  reservations: { text: string; reason: string }[];
+  evidence: RegulationEvidenceDto[];
 }

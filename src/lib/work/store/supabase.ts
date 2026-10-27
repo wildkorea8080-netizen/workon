@@ -32,6 +32,10 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
       const { data } = await db.from('organizations').select('name').eq('id', organizationId).maybeSingle();
       return data?.name ?? null;
     },
+    async getDepartmentName(departmentId, organizationId) {
+      const { data } = await db.from('departments').select('name').eq('id', departmentId).eq('organization_id', organizationId).maybeSingle();
+      return data?.name ?? null;
+    },
     async isUserActive(userId) {
       const { data, error } = await db.from('users').select('is_active').eq('id', userId).maybeSingle();
       if (error || !data) return false;
