@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-26",
+  "scope": "Implementation specification package; application code and runtime integrations not implemented in this task.",
+  "checks": {
+    "workflowCount": 10,
+    "uniqueWorkflowKeys": true,
+    "phaseGroups": "A=3, B=4, C=3",
+    "inputOutputContracts": "passed",
+    "syntheticTotals": "passed",
+    "relativeMarkdownLinks": "passed"
+  },
+  "notRun": [
+    "Existing repository npm tests and build",
+    "TypeScript compilation of contract draft",
+    "Database migrations and isolation integration",
+    "HWPX generation and Hancom visual verification",
+    "Live authenticated product flows"
+  ]
+}

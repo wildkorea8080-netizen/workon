@@ -1,0 +1,86 @@
+{
+  "sourceRepository": "https://github.com/wildkorea8080-netizen/workon",
+  "sourceCommit": "702cc436b895c278ba1fc6eb13673e88d07c3091",
+  "files": [
+    {
+      "path": "01_CURRENT_CODE_AUDIT.md",
+      "bytes": 6895,
+      "sha256": "e629b8182b79e969422d1e3e92c544a7a7bdf18bcbd2abe4424827eac55dc968"
+    },
+    {
+      "path": "02_PRODUCT_AND_SCOPE.md",
+      "bytes": 4380,
+      "sha256": "7b16b10ec7b628a84935b48837df11ae2537fbd27fc4685dee98f84c97d87da8"
+    },
+    {
+      "path": "03_SCREENS_AND_DESIGN.md",
+      "bytes": 7293,
+      "sha256": "fec4982ee1060f2e331ca782ab9b2f78f62b3b3e28351b40f1d601014e3caf6b"
+    },
+    {
+      "path": "04_DOCUMENT_ENGINE.md",
+      "bytes": 9242,
+      "sha256": "da8efce49a20d417e98673648feebfbc6c945bde8865b68b550f3ffc9e24f55e"
+    },
+    {
+      "path": "05_DATA_API_AND_JOBS.md",
+      "bytes": 12107,
+      "sha256": "338eba155ea7fe9fab4e6c9169a1c364a8ff389b37bf5e8bcbc3223c7524c98c"
+    },
+    {
+      "path": "06_MIGRATION_AND_RELEASE.md",
+      "bytes": 5801,
+      "sha256": "d858413af4a7083669a0676c565333b123feeee1597017fd8936c4e8af9cd1ec"
+    },
+    {
+      "path": "07_IMPLEMENTATION_BACKLOG.md",
+      "bytes": 7876,
+      "sha256": "3bd8f9e7d432ca73b80326dd85898846d8cd7c1bcb59a1d4f80d67f896fe0b49"
+    },
+    {
+      "path": "08_ACCEPTANCE_AND_SCENARIOS.md",
+      "bytes": 6589,
+      "sha256": "099a0a7ce3ac5844247c9885839c15d2b11907ec4bd549deccc7b85a97867fd4"
+    },
+    {
+      "path": "09_DECISIONS_AND_SOURCES.md",
+      "bytes": 4472,
+      "sha256": "f2f71d9491e65bef93aa5458ecbf5b59e02f1645ea714ebff64e1f9b5a0e3445"
+    },
+    {
+      "path": "10_CLAUDE_CODE_START.md",
+      "bytes": 7382,
+      "sha256": "a344dd95b1c1afdea4a5b16d9753477187bfaf8025a8dad1484d13a9566a79dc"
+    },
+    {
+      "path": "contracts/domain.ts",
+      "bytes": 6225,
+      "sha256": "38cb53f3da86011c4ff1148a99c9552d44937cd62955e29e21a4a539ae1b0e1e"
+    },
+    {
+      "path": "contracts/workflow-catalog.json",
+      "bytes": 18132,
+      "sha256": "2fda238c42d1369c6817d056c1e38a4a46f451d892844b745315a909cbb42286"
+    },
+    {
+      "path": "fixtures/quarterly-report.json",
+      "bytes": 3060,
+      "sha256": "d7626deb9357fe2cc07f61ff6326c091be3c5e8163b3bcbe33b99ba213ebd30b"
+    },
+    {
+      "path": "PACKAGE_CHECKS.json",
+      "bytes": 651,
+      "sha256": "14024c8dc0625c53bda01bd803b787f52091956abd0d3d526d8faa931c4af77b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4213,
+      "sha256": "7ece6c283db2614d0e625af7f166f7fde447ed11fdc702c31d7122ad1749f289"
+    },
+    {
+      "path": "references/strategy-plan.md",
+      "bytes": 50478,
+      "sha256": "526ee2f4ae2508c72dff1d49d61be27e89ac675d156b2b87f2d2a8b2bea9774c"
+    }
+  ]
+}

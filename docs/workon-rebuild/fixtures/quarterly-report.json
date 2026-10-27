@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "1.0.0",
+  "id": "synthetic-quarterly-2026-q3",
+  "synthetic": true,
+  "institution": "가상 공공지원재단",
+  "period": "2026년 3분기",
+  "deadline": "2026-10-30",
+  "referenceDate": "2026-10-26",
+  "requestedItems": [
+    "부서별 예산액",
+    "부서별 집행액",
+    "참여자 수",
+    "집행률",
+    "미제출 부서",
+    "향후 계획"
+  ],
+  "expectedDepartments": [
+    "기획팀",
+    "사업팀",
+    "교육팀",
+    "운영팀"
+  ],
+  "sourceFiles": [
+    {
+      "id": "planning-original",
+      "department": "기획팀",
+      "unit": "천원",
+      "sheet": "실적",
+      "rows": [
+        {
+          "sourceRow": 3,
+          "project": "사업 A",
+          "budget": 700,
+          "spent": 500,
+          "participants": 18
+        },
+        {
+          "sourceRow": 4,
+          "project": "사업 B",
+          "budget": 500,
+          "spent": 400,
+          "participants": 12
+        },
+        {
+          "sourceRow": 5,
+          "project": "소계",
+          "budget": 1200,
+          "spent": 900,
+          "participants": 30,
+          "isSummary": true
+        }
+      ]
+    },
+    {
+      "id": "planning-duplicate",
+      "department": "기획팀",
+      "sameContentAs": "planning-original",
+      "requiresDuplicateReview": true
+    },
+    {
+      "id": "business-original",
+      "department": "사업팀",
+      "unit": "천원",
+      "sheet": "실적",
+      "rows": [
+        {
+          "sourceRow": 3,
+          "project": "사업 C",
+          "budget": 800,
+          "spent": 500,
+          "participants": 20
+        }
+      ]
+    },
+    {
+      "id": "education-original",
+      "department": "교육팀",
+      "unit": "원",
+      "sheet": "실적",
+      "rows": [
+        {
+          "sourceRow": 3,
+          "project": "사업 D",
+          "budget": 600000,
+          "spent": 450000,
+          "participants": 12
+        }
+      ]
+    }
+  ],
+  "expectedReviewItems": [
+    "기획팀 중복 제출 후보 확인",
+    "운영팀 미제출",
+    "원·천원 단위 통일",
+    "소계 행 중복 집계 제외",
+    "미제출 제외 잠정 집계 사용 확인"
+  ],
+  "reviewedDecisions": {
+    "excludedDuplicate": "planning-duplicate",
+    "summaryRowsExcluded": true,
+    "outputUnit": "원",
+    "allowProvisionalWithMissingDepartment": true
+  },
+  "expectedAfterReview": {
+    "budgetKrw": 2600000,
+    "spentKrw": 1850000,
+    "participants": 62,
+    "executionRatePercentDisplay": "71.15",
+    "missingDepartments": [
+      "운영팀"
+    ],
+    "reportLabel": "미제출 부서를 제외한 잠정 집계"
+  },
+  "outputChecks": [
+    "통합 XLSX·보고서 HWPX·제출 공문 HWPX의 동일 수치",
+    "향후 계획만 수정하면 집계 수치 유지",
+    "모든 수치의 원자료 대응",
+    "원자료의 sourceRow는 실제 생성 fixture와 일치",
+    "대화 삭제 후 업무 결과물 보존"
+  ],
+  "warning": "이 자료는 가상 시나리오다. 실제 법령·기관 실적·효과 검증 결과가 아니다."
+}
