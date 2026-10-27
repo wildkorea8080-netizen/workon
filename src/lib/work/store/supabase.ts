@@ -440,24 +440,29 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
       return ((data ?? []) as unknown as { id: string; name: string; file_name: string; storage_path: string; agents: { name: string } }[]).map((r) => ({ id: r.id, name: r.name, file_name: r.file_name, storage_path: r.storage_path, agent_name: r.agents.name }));
     },
     async workStats(organizationId, sinceIso) {
+      // 실행 ↔ 작업은 (task_id, organization_id) 겹 외래 키라 PostgREST 끼워 넣기를 쓰지 않고 둘을 따로 읽어 맞춘다
       const [tasks, runs] = await Promise.all([
-        db.from('work_tasks').select('workflow_key, status').eq('organization_id', organizationId).limit(10000),
-        db.from('work_runs').select('task_id, error, work_tasks!inner(workflow_key, organization_id)').eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).limit(10000),
+        db.from('work_tasks').select('id, workflow_key, status').eq('organization_id', organizationId).limit(10000),
+        db.from('work_runs').select('task_id, error').eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).limit(10000),
       ]);
       if (tasks.error) fail(tasks.error);
       if (runs.error) fail(runs.error);
+      const keyOf = new Map<string, string>();
       const by = new Map<string, WorkStatsRow>();
-      for (const t of (tasks.data ?? []) as { workflow_key: string; status: string }[]) {
-        const r = by.get(t.workflow_key) ?? { workflow_key: t.workflow_key, tasks: 0, completed: 0, needs_review: 0, failed_runs_30d: 0, top_error: null };
+      const row = (k: string) => by.get(k) ?? { workflow_key: k, tasks: 0, completed: 0, needs_review: 0, failed_runs_30d: 0, top_error: null };
+      for (const t of (tasks.data ?? []) as { id: string; workflow_key: string; status: string }[]) {
+        keyOf.set(t.id, t.workflow_key);
+        const r = row(t.workflow_key);
         r.tasks += 1;
         if (t.status === 'completed') r.completed += 1;
         if (t.status === 'needs_review') r.needs_review += 1;
         by.set(t.workflow_key, r);
       }
       const errors = new Map<string, Map<string, number>>();
-      for (const x of (runs.data ?? []) as unknown as { error: { code?: string } | null; work_tasks: { workflow_key: string } }[]) {
-        const k = x.work_tasks.workflow_key;
-        const r = by.get(k) ?? { workflow_key: k, tasks: 0, completed: 0, needs_review: 0, failed_runs_30d: 0, top_error: null };
+      for (const x of (runs.data ?? []) as { task_id: string; error: { code?: string } | null }[]) {
+        const k = keyOf.get(x.task_id);
+        if (!k) continue;
+        const r = row(k);
         r.failed_runs_30d += 1;
         by.set(k, r);
         const m = errors.get(k) ?? new Map<string, number>();
@@ -465,8 +470,8 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
         m.set(code, (m.get(code) ?? 0) + 1);
         errors.set(k, m);
       }
-      for (const [k, m] of errors) by.get(k)!.top_error = [...m].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-      return [...by.values()].sort((a, b) => a.workflow_key.localeCompare(b.workflow_key));
+      for (const [k, m] of errors) by.get(k)!.top_error = [...m].sort((a2, b2) => b2[1] - a2[1])[0]?.[0] ?? null;
+      return [...by.values()].sort((a2, b2) => a2.workflow_key.localeCompare(b2.workflow_key));
     },
     async listTemplateVersions(organizationId) {
       const { data, error } = await db
