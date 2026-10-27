@@ -13,19 +13,22 @@ export interface WorkflowImpl {
   key: WorkflowKey;
   /**
    * document = 양식 칸 채우기(HWPX), collection = 표 취합(XLSX, 숫자는 프로그램이 냄),
-   * regulations = 근거를 찾아 검토 메모(HWPX — 양식 칸이지만 근거 모으기·유보 판정을 거친다)
+   * regulations = 근거를 찾아 검토 메모(HWPX — 양식 칸이지만 근거 모으기·유보 판정을 거친다),
+   * items = 원자료에서 항목(요청사항·결정·미결 과제)을 원문 인용과 함께 뽑아 처리표(XLSX)·양식(HWPX)으로(workflows/items)
    */
-  kind: 'document' | 'collection' | 'regulations';
+  kind: 'document' | 'collection' | 'regulations' | 'items';
   /** 기관 양식이 없을 때 쓰는 WORKON 표준 양식(취합은 없음) */
   defaultTemplateRef: string | null;
   /** 비면 '검토 완료'를 막는 칸(양식 자리 이름) */
   requiredFieldLabels: readonly string[];
-  /** 결과 파일 키(카탈로그 outputs의 key) */
+  /** 결과 파일 키(카탈로그 outputs의 key) — '검토 완료'가 요구하는 주 결과 */
   documentOutputKey: string;
+  /** 함께 만드는 결과 파일(주 결과 포함, 순서대로). 없으면 주 결과 하나 */
+  outputs?: readonly { key: string; format: 'hwpx' | 'xlsx' }[];
   /** 직원이 정하는 칸 — AI가 쓰지 않는다(공개구분·경유처럼 행정 판단이 필요한 값). 비면 확인 사항으로 알린다 */
   humanOnlyLabels: readonly string[];
   /** 폼 값으로 바로 채울 수 있는 칸 — 모델을 거치지 않는다(지어낼 여지를 줄인다) */
-  prefill(values: FormValues, ctx: { organizationName: string | null }): Record<string, string>;
+  prefill(values: FormValues, ctx: { organizationName: string | null; departmentName: string | null; today: string }): Record<string, string>;
 }
 
 const officialLetter: WorkflowImpl = {
@@ -74,11 +77,73 @@ const regulations: WorkflowImpl = {
   prefill: () => ({}),
 };
 
+/** 보고서·사업계획 — 근거 자료(다른 작업의 결과 파일도 가져와 쓴다)로 보고서 양식 칸을 채운다. 숫자는 원자료와 대조 */
+const report: WorkflowImpl = {
+  key: 'report',
+  kind: 'document',
+  defaultTemplateRef: 'builtin:report',
+  requiredFieldLabels: ['제목', '개요', '주요 내용'],
+  documentOutputKey: 'report',
+  humanOnlyLabels: [],
+  prefill(values, { departmentName, today }) {
+    const out: Record<string, string> = {};
+    if (typeof values.title === 'string') out['제목'] = values.title;
+    if (departmentName) out['작성부서'] = departmentName;
+    out['작성일'] = today;
+    return out;
+  },
+};
+
+/** 접수공문 처리 — 본문·붙임에서 요청사항·제출물·기한을 원문 인용과 함께(처리표 XLSX). 담당 부서는 후보만 */
+const intake: WorkflowImpl = {
+  key: 'intake',
+  kind: 'items',
+  defaultTemplateRef: null,
+  requiredFieldLabels: [],
+  documentOutputKey: 'actionSheet',
+  outputs: [{ key: 'actionSheet', format: 'xlsx' }],
+  humanOnlyLabels: [],
+  prefill: () => ({}),
+};
+
+/** 회의·위원회 정리 — 메모·전사문에서 결정·조건부 합의·제안·미결·후속조치(회의록 HWPX + 후속조치표 XLSX) */
+const meeting: WorkflowImpl = {
+  key: 'meeting',
+  kind: 'items',
+  defaultTemplateRef: 'builtin:minutes',
+  requiredFieldLabels: ['회의명', '결정 사항'],
+  documentOutputKey: 'minutes',
+  outputs: [{ key: 'minutes', format: 'hwpx' }, { key: 'followups', format: 'xlsx' }],
+  humanOnlyLabels: ['작성자'],
+  prefill: () => ({}),
+};
+
+/** 인수인계 — 확인된 자료로 진행·미결·완료·반복 일정(인수인계서 HWPX + 반복 일정·미결 과제 XLSX). 비밀값은 지운다 */
+const handover: WorkflowImpl = {
+  key: 'handover',
+  kind: 'items',
+  defaultTemplateRef: 'builtin:handover',
+  requiredFieldLabels: ['제목', '작성 기준일', '미결 과제'],
+  documentOutputKey: 'handover',
+  outputs: [{ key: 'handover', format: 'hwpx' }, { key: 'calendar', format: 'xlsx' }],
+  humanOnlyLabels: ['인계자', '인수자', '확인자'],
+  prefill: () => ({}),
+};
+
 const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
   'official-letter': officialLetter,
   collection,
   regulations,
+  report,
+  intake,
+  meeting,
+  handover,
 };
+
+/** 만들 결과 파일 키 — 주 결과가 먼저 */
+export function outputKeysOf(impl: WorkflowImpl): string[] {
+  return impl.outputs?.map((o) => o.key) ?? [impl.documentOutputKey];
+}
 
 export function getWorkflowImpl(key: string): WorkflowImpl | null {
   return (IMPLEMENTATIONS as Record<string, WorkflowImpl | undefined>)[key] ?? null;

@@ -2,7 +2,7 @@
 import { buildUsageDetails } from '@/lib/assistant/persist';
 import type { WorkContext } from '../context';
 import { WorkError, type DocumentField, type WorkRunRow, type WorkTaskRow, type WorkRunError } from '../types';
-import { definitionFor, getWorkflowImpl, applyPrefill } from '../workflows';
+import { definitionFor, getWorkflowImpl, applyPrefill, outputKeysOf } from '../workflows';
 import { checkForm, formFacts } from '../workflows/form';
 import { fieldsFromSlots, mergeGenerated, normalizeStoredFields } from '../documents/fields';
 import { loadTemplateBytes } from '../documents/templates';
@@ -18,6 +18,8 @@ import { gatherEvidence } from '../workflows/regulations/gather';
 import { numberEvidence, isUsable, type RegulationEvidence } from '../workflows/regulations/evidence';
 import { settleFindings, memoFieldValues, kstDate, type RegulationDraft, type RegulationOutcome } from '../workflows/regulations/memo';
 import type { RegulationPlan } from '../workflows/regulations/model';
+import { verifyItems, verifyMeta, type ExtractedItem, type VerifySource } from '../workflows/items/verify';
+import { ITEMS_WORKFLOWS, departmentCandidates, flagReviewItems, type ItemsWorkflowKey } from '../workflows/items/specs';
 
 /**
  * 실행 하나를 끝까지 처리한다 — 작업자(runs/worker.ts)가 lease를 잡은 실행만 넘긴다.
@@ -132,7 +134,8 @@ async function prepareFields(ctx: WorkContext, task: WorkTaskRow): Promise<Prepa
     if (cur && cur.template_version_id === tv.id) fields = normalizeStoredFields(cur.fields);
   }
   const organizationName = await ctx.store.getOrganizationName(task.organization_id);
-  fields = applyPrefill(fields, impl.prefill(form.values, { organizationName }));
+  const departmentName = await ctx.store.getDepartmentName(task.department_id, task.organization_id);
+  fields = applyPrefill(fields, impl.prefill(form.values, { organizationName, departmentName, today: kstDate(ctx.now()) }));
   const sources = await loadSourceTexts(ctx, task);
   // AI가 채울 칸: 잠기지 않았고, 직원이 고치거나 폼에서 채우지 않았으며, 직원이 정할 칸이 아닌 것
   const targetIds = fields
@@ -165,6 +168,7 @@ async function composeStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow,
       sources: p.sources,
       organizationName: await ctx.store.getOrganizationName(task.organization_id),
       instruction,
+      rules: def.validationRules,
     },
     { model }
   );
@@ -192,7 +196,8 @@ async function opGenerateCollection(ctx: WorkContext, run: WorkRunRow, task: Wor
     throw new WorkError('REQUIRED_INPUT_MISSING', `필수 입력이 비어 있습니다: ${form.missing.map((m) => m.label).join(', ')}`, 422);
   }
   const computed = await step('aggregate', async () => {
-    const sources = await loadSourceExtracts(ctx, task);
+    // 기준 양식(template)으로 올린 파일은 부서 제출이 아니다 — 합에 넣지 않는다
+    const sources = (await loadSourceExtracts(ctx, task)).filter((x) => x.purpose !== 'template');
     if (!sources.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다.', 422);
     const expected = (form.values.expectedDepartments as string[]) ?? [];
     const fieldNames = ((form.values.fieldDefinitions as { name: string }[]) ?? []).map((f) => f.name);
@@ -375,8 +380,127 @@ async function opGenerateRegulations(ctx: WorkContext, run: WorkRunRow, task: Wo
   return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, review, mode, evidence: evidence.length, findings: outcome.findings.length };
 }
 
+/** 항목 판(content.items) — 그때 뽑은 항목·원문 인용·확인 표시를 그대로 남긴다 */
+export interface ItemsContent {
+  schema: 'items/1';
+  name: string;
+  typeLabel: string;
+  columns: { key: string; label: string; type: string }[];
+  items: ExtractedItem[];
+  meta: Record<string, string>;
+  summary: string;
+  /** 처리표의 추가 열(담당 부서 후보 등) */
+  extra: { label: string; values: Record<string, string> }[] | null;
+  review: NewReviewItem[];
+  mode: 'llm' | 'mock';
+}
+
+/**
+ * 접수공문·회의·인수인계 — 원자료 → 항목 뽑기(모델, 원문 인용) → 원문 대조·날짜/사람 거르기(프로그램)
+ * → (양식이 있으면) 칸 채우기(프로그램) → 업무별 확인 사항 → 처리표 XLSX·HWPX
+ */
+async function opGenerateItems(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
+  if (!ctx.items) throw new WorkError('WORKFLOW_NOT_READY', '이 업무는 아직 준비 중입니다.', 409);
+  const wf = ITEMS_WORKFLOWS[task.workflow_key as ItemsWorkflowKey];
+  if (!wf) throw new WorkError('WORKFLOW_NOT_READY', '이 업무는 아직 준비 중입니다.', 409);
+  const impl = getWorkflowImpl(task.workflow_key)!;
+  const def = definitionFor(task.workflow_key);
+  const form = checkForm(def, task.form);
+  if (form.missing.length) {
+    throw new WorkError('REQUIRED_INPUT_MISSING', `필수 입력이 비어 있습니다: ${form.missing.map((m) => m.label).join(', ')}`, 422);
+  }
+  const limit = await ctx.checkLimit(task.department_id, task.owner_id);
+  if (!limit.allowed) throw new WorkError('USAGE_LIMIT', limit.message ?? '기관 사용 한도에 걸려 실행할 수 없습니다.', 429);
+  const p = impl.defaultTemplateRef ? await step('prepare', () => prepareFields(ctx, task)) : null;
+
+  const extracts = (await loadSourceExtracts(ctx, task)).filter((s) => s.purpose !== 'template');
+  // 접수: '공문·붙임'(request)에서 뽑고 업무분장표(reference)는 부서 후보에만 쓴다. request가 없으면 올린 것 전부에서 뽑는다
+  const requestSources = task.workflow_key === 'intake' && extracts.some((s) => s.purpose === 'request') ? extracts.filter((s) => s.purpose === 'request') : extracts;
+  const mapSources = task.workflow_key === 'intake' && requestSources !== extracts ? extracts.filter((s) => s.purpose !== 'request') : [];
+  const sources: VerifySource[] = requestSources.map((s) => ({ id: s.id, name: s.name, text: s.text }));
+  // 인수인계: 직원이 직접 적은 '담당자 확인 현황'도 원자료다(다른 자료보다 우선 — 규칙에 적음)
+  if (task.workflow_key === 'handover' && typeof form.values.confirmedStatus === 'string' && form.values.confirmedStatus.trim()) {
+    sources.unshift({ id: 'confirmed', name: '담당자 확인 현황(직원 입력)', text: form.values.confirmedStatus });
+  }
+  if (!sources.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다. 원자료를 올려 주세요.', 422);
+
+  const extracted = await step('compose', async () => {
+    const model = await ctx.resolveModel(task.department_id);
+    const r = await ctx.items!.model.extract({ workflowName: def.name, title: task.title, facts: formFacts(def, form.values), sources, spec: wf.spec }, { model });
+    await writeModelUsage(ctx, run, task, r.usage, 'extract');
+    return { items: r.items, meta: r.meta, summary: r.summary, mode: r.mode } as unknown as Record<string, unknown>;
+  });
+  const mode = extracted.mode as 'llm' | 'mock';
+  const items = verifyItems(extracted.items as never, sources, wf.spec);
+  const meta = verifyMeta((extracted.meta ?? {}) as Record<string, unknown>, sources, wf.spec);
+  const candidates = mapSources.length ? departmentCandidates(items, mapSources.map((s) => s.text).join('\n')) : undefined;
+  const summary = typeof extracted.summary === 'string' ? extracted.summary : '';
+  const c = { form: form.values, items, meta: meta.values, summary, departmentCandidates: candidates };
+
+  const saved = await step('save_version', async () => {
+    const existing = await ctx.store.getVersionByRun(task.id, run.id);
+    if (existing) return { versionId: existing.id, version: existing.version };
+    let fields: DocumentField[] = p ? p.fields : [];
+    if (p && wf.fieldValues) {
+      const values = wf.fieldValues(c);
+      const byLabel: Record<string, { value: string }> = {};
+      for (const f of fields) if (values[f.label] !== undefined) byLabel[f.id] = { value: values[f.label] };
+      fields = mergeGenerated(fields, byLabel, { origin: 'system' }).fields;
+      // 요약(업무 개요 등)은 모델 글이다 — 출처를 'AI 초안'으로 바로잡는다
+      if (summary) fields = fields.map((f) => (f.label === '업무 개요' && f.value === values['업무 개요'] ? { ...f, origin: 'ai' as const } : f));
+    }
+    const review = [...flagReviewItems(items), ...wf.checks(c), ...meta.notes.map((n) => ({ severity: 'info' as const, code: 'META_UNVERIFIED', message: n, field_ids: [] }))];
+    const content: ItemsContent = {
+      schema: 'items/1',
+      name: wf.spec.name,
+      typeLabel: wf.spec.typeColumn.label,
+      columns: wf.spec.columns.map((x) => ({ key: x.key, label: x.label, type: x.type })),
+      items,
+      meta: meta.values,
+      summary,
+      extra: candidates ? [{ label: '담당 부서 후보(업무분장표)', values: Object.fromEntries(Object.entries(candidates).map(([k, v]) => [k, v.join(', ')])) }] : null,
+      review,
+      mode,
+    };
+    const v = await ctx.store.saveVersion({
+      taskId: task.id,
+      organizationId: task.organization_id,
+      baseVersion: run.base_version,
+      fields,
+      content: { items: content },
+      templateVersionId: p?.templateVersionId ?? null,
+      origin: 'generate',
+      reason: mode === 'mock' ? `시험 모드로 ${wf.spec.name} 정리` : `${wf.spec.name} 정리`,
+      actorId: run.requested_by,
+      runId: run.id,
+      sourceIds: requestSources.map((s) => s.id),
+    });
+    return { versionId: v.id, version: v.version };
+  });
+  const review = await step('review', async () => {
+    const v = (await ctx.store.getVersion(saved.versionId, task.organization_id))!;
+    const content = (v.content as { items?: ItemsContent } | null)?.items;
+    const vf = normalizeStoredFields(v.fields);
+    const general = vf.length
+      ? computeReviewItems({
+          fields: vf,
+          missing: vf.filter((f) => impl.humanOnlyLabels.includes(f.label) && !f.value.trim()).map((f) => ({ fieldId: f.id, reason: '직원이 정하는 칸입니다(AI가 채우지 않음).' })),
+          knownText: [...formFacts(def, form.values).map((f) => f.value), ...sources.map((s) => s.text)].join('\n'),
+          testMode: mode === 'mock',
+        })
+      : computeReviewItems({ fields: [], missing: [], knownText: '', testMode: mode === 'mock' });
+    const all = [...general, ...(content?.review ?? [])];
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, all);
+    return { blocking: all.filter((i) => i.severity === 'blocking').length, warning: all.filter((i) => i.severity === 'warning').length };
+  });
+  const file = await step('file', () => buildFileStep(ctx, run, task, saved.versionId));
+  await ctx.store.setTaskStatus(task.id, task.organization_id, 'needs_review');
+  return { versionId: saved.versionId, version: saved.version, artifactId: file.artifactId, review, mode, items: items.length };
+}
+
 async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, step: StepFn) {
   const kind = getWorkflowImpl(task.workflow_key)?.kind;
+  if (kind === 'items') return opGenerateItems(ctx, run, task, step);
   if (kind === 'collection') return opGenerateCollection(ctx, run, task, step);
   if (kind === 'regulations') return opGenerateRegulations(ctx, run, task, step);
   const p = await step('prepare', () => prepareFields(ctx, task));
@@ -424,8 +548,10 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
 
 async function buildFileStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, versionId: string) {
   const impl = getWorkflowImpl(task.workflow_key)!;
-  const art = await buildArtifact(ctx, task, versionId, impl.documentOutputKey, run.id);
-  return { artifactId: art.id, sha256: art.sha256, previewStatus: art.preview_status };
+  // 주 결과를 먼저 — 함께 만드는 파일(후속조치표 등)도 같은 판으로. 같은 판·같은 키는 한 벌이라 다시 시도해도 겹치지 않는다
+  const built = [];
+  for (const key of outputKeysOf(impl)) built.push(await buildArtifact(ctx, task, versionId, key, run.id));
+  return { artifactId: built[0].id, sha256: built[0].sha256, previewStatus: built[0].preview_status, artifactIds: built.map((a) => a.id) };
 }
 
 /** 직접 수정·복구·후보 적용으로 생긴 판의 파일 만들기 */
@@ -444,8 +570,9 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
     const items = computeReviewItems({ fields: normalizeStoredFields(v.fields), missing: [], knownText: '', testMode: false });
     // 규정 판은 그 판에 저장한 근거 판정(유보·제외·시행일 미확인)을 다시 건다 — 직원이 칸을 고쳐도 근거가 바뀐 것은 아니다
     const reg = (v.content as { regulations?: RegulationContent } | null)?.regulations;
+    const itemsContent = (v.content as { items?: ItemsContent } | null)?.items;
     // 직접 수정한 판은 AI 숫자 대조 대상이 아니다(직원 글) — 필수 칸·자리 표시만 다시 본다
-    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, [...items.filter((i) => i.code !== 'UNVERIFIED_NUMBER'), ...(reg?.review ?? [])]);
+    await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, [...items.filter((i) => i.code !== 'UNVERIFIED_NUMBER'), ...(reg?.review ?? []), ...(itemsContent?.review ?? [])]);
     return { count: items.length };
   });
   const file = await step('file', () => buildFileStep(ctx, run, task, v.id));

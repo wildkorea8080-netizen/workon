@@ -9,11 +9,20 @@ import { artifactStoragePath } from './files';
 import { RENDERER_UNAVAILABLE_REASON } from './documents/renderer';
 import { checkPackage } from './documents/package-check';
 import { getWorkflowImpl } from './workflows';
+import { getWorkflow } from './catalog';
 import { buildCollectionWorkbook } from './workflows/collection/workbook';
 import type { CollectionResult } from './workflows/collection/aggregate';
+import { buildItemsWorkbook } from './workflows/items/workbook';
+import { ITEMS_WORKFLOWS, type ItemsWorkflowKey } from './workflows/items/specs';
+import type { ItemsContent } from './runs/executor';
 import { createHash } from 'crypto';
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/** 함께 만드는 파일의 이름 꼬리 — 카탈로그 outputs의 label(후속조치표 등) */
+function outputLabel(workflowKey: string, outputKey: string): string {
+  return getWorkflow(workflowKey)?.outputs.find((o) => o.key === outputKey)?.label ?? outputKey;
+}
 
 interface BuiltFile {
   bytes: Buffer;
@@ -35,6 +44,19 @@ async function buildCollectionFile(task: WorkTaskRow, content: Record<string, un
   return { bytes, format: 'xlsx', mimeType: XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
 }
 
+/** 항목 판(content.items) → 처리표 엑셀. 그 업무의 처리표에 넣을 항목만(회의는 후속조치·미결·조건부, 인수인계는 진행·미결·반복) */
+async function buildItemsFile(task: WorkTaskRow, content: Record<string, unknown> | null): Promise<BuiltFile> {
+  const c = (content?.items ?? null) as ItemsContent | null;
+  const wf = ITEMS_WORKFLOWS[task.workflow_key as ItemsWorkflowKey];
+  if (!c || c.schema !== 'items/1' || !wf) throw new WorkError('OUTPUT_INVALID', '이 판에는 뽑은 항목이 없습니다.', 422);
+  const ctxItems = { form: task.form, items: c.items, meta: c.meta, summary: c.summary };
+  const items = wf.sheetItems(ctxItems);
+  const bytes = await buildItemsWorkbook({ title: task.title, spec: wf.spec, items, extraColumns: c.extra ?? undefined, review: c.review, createdAt: new Date(), testMode: c.mode === 'mock' });
+  const check = await checkPackage(bytes, { format: 'xlsx', values: items.slice(0, 5).map((i) => i.id) });
+  if (!check.valid) throw new WorkError('OUTPUT_INVALID', `만든 엑셀이 검사를 통과하지 못했습니다: ${check.problems.slice(0, 3).join('; ')}`, 422);
+  return { bytes, format: 'xlsx', mimeType: XLSX_MIME, sha256: createHash('sha256').update(bytes).digest('hex'), entries: check.entries, uncompressedBytes: check.uncompressedBytes };
+}
+
 /**
  * 판 → 실제 결과 파일. 파일은 그 판에서 만든 불변 결과다(같은 판·같은 키는 한 벌).
  *
@@ -48,8 +70,12 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
   const v = await ctx.store.getVersion(versionId, task.organization_id);
   if (!v || v.task_id !== task.id) throw new WorkError('NOT_FOUND', '판을 찾을 수 없습니다.', 404);
   let gen: BuiltFile;
-  if (getWorkflowImpl(task.workflow_key)?.kind === 'collection') {
+  const impl = getWorkflowImpl(task.workflow_key);
+  const format = impl?.outputs?.find((o) => o.key === outputKey)?.format;
+  if (impl?.kind === 'collection') {
     gen = await buildCollectionFile(task, v.content);
+  } else if (impl?.kind === 'items' && format === 'xlsx') {
+    gen = await buildItemsFile(task, v.content);
   } else {
     if (!v.template_version_id) throw new WorkError('TEMPLATE_MISSING', '이 판에는 양식이 없습니다.', 422);
     const tv = await ctx.store.getTemplateVersion(v.template_version_id, task.organization_id);
@@ -74,7 +100,7 @@ export async function buildArtifact(ctx: WorkContext, task: WorkTaskRow, version
       run_id: runId,
       output_key: outputKey,
       format: gen.format,
-      file_name: safeFileName(`${task.title} (${v.version}판)`, gen.format),
+      file_name: safeFileName(`${task.title}${outputKey === impl?.documentOutputKey ? '' : ` ${outputLabel(task.workflow_key, outputKey)}`} (${v.version}판)`, gen.format),
       mime_type: gen.mimeType,
       size_bytes: gen.bytes.length,
       sha256: gen.sha256,

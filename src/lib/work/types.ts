@@ -183,6 +183,8 @@ export interface WorkSourceRow {
   extract_path: string | null;
   summary: Record<string, unknown> | null;
   failure_reason: string | null;
+  // 가져온 곳(다른 작업의 결과 파일 등) — 참조만
+  origin?: Record<string, unknown> | null;
   created_at: string;
   confirmed_at: string | null;
 }

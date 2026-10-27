@@ -3,14 +3,14 @@ import { createHash } from 'crypto';
 import type { WorkContext } from './context';
 import { taskAccess, type TaskAccess } from './access';
 import { getWorkflow, isWorkflowKey, CATALOG_VERSION } from './catalog';
-import { getWorkflowImpl, summarizeWorkflows, definitionFor } from './workflows';
+import { getWorkflowImpl, summarizeWorkflows, definitionFor, outputKeysOf } from './workflows';
 import { checkForm } from './workflows/form';
 import { applyPatches, mergeGenerated, normalizeStoredFields, parsePatches } from './documents/fields';
 import { ensureBuiltinTemplateVersion, templateLabel } from './documents/templates';
 import { BUILTIN_TEMPLATES } from '@/lib/builtin-templates';
-import type { RegulationContent } from './runs/executor';
+import type { RegulationContent, ItemsContent } from './runs/executor';
 import { artifactDto } from './artifacts';
-import { sourceDto } from './sources';
+import { sourceDto, copyArtifactToSource } from './sources';
 import { WorkError, type WorkActor, type WorkTaskRow, type WorkRunRow, type DocumentField } from './types';
 import type { TemplateVersionRow } from './store/types';
 
@@ -101,9 +101,9 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
   if (def.inputs.some((i) => i.key === 'title') && !rawForm.title) rawForm.title = title;
   const dueDate = typeof input.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) ? input.dueDate : null;
 
-  // 문서 업무만 양식을 고른다(취합은 양식 없이 엑셀을 만든다)
+  // 양식이 있는 업무만 양식을 고른다(취합·접수는 양식 없이 엑셀을 만든다)
   let tv: TemplateVersionRow | null = null;
-  if (impl.kind !== 'collection') {
+  if (impl.defaultTemplateRef) {
     if (typeof input.templateVersionId === 'string' && input.templateVersionId) {
       const found = await ctx.store.getTemplateVersion(input.templateVersionId, actor.organizationId);
       if (!found || found.status === 'retired') throw new WorkError('TEMPLATE_MISSING', '고른 양식을 쓸 수 없습니다.', 404);
@@ -217,7 +217,13 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
   // 끝나지 않은 실행(저장·복구가 건 파일 만들기 포함)이 먼저, 없으면 마지막 '파일 만들기' 결과
   const run = activeRun ?? currentRun;
   const review = version ? await ctx.store.listReviewItems(version.id, task.organization_id) : [];
-  const currentArtifacts = version ? artifacts.filter((a) => a.document_version_id === version.id) : [];
+  // 지금 판의 결과 파일 — 주 결과가 먼저(머리의 '내려받기'가 주 결과를 가리키게), 그다음 함께 만든 파일 순
+  const order = (() => {
+    const impl = getWorkflowImpl(task.workflow_key);
+    return impl ? outputKeysOf(impl) : [];
+  })();
+  const rank = (k: string) => (order.indexOf(k) < 0 ? order.length : order.indexOf(k));
+  const currentArtifacts = version ? artifacts.filter((a) => a.document_version_id === version.id).sort((x, y) => rank(x.output_key) - rank(y.output_key)) : [];
   return {
     task: taskDto(task, access),
     kind: getWorkflowImpl(task.workflow_key)?.kind ?? 'document',
@@ -235,6 +241,8 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
           collection: (version.content as { result?: unknown } | null)?.result ?? null,
           // 규정 확인 — 그 판이 찾은 근거·적용 판정·유보(보관함·파일 이름 앞부분 없음)
           regulations: regulationsDto((version.content as { regulations?: RegulationContent } | null)?.regulations),
+          // 뽑은 항목(접수·회의·인수인계) — 원문 인용·확인 표시 그대로
+          items: itemsDto((version.content as { items?: ItemsContent } | null)?.items),
         }
       : null,
     review: review.map((r) => ({ id: r.id, severity: r.severity, code: r.code, message: r.message, fieldIds: r.field_ids, state: r.state, resolutionNote: r.resolution_note })),
@@ -243,6 +251,20 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
     sources: sources.filter((s) => s.status !== 'failed' || s.failure_reason).map(sourceDto),
     run: run ? runDto(run) : null,
     generatorMode: ctx.generatorMode,
+    // 실제로 만드는 결과 파일 키(카탈로그 outputs 중 구현된 것 — 선택 산출물을 아직 안 만들면 빠진다)
+    producedOutputs: order,
+  };
+}
+
+function itemsDto(c: ItemsContent | undefined) {
+  if (!c || c.schema !== 'items/1') return null;
+  return {
+    name: c.name,
+    columns: c.columns,
+    typeLabel: c.typeLabel,
+    items: c.items.map((i) => ({ id: i.id, type: i.type, values: i.values, sourceName: i.sourceName, quote: i.quote, flags: i.flags, notes: i.notes })),
+    meta: c.meta,
+    extra: c.extra ?? null,
   };
 }
 
@@ -306,7 +328,10 @@ async function currentVersionNumber(ctx: WorkContext, task: WorkTaskRow): Promis
 
 /** 칸만 고친 새 판이 이어 받는 내용 — 규정 판의 근거·판정(무엇을 보고 썼나)은 칸을 고쳐도 그대로다 */
 function carriedContent(content: Record<string, unknown> | null): Record<string, unknown> | null {
-  return content && 'regulations' in content ? { regulations: content.regulations } : null;
+  if (!content) return null;
+  if ('regulations' in content) return { regulations: content.regulations };
+  if ('items' in content) return { items: content.items };
+  return null;
 }
 
 /** '파일 만들기' — 초안 생성 실행. 같은 요청 번호면 같은 실행(연속 클릭 — A11) */
@@ -549,7 +574,9 @@ export async function completionGate(ctx: WorkContext, task: WorkTaskRow) {
   const impl = getWorkflowImpl(task.workflow_key);
   const [items, artifacts] = await Promise.all([ctx.store.listReviewItems(versionId, task.organization_id), ctx.store.listArtifacts(task.id, task.organization_id)]);
   const blocking = items.filter((i) => i.severity === 'blocking' && i.state === 'open').length;
-  const artifactReady = artifacts.some((a) => a.document_version_id === versionId && a.output_key === impl?.documentOutputKey && a.validation_status === 'valid');
+  // 함께 만드는 파일이 여럿이면 모두 지금 판으로 있어야 한다(회의록 + 후속조치표 등)
+  const keys = impl ? outputKeysOf(impl) : [];
+  const artifactReady = keys.length > 0 && keys.every((k) => artifacts.some((a) => a.document_version_id === versionId && a.output_key === k && a.validation_status === 'valid'));
   return { blocking, artifactReady };
 }
 
@@ -588,6 +615,23 @@ export async function artifactDownloadUrl(ctx: WorkContext, actor: WorkActor, ar
 }
 
 /** 결과물 모음 — 내가 볼 수 있는 작업의 파일만 */
+/** 다른 작업의 결과 파일을 이 작업의 원자료로 — 이 작업은 고칠 수 있어야 하고, 원래 작업은 내려받을 수 있어야 한다(같은 기관) */
+export async function importArtifactAsSource(ctx: WorkContext, actor: WorkActor, taskId: string, input: { artifactId: unknown; purpose?: unknown }) {
+  const { task } = await loadTask(ctx, actor, taskId, 'edit');
+  if (typeof input.artifactId !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.artifactId)) throw new WorkError('INVALID_INPUT', 'artifactId가 필요합니다.');
+  const art = await ctx.store.getArtifact(input.artifactId, actor.organizationId);
+  if (!art) throw new WorkError('NOT_FOUND', '결과 파일을 찾을 수 없습니다.', 404);
+  if (art.task_id === task.id) throw new WorkError('INVALID_INPUT', '같은 작업의 결과 파일은 원자료로 가져올 수 없습니다.');
+  // 원래 작업을 볼 수 없으면 404 — 남의 작업 파일이 있는지도 알려 주지 않는다
+  await loadTask(ctx, actor, art.task_id, 'download');
+  if (art.validation_status !== 'valid') throw new WorkError('INVALID_INPUT', '검사를 통과한 결과 파일만 가져올 수 있습니다.', 409);
+  const purpose = (['reference', 'data', 'request', 'template', 'evidence'] as const).find((p) => p === input.purpose) ?? 'reference';
+  const src = await copyArtifactToSource(ctx, task, actor.userId, art, purpose);
+  if (src.status === 'ready') await refreshReadiness(ctx, task);
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'source.imported', details: { source_id: src.id, from_task_id: art.task_id, artifact_id: art.id } });
+  return sourceDto(src);
+}
+
 export async function listMyFiles(ctx: WorkContext, actor: WorkActor) {
   const { items } = await listTasks(ctx, actor, { limit: 50 });
   const out: (ReturnType<typeof artifactDto> & { taskTitle: string; current: boolean })[] = [];

@@ -15,6 +15,7 @@ import {
   SEVERITY_LABEL,
 } from '@/lib/work/client';
 import { Card, ErrorNote, StatusBadge, statusTone } from './WorkShell';
+import ItemsView from './ItemsView';
 import FormFields, { cleanForm, type FormState } from './FormFields';
 import CollectionView from './CollectionView';
 import type { ArtifactDto, FieldDto, RegulationEvidenceDto, RegulationsDto, RunDto, TaskDetailDto } from './types';
@@ -204,8 +205,11 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
             </>
           ) : (
             <>
-              <PreviewCard artifact={current} canDownload={task.access.download} />
-              <FieldEditor
+              {detail.currentArtifacts.length > 1
+                ? detail.currentArtifacts.map((a) => <PreviewCard key={a.id} artifact={a} canDownload={task.access.download} />)
+                : <PreviewCard artifact={current} canDownload={task.access.download} />}
+              {version.items && <ItemsView data={version.items} />}
+              {version.fields.length > 0 && <FieldEditor
                 key={version.id}
                 detail={detail}
                 taskId={taskId}
@@ -217,7 +221,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
                 }}
                 setError={setError}
                 onRun={(r) => void startRun(r)}
-              />
+              />}
               {task.access.edit && (
                 <Card>
                   <h2 className="text-[16px] font-semibold">다시 만들기</h2>
@@ -312,6 +316,8 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
             ? '올린 원자료의 표를 부서·항목별로 더해 통합 엑셀(XLSX)을 만듭니다. 숫자는 프로그램이 계산하고, 중복·미제출·단위 차이는 확인할 사항으로 알립니다.'
             : detail.kind === 'regulations'
               ? '기관 문서·공통 기준 자료·국가법령정보·올린 추가 자료에서 근거를 찾아 근거 검토 메모(HWPX)를 만듭니다. 적용 기준일 뒤에 시행된 근거·다른 기관 자료는 빼고, 근거로 받치지 못한 판단은 유보로 적습니다. 법률적 최종 판단이 아닙니다.'
+              : detail.kind === 'items'
+                ? `원자료에서 항목을 원문 인용과 함께 뽑아 ${workflow.outputs.filter((o) => detail.producedOutputs.includes(o.key)).map((o) => `${o.label}(${o.format.toUpperCase()})`).join('·')}을 만듭니다. 날짜·담당·화자는 원자료에 적힌 것만 옮기고, 없으면 비운 채 확인할 사항으로 알립니다.`
               : '입력과 원자료로 양식의 칸을 채운 한글(HWPX) 초안을 만듭니다. 모르는 사실(발신 명의·기한·금액 등)은 지어내지 않고 비워 둔 뒤 확인할 사항으로 알립니다.'}
         </p>
         {detail.kind === 'collection' && <p className="mt-1 text-[13px] text-slate-500">원자료는 왼쪽 &lsquo;원자료&rsquo; 탭에서 올립니다(부서별 파일 — 파일 이름에 부서명이 있으면 부서를 알아봅니다).</p>}
@@ -320,7 +326,7 @@ function BeforeGenerate({ detail, taskId, busy, onGenerate, onSaved, setError }:
           disabled={!task.access.edit || busy || dirty || task.status === 'draft'}
           className="mt-4 rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white disabled:bg-slate-300"
         >
-          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : detail.kind === 'regulations' ? '근거 찾아 메모 만들기' : 'HWPX 만들기'}
+          {busy ? '만드는 중…' : detail.kind === 'collection' ? '취합 엑셀 만들기' : detail.kind === 'regulations' ? '근거 찾아 메모 만들기' : detail.kind === 'items' ? `${workflow.outputs[0].label} 만들기` : 'HWPX 만들기'}
         </button>
         {task.status === 'draft' && <p className="mt-2 text-[13px] text-red-700">{draftReason(detail)}</p>}
         {dirty && <p className="mt-2 text-[13px] text-amber-800">바꾼 입력을 먼저 저장해 주세요.</p>}
@@ -577,6 +583,7 @@ function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: {
   const [busy, setBusy] = useState(false);
   const keyRef = useRef<string | null>(null);
   const version = detail.version;
+  if (detail.kind === 'items' && !detail.version?.fields.length) return <p className="text-[14px] text-slate-600">처리표는 원자료에서 뽑은 항목 그대로입니다. 고치려면 원자료를 바로잡아 다시 만들거나, 내려받은 엑셀에서 직접 고치세요.</p>;
   if (detail.kind === 'collection') return <p className="text-[14px] text-slate-600">취합 숫자는 원자료에서 프로그램이 계산합니다. 고치려면 가운데에서 결정(중복·단위·잠정)을 바꿔 다시 취합하거나 원자료를 고쳐 다시 올리세요.</p>;
   if (!version) return <p className="text-[14px] text-slate-500">파일을 만든 뒤 고칠 수 있습니다.</p>;
   if (!detail.task.access.edit) return <p className="text-[14px] text-slate-500">이 작업을 고칠 권한이 없습니다.</p>;
@@ -672,15 +679,36 @@ function ArtifactList({ artifacts, canDownload }: { artifacts: ArtifactDto[]; ca
   );
 }
 
+/** 파일 입력(카탈로그 file-set) → 원자료 용도. 업무가 파일을 여러 갈래로 받을 때(공문·붙임 / 업무분장표) 서버가 가른다 */
+const FILE_SET_PURPOSE: Record<string, 'request' | 'reference' | 'template'> = { requestFiles: 'request', departmentMap: 'reference', baseForm: 'template' };
+
 function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; taskId: string; onChanged: () => Promise<void> }) {
   const [stage, setStage] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileSets = detail.workflow.inputs.filter((i) => i.type === 'file-set');
+  const [setKey, setSetKey] = useState(fileSets[0]?.key ?? '');
+  const purpose = FILE_SET_PURPOSE[setKey] ?? 'reference';
+  const [picking, setPicking] = useState<{ id: string; label: string }[] | null>(null);
+  async function openImport() {
+    setErr(null);
+    const r = await api<({ id: string; file_name: string; taskTitle: string; task_id: string; current: boolean; validation_status: string })[]>('/api/work/files');
+    if (!r.ok) return setErr(r.error.message);
+    setPicking(r.data.filter((a) => a.task_id !== taskId && a.current && a.validation_status === 'valid').map((a) => ({ id: a.id, label: `${a.taskTitle} — ${a.file_name}` })));
+  }
+  async function importArtifact(id: string) {
+    setStage('결과 파일을 가져와 읽는 중');
+    const r = await api(`/api/work/tasks/${taskId}/sources/import`, { method: 'POST', json: { artifactId: id, purpose } });
+    setStage(null);
+    setPicking(null);
+    if (!r.ok) setErr(r.error.message);
+    await onChanged();
+  }
   async function onFiles(files: FileList | null) {
     if (!files) return;
     for (const file of Array.from(files)) {
       setErr(null);
-      const r = await uploadSource(taskId, file, 'reference', (s) => setStage(`${file.name}: ${s === 'uploading' ? '올리는 중' : '읽는 중'}`));
+      const r = await uploadSource(taskId, file, purpose, (s) => setStage(`${file.name}: ${s === 'uploading' ? '올리는 중' : '읽는 중'}`));
       if (!r.ok) setErr(`${file.name}: ${r.message}`);
     }
     setStage(null);
@@ -694,6 +722,8 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
         {detail.sources.map((s) => (
           <li key={s.id} className="rounded border border-[#DCE3EC] p-2">
             <div className="break-all font-medium">{s.file_name}</div>
+            {fileSets.length > 1 && <div className="text-[12px] text-slate-500">{fileSets.find((f) => (FILE_SET_PURPOSE[f.key] ?? 'reference') === s.purpose)?.label ?? '자료'}</div>}
+            {(s as { origin?: { type?: string } | null }).origin?.type === 'work_artifact' && <div className="text-[12px] text-[#003087]">다른 작업의 결과 파일에서 가져옴</div>}
             <div className="text-[12px] text-slate-500">
               {s.status === 'ready' ? '읽음' : s.status === 'pending' ? '확인 전' : `읽지 못함 — ${s.failure_reason ?? ''}`} · {formatBytes(s.size_bytes)}
               {(s.summary as { truncated?: boolean } | null)?.truncated ? ' · 길어서 앞부분만 읽음' : ''}
@@ -703,8 +733,36 @@ function SourceList({ detail, taskId, onChanged }: { detail: TaskDetailDto; task
       </ul>
       {detail.task.access.edit && (
         <>
+          {fileSets.length > 1 && (
+            <div>
+              <label htmlFor="src-set" className="text-[13px] font-medium">올릴 자료</label>
+              <select id="src-set" value={setKey} onChange={(e) => setSetKey(e.target.value)} className="mt-1 w-full rounded-lg border border-[#DCE3EC] bg-white px-2 py-1.5">
+                {fileSets.map((f) => (
+                  <option key={f.key} value={f.key}>{f.label}{f.required ? ' (필수)' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <input ref={inputRef} id="src-file" type="file" multiple className="sr-only" accept=".xlsx,.xlsm,.csv,.hwpx,.hwp,.docx,.pdf,.pptx,.txt" onChange={(e) => onFiles(e.target.files)} />
-          <label htmlFor="src-file" className="inline-block cursor-pointer rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">파일 선택</label>
+          <div className="flex flex-wrap gap-2">
+            <label htmlFor="src-file" className="inline-block cursor-pointer rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">파일 선택</label>
+            <button type="button" onClick={openImport} className="rounded-[10px] border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">내 결과물에서 가져오기</button>
+          </div>
+          {picking && (
+            <div className="rounded-lg border border-[#DCE3EC] p-2">
+              <p className="text-[13px] text-slate-600">다른 작업의 지금 판 결과 파일을 원자료로 복사해 읽습니다(원래 작업은 바뀌지 않음).</p>
+              {picking.length === 0 ? <p className="text-slate-500">가져올 결과 파일이 없습니다.</p> : (
+                <ul className="mt-1 space-y-1">
+                  {picking.map((a) => (
+                    <li key={a.id}>
+                      <button type="button" onClick={() => importArtifact(a.id)} className="w-full rounded px-2 py-1 text-left hover:bg-slate-100">{a.label}</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={() => setPicking(null)} className="mt-1 text-[13px] text-slate-500 underline">닫기</button>
+            </div>
+          )}
           <p className="text-[12px] text-slate-500">엑셀·CSV·한글·워드·PDF·파워포인트·TXT, 10MB까지. 자료는 그대로 읽어 근거로만 씁니다.</p>
         </>
       )}

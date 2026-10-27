@@ -30,6 +30,8 @@ export interface ComposeInput {
   organizationName: string | null;
   /** 선택 영역 수정 요청 */
   instruction?: string;
+  /** 업무 검토 규칙(카탈로그 validationRules — 예: 실적·계획·제안 구분) */
+  rules?: readonly string[];
 }
 
 export interface ComposeResult {
@@ -76,6 +78,7 @@ function buildUserMessage(i: ComposeInput): string {
     i.organizationName ? `기관: ${i.organizationName}` : '',
     `작업 제목: ${i.title}`,
     i.instruction ? `직원의 수정 요청(선택한 칸에만 적용): ${i.instruction}` : '',
+    i.rules?.length ? `이 업무에서 지킬 것: ${i.rules.join(' / ')}` : '',
     '',
     '직원이 확인한 사실:',
     ...i.facts.map((f) => `- ${f.label}: ${f.value}`),

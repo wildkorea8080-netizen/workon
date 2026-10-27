@@ -96,16 +96,17 @@ export interface CollectionResultDto {
 
 export interface TaskDetailDto {
   task: TaskDto;
-  kind: 'document' | 'collection' | 'regulations';
+  kind: 'document' | 'collection' | 'regulations' | 'items';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[] };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null } | null;
+  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];
   sources: { id: string; file_name: string; file_ext: string; size_bytes: number | null; status: string; failure_reason: string | null; purpose: string; summary: Record<string, unknown> | null; created_at: string }[];
   run: RunDto | null;
   generatorMode: 'llm' | 'mock';
+  producedOutputs: string[];
 }
 
 export interface TemplatesDto {
@@ -133,4 +134,13 @@ export interface RegulationsDto {
   findings: { text: string; evidenceIds: string[]; dateCheck: boolean }[];
   reservations: { text: string; reason: string }[];
   evidence: RegulationEvidenceDto[];
+}
+
+export interface ItemsDto {
+  name: string;
+  typeLabel: string;
+  columns: { key: string; label: string; type: string }[];
+  items: { id: string; type: string; values: Record<string, string>; sourceName: string | null; quote: string; flags: string[]; notes: string[] }[];
+  meta: Record<string, string>;
+  extra: { label: string; values: Record<string, string> }[] | null;
 }

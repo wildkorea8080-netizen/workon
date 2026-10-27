@@ -164,3 +164,52 @@ export function sourceDto(s: WorkSourceRow) {
   const { storage_path: _p, extract_path: _e, ...rest } = s;
   return rest;
 }
+
+/**
+ * 다른 작업의 결과 파일을 이 작업의 원자료로 가져온다(접수 → 취합 → 보고서 → 공문처럼 업무를 잇는다).
+ * 권한·같은 기관 확인은 부르는 쪽(services.importArtifactAsSource)이 한다. 원본 결과 파일은 옮기지 않고
+ * 바이트를 복사해 새 원자료로 읽는다 — 원래 작업이 바뀌어도 이 작업이 본 판은 그대로다(origin에 판·해시를 남긴다)
+ */
+export async function copyArtifactToSource(
+  ctx: WorkContext,
+  task: WorkTaskRow,
+  userId: string,
+  art: { id: string; task_id: string; document_version_id: string; file_name: string; format: string; mime_type: string; sha256: string; storage_path: string },
+  purpose: WorkSourceRow['purpose']
+): Promise<WorkSourceRow> {
+  const existing = await ctx.store.listSources(task.id, task.organization_id);
+  if (existing.filter((s) => s.status !== 'failed').length >= MAX_SOURCES_PER_TASK) {
+    throw new WorkError('INVALID_INPUT', `한 작업에 원자료는 ${MAX_SOURCES_PER_TASK}개까지 올릴 수 있습니다.`, 429);
+  }
+  const already = existing.find((s) => s.status !== 'failed' && (s.origin as { artifactId?: string } | null)?.artifactId === art.id);
+  if (already) return already;
+  const bytes = await ctx.files.get(art.storage_path);
+  if (!bytes) throw new WorkError('STORAGE_FAILED', '가져올 결과 파일을 찾지 못했습니다.', 409);
+  if (createHash('sha256').update(bytes).digest('hex') !== art.sha256) throw new WorkError('OUTPUT_INVALID', '결과 파일이 기록과 달라 가져오지 않았습니다.', 409);
+  const ext = attachmentExtension(art.file_name) ?? art.format;
+  const sourceId = randomUUID();
+  const path = sourceStoragePath(task.organization_id, task.id, sourceId, ext);
+  try {
+    await ctx.files.put(path, bytes, art.mime_type);
+  } catch {
+    throw new WorkError('STORAGE_FAILED', '결과 파일을 복사하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+  }
+  try {
+    await ctx.store.insertSource({
+      id: sourceId,
+      task_id: task.id,
+      organization_id: task.organization_id,
+      uploaded_by: userId,
+      purpose,
+      file_name: cleanSourceName(art.file_name) ?? `결과 파일.${ext}`,
+      file_ext: ext,
+      size_bytes: bytes.length,
+      storage_path: path,
+      origin: { type: 'work_artifact', taskId: art.task_id, artifactId: art.id, versionId: art.document_version_id, sha256: art.sha256 },
+    });
+  } catch (e) {
+    await ctx.files.remove([path]).catch(() => undefined);
+    throw e;
+  }
+  return confirmSource(ctx, task, sourceId);
+}
