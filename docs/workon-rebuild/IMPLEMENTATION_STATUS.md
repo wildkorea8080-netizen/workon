@@ -40,6 +40,7 @@
 | `npm run work:template-check` | 3종 ✓(사람의 시각 검토 경고), `--release`는 실패(정상 — 시각 검토 기록 필요) |
 | `npm run work:template-verify` | 3종 한글 열기·넣은 글·편집·다시 저장·PDF 통과 |
 | 별도 작업자 프로세스 | `npm run work:worker -- --once --hancom`: 시험 DB 대기 실행 처리 → 실제 HWPX + 한글 PDF 미리보기(1쪽, sha256 연결) |
+| **로컬 Supabase(Docker, 2026-10-27)** | 별도 포트 55321~(다른 프로젝트 스택과 안 겹침)에 0001~0034를 실제 Supabase Postgres 17로 적용 — **0034 포함 전부 통과**(옛 칸 4개 드리프트만 보충). 시험 기관 2·계정 4로 **로그인 → 업무 홈(실제 0건) → 공문 작업 만들기 → HWPX 만들기(시험 모드) → 작업실에 칸·확인할 사항 4건·파일(구조 검사 통과) → 칸 직접 수정 저장(2판)** 까지 화면에서 확인. 여기서 **버그 발견·수정**(345eb8b): 저장이 건 '이 판의 파일 만들기'가 대기에 멈춤. 수정 뒤 화면 재확인은 Docker가 메모리 부족으로 꺼져 남음 |
 | 실제 모델 | 공문 1건(가상 자료) — claude-sonnet-4-6, 입력 858·출력 444 토큰, 기록 원가 12원, usage_logs에 모델·토큰·원가·run_id |
 
 시험 DB: `npm run work:testdb -- start`(이 PC의 PostgreSQL 16 바이너리로 임시 클러스터, 54329). 옛 벡터 칸만 text로 대체. **운영 DB 드리프트 발견**: `agents.icon·color·usage_guide·starter_prompts`는 저장소 마이그레이션 어디에도 없지만 0019·0026이 쓴다(운영에서 손으로 추가한 칸) — 시험 DB는 그 칸을 보충해 적용.
@@ -90,6 +91,7 @@
 
 - 표 엔진이 표 위 글 '(단위: 천원)'을 '참여자'처럼 차원 낱말이 없는 셈 열에도 붙인다 — 대화의 표 합치기가 참여자 합을 '천원'으로 표시할 수 있음. 취합 업무는 셈 항목에서 그 단위를 버리게 막았고, 엔진 수정은 별도 작업으로 제안함
 - 운영 DB 드리프트(agents.icon·color·usage_guide·starter_prompts — 3절)
+- `nextAuthOptions.ts`가 users 행이 없거나 부서가 빈 사용자에게 **가장 오래된 부서**(`getDefaultDepartmentId`)를 배정한다 — CLAUDE.md '부서를 추측해서 배정하지 말 것'(signup·chat·bulk-register에서 지웠던 것)과 같은 꼴이 로그인 경로에 남아 있음. 업무 개편과 별개 — 수정 필요(소속을 모르면 거부)
 
 ## 6. 미완료 의존성(외부·사용자)
 
