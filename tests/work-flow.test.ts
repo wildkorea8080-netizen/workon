@@ -1,3 +1,4 @@
+import { createSourceUpload, confirmSource } from '@/lib/work/sources';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import pg from 'pg';
 import { randomUUID, createHash } from 'crypto';
@@ -27,8 +28,16 @@ const key = () => `k-${randomUUID()}`;
 class FakeGenerator implements FieldGenerator {
   calls = 0;
   failNext = 0;
+  invalidNext = 0;
   async compose(input: ComposeInput) {
     this.calls += 1;
+    if (this.invalidNext > 0) {
+      // 실제 생성기처럼 — 토큰을 쓴 응답이 형식 검사에서 던진다
+      this.invalidNext -= 1;
+      const { WorkError } = await import('@/lib/work/types');
+      const { parseSpent } = await import('@/lib/work/generation/spent');
+      return parseSpent({ model: 'claude-sonnet-4-6', input_tokens: 70, output_tokens: 20 }, () => { throw new WorkError('LLM_INVALID_OUTPUT', '가짜 형식 오류', 502); });
+    }
     if (this.failNext > 0) {
       this.failNext -= 1;
       const { WorkError } = await import('@/lib/work/types');
@@ -101,6 +110,126 @@ describe.skipIf(!url)('업무 흐름 통합(실제 Postgres·실제 HWPX)', () =
     };
     a = await seedOrg('A');
     b = await seedOrg('B');
+  });
+
+  it('문서 요약 앱은 첨부 자료로 두 요약 칸만 생성하고 실제 HWPX로 저장한다', async () => {
+    const task = await svc.createTask(ctx, a.actor, { workflowKey: 'document-summary', title: '시설 운영 자료 요약', form: { summaryStyle: '핵심 요약' } });
+    expect(task.status).toBe('draft');
+    const bytes = Buffer.from('주차장은 매일 운영하며 야간 운영 연장은 미확정입니다.', 'utf8');
+    const up = await createSourceUpload(ctx, task, a.userId, { fileName: '운영.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain');
+    await confirmSource(ctx, task, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(task.id, a.orgId))!);
+    const original = gen.compose.bind(gen);
+    ctx.generator = { compose: async (input, options) => {
+      expect(input.fields.filter((f) => input.targetIds.includes(f.id)).map((f) => f.label)).toEqual(['개요', '주요 내용']);
+      expect(input.sources[0].text).toContain('미확정');
+      expect(input.rules).toContain('원문에 없는 향후 계획·건의·조치·권고는 생성하지 않는다');
+      const result = await original(input);
+      for (const value of Object.values(result.values)) value.evidenceIds = [input.sources[0].id];
+      return result;
+    } };
+    const request = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    expect((await runWorker(ctx, { workerId: 'summary', runId: request.run.id }))[0].finish).toBe('succeeded');
+    const detail = await svc.getTaskDetail(ctx, a.actor, task.id);
+    expect(detail.currentArtifacts[0]).toMatchObject({ output_key: 'summary', format: 'hwpx', validation_status: 'valid' });
+    expect(detail.version!.fields.find((f) => f.label === '향후 계획')?.value).toBe('');
+  });
+
+  it.each(['oversize', 'missing-evidence'])('문서 요약의 %s는 완료 파일을 만들지 않는다', async (kind) => {
+    const task = await svc.createTask(ctx, a.actor, { workflowKey: 'document-summary', title: '제한 검증', form: { summaryStyle: '핵심 요약' } });
+    const bytes = Buffer.from(kind === 'oversize' ? '가'.repeat(40001) : '운영 기준 자료', 'utf8');
+    const up = await createSourceUpload(ctx, task, a.userId, { fileName: '자료.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain'); await confirmSource(ctx, task, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(task.id, a.orgId))!);
+    const request = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    const outcome = (await runWorker(ctx, { workerId: 'summary-limit', runId: request.run.id }))[0];
+    expect(outcome.error?.code).toBe(kind === 'oversize' ? 'SOURCE_TOO_LARGE' : 'LLM_INVALID_OUTPUT');
+    expect((await svc.getTaskDetail(ctx, a.actor, task.id)).currentArtifacts).toHaveLength(0);
+    if (kind === 'oversize') expect(gen.calls).toBe(0);
+    else expect((await pool.query('SELECT id FROM usage_logs WHERE resource_id=$1', [request.run.id])).rows).toHaveLength(1);
+  });
+
+  it.each(['document-rewrite', 'document-translation'].flatMap((workflowKey) => [false, true].map((changed) => ({ workflowKey, changed }))))('문서 변환 $workflowKey 숫자 변경=$changed: 작업·파일 경로와 차단', async ({ workflowKey, changed }) => {
+    const task = await svc.createTask(ctx, a.actor, { workflowKey, title: '시설 안내 변환', form: workflowKey === 'document-rewrite' ? { rewriteMode: '공문체 변환' } : { targetLanguage: '영어', translationStyle: '공식 문서' } });
+    const bytes = Buffer.from('점검 인원은 15명입니다.', 'utf8');
+    const up = await createSourceUpload(ctx, task, a.userId, { fileName: '안내.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain'); await confirmSource(ctx, task, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(task.id, a.orgId))!);
+    ctx.generator = { compose: async (input) => ({ values: Object.fromEntries(input.targetIds.map((id) => [id, { value: input.fields.find((f) => f.id === id)?.label === '개요' ? '문체를 교정했습니다.' : changed ? '점검 인원은 16명입니다.' : '점검 인원은 15명입니다.', evidenceIds: [input.sources[0].id] }])), missing: [], usage: null, mode: 'llm' }) };
+    const request = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    const out = (await runWorker(ctx, { workerId: 'rewrite-test', runId: request.run.id }))[0];
+    if (changed) { expect(out.error?.code).toBe('LLM_INVALID_OUTPUT'); expect((await svc.getTaskDetail(ctx, a.actor, task.id)).currentArtifacts).toHaveLength(0); }
+    else { expect(out.finish).toBe('succeeded'); expect((await svc.getTaskDetail(ctx, a.actor, task.id)).currentArtifacts[0]).toMatchObject({ output_key: workflowKey === 'document-rewrite' ? 'rewritten' : 'translation', format: 'hwpx', validation_status: 'valid' }); }
+  });
+
+  it('회의 안건 초안은 논의 칸만 채우고 확정 결정·일시를 만들지 않는다', async () => {
+    const task = await svc.createTask(ctx, a.actor, { workflowKey: 'meeting-agenda', title: '시설 개선 회의', form: { meetingPurpose: '운영 개선 쟁점 검토' } });
+    const bytes = Buffer.from('야간 인력과 비용 추산은 아직 없다. 연장 여부는 미결정이다.', 'utf8');
+    const up = await createSourceUpload(ctx, task, a.userId, { fileName: '검토.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain'); await confirmSource(ctx, task, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(task.id, a.orgId))!);
+    ctx.generator = { compose: async (input) => {
+      expect(input.fields.filter((f) => input.targetIds.includes(f.id)).map((f) => f.label)).toEqual(['안건', '논의 내용']);
+      return { values: Object.fromEntries(input.targetIds.map((id) => [id, { value: '확인 질문: 야간 인력과 비용 자료를 준비할 수 있는가?', evidenceIds: [input.sources[0].id] }])), missing: [], usage: null, mode: 'llm' };
+    } };
+    const req = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    expect((await runWorker(ctx, { workerId: 'agenda', runId: req.run.id }))[0].finish).toBe('succeeded');
+    const detail = await svc.getTaskDetail(ctx, a.actor, task.id);
+    for (const label of ['일시', '결정 사항', '향후 계획']) expect(detail.version!.fields.find((f) => f.label === label)?.value).toBe('');
+    expect(detail.version!.fields.find((f) => f.label === '회의명')?.value).toContain('[안건 초안]');
+    expect(detail.currentArtifacts[0]).toMatchObject({ output_key: 'agenda', format: 'hwpx', validation_status: 'valid' });
+  });
+
+  it.each(['grounded', 'bad-quote', 'needs_info'])('FAQ 초안 %s: 답변별 인용과 확인 필요', async (status) => {
+    const task = await svc.createTask(ctx, a.actor, { workflowKey: 'document-faq', title: '이용 FAQ', form: { audience: '일반 시민', questionCount: '3' } });
+    const bytes = Buffer.from('주차장은 매일 운영합니다.', 'utf8');
+    const up = await createSourceUpload(ctx, task, a.userId, { fileName: '이용.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain'); await confirmSource(ctx, task, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(task.id, a.orgId))!);
+    ctx.generator = { compose: async (input) => ({ values: Object.fromEntries(input.targetIds.map((id) => [id, { value: input.fields.find((f) => f.id === id)?.label === '개요' ? '이용 FAQ 초안입니다.' : JSON.stringify({ items: [{ question: '운영일은?', answer: '매일 운영합니다.', sourceId: input.sources[0].id, quote: status === 'bad-quote' ? '무료입니다.' : '주차장은 매일 운영합니다.', status: status === 'needs_info' ? 'needs_info' : 'grounded' }] }), evidenceIds: [input.sources[0].id] }])), missing: [], usage: null, mode: 'llm' }) };
+    const request = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    const outcome = (await runWorker(ctx, { workerId: 'faq-test', runId: request.run.id }))[0];
+    if (status === 'bad-quote') { expect(outcome.error?.code).toBe('LLM_INVALID_OUTPUT'); expect((await svc.getTaskDetail(ctx, a.actor, task.id)).currentArtifacts).toHaveLength(0); }
+    else {
+      expect(outcome.finish).toBe('succeeded'); const detail = await svc.getTaskDetail(ctx, a.actor, task.id);
+      expect(detail.currentArtifacts[0]).toMatchObject({ output_key: 'faq', format: 'hwpx', validation_status: 'valid' });
+      expect(detail.version!.fields.find((f) => f.label === '주요 내용')?.value).toContain(status === 'needs_info' ? '[확인 필요]' : '근거: 이용.txt');
+      if (status === 'needs_info') {
+        expect(detail.review.some((r) => r.severity === 'blocking')).toBe(true);
+        const field = detail.version!.fields.find((f) => f.label === '주요 내용')!;
+        const saved = await svc.saveDocument(ctx, a.actor, task.id, { baseVersion: 1, patches: [{ fieldId: field.id, operation: 'set_value', value: field.value + '\n직원 검토 중' }] });
+        await runWorker(ctx, { workerId: 'faq-edit', runId: saved.run!.id });
+        expect((await svc.getTaskDetail(ctx, a.actor, task.id)).review.some((r) => r.code === 'FAQ_NEEDS_INFO' && r.severity === 'blocking')).toBe(true);
+      }
+    }
+  });
+
+  it('요약 HWPX를 번역 작업에 복사해 출처 판·해시를 보존하고 이어서 파일을 만든다', async () => {
+    const summary = await svc.createTask(ctx, a.actor, { workflowKey: 'document-summary', title: '시설 운영 요약', form: { summaryStyle: '핵심 요약' } });
+    const bytes = Buffer.from('시설은 매일 운영합니다.', 'utf8');
+    const up = await createSourceUpload(ctx, summary, a.userId, { fileName: '운영.txt', size: bytes.length, purpose: 'reference' });
+    await ctx.files.put(up.path, bytes, 'text/plain'); await confirmSource(ctx, summary, up.sourceId);
+    await svc.refreshReadiness(ctx, (await store.getTask(summary.id, a.orgId))!);
+    ctx.generator = { compose: async (input) => ({ values: Object.fromEntries(input.targetIds.map((id) => [id, { value: input.sources[0].text, evidenceIds: [input.sources[0].id] }])), missing: [], usage: null, mode: 'llm' }) };
+    const first = await svc.requestGenerate(ctx, a.actor, summary.id, { baseVersion: 0, idempotencyKey: key() });
+    expect((await runWorker(ctx, { workerId: 'chain-summary', runId: first.run.id }))[0].finish).toBe('succeeded');
+    const detail = await svc.getTaskDetail(ctx, a.actor, summary.id);
+    const artifact = detail.currentArtifacts[0];
+    await svc.reviewTask(ctx, a.actor, summary.id, { action: 'approve', versionId: detail.version!.id });
+    expect((await store.getTask(summary.id, a.orgId))?.approved_version_id).toBe(detail.version!.id);
+    const translation = await svc.createTask(ctx, a.actor, { workflowKey: 'document-translation', title: '요약 번역', form: { targetLanguage: '영어', translationStyle: '일반 안내' } });
+    const imported = await svc.importArtifactAsSource(ctx, a.actor, translation.id, { artifactId: artifact.id });
+    expect(imported.status).toBe('ready');
+    expect(imported.origin).toMatchObject({ type: 'work_artifact', taskId: summary.id, artifactId: artifact.id, versionId: detail.version!.id });
+    const original = await store.getArtifact(artifact.id, a.orgId);
+    expect(imported.sha256).toBe(original!.sha256);
+    expect((await store.getTask(translation.id, a.orgId))?.status).toBe('ready');
+    // 같은 파일을 다시 가져와도 원자료가 중복되지 않는다.
+    expect((await svc.importArtifactAsSource(ctx, a.actor, translation.id, { artifactId: artifact.id })).id).toBe(imported.id);
+    const second = await svc.requestGenerate(ctx, a.actor, translation.id, { baseVersion: 0, idempotencyKey: key() });
+    expect((await runWorker(ctx, { workerId: 'chain-translation', runId: second.run.id }))[0].finish).toBe('succeeded');
+    expect((await svc.getTaskDetail(ctx, a.actor, translation.id)).currentArtifacts[0]).toMatchObject({ output_key: 'translation', format: 'hwpx', validation_status: 'valid' });
   });
 
   it('기관 스위치가 꺼져 있으면 새 작업을 만들 수 없다', async () => {
@@ -182,6 +311,25 @@ describe.skipIf(!url)('업무 흐름 통합(실제 Postgres·실제 HWPX)', () =
     // 같은 응답을 두 번 과금하지 않는다(성공한 호출 1건만 기록)
     const usage = await pool.query(`SELECT count(*)::int AS n FROM usage_logs WHERE resource_id = $1`, [r.run.id]);
     expect(usage.rows[0].n).toBe(1);
+  });
+
+  it('과금 규약 — 형식이 깨진 응답의 토큰은 실패 기록 한 건, 다시 시도해 성공하면 성공 기록 한 건', async () => {
+    const task = await newTask();
+    const r = await svc.requestGenerate(ctx, a.actor, task.id, { baseVersion: 0, idempotencyKey: key() });
+    gen.invalidNext = 1;
+    const first = await runWorker(ctx, { workerId: 'inv1', runId: r.run.id });
+    expect(first[0].error?.code).toBe('LLM_INVALID_OUTPUT');
+    const afterFail = await pool.query(`SELECT details FROM usage_logs WHERE resource_id = $1 ORDER BY created_at`, [r.run.id]);
+    expect(afterFail.rows).toHaveLength(1);
+    expect(afterFail.rows[0].details).toMatchObject({ failed: true, error_code: 'LLM_INVALID_OUTPUT', input_tokens: 70, stage: 'compose', attempt: 1 });
+    expect(afterFail.rows[0].details.cost_krw).toBeGreaterThan(0);
+    expect(first[0].finish).toBe('requeued'); // 형식 오류는 다시 시도하는 오류
+    await pool.query('UPDATE work_runs SET available_at = now() WHERE id = $1', [r.run.id]);
+    expect((await runWorker(ctx, { workerId: 'inv2', runId: r.run.id }))[0].finish).toBe('succeeded');
+    const all = await pool.query(`SELECT details FROM usage_logs WHERE resource_id = $1 ORDER BY created_at`, [r.run.id]);
+    expect(all.rows).toHaveLength(2);
+    expect(all.rows[1].details).toMatchObject({ input_tokens: 100, attempt: 2 });
+    expect(all.rows[1].details.failed).toBeUndefined();
   });
 
   it('A12 — 판을 저장한 뒤 체크포인트 전에 죽어도 같은 실행이 판을 두 번 만들지 않는다', async () => {

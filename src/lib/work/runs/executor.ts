@@ -1,5 +1,9 @@
+import { verifyFaq, formatFaq } from '../workflows/faq/verify';
+import { getDocumentAppPolicy, isDocumentAppTarget } from '../workflows/document-apps';
+import { rewriteNumbersPreserved, translationNumbersPreserved } from '../workflows/rewrite/verify';
+import { retrieveAppEvidence, storedAppEvidence } from '../app-evidence';
+import { workModelOptions } from '../app-binding';
 // src/lib/work/runs/executor.ts
-import { buildUsageDetails } from '@/lib/assistant/persist';
 import type { WorkContext } from '../context';
 import { WorkError, type DocumentField, type WorkRunRow, type WorkTaskRow, type WorkRunError } from '../types';
 import { definitionFor, getWorkflowImpl, applyPrefill } from '../workflows';
@@ -21,7 +25,7 @@ import { ITEMS_WORKFLOWS, departmentCandidates, flagReviewItems, type ItemsWorkf
 import { reconcile, type SettlementResult } from '../workflows/settlement/reconcile';
 import { factLines, qaReviewItems, verifyQa, type QaResult } from '../workflows/qa/verify';
 import { auditFieldValues, replyFieldValues } from '../workflows/qa/output';
-import { writeModelUsage, buildFileStep, type StepFn } from './shared';
+import { callModel, buildFileStep, type StepFn } from './shared';
 import { opGenerateCurrentize, usesCurrentize } from './currentize-op';
 import { currentizeReviewItems } from '../workflows/currentize/review';
 import type { CurrentizeContent } from '../workflows/currentize/plan';
@@ -142,9 +146,13 @@ async function prepareFields(ctx: WorkContext, task: WorkTaskRow): Promise<Prepa
   const departmentName = await ctx.store.getDepartmentName(task.department_id, task.organization_id);
   fields = applyPrefill(fields, impl.prefill(form.values, { organizationName, departmentName, today: kstDate(ctx.now()) }));
   const sources = await loadSourceTexts(ctx, task);
+  const documentPolicy = getDocumentAppPolicy(task.workflow_key);
+  if (documentPolicy && (sources.length > documentPolicy.maxSources || sources.reduce((sum, source) => sum + source.text.length, 0) > documentPolicy.maxChars)) {
+    throw new WorkError('SOURCE_TOO_LARGE', `${documentPolicy.label}은 ${Number.isFinite(documentPolicy.maxSources) ? `문서 ${documentPolicy.maxSources}개 이하·` : ''}읽힌 원문 ${documentPolicy.maxChars.toLocaleString('ko-KR')}자까지 지원합니다. 자료를 나눠 주세요.`, 422);
+  }
   // AI가 채울 칸: 잠기지 않았고, 직원이 고치거나 폼에서 채우지 않았으며, 직원이 정할 칸이 아닌 것
   const targetIds = fields
-    .filter((f) => !f.locked && f.origin !== 'user' && f.origin !== 'form' && !impl.humanOnlyLabels.includes(f.label))
+    .filter((f) => isDocumentAppTarget(task.workflow_key, f.label) && !f.locked && f.origin !== 'user' && f.origin !== 'form' && !impl.humanOnlyLabels.includes(f.label))
     .map((f) => f.id);
   return {
     fields,
@@ -161,8 +169,10 @@ async function composeStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow,
   const def = definitionFor(task.workflow_key);
   const targetIds = onlyIds ?? p.targetIds;
   if (targetIds.length === 0) return { values: {}, missing: [], mode: ctx.generatorMode, model: null };
-  const model = await ctx.resolveModel(task.department_id);
-  const res = await ctx.generator.compose(
+  const options = await workModelOptions(ctx, task);
+  const model = options.model;
+  const organizationName = await ctx.store.getOrganizationName(task.organization_id);
+  const res = await callModel(ctx, run, task, 'compose', () => ctx.generator.compose(
     {
       workflowName: def.name,
       workflowPurpose: def.purpose,
@@ -171,21 +181,39 @@ async function composeStep(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow,
       fields: p.fields,
       targetIds,
       sources: p.sources,
-      organizationName: await ctx.store.getOrganizationName(task.organization_id),
+      organizationName,
       instruction,
       rules: def.validationRules,
     },
-    { model }
-  );
-  if (res.usage) {
-    // 과금 규약 — 모델·토큰·기록 시점 원가. 작업·실행·시도까지 남겨 대조할 수 있게
-    await ctx.store.writeUsage({
-      departmentId: task.department_id,
-      userId: run.requested_by,
-      action: run.operation === 'revise' ? 'work_revise' : 'work_generate',
-      resourceId: run.id,
-      details: buildUsageDetails(res.usage, { task_id: task.id, run_id: run.id, attempt: run.attempt, workflow_key: task.workflow_key, agent_id: task.agent_id }),
-    });
+    { ...options, model }
+  ), run.operation === 'revise' ? 'work_revise' : 'work_generate');
+  if (getDocumentAppPolicy(task.workflow_key)) {
+    const allowed = new Set(p.sources.map((s) => s.id));
+    if (Object.values(res.values).some((v) => v.value.trim() && !v.evidenceIds.some((id) => allowed.has(id)))) {
+      throw new WorkError('LLM_INVALID_OUTPUT', '생성 결과의 근거 문서 연결이 빠졌습니다. 다시 생성해 주세요.', 502);
+    }
+    const main = p.fields.find((f) => f.label === getDocumentAppPolicy(task.workflow_key)!.mainLabel);
+    const output = main ? res.values[main.id] : null;
+    if (task.workflow_key === 'document-faq' && output?.value.trim()) {
+      try {
+        const items = verifyFaq(output.value, p.sources, Number(task.form.questionCount));
+        output.value = formatFaq(items, p.sources);
+        output.evidenceIds = [...new Set(items.flatMap((item) => item.sourceId ? [item.sourceId] : []))];
+      } catch {
+        throw new WorkError('LLM_INVALID_OUTPUT', 'FAQ 형식이나 답변별 원문 인용이 맞지 않아 저장하지 않았습니다. 다시 생성해 주세요.', 502);
+      }
+    }
+    if (task.workflow_key === 'document-rewrite' && output?.value.trim() && !rewriteNumbersPreserved(p.sources.map((s) => s.text).join('\n'), output.value)) {
+      throw new WorkError('LLM_INVALID_OUTPUT', '원문의 숫자·날짜 표기가 달라져 결과를 저장하지 않았습니다. 다시 생성해 주세요.', 502);
+    }
+    if (task.workflow_key === 'document-translation' && output?.value.trim() && !translationNumbersPreserved(p.sources.map((s) => s.text).join('\n'), output.value)) {
+      throw new WorkError('LLM_INVALID_OUTPUT', '번역문의 숫자·날짜 값이 달라져 결과를 저장하지 않았습니다. 다시 생성해 주세요.', 502);
+    }
+    if (output?.value.trim()) {
+      const used = new Set(Object.values(res.values).flatMap((v) => v.evidenceIds));
+      const names = p.sources.filter((s) => used.has(s.id)).map((s) => s.name.replace(/[\r\n]/g, ' '));
+      if (names.length) output.value += `\n\n[참고 자료]\n${names.map((name) => `- ${name}`).join('\n')}`;
+    }
   }
   return { values: res.values, missing: res.missing, mode: res.mode, model: res.usage?.model ?? null };
 }
@@ -296,22 +324,22 @@ async function opGenerateRegulations(ctx: WorkContext, run: WorkRunRow, task: Wo
   const scopeText = fact('scope');
   const organizationName = await ctx.store.getOrganizationName(task.organization_id);
   const planned = await step('plan', async () => {
-    const model = await ctx.resolveModel(task.department_id);
-    const r = await regModel.plan({ question, scope: scopeText, basisDate, organizationName }, { model });
-    await writeModelUsage(ctx, run, task, r.usage, 'plan');
+    const options = await workModelOptions(ctx, task);
+    const model = options.model;
+    const r = await callModel(ctx, run, task, 'plan', () => regModel.plan({ question, scope: scopeText, basisDate, organizationName }, { ...options, model }));
     return { plan: r.plan, mode: r.mode } as unknown as Record<string, unknown>;
   });
   const plan = planned.plan as RegulationPlan;
   const gathered = await step('gather', async () => {
-    const g = await gatherEvidence(providers, { organizationId: task.organization_id, organizationName, departmentId: task.department_id }, plan, p.sources);
+    const g = await gatherEvidence(providers, { organizationId: task.organization_id, organizationName, departmentId: task.department_id, ...(task.app_snapshot?.documentScope === 'selected-agent' ? { agentId: task.app_snapshot.agentId } : {}) }, plan, p.sources);
     return { evidence: numberEvidence(g.raw, { basisDate, organizationName }), unavailable: g.unavailable } as unknown as Record<string, unknown>;
   });
   const evidence = gathered.evidence as RegulationEvidence[];
   const unavailable = gathered.unavailable as string[];
   const drafted = await step('compose', async () => {
-    const model = await ctx.resolveModel(task.department_id);
-    const r = await regModel.review({ question, scope: scopeText, basisDate, organizationName, evidence }, { model });
-    await writeModelUsage(ctx, run, task, r.usage, 'review');
+    const options = await workModelOptions(ctx, task);
+    const model = options.model;
+    const r = await callModel(ctx, run, task, 'review', () => regModel.review({ question, scope: scopeText, basisDate, organizationName, evidence }, { ...options, model }));
     return { draft: r.draft, mode: r.mode } as unknown as Record<string, unknown>;
   });
   const outcome = settleFindings(drafted.draft as RegulationDraft, evidence);
@@ -419,9 +447,9 @@ async function opGenerateItems(ctx: WorkContext, run: WorkRunRow, task: WorkTask
   if (!sources.length) throw new WorkError('REQUIRED_INPUT_MISSING', '읽힌 원자료가 없습니다. 원자료를 올려 주세요.', 422);
 
   const extracted = await step('compose', async () => {
-    const model = await ctx.resolveModel(task.department_id);
-    const r = await ctx.items!.model.extract({ workflowName: def.name, title: task.title, facts: formFacts(def, form.values), sources, spec: wf.spec }, { model });
-    await writeModelUsage(ctx, run, task, r.usage, 'extract');
+    const options = await workModelOptions(ctx, task);
+    const model = options.model;
+    const r = await callModel(ctx, run, task, 'extract', () => ctx.items!.model.extract({ workflowName: def.name, title: task.title, facts: formFacts(def, form.values), sources, spec: wf.spec }, { ...options, model }));
     return { items: r.items, meta: r.meta, summary: r.summary, mode: r.mode } as unknown as Record<string, unknown>;
   });
   const mode = extracted.mode as 'llm' | 'mock';
@@ -558,15 +586,17 @@ async function opGenerateQa(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow
   const inquiryText = typeof form.values.inquiry === 'string' ? form.values.inquiry : '';
   const questionSources = kind === 'reply' ? [{ id: 'inquiry', name: '문의 내용', text: inquiryText }] : extracts.filter((s) => s.purpose === 'request');
   const evidenceSources = kind === 'reply' ? extracts.filter((s) => s.purpose !== 'template') : extracts.filter((s) => s.purpose === 'evidence');
+  const retrieved = await step('app_evidence', () => retrieveAppEvidence(ctx, task, `${task.title}\n${inquiryText}`));
+  evidenceSources.push(...retrieved.sources.map((s) => ({ ...s, purpose: 'evidence' as const })));
   const priorSources = kind === 'audit' ? extracts.filter((s) => s.purpose === 'reference') : [];
   const facts = factLines(typeof form.values.confirmedFacts === 'string' ? form.values.confirmedFacts : '');
   const definitions = Array.isArray(form.values.indicatorDefinitions) ? (form.values.indicatorDefinitions as { name: string }[]).map((d) => d.name).filter(Boolean) : [];
   if (!questionSources.length || !questionSources.some((s) => s.text.trim())) throw new WorkError('REQUIRED_INPUT_MISSING', kind === 'reply' ? '문의 내용이 비어 있습니다.' : '요구서를 올려 주세요.', 422);
 
   const answered = await step('compose', async () => {
-    const model = await ctx.resolveModel(task.department_id);
-    const r = await ctx.qa!.model.answer({ kind, title: task.title, questionSources, evidenceSources, priorSources, facts, definitions }, { model });
-    await writeModelUsage(ctx, run, task, r.usage, 'answer');
+    const options = await workModelOptions(ctx, task);
+    const model = options.model;
+    const r = await callModel(ctx, run, task, 'answer', () => ctx.qa!.model.answer({ kind, title: task.title, questionSources, evidenceSources, priorSources, facts, definitions }, { ...options, model }));
     return { raw: r.raw, mode: r.mode } as unknown as Record<string, unknown>;
   });
   const mode = answered.mode as 'llm' | 'mock';
@@ -588,7 +618,7 @@ async function opGenerateQa(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow
       organizationId: task.organization_id,
       baseVersion: run.base_version,
       fields,
-      content: { qa: content },
+      content: { qa: content, appEvidence: retrieved.sources },
       templateVersionId: p.templateVersionId,
       origin: 'generate',
       reason: mode === 'mock' ? '시험 모드로 질문별 답변' : '질문별 답변',
@@ -626,9 +656,14 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
   if (kind === 'regulations') return opGenerateRegulations(ctx, run, task, step);
   // 보고서 등: 작년 파일이 읽혀 있으면 양식 채우기 대신 현행화(작년 HWPX를 올해로)
   // (다시 시도는 첫 시도의 길 — usesCurrentize)
-  if (getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior && (await usesCurrentize(ctx, run, task))) return opGenerateCurrentize(ctx, run, task, step);
+  if (getWorkflowImpl(task.workflow_key)?.usesCurrentizeWhenPrior && (await usesCurrentize(ctx, run, task))) {
+    if (task.app_snapshot?.documentScope === 'selected-agent') throw new WorkError('INVALID_INPUT', '문서함 연결은 새 보고서 작성에서 지원합니다. 현행화는 기본 검색 범위로 새 작업을 만들어 주세요.', 422);
+    return opGenerateCurrentize(ctx, run, task, step);
+  }
   const p = await step('prepare', () => prepareFields(ctx, task));
-  const composed = await step('compose', () => composeStep(ctx, run, task, p));
+  const retrieved = await step('app_evidence', () => retrieveAppEvidence(ctx, task, [task.title, ...p.facts.map((f) => f.value)].join('\n')));
+  const enriched = { ...p, sources: [...p.sources, ...retrieved.sources] };
+  const composed = await step('compose', () => composeStep(ctx, run, task, enriched));
   const saved = await step('save_version', async () => {
     // 저장 뒤 체크포인트 전에 죽었으면 그 판을 다시 쓴다 — 같은 실행이 판을 두 번 만들지 않는다
     const existing = await ctx.store.getVersionByRun(task.id, run.id);
@@ -645,12 +680,14 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
       actorId: run.requested_by,
       runId: run.id,
       sourceIds: p.sourceIds,
+      content: { appEvidence: retrieved.sources },
     });
     return { versionId: v.id, version: v.version };
   });
   const review = await step('review', async () => {
     const v = (await ctx.store.getVersion(saved.versionId, task.organization_id))!;
     const items = computeReviewItems({
+      workflowKey: task.workflow_key,
       fields: normalizeStoredFields(v.fields),
       missing: [
         ...(composed.missing as { fieldId: string; reason: string }[]),
@@ -659,7 +696,7 @@ async function opGenerate(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, 
           .filter((f) => getWorkflowImpl(task.workflow_key)!.humanOnlyLabels.includes(f.label) && !f.value.trim())
           .map((f) => ({ fieldId: f.id, reason: '직원이 정하는 칸입니다(AI가 채우지 않음). 해당이 없으면 비워 두세요.' })),
       ],
-      knownText: [...p.facts.map((f) => f.value), ...p.sources.map((s) => s.text)].join('\n'),
+      knownText: [...p.facts.map((f) => f.value), ...enriched.sources.map((s) => s.text)].join('\n'),
       testMode: composed.mode === 'mock',
     });
     await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, items);
@@ -695,7 +732,7 @@ async function opPackage(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, s
       await ctx.store.replaceReviewItems(task.id, task.organization_id, v.id, result.review.map((r) => ({ ...r, field_ids: [] })));
       return { count: result.review.length };
     }
-    const items = computeReviewItems({ fields: normalizeStoredFields(v.fields), missing: [], knownText: '', testMode: false });
+    const items = computeReviewItems({ workflowKey: task.workflow_key, fields: normalizeStoredFields(v.fields), missing: [], knownText: '', testMode: false });
     // 규정 판은 그 판에 저장한 근거 판정(유보·제외·시행일 미확인)을 다시 건다 — 직원이 칸을 고쳐도 근거가 바뀐 것은 아니다
     const reg = (v.content as { regulations?: RegulationContent } | null)?.regulations;
     const itemsContent = (v.content as { items?: ItemsContent } | null)?.items;
@@ -723,8 +760,10 @@ async function opRevise(ctx: WorkContext, run: WorkRunRow, task: WorkTaskRow, st
   // 규정 메모를 고칠 때는 그 판이 찾은 근거를 원자료로 준다(근거 밖 내용을 새로 지어내지 않게)
   const reg = (current.content as { regulations?: RegulationContent } | null)?.regulations;
   if (reg) p.sources = [...p.sources, ...reg.evidence.filter((e) => isUsable(e.applicability)).map((e) => ({ id: e.id, name: `${e.title}${e.location ? ` ${e.location}` : ''}`, text: e.text }))];
-  const targets = proposal.field_ids.filter((id) => fields.some((f) => f.id === id && !f.locked));
-  if (!targets.length) throw new WorkError('INVALID_INPUT', '고른 칸이 모두 잠겨 있어 바꿀 수 없습니다.', 422);
+  const appEvidence = storedAppEvidence(current.content);
+  p.sources = [...p.sources, ...appEvidence];
+  const targets = proposal.field_ids.filter((id) => fields.some((f) => f.id === id && !f.locked && isDocumentAppTarget(task.workflow_key, f.label)));
+  if (!targets.length) throw new WorkError('INVALID_INPUT', '선택한 칸은 AI로 수정할 수 없습니다. 잠금과 앱의 수정 가능 범위를 확인해 주세요.', 422);
   const composed = await step('compose', () => composeStep(ctx, run, task, { ...p, fields }, proposal.instruction, targets));
   const values = composed.values as Record<string, { value: string }>;
   const diff = targets

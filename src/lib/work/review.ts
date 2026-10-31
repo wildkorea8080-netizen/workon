@@ -19,6 +19,7 @@ export const TEST_MODE_MARKER = '[시험 모드]';
 const PLACEHOLDER = /○{2,}|O{3,}|X{3,}|\[\s*확인\s*필요[^\]]*\]|\(\s*내용\s*\)/;
 
 export interface ReviewInput {
+  workflowKey?: string;
   fields: DocumentField[];
   missing: { fieldId: string; reason: string }[];
   /** 직원 입력 + 원자료 글 — 숫자 대조의 기준 */
@@ -43,6 +44,9 @@ export function computeReviewItems(input: ReviewInput): NewReviewItem[] {
   }
   const known = numbersIn(input.knownText);
   for (const f of input.fields) {
+    if (input.workflowKey === 'document-faq' && f.value.includes('[확인 필요]')) {
+      items.push({ severity: 'blocking', code: 'FAQ_NEEDS_INFO', message: '답을 확인하지 못한 FAQ 항목이 있습니다. 근거를 보완하거나 항목을 제외한 뒤 검토해 주세요.', field_ids: [f.id] });
+    }
     if (f.origin !== 'ai' || !f.value) continue;
     const unverified = checkNumbers(f.value, known);
     if (unverified.length) {

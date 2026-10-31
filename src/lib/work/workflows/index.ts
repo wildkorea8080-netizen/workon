@@ -174,7 +174,34 @@ const auditResponse: WorkflowImpl = {
   prefill: () => ({}),
 };
 
+const documentSummary: WorkflowImpl = {
+  key: 'document-summary', kind: 'document', defaultTemplateRef: 'builtin:report',
+  requiredFieldLabels: ['제목', '개요', '주요 내용'], documentOutputKey: 'summary', humanOnlyLabels: [],
+  prefill(values, { departmentName, today }) {
+    return { 제목: typeof values.title === 'string' ? values.title : '', 작성부서: departmentName ?? '', 작성일: today };
+  },
+};
+
+const documentRewrite: WorkflowImpl = { ...documentSummary, key: 'document-rewrite', documentOutputKey: 'rewritten' };
+
+const documentTranslation: WorkflowImpl = { ...documentSummary, key: 'document-translation', documentOutputKey: 'translation' };
+
+const meetingAgenda: WorkflowImpl = {
+  key: 'meeting-agenda', kind: 'document', defaultTemplateRef: 'builtin:minutes',
+  requiredFieldLabels: ['회의명', '안건'], documentOutputKey: 'agenda', humanOnlyLabels: [],
+  prefill(values) {
+    return { 회의명: `[안건 초안] ${typeof values.title === 'string' ? values.title : ''}`, 일시: typeof values.meetingOn === 'string' ? values.meetingOn : '', 장소: typeof values.place === 'string' ? values.place : '', 참석자: Array.isArray(values.attendees) ? values.attendees.join(', ') : '' };
+  },
+};
+
+const documentFaq: WorkflowImpl = { ...documentSummary, key: 'document-faq', documentOutputKey: 'faq', prefill(values, context) { return documentSummary.prefill({ ...values, title: `[FAQ 초안] ${values.title ?? ''}` }, context); } };
+
 const IMPLEMENTATIONS: Partial<Record<WorkflowKey, WorkflowImpl>> = {
+  'document-summary': documentSummary,
+  'document-rewrite': documentRewrite,
+  'document-translation': documentTranslation,
+  'meeting-agenda': meetingAgenda,
+  'document-faq': documentFaq,
   'official-letter': officialLetter,
   collection,
   regulations,
