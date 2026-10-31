@@ -1,0 +1,20 @@
+# Local credentials and tool state must not be uploaded.
+.env
+.env.*
+.git
+.next
+node_modules
+.agents
+.codex
+.claude
+.superpowers
+coverage
+*.log
+
+# Development and research material is not runtime input.
+docs
+tests
+scripts
+supabase
+CLAUDE.md
+AGENTS.md

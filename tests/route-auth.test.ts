@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { sourceFiles } from './helpers/source-files';
 
 /**
  * API 라우트 권한 검사.
@@ -50,6 +50,9 @@ const PUBLIC_ROUTES = new Map<string, string>([
  * 직원이 자기 것을 보거나 쓰는 경로다.
  */
 const EMPLOYEE_ROUTES = new Set([
+  '/apps/favorites',
+  '/apps/export',
+  '/apps/history',
   '/agents',
   '/agents/[id]',
   '/agents/favorite',
@@ -83,10 +86,7 @@ interface Handler {
 }
 
 function collectHandlers(): Handler[] {
-  const files = execSync('find src/app/api -name "route.ts"', { encoding: 'utf8' })
-    .trim()
-    .split('\n')
-    .filter(Boolean);
+  const files = sourceFiles('src/app/api').filter((f) => f.endsWith('/route.ts'));
 
   const out: Handler[] = [];
   for (const file of files) {

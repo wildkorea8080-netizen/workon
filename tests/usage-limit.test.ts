@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { sourceFiles } from './helpers/source-files';
 import { limitMessage, type TokenLimitStatus } from '../src/lib/usage-limit';
 
 /**
@@ -83,10 +83,7 @@ describe('토큰을 쓰는 경로는 모두 한도를 확인한다', () => {
    * 이제 모델은 AI 연결부(@/lib/llm)로만 부른다. 연결부를 쓰는 라우트와
    * 대화 실행기를 본다.
    */
-  const routeFiles = execSync('find src/app/api -name "route.ts"', { encoding: 'utf8' })
-    .trim()
-    .split('\n')
-    .filter(Boolean);
+  const routeFiles = sourceFiles('src/app/api').filter((f) => f.endsWith('/route.ts'));
 
   const spenders = routeFiles.filter((f) => {
     const src = readFileSync(f, 'utf8');

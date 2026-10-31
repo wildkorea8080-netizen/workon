@@ -3,13 +3,14 @@
  *
  *   npm run work:testdb -- start
  *   npm run work:llm-smoke -- --yes-cost            -- 모델을 부르는 업무 8개(취합·정산은 모델을 안 써서 뺌) + 현행화(S6-1)
+ *   npm run work:llm-smoke -- --yes-cost --app-rag --out report.md  -- 실제 ReadLayer + 실제 모델로 회신 1건
  *   npm run work:llm-smoke -- --yes-cost --only reply,meeting
  *   npm run work:llm-smoke -- --yes-cost --only currentize   -- 보고서에 작년 파일(HWPX)을 넣어 올해 문서로 고치기
  *   npm run work:llm-smoke -- --yes-cost --out docs/workon-rebuild/evidence/llm-smoke.md
  *
  * 지키는 것
  *  - **시험 DB(WORK_TEST_DATABASE_URL)에만** 쓴다. 운영처럼 보이는 주소면 멈춘다. 자료는 전부 가상(실제 기관·사람 아님)
- *  - .env.local에서는 **ANTHROPIC_API_KEY만** 읽는다. Supabase·NODA 주소는 닿지 않는 값으로 덮어 운영에 아무것도 가지 않게 한다
+ *  - 기본은 .env.local에서 ANTHROPIC_API_KEY만 읽는다. --app-rag는 NODA_API_KEY·NODA_API_URL도 읽고 별도 가상 문서를 올렸다 지운다. 운영 Supabase에는 접근하지 않으며, NODA는 --app-rag에서만 실제 호출한다
  *  - 규정 확인의 근거: 기관 문서·공통 자료실은 '설정 안 됨', 법령은 법제처 **공개 시험 계정(OC=test)**으로 실제 검색
  *  - --yes-cost 없이는 모델을 부르지 않는다(비용이 든다). 사용 기록은 시험 DB usage_logs에만 남는다
  */
@@ -19,6 +20,8 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 const args = process.argv.slice(2);
+const appRag = args.includes('--app-rag');
+if (appRag && args.includes('--only') && args[args.indexOf('--only') + 1] !== 'reply') throw new Error('--app-rag는 reply 한 건만 지원합니다.');
 if (!args.includes('--yes-cost')) {
   console.error('실제 모델을 부르면 비용이 듭니다. --yes-cost를 붙여 실행하세요.');
   process.exit(1);
@@ -28,7 +31,8 @@ if (!dbUrl) {
   console.error('WORK_TEST_DATABASE_URL이 없습니다 — npm run work:testdb -- start');
   process.exit(1);
 }
-if (/supabase\.(co|com)|pooler\./.test(dbUrl) || !/localhost|127\.0\.0\.1/.test(dbUrl)) {
+const parsedDbUrl = new URL(dbUrl);
+if (!['localhost', '127.0.0.1'].includes(parsedDbUrl.hostname) || !parsedDbUrl.pathname.startsWith('/workon_')) {
   console.error('시험 DB(localhost)만 씁니다. 운영처럼 보이는 주소라 멈춥니다.');
   process.exit(1);
 }
@@ -41,6 +45,16 @@ if (!process.env.ANTHROPIC_API_KEY) {
   console.error('ANTHROPIC_API_KEY가 없습니다.');
   process.exit(1);
 }
+// --app-rag일 때만 ReadLayer 연결 설정도 읽는다. 운영 DB 설정은 읽지 않는다.
+if (appRag && existsSync('.env.local')) {
+  for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
+    const m = /^(NODA_API_KEY|NODA_API_URL)=(.*)$/.exec(line);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+}
+const ragUrl = appRag ? process.env.NODA_API_URL || 'https://api.readlayer.kr' : 'http://127.0.0.1:9';
+const ragKey = appRag ? process.env.NODA_API_KEY || '' : '';
+if (appRag && !ragKey) throw new Error('NODA_API_KEY가 없습니다.');
 // config.ts가 요구하는 값 — 닿지 않는 값으로(운영 Supabase·NODA로 아무것도 가지 않게)
 Object.assign(process.env, {
   NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:9',
@@ -48,8 +62,8 @@ Object.assign(process.env, {
   SUPABASE_SERVICE_ROLE_KEY: 'smoke-disabled',
   NEXTAUTH_URL: 'http://localhost',
   NEXTAUTH_SECRET: 'smoke',
-  NODA_API_URL: 'http://127.0.0.1:9',
-  NODA_API_KEY: '',
+  NODA_API_URL: ragUrl,
+  NODA_API_KEY: ragKey,
   LAW_API_OC: 'test',
   WORK_GENERATOR: '',
 });
@@ -127,6 +141,28 @@ await pool.query('INSERT INTO users (id, email, department_id) VALUES ($1, $2, $
 await pool.query('INSERT INTO work_org_settings (organization_id, home_enabled, new_tasks_enabled) VALUES ($1, true, true)', [orgId]);
 const actor = { userId, organizationId: orgId, departmentId: deptId, isAdmin: false, managedDepartmentIds: [] };
 
+// 실제 ReadLayer + 실제 모델 시험은 한 개의 독립 가상 문서만 쓴다.
+const ragAgentId = randomUUID();
+const ragDocId = randomUUID();
+const ragTenant = `workon-smoke-${randomUUID()}`;
+let ragFilename = null;
+let ragClient = null;
+if (appRag) {
+  const { noda, nodaFilename } = await import('../src/lib/noda.ts');
+  const { sourcesToChunks, contextPassages, isCleanMatch } = await import('../src/lib/capabilities/doc-search.ts');
+  ragClient = noda;
+  ragFilename = nodaFilename(ragDocId, '가상-주차장-운영기준.txt');
+  await pool.query('INSERT INTO agents(id,name,department_id,organization_id,tier,visibility,is_published) VALUES($1,$2,$3,$4,$5,$6,true)', [ragAgentId, '가상 주차장 비서', deptId, orgId, 'official', 'organization']);
+  ctx.loadAppSnapshot = async () => ({ schemaVersion: 1, agentId: ragAgentId, name: '가상 주차장 비서', version: 1, systemPrompt: '문의별로 짧게 답변하고 확정되지 않은 약속은 하지 않습니다.', requestedModel: 'claude-sonnet-4-6', capturedAt: new Date().toISOString(), documentSearchEligible: true });
+  ctx.regulations.providers.orgDocuments = async (scope, query) => {
+    if (scope.agentId !== ragAgentId || scope.organizationId !== orgId) throw new Error('시험 범위 불일치');
+    const c = await noda.getContext({ tenant: ragTenant, query });
+    const match = sourcesToChunks(c.sources, [{ id: ragDocId, title: '가상 주차장 운영 기준', file_name: '가상-주차장-운영기준.txt', noda_status: 'ready' }], contextPassages(c.context));
+    if (!isCleanMatch(match)) throw new Error('검색 근거 매칭 실패');
+    return { status: 'ok', items: match.chunks.map((chunk) => ({ kind: 'org_doc', title: chunk.documentTitle, location: chunk.page ? `p.${chunk.page}` : chunk.section || null, text: chunk.text, effectiveDate: null, editionYear: null, issuer: null, url: null })) };
+  };
+}
+
 /** 현행화 사례의 작년 파일 — 표준 보고서 양식(assets/templates/report.hwpx)을 실제 채우기 엔진으로 채운다(tests/helpers/prior-fixture.ts와 같은 방법) */
 async function buildPriorHwpx() {
   const bytes = readFileSync(path.join(process.cwd(), 'assets', 'templates', 'report.hwpx'));
@@ -159,6 +195,26 @@ const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 /** 업무별 가상 자료 */
 const CASES = {
+  'document-faq': {
+    title: '가상 주차장 이용 FAQ', form: { audience: '일반 시민', questionCount: '3' },
+    sources: [{ name: '가상-이용안내.txt', purpose: 'reference', text: '가상 주차장은 매일 오전 7시부터 오후 10시까지 운영합니다. 장애인 주차구역은 상시 확보합니다. 이용 요금은 안내문에 기재되어 있지 않습니다. 야간 조명은 교체 완료했습니다.' }],
+  },
+  'meeting-agenda': {
+    title: '가상 주차장 운영 개선 회의', form: { meetingPurpose: '운영 시간 연장 검토에 필요한 쟁점과 준비 자료를 정리한다. 이번 회의에서 결정된 사항은 아직 없다.', attendees: ['시설관리팀', '민원지원팀'] },
+    sources: [{ name: '가상-검토메모.txt', purpose: 'reference', text: '가상 주차장은 매일 07시부터 22시까지 운영한다. 23시까지 연장을 요청하는 민원이 접수됐다. 야간 인력과 조명 유지비 추산은 아직 없다. 인근 주민의 소음 의견은 확인하지 않았다. 운영 시간 변경 여부는 결정되지 않았다.' }],
+  },
+  'document-translation': {
+    title: '가상 시설 점검 안내 영어 번역', form: { targetLanguage: '영어', translationStyle: '공식 문서', glossary: '가상시청 = Example City Hall' },
+    sources: [{ name: '가상-번역원문.txt', purpose: 'reference', text: '가상시청은 2026년 11월 3일 오후 2시에 시설 점검을 진행할 예정입니다. 참가 인원은 15명이며 비용은 30,000원입니다. 우천 시에는 일정을 다시 안내합니다. 추가 점검 계획은 아직 확정되지 않았습니다.' }],
+  },
+  'document-rewrite': {
+    title: '가상 시설 점검 안내 공문체 변환', form: { rewriteMode: '공문체 변환' },
+    sources: [{ name: '가상-점검안내.txt', purpose: 'reference', text: '시설 점검을 2026년 11월 3일 오후 2시에 할 예정이에요. 참가 인원은 15명이고 비용은 30,000원입니다. 비가 오면 날짜는 다시 알려드릴게요. 추가 점검 계획은 아직 확정되지 않았어요.' }],
+  },
+  'document-summary': {
+    title: '가상 주차장 운영 안내 요약', form: { summaryStyle: '핵심 요약' },
+    sources: [{ name: '가상-운영안내.txt', purpose: 'reference', text: '가상시청 주차장은 2026년 10월 기준 매일 오전 7시부터 오후 10시까지 운영한다. 오후 11시까지 연장하는 계획은 아직 확정되지 않았다. 야간 조명은 2026년 10월 20일 교체 완료했다. 장애인 주차구역은 상시 확보한다.' }],
+  },
   'official-letter': {
     title: '2026년 하반기 개인정보 보호 교육 실시 알림',
     form: { facts: '전 직원 대상 개인정보 보호 교육을 2026. 11. 19.(목) 14:00 본관 대회의실에서 2시간 실시. 부서별 참석자 명단을 11. 12.까지 총무과로 제출.', recipients: ['각 부서장'] },
@@ -220,10 +276,17 @@ const CASES = {
 };
 
 const onlyIdx = args.indexOf('--only');
-const keys = onlyIdx >= 0 ? args[onlyIdx + 1].split(',') : Object.keys(CASES);
+const keys = appRag ? ['reply'] : onlyIdx >= 0 ? args[onlyIdx + 1].split(',') : Object.keys(CASES);
 const outIdx = args.indexOf('--out');
 const lines = [`# 업무 실제 모델 점검 (${new Date().toISOString().slice(0, 16)}Z, claude-sonnet-4-6, 가상 자료)`, ''];
 let total = 0;
+let failures = 0;
+try {
+if (appRag) {
+  const upload = await ragClient.uploadDocument({ tenant: ragTenant, filename: ragFilename, bytes: new TextEncoder().encode('가상시청 주차장 운영 안내. 주차장은 매일 오전 07시부터 오후 22시까지 운영합니다. 밤 23시까지 연장하는 계획은 확정되지 않았습니다. 야간 조명은 2026년 10월 20일 교체 완료되었습니다.') });
+  if (upload.filename) ragFilename = upload.filename;
+  if (!upload.readable) throw new Error('시험 문서 읽기 실패');
+}
 
 for (const key of keys) {
   const c = CASES[key];
@@ -233,7 +296,7 @@ for (const key of keys) {
   }
   const started = Date.now();
   try {
-    let task = await svc.createTask(ctx, actor, { workflowKey: c.workflowKey ?? key, title: c.title, form: c.form });
+    let task = await svc.createTask(ctx, actor, { workflowKey: c.workflowKey ?? key, title: c.title, form: c.form, ...(appRag ? { agentId: ragAgentId, documentScope: 'selected-agent' } : {}) });
     const sources = typeof c.sources === 'function' ? await c.sources() : c.sources;
     for (const s of sources) {
       // 글 원자료는 text, 파일 원자료(작년 HWPX·엑셀)는 bytes + contentType
@@ -246,6 +309,12 @@ for (const key of keys) {
     const r = await svc.requestGenerate(ctx, actor, task.id, { baseVersion: 0, idempotencyKey: `smoke-${randomUUID()}` });
     const [out] = await runWorker(ctx, { workerId: 'smoke', runId: r.run.id, budgetMs: 280_000 });
     const d = await svc.getTaskDetail(ctx, actor, task.id);
+    if (out?.finish !== 'succeeded') failures++;
+    if (appRag) {
+      const count = d.version?.appEvidence?.length ?? 0;
+      lines.push(`- 실제 ReadLayer 근거: ${count}건 · 앱 설정 버전: ${d.task.app?.version ?? '없음'}`);
+      if (!count || !d.currentArtifacts.some((a) => a.format === 'hwpx' && a.validation_status === 'valid')) failures++;
+    }
     const { rows } = await pool.query("SELECT details FROM usage_logs WHERE resource_id = $1", [r.run.id]);
     const krw = rows.reduce((s, x) => s + Number(x.details.cost_krw ?? 0), 0);
     total += krw;
@@ -275,6 +344,7 @@ for (const key of keys) {
     lines.push('');
     console.log(`${key}: ${out?.finish} ${krw.toFixed(1)}원 ${sec}초`);
   } catch (e) {
+    failures++;
     lines.push(`## ${key} — 실패: ${e instanceof Error ? e.message : String(e)}`, '');
     console.log(`${key}: 실패 ${e instanceof Error ? e.message : e}`);
   }
@@ -283,4 +353,18 @@ lines.push(`합계 원가(기록 시점 단가): ${total.toFixed(1)}원`);
 const text = lines.join('\n');
 if (outIdx >= 0) writeFileSync(args[outIdx + 1], text + '\n');
 console.log('\n' + text);
-await pool.end();
+} finally {
+  if (appRag && ragFilename) {
+    try {
+      await ragClient.deleteDocument(ragTenant, ragFilename);
+      const remaining = await ragClient.listDocuments(ragTenant);
+      if ([...remaining.documents, ...remaining.receiving].some((d) => d.filename === ragFilename)) throw new Error('삭제 확인 실패');
+      console.log('ReadLayer 시험 문서 삭제·목록 확인 완료');
+    } catch {
+      failures++;
+      console.error(`ReadLayer 시험 문서 정리 필요: 보관함 ${ragTenant}, 파일 ${ragFilename}`);
+    }
+  }
+  await pool.end();
+}
+if (failures) process.exitCode = 1;

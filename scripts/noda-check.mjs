@@ -5,12 +5,15 @@
  *   npm run noda:check -- --roundtrip   -- 작은 파일을 보관함 workon-check에 올려 찾고 지우기까지
  *   npm run noda:check -- --roundtrip --strict -- 엉뚱한 질문·쪽/출처 확인도 WARN이 아니라 FAIL로
  *
+ *   npm run noda:check -- --roundtrip --saas --isolated -- SaaS 연결 점검·실행별 독립 시험 보관함
+ *
  * 실제 NODA 서버를 호출한다. 키(NODA_API_KEY)는 .env.local에서 읽고 **출력하지 않는다**.
  * 하나라도 FAIL이면 종료 코드 1. WARN(엉뚱한 질문·쪽/출처 정보)은 종료 코드에 넣지 않는다(`--strict`면 FAIL).
  *
  * 배포 순서(CLAUDE.md): 키 넣기 → noda:check -- --roundtrip → 마이그레이션 0031 → 푸시(배포 확인) → noda:migrate.
  */
 import { existsSync, readFileSync } from 'fs';
+import { randomUUID } from 'crypto';
 
 if (existsSync('.env.local')) {
   for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
@@ -36,7 +39,8 @@ for (const key of [
 const { noda, nodaFilename, NodaError } = await import('../src/lib/noda.ts');
 
 /** 점검용 보관함. 운영 보관함(`workon-a…`)과 겹치지 않는다 */
-const CHECK_TENANT = 'workon-check';
+const isolated = process.argv.includes('--isolated');
+const CHECK_TENANT = isolated ? `workon-check-${randomUUID()}` : 'workon-check';
 const CHECK_FILE = 'noda-check.txt';
 // 고정 이름 — 지난 실행이 남긴 파일이 있어도 replace=1이 덮어쓰므로 쌓이지 않는다
 const CHECK_DOC_ID = '00000000-0000-0000-0000-000000000000';
@@ -97,7 +101,8 @@ async function checkHealth() {
 
   const llm = health && typeof health.llm === 'object' ? health.llm : null;
   if (llm && llm.external === true) {
-    fail('바깥 LLM 연결(llm.external)', "운영 서버에 바깥 LLM 연결이 남아 있습니다 — 보안 자료에 '바깥 연결 없음'을 쓰지 마세요");
+    if (process.argv.includes('--saas')) console.log('INFO  바깥 LLM 연결(llm.external) — 사용 중; SaaS 점검에서는 실패로 분류하지 않음');
+    else fail('바깥 LLM 연결(llm.external)', "운영 서버에 바깥 LLM 연결이 남아 있습니다 — 보안 자료에 '바깥 연결 없음'을 쓰지 마세요");
   } else if (llm && llm.external === false) {
     ok('바깥 LLM 연결(llm.external)', '없음');
   } else {

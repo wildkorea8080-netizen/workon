@@ -1,15 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
-import { execSync } from 'child_process';
+import { sourceFiles } from './helpers/source-files';
 
 /**
  * 모델 호출은 AI 연결부(src/lib/llm/) 한 곳으로 모은다(설계 5.1).
  * 다른 곳에서 업체 주소를 직접 부르면 기관 내부 모델로 바꿀 때 그 자리가 남는다.
  */
-const files = execSync('find src -name "*.ts" -o -name "*.tsx"', { encoding: 'utf8' })
-  .trim()
-  .split('\n')
-  .filter(Boolean);
+const files = sourceFiles('src');
 
 /** 모델 호출이 아니라 키가 유효한지만 보는 곳. 이유와 함께 둔다. */
 const ALLOWED = new Map<string, string>([

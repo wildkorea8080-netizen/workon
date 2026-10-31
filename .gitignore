@@ -30,3 +30,5 @@ temp-login-test.mjs
 
 # superpowers 작업 장부(세션 임시)
 .superpowers/
+
+.vercel

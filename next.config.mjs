@@ -5,6 +5,7 @@ const nextConfig = {
     ...(process.env.NEXT_BUILD_CPUS ? { cpus: Number(process.env.NEXT_BUILD_CPUS) } : {}),
     outputFileTracingIncludes: {
       '/api/chat': ['./assets/templates/**/*'],
+      '/api/apps/export': ['./assets/templates/**/*'],
       // 업무 작업 — 생성·파일 만들기·양식 목록이 표준 양식 바이트와 검증 기록(verification.json)을 읽는다
       '/api/work/**': ['./assets/templates/**/*'],
     },

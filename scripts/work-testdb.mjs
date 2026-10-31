@@ -19,8 +19,11 @@ import { spawnSync } from 'child_process';
 import pg from 'pg';
 
 const PORT = Number(process.env.WORK_TEST_DB_PORT || 54329);
-const DB = 'workon_test';
-const dataDir = path.join(tmpdir(), 'workon-testdb');
+// 병행 개발에서는 기존 시험 DB를 초기화하지 않도록 별도 인스턴스를 쓴다.
+const instance = process.env.WORK_TEST_DB_INSTANCE || '';
+if (instance && !/^[a-z][a-z0-9_]{0,31}$/.test(instance)) throw new Error('잘못된 시험 DB 인스턴스 이름');
+const DB = instance ? `workon_${instance}` : 'workon_test';
+const dataDir = path.join(tmpdir(), instance ? `workon-testdb-${instance}` : 'workon-testdb');
 const binCandidates = [process.env.PG_BIN, 'C:/Program Files/PostgreSQL/17/bin', 'C:/Program Files/PostgreSQL/16/bin'].filter(Boolean);
 const bin = binCandidates.find((d) => existsSync(path.join(d, process.platform === 'win32' ? 'pg_ctl.exe' : 'pg_ctl')));
 if (!bin) {
