@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     const actor = await getWorkActor(session, ctx);
     if (!actor) return NO_ACTOR();
     const body = await readJson(request);
-    const task = await svc.createTask(ctx, actor, { workflowKey: body.workflowKey, title: body.title, form: body.form, templateVersionId: body.templateVersionId, dueDate: body.dueDate });
+    const task = await svc.createTask(ctx, actor, { workflowKey: body.workflowKey, title: body.title, form: body.form, templateVersionId: body.templateVersionId, dueDate: body.dueDate, agentId: body.agentId, documentScope: body.documentScope });
     return ok(await svc.getTaskDetail(ctx, actor, task.id), 201);
   });
 }

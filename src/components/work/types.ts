@@ -23,6 +23,7 @@ export interface WorkflowSummaryDto {
 }
 
 export interface TaskDto {
+  app?: { agentId: string; name: string; version: number; capturedAt: string; documentScope?: 'selected-agent' | null } | null;
   id: string;
   title: string;
   workflowKey: string;
@@ -101,7 +102,7 @@ export interface TaskDetailDto {
   kind: 'document' | 'collection' | 'regulations' | 'items' | 'settlement' | 'qa';
   workflow: { key: string; name: string; purpose: string; inputs: WorkflowInputDto[]; outputs: WorkflowSummaryDto['outputs']; scopeNote: string; validationRules: string[]; currentizes: boolean };
   template: { id: string; name: string; status: string; label: string; fieldCount: number } | null;
-  version: { id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null; currentize: CurrentizeDto | null } | null;
+  version: { appEvidence?: { id: string; name: string; text: string; documentId?: string }[]; id: string; version: number; origin: string; changeReason: string; createdAt: string; fields: FieldDto[]; collection: CollectionResultDto | null; regulations: RegulationsDto | null; items: ItemsDto | null; settlement: SettlementDto | null; qa: QaDto | null; currentize: CurrentizeDto | null } | null;
   review: { id: string; severity: 'blocking' | 'warning' | 'info'; code: string; message: string; fieldIds: string[]; state: string; resolutionNote: string | null }[];
   artifacts: ArtifactDto[];
   currentArtifacts: ArtifactDto[];

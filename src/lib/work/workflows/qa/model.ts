@@ -1,6 +1,8 @@
+import { withAppInstruction, type WorkModelOptions } from '../../app-binding';
 // src/lib/work/workflows/qa/model.ts
 import { complete, type LlmUsage } from '@/lib/llm';
 import { WorkError } from '../../types';
+import { parseSpent } from '../../generation/spent';
 import { TEST_MODE_MARKER } from '../../review';
 import type { VerifySource } from '../items/verify';
 import type { QaKind, RawQa } from './verify';
@@ -19,7 +21,7 @@ export interface QaInput {
 }
 
 export interface QaModel {
-  answer(input: QaInput, opts: { model: string }): Promise<{ raw: RawQa; usage: LlmUsage | null; mode: 'llm' | 'mock' }>;
+  answer(input: QaInput, opts: WorkModelOptions): Promise<{ raw: RawQa; usage: LlmUsage | null; mode: 'llm' | 'mock' }>;
 }
 
 const MAX_CHARS = 60_000;
@@ -92,14 +94,14 @@ export function parseQa(text: string): RawQa {
 }
 
 export const llmQaModel: QaModel = {
-  async answer(input, { model }) {
+  async answer(input, { model, appInstruction }) {
     let res;
     try {
-      res = await complete({ model, system: system(input.kind), messages: [{ role: 'user', content: user(input) }], maxTokens: 6000 });
+      res = await complete({ model, system: withAppInstruction(system(input.kind), appInstruction), messages: [{ role: 'user', content: user(input) }], maxTokens: 6000 });
     } catch (e) {
       throw new WorkError('LLM_UNAVAILABLE', 'AI 연결이 잠시 원활하지 않습니다. 잠시 뒤 다시 시도해 주세요.', 503, { cause: e instanceof Error ? e.name : 'unknown' });
     }
-    return { raw: parseQa(res.text), usage: res.usage, mode: 'llm' };
+    return { raw: parseSpent(res.usage, () => parseQa(res.text)), usage: res.usage, mode: 'llm' };
   },
 };
 

@@ -1,3 +1,4 @@
+import { workModelOptions } from '../app-binding';
 // src/lib/work/runs/currentize-op.ts
 import type { WorkContext } from '../context';
 import { WorkError, type WorkRunRow, type WorkSourceRow, type WorkTaskRow } from '../types';
@@ -22,7 +23,7 @@ import { verifyRewrites } from '../workflows/currentize/verify';
 import { buildPlan, type Change, type CurrentizeContent, type PlanTableCell } from '../workflows/currentize/plan';
 import { currentizeReviewItems } from '../workflows/currentize/review';
 import { loadPriorFile, segmentLabels, type PriorFile } from '../workflows/currentize/output';
-import { buildFileStep, writeModelUsage, type StepFn } from './shared';
+import { buildFileStep, callModel, type StepFn } from './shared';
 
 /**
  * 현행화 — 작년 HWPX(원자료 용도 prior)를 올해 문서로 고친다(S6-1). 보고서처럼 usesCurrentizeWhenPrior인 업무에서
@@ -352,7 +353,8 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   const targets = segments.filter((s) => !tables.frozen.has(s.id) && (isProse(s) || changedCitation.has(s.id) || isYearSentence(s, findings.get(s.id) ?? [])));
   const batches: Segment[][] = [];
   for (let i = 0; i < targets.length; i += MODEL_BATCH_SEGMENTS) batches.push(targets.slice(i, i + MODEL_BATCH_SEGMENTS));
-  const modelId = batches.length ? await ctx.resolveModel(task.department_id) : null;
+  const options = batches.length ? await workModelOptions(ctx, task) : null;
+  const modelId = options?.model ?? null;
   const cap = ctx.costCapKrw ?? DEFAULT_COST_CAP_KRW;
   const sources = inputs.map((s) => ({ id: s.id, name: s.name, text: s.text }));
   const accepted: RawRewrite[] = [];
@@ -376,8 +378,7 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
       break;
     }
     const out = await step(rewriteStepName(i), async () => {
-      const r = await model.rewrite(input, { model: modelId! });
-      await writeModelUsage(ctx, run, task, r.usage, 'rewrite');
+      const r = await callModel(ctx, run, task, 'rewrite', () => model.rewrite(input, { ...options, model: modelId! }));
       return { rewrites: r.rewrites, usage: r.usage, mode: r.mode };
     });
     if (out.usage) spent += estimateCostKrw(out.usage, out.usage.model);

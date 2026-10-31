@@ -31,7 +31,8 @@ export interface WorkContext {
   /** 현행화 한 번에 쓸 모델 비용 상한(원). 없으면 DEFAULT_COST_CAP_KRW */
   costCapKrw?: number;
   /** 기관 허용 모델로 확정(model-policy) */
-  resolveModel(departmentId: string): Promise<string>;
+  resolveModel(departmentId: string, requested?: string | null): Promise<string>;
+  loadAppSnapshot?(actor: import('./types').WorkActor, agentId: string): Promise<import('./app-binding').WorkAppSnapshot>;
   /** 기관 정지·한도(usage-limit) */
   checkLimit(departmentId: string, userId: string): Promise<{ allowed: boolean; message?: string }>;
   log(p: { level: 'info' | 'warning' | 'error' | 'critical'; category: string; message: string; details?: Record<string, unknown> }): Promise<void>;

@@ -16,6 +16,8 @@ export interface RegulationScope {
   organizationId: string;
   organizationName: string | null;
   departmentId: string;
+  /** 기관 문서를 이 공식 비서 하나로 제한한다. 공통 기준·법령에는 영향 없음. */
+  agentId?: string;
 }
 
 export interface RegulationProviders {

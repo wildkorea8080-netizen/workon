@@ -1,3 +1,4 @@
+import { storedAppEvidence } from './app-evidence';
 // src/lib/work/services.ts
 import { createHash } from 'crypto';
 import type { WorkContext } from './context';
@@ -95,6 +96,8 @@ export interface CreateTaskInput {
   form?: unknown;
   templateVersionId?: unknown;
   dueDate?: unknown;
+  agentId?: unknown;
+  documentScope?: unknown;
 }
 
 export async function createTask(ctx: WorkContext, actor: WorkActor, input: CreateTaskInput): Promise<WorkTaskRow> {
@@ -110,6 +113,21 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
   const rawForm = { ...((input.form ?? {}) as Record<string, unknown>) };
   if (def.inputs.some((i) => i.key === 'title') && !rawForm.title) rawForm.title = title;
   const dueDate = typeof input.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) ? input.dueDate : null;
+
+  let app: import('./app-binding').WorkAppSnapshot | null = null;
+  if (input.agentId != null && input.agentId !== '') {
+    if (typeof input.agentId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.agentId)) throw new WorkError('INVALID_INPUT', '비서 선택이 올바르지 않습니다.');
+    if (impl.kind === 'collection' || impl.kind === 'settlement') throw new WorkError('INVALID_INPUT', '이 업무는 비서 지침 없이 프로그램으로 계산합니다.');
+    if (!ctx.loadAppSnapshot) throw new WorkError('WORKFLOW_NOT_READY', '비서 연결이 준비되지 않았습니다.', 409);
+    app = await ctx.loadAppSnapshot(actor, input.agentId);
+  }
+
+  if (input.documentScope != null && input.documentScope !== 'default') {
+    if (input.documentScope !== 'selected-agent' || !['regulations', 'report', 'reply'].includes(input.workflowKey) || !app?.documentSearchEligible) {
+      throw new WorkError('INVALID_INPUT', '문서 검색이 설정된 공개 공식 비서를 규정 확인·보고서·회신 업무에서 선택해 주세요.');
+    }
+    app = { ...app, documentScope: 'selected-agent' };
+  }
 
   // 양식이 있는 업무만 양식을 고른다(취합·접수는 양식 없이 엑셀을 만든다)
   let tv: TemplateVersionRow | null = null;
@@ -127,6 +145,7 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
   const form = checkForm(def, tv ? { ...rawForm, templateVersion: tv.id } : rawForm);
 
   const task = await ctx.store.insertTask({
+    ...(app ? { agent_id: app.agentId, app_snapshot: app } : {}),
     organization_id: actor.organizationId,
     department_id: actor.departmentId,
     owner_id: actor.userId,
@@ -138,7 +157,7 @@ export async function createTask(ctx: WorkContext, actor: WorkActor, input: Crea
     due_date: dueDate,
     status: requiredReady(def, form.missing.length, []) ? 'ready' : 'draft',
   });
-  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'task.created', details: { workflow_key: task.workflow_key } });
+  await ctx.store.insertEvent({ organizationId: task.organization_id, taskId: task.id, actorId: actor.userId, type: 'task.created', details: { workflow_key: task.workflow_key, ...(app ? { agent_id: app.agentId, agent_version: app.version } : {}) } });
   return task;
 }
 
@@ -180,6 +199,7 @@ export function taskDto(t: WorkTaskRow, access: TaskAccess) {
     title: t.title,
     workflowKey: t.workflow_key,
     workflowName: def?.name ?? t.workflow_key,
+    app: t.app_snapshot ? { agentId: t.app_snapshot.agentId, name: t.app_snapshot.name, version: t.app_snapshot.version, capturedAt: t.app_snapshot.capturedAt, documentScope: t.app_snapshot.documentScope ?? null } : null,
     status: t.status,
     revision: t.revision,
     dueDate: t.due_date,
@@ -263,6 +283,7 @@ export async function getTaskDetail(ctx: WorkContext, actor: WorkActor, taskId: 
           // 취합 결과(부서·합계·원본 대응) — 원자료 저장 경로는 없다
           collection: (version.content as { result?: unknown } | null)?.result ?? null,
           // 규정 확인 — 그 판이 찾은 근거·적용 판정·유보(보관함·파일 이름 앞부분 없음)
+          appEvidence: storedAppEvidence(version.content),
           regulations: regulationsDto((version.content as { regulations?: RegulationContent } | null)?.regulations),
           // 뽑은 항목(접수·회의·인수인계) — 원문 인용·확인 표시 그대로
           items: itemsDto((version.content as { items?: ItemsContent } | null)?.items),
@@ -377,7 +398,8 @@ function carriedContent(content: Record<string, unknown> | null): Record<string,
   if (!content) return null;
   if ('regulations' in content) return { regulations: content.regulations };
   if ('items' in content) return { items: content.items };
-  if ('qa' in content) return { qa: content.qa };
+  if ('qa' in content) return { qa: content.qa, appEvidence: storedAppEvidence(content) };
+  if ('appEvidence' in content) return { appEvidence: storedAppEvidence(content) };
   // 현행화 판은 칸이 없고 변경 목록이 곧 문서다 — 다른 수정 길이 판을 이어도 잃지 않게
   if ('currentize' in content) return { currentize: content.currentize, currentizeWarnings: content.currentizeWarnings ?? [] };
   return null;

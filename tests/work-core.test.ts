@@ -24,9 +24,9 @@ const actor = (over: Partial<WorkActor> = {}): WorkActor => ({
 const task = (over: Record<string, unknown> = {}) => ({ organization_id: 'o1', owner_id: 'u1', status: 'draft' as const, ...over });
 
 describe('업무 카탈로그', () => {
-  it('10개 · key 고유 · 모두 필수 산출 파일이 있다', () => {
-    expect(WORKFLOWS).toHaveLength(10);
-    expect(new Set(WORKFLOWS.map((w) => w.key)).size).toBe(10);
+  it('15개 · key 고유 · 모두 필수 산출 파일이 있다', () => {
+    expect(WORKFLOWS).toHaveLength(15);
+    expect(new Set(WORKFLOWS.map((w) => w.key)).size).toBe(15);
     expect(getWorkflow('official-letter')?.outputs[0]).toMatchObject({ format: 'hwpx', required: true });
     expect(isWorkflowKey('collection')).toBe(true);
     expect(isWorkflowKey('없음')).toBe(false);

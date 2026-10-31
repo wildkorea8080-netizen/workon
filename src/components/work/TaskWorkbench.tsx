@@ -156,6 +156,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
             <Link href="/tasks" className="hover:underline">내 작업함</Link> · {task.workflowName}
           </div>
           <h1 className="break-keep text-[22px] font-bold md:truncate">{task.title}</h1>
+          {task.app && <p className="mt-1 text-sm text-slate-500">작성 비서: {task.app.name} · 설정 {task.app.version}판{task.app.documentScope === 'selected-agent' ? ' · 이 비서 문서함으로 기관 문서 검색 제한' : ''}</p>}
         </div>
         <StatusBadge label={TASK_STATUS_LABEL[task.status] ?? task.status} tone={statusTone(task.status)} />
         {version && <span className="text-[14px] text-slate-600">{version.version}판</span>}
@@ -193,6 +194,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
       </div>
 
       <div className="grid flex-1 gap-4 overflow-y-auto p-4 md:p-6 lg:grid-cols-[220px_1fr_360px]">
+        {version?.appEvidence?.length ? <details className="rounded-lg border border-slate-200 bg-white p-4 lg:col-span-3"><summary className="cursor-pointer font-medium">비서 문서함에서 찾은 근거 {version.appEvidence.length}건</summary><p className="mt-2 text-xs text-slate-500">발췌문은 검색 당시 내용입니다. 원문 열기는 현재 접근 가능한 원본을 엽니다.</p><ul className="mt-3 space-y-3">{version.appEvidence.map((e) => <li key={e.id}><p className="text-sm font-medium">{e.name}</p>{e.documentId && <a href={`/api/work/tasks/${task.id}/evidence/${e.documentId}/open`} target="_blank" rel="noopener noreferrer" className="my-1 inline-block text-sm text-[#003087] underline">원문 열기</a>}<p className="whitespace-pre-wrap text-sm text-slate-600">{e.text}</p></li>)}</ul></details> : null}
         {/* 왼쪽 — 목차·파일·원자료 */}
         <aside className="order-2 lg:order-1">
           <Tabs<LeftTab> value={left} onChange={setLeft} items={[['outline', '목차'], ['files', '파일'], ['sources', '원자료']]} label="작업 항목" />

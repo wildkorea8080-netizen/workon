@@ -1,6 +1,8 @@
+import { withAppInstruction, type WorkModelOptions } from '../../app-binding';
 // src/lib/work/workflows/items/model.ts
 import { complete, type LlmUsage } from '@/lib/llm';
 import { WorkError } from '../../types';
+import { parseSpent } from '../../generation/spent';
 import { TEST_MODE_MARKER } from '../../review';
 import type { ItemsSpec, RawItem, VerifySource } from './verify';
 
@@ -24,7 +26,7 @@ export interface ExtractOutput {
 }
 
 export interface ItemsModel {
-  extract(input: ExtractInput, opts: { model: string }): Promise<ExtractOutput>;
+  extract(input: ExtractInput, opts: WorkModelOptions): Promise<ExtractOutput>;
 }
 
 export const MAX_EXTRACT_SOURCE_CHARS = 60_000;
@@ -86,14 +88,14 @@ export function parseExtract(text: string, spec: ItemsSpec): Omit<ExtractOutput,
 }
 
 export const llmItemsModel: ItemsModel = {
-  async extract(input, { model }) {
+  async extract(input, { model, appInstruction }) {
     let res;
     try {
-      res = await complete({ model, system: system(input.spec), messages: [{ role: 'user', content: user(input) }], maxTokens: 6000 });
+      res = await complete({ model, system: withAppInstruction(system(input.spec), appInstruction), messages: [{ role: 'user', content: user(input) }], maxTokens: 6000 });
     } catch (e) {
       throw new WorkError('LLM_UNAVAILABLE', 'AI 연결이 잠시 원활하지 않습니다. 잠시 뒤 다시 시도해 주세요.', 503, { cause: e instanceof Error ? e.name : 'unknown' });
     }
-    return { ...parseExtract(res.text, input.spec), usage: res.usage, mode: 'llm' };
+    return { ...parseSpent(res.usage, () => parseExtract(res.text, input.spec)), usage: res.usage, mode: 'llm' };
   },
 };
 

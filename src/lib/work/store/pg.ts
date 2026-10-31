@@ -77,9 +77,9 @@ export function createPgWorkStore(db: Pool): WorkStore {
     async insertTask(t) {
       return (await one<WorkTaskRow>(
         db,
-        `INSERT INTO work_tasks (organization_id, department_id, owner_id, workflow_key, workflow_version, title, form, template_version_id, due_date, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [t.organization_id, t.department_id, t.owner_id, t.workflow_key, t.workflow_version, t.title, JSON.stringify(t.form), t.template_version_id, t.due_date, t.status]
+        `INSERT INTO work_tasks (organization_id, department_id, owner_id, workflow_key, workflow_version, title, form, template_version_id, due_date, status, agent_id, app_snapshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+        [t.organization_id, t.department_id, t.owner_id, t.workflow_key, t.workflow_version, t.title, JSON.stringify(t.form), t.template_version_id, t.due_date, t.status, t.agent_id ?? null, t.app_snapshot ? JSON.stringify(t.app_snapshot) : null]
       ))!;
     },
     async getTask(id, organizationId) {

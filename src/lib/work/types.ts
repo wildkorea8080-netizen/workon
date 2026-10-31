@@ -9,6 +9,11 @@
  */
 
 export const WORKFLOW_KEYS = [
+  'document-faq',
+  'meeting-agenda',
+  'document-translation',
+  'document-rewrite',
+  'document-summary',
   'intake',
   'official-letter',
   'report',
@@ -45,6 +50,7 @@ export interface WorkTaskRow {
   workflow_key: WorkflowKey;
   workflow_version: string;
   agent_id: string | null;
+  app_snapshot?: import('./app-binding').WorkAppSnapshot | null;
   title: string;
   status: TaskStatus;
   revision: number;
@@ -195,6 +201,7 @@ export const WORK_ERROR_CODES = {
   TEMPLATE_UNSUPPORTED: 'TEMPLATE_UNSUPPORTED',
   OUTPUT_INVALID: 'OUTPUT_INVALID',
   OUTPUT_TOO_LARGE: 'OUTPUT_TOO_LARGE',
+  SOURCE_TOO_LARGE: 'SOURCE_TOO_LARGE',
   PREVIEW_UNAVAILABLE: 'PREVIEW_UNAVAILABLE',
   VERSION_CONFLICT: 'VERSION_CONFLICT',
   IDEMPOTENCY_CONFLICT: 'IDEMPOTENCY_CONFLICT',

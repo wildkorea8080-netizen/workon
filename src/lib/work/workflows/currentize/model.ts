@@ -1,7 +1,9 @@
+import { withAppInstruction, type WorkModelOptions } from '../../app-binding';
 // src/lib/work/workflows/currentize/model.ts
 import { complete, type LlmUsage } from '@/lib/llm';
 import { MAX_SLOT_TEXT } from '@/lib/doc-fill';
 import { WorkError } from '../../types';
+import { parseSpent } from '../../generation/spent';
 import type { CitationPair } from './citations';
 
 /**
@@ -31,7 +33,7 @@ export interface RewriteOutput {
 }
 
 export interface CurrentizeModel {
-  rewrite(input: RewriteInput, opts: { model: string }): Promise<RewriteOutput>;
+  rewrite(input: RewriteInput, opts: WorkModelOptions): Promise<RewriteOutput>;
 }
 
 export const MAX_REWRITE_SOURCE_CHARS = 40_000;
@@ -110,14 +112,14 @@ export function parseRewrites(text: string, input: RewriteInput): RawRewrite[] {
 }
 
 export const llmCurrentizeModel: CurrentizeModel = {
-  async rewrite(input, { model }) {
+  async rewrite(input, { model, appInstruction }) {
     let res;
     try {
-      res = await complete({ model, system: SYSTEM, messages: [{ role: 'user', content: user(input) }], maxTokens: MAX_REWRITE_OUTPUT_TOKENS });
+      res = await complete({ model, system: withAppInstruction(SYSTEM, appInstruction), messages: [{ role: 'user', content: user(input) }], maxTokens: MAX_REWRITE_OUTPUT_TOKENS });
     } catch (e) {
       throw new WorkError('LLM_UNAVAILABLE', 'AI 연결이 잠시 원활하지 않습니다. 잠시 뒤 다시 시도해 주세요.', 503, { cause: e instanceof Error ? e.name : 'unknown' });
     }
-    return { rewrites: parseRewrites(res.text, input), usage: res.usage, mode: 'llm' };
+    return { rewrites: parseSpent(res.usage, () => parseRewrites(res.text, input)), usage: res.usage, mode: 'llm' };
   },
 };
 

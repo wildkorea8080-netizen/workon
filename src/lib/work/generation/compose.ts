@@ -1,7 +1,9 @@
+import { withAppInstruction, type WorkModelOptions } from '../app-binding';
 // src/lib/work/generation/compose.ts
 import { complete, type LlmUsage } from '@/lib/llm';
 import type { DocumentField } from '../types';
 import { WorkError } from '../types';
+import { parseSpent } from './spent';
 import { TEST_MODE_MARKER } from '../review';
 
 /**
@@ -42,7 +44,7 @@ export interface ComposeResult {
 }
 
 export interface FieldGenerator {
-  compose(input: ComposeInput, opts: { model: string }): Promise<ComposeResult>;
+  compose(input: ComposeInput, opts: WorkModelOptions): Promise<ComposeResult>;
 }
 
 export const MAX_SOURCE_CHARS = 40_000;
@@ -126,16 +128,16 @@ export function parseComposeOutput(text: string, targetIds: string[], sourceIds:
 }
 
 export const llmGenerator: FieldGenerator = {
-  async compose(input, { model }) {
+  async compose(input, { model, appInstruction }) {
     let res;
     try {
-      res = await complete({ model, system: SYSTEM, messages: [{ role: 'user', content: buildUserMessage(input) }], maxTokens: MAX_TOKENS });
+      res = await complete({ model, system: withAppInstruction(SYSTEM, appInstruction), messages: [{ role: 'user', content: buildUserMessage(input) }], maxTokens: MAX_TOKENS });
     } catch (e) {
       throw new WorkError('LLM_UNAVAILABLE', 'AI 연결이 잠시 원활하지 않습니다. 잠시 뒤 다시 시도해 주세요.', 503, {
         cause: e instanceof Error ? e.name : 'unknown',
       });
     }
-    const parsed = parseComposeOutput(res.text, input.targetIds, input.sources.map((s) => s.id));
+    const parsed = parseSpent(res.usage, () => parseComposeOutput(res.text, input.targetIds, input.sources.map((s) => s.id)));
     return { ...parsed, usage: res.usage, mode: 'llm' };
   },
 };

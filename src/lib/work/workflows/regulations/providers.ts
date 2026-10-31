@@ -1,4 +1,5 @@
 // src/lib/work/workflows/regulations/providers.ts
+import { restrictDocumentAgents } from './scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NODA_API_KEY } from '@/lib/config';
 import { noda, nodaTenant, stripNodaPrefixes, CONTEXT_BUDGET_AGENT_SHARED, CONTEXT_BUDGET_COMMON_SHARED } from '@/lib/noda';
@@ -34,6 +35,7 @@ function chunkEvidence(c: RetrievedChunk, kind: 'org_doc' | 'common', editionYea
   if (!c.text.trim()) return null;
   return {
     kind,
+    ...(kind === 'org_doc' ? { documentId: c.documentId } : {}),
     title: stripNodaPrefixes(c.documentTitle || '제목 없는 문서'),
     location: locationOf(c),
     effectiveDate: null,
@@ -44,9 +46,13 @@ function chunkEvidence(c: RetrievedChunk, kind: 'org_doc' | 'common', editionYea
   };
 }
 
-async function orgDocuments(scope: { organizationId: string; departmentId: string }, query: string): Promise<ProviderResult> {
-  if (!NODA_API_KEY) return { status: 'unavailable', reason: '문서 검색(NODA) 키가 설정되지 않았습니다' };
+async function orgDocuments(scope: { organizationId: string; departmentId: string; agentId?: string }, query: string): Promise<ProviderResult> {
+  if (!NODA_API_KEY) {
+    if (scope.agentId) throw new Error('Selected document search is not configured');
+    return { status: 'unavailable', reason: '문서 검색(NODA) 키가 설정되지 않았습니다' };
+  }
   const access = await getAccessScope(scope.departmentId);
+  if (access.organizationId !== scope.organizationId) throw new Error('Document scope organization mismatch');
   const { data, error } = await supabaseAdmin
     .from('agents')
     .select('id, visibility, department_id, capabilities')
@@ -56,27 +62,34 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
     .eq('is_active', true)
     .is('deleted_at', null);
   if (error) throw new Error(error.message);
-  const agents = ((data ?? []) as { id: string; visibility: string; department_id: string; capabilities: Record<string, unknown> | null }[]).filter(
+  const eligible = ((data ?? []) as { id: string; visibility: string; department_id: string; capabilities: Record<string, unknown> | null }[]).filter(
     (a) => a.capabilities && 'doc_search' in a.capabilities && (a.visibility === 'organization' || access.visibleDepartmentIds.includes(a.department_id))
   );
+  const agents = restrictDocumentAgents(eligible, scope.agentId);
   if (!agents.length) return { status: 'ok', items: [] };
   const { data: docRows, error: docErr } = await supabaseAdmin
     .from('documents')
-    .select('id, title, file_name, noda_status, agent_id')
+    .select('id, title, file_name, noda_status, agent_id, organization_id, department_id, visibility')
+    .eq('organization_id', scope.organizationId)
     .in('agent_id', agents.map((a) => a.id));
   if (docErr) throw new Error(docErr.message);
   const docsByAgent = new Map<string, AgentDocument[]>();
-  for (const d of (docRows ?? []) as (AgentDocument & { agent_id: string })[]) docsByAgent.set(d.agent_id, [...(docsByAgent.get(d.agent_id) ?? []), d]);
+  for (const d of (docRows ?? []) as (AgentDocument & { agent_id: string; visibility: string; department_id: string })[]) {
+    if (d.visibility !== 'organization' && !(d.visibility === 'department' && access.visibleDepartmentIds.includes(d.department_id))) continue;
+    docsByAgent.set(d.agent_id, [...(docsByAgent.get(d.agent_id) ?? []), d]);
+  }
   const vaults = agents
     .map((a) => ({ id: a.id, docs: docsByAgent.get(a.id) ?? [] }))
     .filter((a) => a.docs.some((d) => d.noda_status === 'ready'))
     .sort((x, y) => y.docs.length - x.docs.length)
     .slice(0, MAX_AGENT_VAULTS);
+  if (scope.agentId && !vaults.length) throw new Error('Selected document vault has no ready documents');
   const items: RawEvidence[] = [];
   const results = await Promise.all(vaults.map((v) => noda.getContext({ tenant: nodaTenant(v.id), query, budget: CONTEXT_BUDGET_AGENT_SHARED })));
   results.forEach((res, i) => {
     const match = sourcesToChunks(res.sources, vaults[i].docs, contextPassages(res.context));
     if (!isCleanMatch(match)) {
+      if (scope.agentId) throw new Error('Selected document vault evidence mismatch');
       void logSystem({ level: 'warning', category: 'security', message: '업무 규정 확인: 비서 보관함 근거가 문서 행과 맞지 않아 버림', details: { agent_id: vaults[i].id, unknown: match.unknown.length, unparsable: match.unparsable.length, malformed: match.malformed } });
       return;
     }

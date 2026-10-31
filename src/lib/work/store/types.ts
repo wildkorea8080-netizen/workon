@@ -43,6 +43,8 @@ export interface TemplateVersionRow {
 }
 
 export interface NewTask {
+  agent_id?: string | null;
+  app_snapshot?: import('../app-binding').WorkAppSnapshot | null;
   organization_id: string;
   department_id: string;
   owner_id: string;

@@ -14,6 +14,8 @@ export type Applicability = 'applicable' | 'date_unknown' | 'after_basis' | 'oth
 /** 제공자(기관 문서·공통 자료실·법령·추가 자료)가 찾은 근거 — 번호·적용 판정 전 */
 export interface RawEvidence {
   kind: EvidenceKind;
+  /** 기관 문서 행과 대조해 확인한 ID만 보존한다. */
+  documentId?: string;
   title: string;
   /** 자료가 알려 준 위치만(p.12 · 제3장 › 숙박비 / 제17조(숙박비)). 모르면 null */
   location: string | null;
