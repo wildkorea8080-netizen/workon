@@ -5,15 +5,14 @@
 
 > **Claude Code 작업 시작점**: 먼저 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md)를 읽는다.
 > 붙여 넣을 시작 프롬프트는 [`docs/CLAUDE_CODE_PROMPTS.md`](docs/CLAUDE_CODE_PROMPTS.md)에 있다.
-> 현재 작업 트리는 대규모 미커밋 변경을 포함한다. 기존 변경을 사용자의 작업으로 취급하고 `git status --short`와 `git diff --stat` 확인 전에는 수정하지 않는다.
+> 작업을 시작할 때 `git status --short`와 `git diff --stat`을 먼저 본다. 미커밋 변경이 있으면 사용자의 작업으로 취급하고 지우거나 되돌리지 않는다.
 > 최신 운영 기록은 [`docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md`](docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md), 남은 제품 차이는 [`CURRENT_GAPS_AND_NEXT.md`](docs/benchmarks/allganize/CURRENT_GAPS_AND_NEXT.md)가 우선한다. 이 본문의 과거 “미구현/운영 미반영” 표시는 작성 시점 기록일 수 있다.
 
 ### 현재 작업 트리 기준선(2026-10-31)
 
-- 브랜치/HEAD: `feat/s6-1-currentize` / `457d215`.
-- 커밋 이후 앱 라이브러리·입력형 앱 빌더·단계 실행·파일 입력·실행 기록·HWPX 내보내기와 업무 흐름 확장이 미커밋 상태로 존재한다.
-- `npx tsc --noEmit --incremental false`는 `tests/app-copy.test.ts`의 `Agent.template_ids` 타입 불일치 1건으로 실패한다.
-- 전체 Vitest는 이 PC에서 현재 트리 기준 최종 집계 전에 Node 메모리 부족으로 중단됐다. 과거 배포 시점의 통과 기록과 현재 기준선을 구분한다.
+- 브랜치: `feat/s6-1-currentize`. 2026-10-31 미커밋이던 앱 플랫폼·업무 흐름 확장을 다섯 커밋으로 넣었다(`89fb3d2` 시험 도우미·배포 설정 → `7f7fb60` 앱 플랫폼 → `887952a` 앱 설정·근거와 업무 작업 연결 → `30e470c` 업무 5종 → `3704443` 문서). 각 커밋 시점의 타입 검사 통과를 확인했다.
+- `npx tsc --noEmit --incremental false` 오류 0. 전체 Vitest는 `NODE_OPTIONS=--max-old-space-size=4096`로 2,144개 통과(시험 DB 없이, 8파일 건너뜀), 시험 DB를 띄우면 124파일 2,212개 통과.
+- 운영은 이 내용과 같은 작업 트리에서 배포한 `dpl_6XBqcsTTXeNDsh5LCfTLtYYouCY2`(2026-10-31 20:12 KST)다. 아직 `main`에 합치거나 원격에 올리지 않았다.
 - 자세한 완료 범위·위험·우선순위·검증 순서는 인수인계 문서를 따른다.
 
 ---
