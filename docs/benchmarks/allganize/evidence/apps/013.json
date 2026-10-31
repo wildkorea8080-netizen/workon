@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/013",
+  "retrieved_at_utc": "2026-10-28T02:19:13.025435+00:00",
+  "sha256": "4184fa0c9da10581d8ec24c6ec895467d7322814dbe61f7e58d738d8b576b529",
+  "http_status": 200,
+  "overview_excerpt_ja": "”プロンプト（生成AIに向けた指示）がうまく書けずに、生成AIから良いアウトプットを得られない。”そのような課題を解決するアプリです。\n‍\n特徴\n実行したいことを簡単に記載するだけで、プロンプトを自動で生成\n具体的な指示、文章の記載方法など、プロンプトとして適切な文章を自動で生成\n生成したプロンプトはコピーでき、LLMアプリでそのまま利用可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/024",
+  "retrieved_at_utc": "2026-10-28T02:19:20.730656+00:00",
+  "sha256": "132ec44a787873676cb97bcec4e6de308931ff291fd8349d988289e7a119fea9",
+  "http_status": 200,
+  "overview_excerpt_ja": "メールの文面が、送付先に適した表現になっているか誤字脱字の有無を含め、チェックします。問題がある場合は、修正案も提示します。\n‍\n特徴\nどのような相手に送信するかを選択し、作成したメール文面を送信するだけで、AIが内容をチェック\n送信する相手（例：お客様）に相応しくない表現があった場合は、修正案を提示\n誤字脱字のチェックも同時に行い、シーンに適した失礼のないメールを作成可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

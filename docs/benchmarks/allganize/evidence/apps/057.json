@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/057",
+  "retrieved_at_utc": "2026-10-28T02:19:23.564282+00:00",
+  "sha256": "91b1a18ffd00b3f693db632bc17a3603481907ba6138303f6b1361dabc64ee22",
+  "http_status": 200,
+  "overview_excerpt_ja": "請求情報一覧と入金情報一覧を突合し、未入金や過不足のある入金を洗い出します。\n‍\n概要\n請求一覧と入金一覧のファイルをそれぞれアップロードすると差分を確認し、未入金や過不足のある企業や入金をそれぞれリストアップ\n時間と手間を要する入金チェック業務を生成AIで効率化\nケアレスミスや確認漏れを防止",
+  "purpose": "public product capability research; no authenticated execution"
+}

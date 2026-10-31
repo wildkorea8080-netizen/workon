@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/003",
+  "retrieved_at_utc": "2026-10-28T02:19:19.176615+00:00",
+  "sha256": "f682cbaa062d163c58892d5cc089588e32ce090fb671310b6b6d4f617ce995dc",
+  "http_status": 200,
+  "overview_excerpt_ja": "契約金額、契約期間、対象案件など、契約の主要項目を契約書の中から抽出し、類似する契約書の差分を比較します。\n‍\n特徴\n契約書をアップロードするだけで、契約において重要な項目を自動で抽出\n類似する契約書であっても、各項目における相違点をAIが自動で分析\n難解な契約書の理解を助け、契約リスクを把握しやすくなります",
+  "purpose": "public product capability research; no authenticated execution"
+}

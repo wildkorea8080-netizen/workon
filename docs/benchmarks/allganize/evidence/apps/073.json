@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/073",
+  "retrieved_at_utc": "2026-10-28T02:19:22.649140+00:00",
+  "sha256": "282302efcd85a55d2c079b336ceaff6b38e8ae49be82a6d82152d243896cbeb2",
+  "http_status": 200,
+  "overview_excerpt_ja": "アンケート結果のExcelファイルやCSVファイル等のデータをもとに、AIが情報を整理分析し、まとめや改善案を作成します。\n手間のかかるアンケートの集計作業を1分程度に短縮できます。\n‍\n概要\nアンケート結果のファイルをアップロードするだけで、AIが集計、分類、分析\n選択項目などは数値化し、満足度などは平均値も計算して提示\nアンケート結果から傾向などを分析し、サマリーを作成するほか、改善点なども提示（例：セミナーアンケートの結果から、次回に向けたセミナーの改善点などを提案）",
+  "purpose": "public product capability research; no authenticated execution"
+}

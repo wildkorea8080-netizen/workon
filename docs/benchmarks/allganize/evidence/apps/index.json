@@ -1,0 +1,16 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/llm-apps",
+  "sha256": "bad0ae9a8db9382ca2978d537311e2de588e3de1ad0df822cd3350fd9f404abd",
+  "retrieved_at_utc": "2026-10-28T02:19:25.789093+00:00",
+  "app_count": 100,
+  "categories": {
+    "Other": 16,
+    "Sales": 11,
+    "General": 29,
+    "Human Resources": 11,
+    "IT": 8,
+    "Legal": 8,
+    "Marketing": 15,
+    "Customer Relations": 2
+  }
+}

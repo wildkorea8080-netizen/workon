@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/106",
+  "retrieved_at_utc": "2026-10-28T02:19:13.738992+00:00",
+  "sha256": "22bc8ebc670b883682b1cc965b9521c6653e58a21d67763e06f6a1122c2c97f9",
+  "http_status": 200,
+  "overview_excerpt_ja": "アップロードしたドキュメントからQ&Aデータを作成し、CSV形式で出力します。\n‍\n特徴\nドキュメントをアップロードすると、AIがドキュメントに記載されている内容をもとにFAQ一覧を自動で生成\n生成したFAQは、Alli LLM App MarketのFAQ応答チャットボット用のデータとしてインポートが可能\nFAQの準備の手間や工数を削減",
+  "purpose": "public product capability research; no authenticated execution"
+}

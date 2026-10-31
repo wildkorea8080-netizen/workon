@@ -1,0 +1,36 @@
+{
+  "appliedAt": "2026-10-29T09:52:16.317Z",
+  "targetMatchesConfiguredApi": true,
+  "transactionCommitted": true,
+  "results": [
+    {
+      "version": "0036",
+      "status": "applied"
+    },
+    {
+      "version": "0037",
+      "status": "applied"
+    },
+    {
+      "version": "0038",
+      "status": "applied"
+    },
+    {
+      "version": "0039",
+      "status": "applied"
+    },
+    {
+      "version": "0040",
+      "status": "applied"
+    },
+    {
+      "version": "0041",
+      "status": "applied"
+    }
+  ],
+  "appSnapshotType": "jsonb",
+  "workflowCount": 15,
+  "bothWorkflowConstraintsVerified": true,
+  "existingTaskCountUnchanged": true,
+  "postgrestReloadRequested": true
+}

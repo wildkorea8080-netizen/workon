@@ -1,0 +1,49 @@
+{
+  "checkedAt": "2026-10-30T21:21:03.668Z",
+  "scope": "Synthetic model-only checkpoint, injected failure; no DB or browser E2E",
+  "firstCalls": 1,
+  "firstUsage": {
+    "model": "claude-sonnet-4-6",
+    "input_tokens": 422,
+    "output_tokens": 67
+  },
+  "firstRecords": [
+    {
+      "name": "정리",
+      "status": "completed",
+      "output": "- 가상 행사는 새빛회의실에서 참석자 30명 규모로 개최될 예정이다.\n- 개최일은 현재 미정으로, 확인이 필요하다."
+    },
+    {
+      "name": "초안",
+      "status": "failed"
+    },
+    {
+      "name": "검토",
+      "status": "not_run"
+    }
+  ],
+  "newModelCallsOnResume": 2,
+  "resumedUsage": {
+    "model": "claude-sonnet-4-6",
+    "input_tokens": 1297,
+    "output_tokens": 321
+  },
+  "resumedRecords": [
+    {
+      "name": "정리",
+      "status": "completed",
+      "output": "- 가상 행사는 새빛회의실에서 참석자 30명 규모로 개최될 예정이다.\n- 개최일은 현재 미정으로, 확인이 필요하다.",
+      "reused": true
+    },
+    {
+      "name": "초안",
+      "status": "completed",
+      "output": "이번 행사는 새빛회의실에서 참석자 30명 규모로 개최될 예정입니다. 개최일은 현재 미정으로 확인이 필요합니다. 일정이 확정되는 대로 추가 안내 드릴 예정입니다."
+    },
+    {
+      "name": "검토",
+      "status": "completed",
+      "output": "**최종 안내문**\n\n- 행사 장소: 새빛회의실\n- 참석자 규모: 30명\n- 개최일: 미정 ⚠️ *확인 필요*\n\n---\n\n이번 행사는 새빛회의실에서 참석자 30명 규모로 개최될 예정입니다. 개최일은 현재 미정입니다.\n\n> **검토 의견:** 초안에 포함된 \"일정이 확정되는 대로 추가 안내 드릴 예정입니다.\"는 원문에 없는 내용이므로 최종안에서 제외하였습니다. 업무 사용 전 개최일 확정 여부를 확인하시기 바랍니다."
+    }
+  ]
+}

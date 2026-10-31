@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/001",
+  "retrieved_at_utc": "2026-10-28T02:19:24.039939+00:00",
+  "sha256": "fd5d9a20a5d3329246611b3f1dbde75fcd276ecbdc832e9bebc23b30d465f1df",
+  "http_status": 200,
+  "overview_excerpt_ja": "会議メモをアップロードすると、メモの内容を整理し、あらかじめ指定した議事録フォーマットに成形します。\n‍\n特徴\n乱雑なメモでも問題ありません。記載内容を把握し、AIが議事録に適した文章を作成\n出力する議事録の形式は、ユーザーが自由に変更可能\n生成した議事録は、Word、Textデータ等でダウンロードしたり、SFA等へのデータ連携も可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

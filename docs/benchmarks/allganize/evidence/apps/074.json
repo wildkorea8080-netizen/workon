@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/074",
+  "retrieved_at_utc": "2026-10-28T02:19:17.763673+00:00",
+  "sha256": "2b74c2a651f322f9c0c043c00bf2c24036ee43dfc278ac8ea3d45f7a10bac056",
+  "http_status": 200,
+  "overview_excerpt_ja": "想定通り動作しない場合など、コーディング上の改善点をAIがチェックし、修正案を提示します。\n‍\n概要\nコーディング中の言語、上手くいかないことを伝え、対象のコードを入力すると、AIがボトルネックになっている部分をチェックし、修正案のコードを提示します。\n‍\n‍",
+  "purpose": "public product capability research; no authenticated execution"
+}

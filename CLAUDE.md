@@ -1,8 +1,20 @@
 # CLAUDE.md — WORKON 개발 가이드
 
-**최종 업데이트**: 2026-10-28(현행화 엔진 S6-1 — feat/s6-1-currentize, 운영 미반영)  
-**분석 기준**: 코드베이스 전수 확인
-(`tsc --noEmit` + `npm test` + `npm run db:check` 통과 상태에서 검증, `next build`는 배포 때 Vercel이 확인)
+**최종 업데이트**: 2026-10-31(Claude Code 인수인계 진입점 추가)
+**상세 본문 기준**: 2026-10-28 현행화 엔진 S6-1까지. 이후 앱 플랫폼·업무 15종·운영 배포 상태는 아래 최신 문서를 함께 본다.
+
+> **Claude Code 작업 시작점**: 먼저 [`docs/CLAUDE_CODE_HANDOFF.md`](docs/CLAUDE_CODE_HANDOFF.md)를 읽는다.
+> 붙여 넣을 시작 프롬프트는 [`docs/CLAUDE_CODE_PROMPTS.md`](docs/CLAUDE_CODE_PROMPTS.md)에 있다.
+> 현재 작업 트리는 대규모 미커밋 변경을 포함한다. 기존 변경을 사용자의 작업으로 취급하고 `git status --short`와 `git diff --stat` 확인 전에는 수정하지 않는다.
+> 최신 운영 기록은 [`docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md`](docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md), 남은 제품 차이는 [`CURRENT_GAPS_AND_NEXT.md`](docs/benchmarks/allganize/CURRENT_GAPS_AND_NEXT.md)가 우선한다. 이 본문의 과거 “미구현/운영 미반영” 표시는 작성 시점 기록일 수 있다.
+
+### 현재 작업 트리 기준선(2026-10-31)
+
+- 브랜치/HEAD: `feat/s6-1-currentize` / `457d215`.
+- 커밋 이후 앱 라이브러리·입력형 앱 빌더·단계 실행·파일 입력·실행 기록·HWPX 내보내기와 업무 흐름 확장이 미커밋 상태로 존재한다.
+- `npx tsc --noEmit --incremental false`는 `tests/app-copy.test.ts`의 `Agent.template_ids` 타입 불일치 1건으로 실패한다.
+- 전체 Vitest는 이 PC에서 현재 트리 기준 최종 집계 전에 Node 메모리 부족으로 중단됐다. 과거 배포 시점의 통과 기록과 현재 기준선을 구분한다.
+- 자세한 완료 범위·위험·우선순위·검증 순서는 인수인계 문서를 따른다.
 
 ---
 
@@ -1038,7 +1050,7 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 - **파일·XML은 프로그램이 만든다.** 모델은 칸 글·항목·근거 번호만 낸다. 위치(쪽·조문)·날짜·사람은 원자료에 적힌 것만 남기고(`workflows/items/verify.ts`), 숫자는 원자료 숫자와 대조한다(`review.ts` — 숫자 확인 규칙 재사용). 취합·정산의 숫자는 프로그램만 낸다
 - **권한은 작업마다**: 주인·명시 구성원(viewer·editor·reviewer)만. 같은 기관 관리자도 남의 작업은 404(`work/access.ts`). 모든 API·작업자·파일·내려받기에서 서버가 다시 확인(RLS에 기대지 않음). 내려받기는 60초 서명 주소
 - **내구성 실행**(ADR 0003): `work_runs` lease(`FOR UPDATE SKIP LOCKED`)·단계 체크포인트(`work_run_steps` — 끝난 모델 호출은 다시 부르지 않음)·같은 요청 번호는 같은 실행·판 저장은 기준 판·현재 실행을 DB가 원자적으로 확인. 화면이 실행을 바로 걸고, 화면을 닫으면 pg_cron(`/api/work/worker`)이 이어 받는다
-- **과금 규약**: 업무의 모델 호출도 `usage_logs`(`work_generate`·`work_revise`, model·토큰·원가·run_id·stage)
+- **과금 규약**: 업무의 모델 호출도 `usage_logs`(`work_generate`·`work_revise`, model·토큰·원가·run_id·stage). 모델 호출은 `runs/shared.ts`의 `callModel`로만 한다 — 성공이면 그 토큰, **응답 검사(JSON 형식)에서 던졌으면 쓴 토큰을 `failed: true`·`error_code`와 함께 한 번** 남긴다(생성기는 `generation/spent.ts`의 `parseSpent`로 오류에 실어 보냄, 2026-10-31 — 그 전에는 이 토큰이 청구만 되고 기록·예산 판정에서 빠졌다). 모델 호출 자체가 실패한 오류(토큰 없음)는 남기지 않는다
 - **결과 파일은 판에서 만든 불변 결과**(같은 판·같은 키 한 벌, sha256). 업무 하나가 파일 여럿이면(`outputs`) 모두 지금 판일 때만 '검토 완료'. 렌더러가 없으면 '실제 파일 미리보기 없음'(구조 보기로 꾸미지 않음, ADR 0002)
 - **원자료 갈래**: 파일 입력 키 → 원자료 용도 표는 `work/file-sets.ts` 한 곳(화면·서버 공용). 필수 파일 입력마다 그 용도 원자료가 있어야 '만들 준비됨'
 - **가져오기**: 다른 작업의 결과 파일(이 작업 편집 + 원래 작업 내려받기 권한)·대화에서 만든 파일·대화 첨부(본인 것만)는 **바이트를 복사**해 원자료로(origin에 출처·해시). 원래 기록이 지워져도 남는다

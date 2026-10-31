@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/050",
+  "retrieved_at_utc": "2026-10-28T02:19:22.495994+00:00",
+  "sha256": "82c6506c50e39e55c2e0aff7f17e9d05670a5e6c63150c66c652a39de6454052",
+  "http_status": 200,
+  "overview_excerpt_ja": "Alli LLM App Marketの薬機法チェッカーは、医薬品等の広告メッセージや製品紹介文が、薬機法や通達などの下位ルールの観点で懸念がないか確認するための確認業務をAIの力でサポートする生成AIアプリです。\n‍\n概要\n薬機法や関連通達と広告メッセージなどを照合し、抵触リスクをAIが確認\nリスクのある表現があった場合、具体的にどの表現がどの規制に関するリスクがあるのか具体的に提示\n各社毎の独自ルールや禁止ワードなどの設定など、カスタマイズも可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

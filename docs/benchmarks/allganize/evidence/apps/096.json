@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/096",
+  "retrieved_at_utc": "2026-10-28T02:19:15.315351+00:00",
+  "sha256": "237ebb04567e4974e2a27e0cb20bffa9b706a6ec40f30897dc7efac73accde2b",
+  "http_status": 200,
+  "overview_excerpt_ja": "AIがテーマをもとに資料骨子を考え、PowerPointにページ出力するVBA（Visual Basic for Applications）コードを生成します。\n‍\n特徴\n資料タイトルとページ数を指定するだけで、資料の骨子（アジェンダ）を作成\nページ出力を自動化する、PowerPointのマクロ機能で実行できるVBA（Visual Basic for Applications）コードを生成\nPowertPointのマクロ機能にコードを貼り付けて実行すれば、骨子が入力されたPowerPointの自動生成が可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

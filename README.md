@@ -1,110 +1,50 @@
-# WORKON AI — 공공기관 전용 AI 비서 플랫폼
+# WORKON
 
-> Next.js 14 · Supabase · Claude API · Voyage AI · Vercel
+WORKON은 기관·부서 기반 멀티테넌트 업무 AI 서비스입니다. 기관 문서를 검색해 근거 있는 답을 제공하고, 원자료와 기존 양식을 이용해 검토 가능한 HWPX/XLSX 결과물을 생성합니다.
 
----
+현재 주요 영역은 다음과 같습니다.
 
-## 슈퍼관리자 포털
+- AI 대화와 기관/부서/개인 비서
+- NODA(ReadLayer) 기반 문서 읽기·검색·근거 확인
+- HWP/HWPX·DOCX·XLSX·PDF 등 파일 입력
+- HWPX/DOCX 양식 채우기와 HWPX/XLSX 결과물 생성
+- 업무 작업 15종과 판·검토·복구·다운로드
+- 앱 라이브러리와 입력형 앱 빌더
+- 기관 관리자와 슈퍼관리자 포털
 
-### 접속 URL
-```
-https://workon-ai.vercel.app/super/login
-```
-
-### 최초 계정 생성 (1회만)
-
-```bash
-curl -X POST https://workon-ai.vercel.app/api/super/auth/setup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email":    "admin@workon.ai",
-    "password": "안전한비밀번호8자이상",
-    "name":     "슈퍼관리자",
-    "setupKey": "YOUR_SUPER_ADMIN_SETUP_KEY"
-  }'
-```
-
-이미 계정이 있으면 `/super/login` 에서 바로 로그인하세요.
-
-### 주요 기능
-
-| 경로 | 기능 |
-|---|---|
-| `/super` | 대시보드 (전체 현황, 차트, 알림) |
-| `/super/organizations` | 기관 CRUD, 대리 접근 |
-| `/super/accounts` | 전체 사용자 + 슈퍼관리자 관리 |
-| `/super/api-keys` | 시스템 API 키 + 기관별 키 현황 |
-| `/super/usage` | 실시간 사용량 모니터링 |
-| `/super/contracts` | 계약 등록/갱신, 매출 통계 |
-| `/super/notices` | 공지사항 작성/발행 |
-| `/super/settings` | 시스템 설정, 점검 모드 |
-| `/super/logs` | 접속·시스템·대리접근 로그 |
-
----
-
-## 환경변수
+## 개발 시작
 
 ```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# NextAuth
-NEXTAUTH_URL=
-NEXTAUTH_SECRET=
-
-# AI APIs
-ANTHROPIC_API_KEY=       # Claude
-VOYAGE_API_KEY=          # Voyage AI 임베딩
-
-# 슈퍼관리자 전용
-SUPER_ADMIN_SETUP_KEY=   # 최초 계정 생성 키
-SUPER_JWT_SECRET=        # JWT 서명 키 (32바이트)
-ENCRYPTION_KEY=          # API 키 암호화 키 (64자 hex)
+npm install
+npm run dev
 ```
 
-### 키 생성 명령
+환경변수 목록과 설명은 [.env.example](./.env.example)을 참고하세요. 실제 비밀값이 있는 `.env.local`은 커밋하지 않습니다.
+
+기본 검증:
 
 ```bash
-# SUPER_JWT_SECRET
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-
-# ENCRYPTION_KEY
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+npx tsc --noEmit --incremental false
+npm test
+npm run build
 ```
 
----
+DB, NODA, HWPX, 업무 작업 검증 명령은 [CLAUDE.md](./CLAUDE.md)의 `검증 장치` 절에 정리되어 있습니다.
 
-## DB 마이그레이션 실행 순서
+## Claude Code로 이어서 작업하기
 
-Supabase SQL Editor에서 순서대로 실행:
+1. [현재 인수인계](./docs/CLAUDE_CODE_HANDOFF.md)를 먼저 읽습니다.
+2. [Claude Code 시작 프롬프트](./docs/CLAUDE_CODE_PROMPTS.md)에서 목적에 맞는 프롬프트를 사용합니다.
+3. 상세 구조와 코딩 규약은 [CLAUDE.md](./CLAUDE.md)를 따릅니다.
+4. 최신 운영 배포 기록은 [PRODUCTION_DEPLOYMENT.md](./docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md)를 확인합니다.
 
-```
-0001_init.sql
-0002_security_logs.sql
-0003_search_document_chunks.sql
-0004_search_agent_chunks.sql
-0005_benchmark_features.sql
-0006_super_admin.sql
-0007_impersonation.sql
-0008_user_active.sql
-0009_api_keys_system.sql
-0010_notices.sql
-0011_logs.sql
-```
+현재 작업 트리에는 대규모 미커밋 작업이 있을 수 있습니다. 시작 전에 반드시 `git status --short`와 `git diff --stat`을 확인하고 기존 변경을 보존하세요.
 
----
+## 주요 문서
 
-## 기술 스택
-
-| 레이어 | 기술 |
-|---|---|
-| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS |
-| 일반 인증 | NextAuth.js 4 (Credentials) |
-| 슈퍼관리자 인증 | 자체 JWT (HMAC-SHA256, httpOnly 쿠키) |
-| DB | Supabase PostgreSQL + pgvector |
-| AI/LLM | Claude API (`claude-sonnet-4-6`) |
-| 임베딩 | Voyage AI (`voyage-3`) |
-| 배포 | Vercel |
-| 차트 | Recharts |
+- [Claude Code 인수인계](./docs/CLAUDE_CODE_HANDOFF.md)
+- [제품 방향 재검토](./docs/2026-10-28-product-benchmark-review.md)
+- [현재 기능 차이와 다음 작업](./docs/benchmarks/allganize/CURRENT_GAPS_AND_NEXT.md)
+- [운영 배포 기록](./docs/benchmarks/allganize/PRODUCTION_DEPLOYMENT.md)
+- [업무 개편 출시 절차](./docs/workon-rebuild/RELEASE_RUNBOOK.md)
+- [DB 마이그레이션](./supabase/migrations)

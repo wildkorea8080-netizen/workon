@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/025",
+  "retrieved_at_utc": "2026-10-28T02:19:15.063352+00:00",
+  "sha256": "9b96529e85ea59e9a8da8022706e81d9d3d432de9b8405cfd4fff93662a28f0b",
+  "http_status": 200,
+  "overview_excerpt_ja": "業界や市場を指定すると、PEST分析のフレームワークに沿って情報をまとめて提示します。営業やマーケティング業務などで活用できるLLMアプリです。\n‍\n特徴\n業界名やサービス名を入力すると、PEST分析のフレームワーク（「政治（Politics）」「経済（Economy）」「社会（Society）」「技術（Technology）」）に沿って情報を整理して提示\n分析結果は項目ごとに箇条書きで提示するなど、アウトプット方法はカスタマイズ可能\n自分とは異なる視点で分析することで、多角的な分析が可能\n分析結果は、テキストコピー、テキストファイルやWordでのダウンロードが可能\n‍",
+  "purpose": "public product capability research; no authenticated execution"
+}

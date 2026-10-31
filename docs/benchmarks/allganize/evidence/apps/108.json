@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/108",
+  "retrieved_at_utc": "2026-10-28T02:19:15.255353+00:00",
+  "sha256": "68243695593ab62ce86dddc11429da1336dd8cdce7ddfc3c2bac6fb74a8944b8",
+  "http_status": 200,
+  "overview_excerpt_ja": "LLMが持つ情報とWeb上の情報から、それぞれ質問に回答するアプリです。\n‍\n特徴\nLLMが保有する情報（学習済みの情報）に加え、インターネットから質問に関連する情報を調査し、回答を提示。\nWeb情報から回答を生成するため、最新情報にも対応\nWeb情報から回答した場合、回答根拠となったWebページを情報ソースとして提示するため、生成AI特有のハルシネーション（誤った回答）の影響を低減可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

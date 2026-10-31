@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/092",
+  "retrieved_at_utc": "2026-10-28T02:19:13.401675+00:00",
+  "sha256": "713db6b39e519189f5676cb1407c95706c5c748f5c804981e93f6d08f51b7f85",
+  "http_status": 200,
+  "overview_excerpt_ja": "AIにとって理解しやすいドキュメント、判断が難しいドキュメントが存在します。AIに投入するドキュメントが、AIにとって一般的に理解しやすい構造、表現になっているかを判断します。\n‍\n概要\nドキュメントをアップロードすると、ドキュメントの構造や表現を確認し、AIが認識しやすいファイルかどうか判定\nAIとの適合性が高い要素、適合性の低い要素それぞれ解説するため、AIによる回答生成精度を向上させるためのヒントを得ることが可能",
+  "purpose": "public product capability research; no authenticated execution"
+}

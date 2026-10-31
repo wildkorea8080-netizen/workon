@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/087",
+  "retrieved_at_utc": "2026-10-28T02:19:19.109614+00:00",
+  "sha256": "463b1ef426a3386b4d1597b1cb16685adfc13b88526d56e59698f5cf7fa93614",
+  "http_status": 200,
+  "overview_excerpt_ja": "質問や指示をLLMが理解し、柔軟に自動応答します。\n‍\n概要\nChatGPTのように一般的な情報から回答する生成AIチャットアプリ\nLLMのモデルはさまざまなモデルから選択可能（選択可能なLLMの一例：OpenAI GPT-4, GPT-4 Turbo, GPT-3.5、Google PaLM2, Gemini、Anthropic Claude 3 各モデル等）\nデータの二次利用を防止したセキュアな環境",
+  "purpose": "public product capability research; no authenticated execution"
+}

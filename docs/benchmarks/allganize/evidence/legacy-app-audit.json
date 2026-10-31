@@ -1,0 +1,815 @@
+{
+  "checkedAt": "2026-10-30T08:07:02.672Z",
+  "scope": "Local adapter using connected DB settings; not authenticated production E2E",
+  "live": true,
+  "agents": [
+    {
+      "name": "개조식 내용정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "file_read",
+        "doc_search"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 96,
+      "tokens": {
+        "input": 217,
+        "output": 102
+      }
+    },
+    {
+      "name": "개조식 내용정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 103,
+      "tokens": {
+        "input": 217,
+        "output": 111
+      }
+    },
+    {
+      "name": "공문 영문 번역 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 76,
+      "tokens": {
+        "input": 377,
+        "output": 85
+      }
+    },
+    {
+      "name": "공문 영문 번역 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 88,
+      "tokens": {
+        "input": 377,
+        "output": 97
+      }
+    },
+    {
+      "name": "공문 초안 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 89,
+      "tokens": {
+        "input": 294,
+        "output": 96
+      }
+    },
+    {
+      "name": "공문 초안 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "doc_search"
+      ],
+      "documents": 1,
+      "documentStates": {
+        "ready": 1
+      },
+      "live": "model_response_ok",
+      "responseChars": 80,
+      "tokens": {
+        "input": 294,
+        "output": 87
+      }
+    },
+    {
+      "name": "공문서 검토 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 114,
+      "tokens": {
+        "input": 437,
+        "output": 125
+      }
+    },
+    {
+      "name": "공문서 검토 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "doc_search"
+      ],
+      "documents": 1,
+      "documentStates": {
+        "ready": 1
+      },
+      "live": "model_response_ok",
+      "responseChars": 123,
+      "tokens": {
+        "input": 437,
+        "output": 134
+      }
+    },
+    {
+      "name": "문서 요약 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 139,
+      "tokens": {
+        "input": 359,
+        "output": 147
+      }
+    },
+    {
+      "name": "문서 요약 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 114,
+      "tokens": {
+        "input": 359,
+        "output": 124
+      }
+    },
+    {
+      "name": "민원인 답변 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 79,
+      "tokens": {
+        "input": 322,
+        "output": 85
+      }
+    },
+    {
+      "name": "민원인 답변 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 60,
+      "tokens": {
+        "input": 322,
+        "output": 66
+      }
+    },
+    {
+      "name": "발표자료 기획 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 73,
+      "tokens": {
+        "input": 380,
+        "output": 79
+      }
+    },
+    {
+      "name": "발표자료 기획 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 125,
+      "tokens": {
+        "input": 380,
+        "output": 130
+      }
+    },
+    {
+      "name": "법령·규정 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "doc_search",
+        "public_data"
+      ],
+      "documents": 1,
+      "documentStates": {
+        "ready": 1
+      },
+      "live": "model_response_ok",
+      "responseChars": 125,
+      "tokens": {
+        "input": 328,
+        "output": 130
+      }
+    },
+    {
+      "name": "법령·규정 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "public_data"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 128,
+      "tokens": {
+        "input": 328,
+        "output": 133
+      }
+    },
+    {
+      "name": "보고서 초안 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 102,
+      "tokens": {
+        "input": 269,
+        "output": 114
+      }
+    },
+    {
+      "name": "보고서 초안 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 110,
+      "tokens": {
+        "input": 269,
+        "output": 120
+      }
+    },
+    {
+      "name": "사업 협력 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 88,
+      "tokens": {
+        "input": 156,
+        "output": 91
+      }
+    },
+    {
+      "name": "쉬운 공공언어 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 138,
+      "tokens": {
+        "input": 427,
+        "output": 145
+      }
+    },
+    {
+      "name": "쉬운 공공언어 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 131,
+      "tokens": {
+        "input": 427,
+        "output": 136
+      }
+    },
+    {
+      "name": "엑셀 수식 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 87,
+      "tokens": {
+        "input": 419,
+        "output": 99
+      }
+    },
+    {
+      "name": "엑셀 수식 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 124,
+      "tokens": {
+        "input": 419,
+        "output": 133
+      }
+    },
+    {
+      "name": "연설문 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 82,
+      "tokens": {
+        "input": 243,
+        "output": 89
+      }
+    },
+    {
+      "name": "연설문 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 78,
+      "tokens": {
+        "input": 243,
+        "output": 79
+      }
+    },
+    {
+      "name": "예산 관리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 81,
+      "tokens": {
+        "input": 163,
+        "output": 87
+      }
+    },
+    {
+      "name": "음슴체 변환 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 60,
+      "tokens": {
+        "input": 251,
+        "output": 67
+      }
+    },
+    {
+      "name": "음슴체 변환 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 63,
+      "tokens": {
+        "input": 251,
+        "output": 68
+      }
+    },
+    {
+      "name": "의회 답변 준비 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 78,
+      "tokens": {
+        "input": 396,
+        "output": 83
+      }
+    },
+    {
+      "name": "의회 답변 준비 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 83,
+      "tokens": {
+        "input": 396,
+        "output": 87
+      }
+    },
+    {
+      "name": "인사·채용 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 161,
+      "tokens": {
+        "input": 418,
+        "output": 170
+      }
+    },
+    {
+      "name": "입찰공고 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "public_data"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 121,
+      "tokens": {
+        "input": 329,
+        "output": 125
+      }
+    },
+    {
+      "name": "입찰공고 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "public_data"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 109,
+      "tokens": {
+        "input": 329,
+        "output": 112
+      }
+    },
+    {
+      "name": "정책 홍보문 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 120,
+      "tokens": {
+        "input": 294,
+        "output": 128
+      }
+    },
+    {
+      "name": "정책 홍보문 작성 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 99,
+      "tokens": {
+        "input": 294,
+        "output": 103
+      }
+    },
+    {
+      "name": "통계 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "public_data"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 155,
+      "tokens": {
+        "input": 331,
+        "output": 156
+      }
+    },
+    {
+      "name": "통계 조회 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image",
+        "public_data"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 161,
+      "tokens": {
+        "input": 331,
+        "output": 161
+      }
+    },
+    {
+      "name": "표 정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 107,
+      "tokens": {
+        "input": 385,
+        "output": 120
+      }
+    },
+    {
+      "name": "표 정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 92,
+      "tokens": {
+        "input": 385,
+        "output": 105
+      }
+    },
+    {
+      "name": "해외농업자원개발서비스",
+      "published": false,
+      "active": true,
+      "kind": "link",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [],
+      "documents": 0,
+      "documentStates": {},
+      "live": "not_available"
+    },
+    {
+      "name": "회의록 정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 92,
+      "tokens": {
+        "input": 313,
+        "output": 101
+      }
+    },
+    {
+      "name": "회의록 정리 비서",
+      "published": true,
+      "active": true,
+      "kind": "chat",
+      "model": "claude-sonnet-4-6",
+      "settingsValid": true,
+      "capabilities": [
+        "image"
+      ],
+      "documents": 0,
+      "documentStates": {},
+      "live": "model_response_ok",
+      "responseChars": 98,
+      "tokens": {
+        "input": 313,
+        "output": 107
+      }
+    }
+  ]
+}

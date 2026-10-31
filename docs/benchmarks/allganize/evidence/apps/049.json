@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/049",
+  "retrieved_at_utc": "2026-10-28T02:19:16.172019+00:00",
+  "sha256": "e79f0b91495816e41d883522564e67a64932d70e19ae73ec11243068a60ea75f",
+  "http_status": 200,
+  "overview_excerpt_ja": "ご利用のSQL動作環境と実現したいこと、テーブル情報を入力いただくと、動作環境に適したSQLのDDLとテーブル情報に対して実行するクエリを作成します。\n‍\n概要\n動作環境（例:MySQLなど)、実現したいこととともに、テーブル情報をコピーして貼り付けるだけで、適したSQLのDDLとテーブル情報に対して実行するクエリを作成し、提示します。",
+  "purpose": "public product capability research; no authenticated execution"
+}

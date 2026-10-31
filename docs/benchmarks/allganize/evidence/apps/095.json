@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/095",
+  "retrieved_at_utc": "2026-10-28T02:19:13.837512+00:00",
+  "sha256": "ef617f2389b40fcdd27d940987e1c6f4bea8f2082eeb18e011a92c6257fe6553",
+  "http_status": 200,
+  "overview_excerpt_ja": "FAQデータの類似・重複や利用頻度の低いFAQを洗い出します。（Alli LLM App MarketのFAQ応答 AIチャットボット利用者様向け）\n‍\n概要\nAlli LLM App Marketの管理ダッシュボードから取得できるデータをもとに、類似・重複しているFAQや利用頻度の低いFAQを洗い出します。\nFAQデータが増えたり、複数人で管理している場合、類似FAQが発生する場合があります。棚卸しの効率化、自動化を実現します。",
+  "purpose": "public product capability research; no authenticated execution"
+}

@@ -1,0 +1,2378 @@
+{
+  "research_date_kst": "2026-10-28",
+  "source": "app-catalog.json",
+  "scope": "Analyst implementation proposals for every public catalog record; no vendor runtime or WORKON installed-app availability claim.",
+  "app_count": 100,
+  "family_counts": {
+    "text-form": 57,
+    "rag-evidence": 7,
+    "extract-review": 24,
+    "table-deterministic": 3,
+    "research-multistep": 5,
+    "multimodal-file": 4
+  },
+  "priority_counts": {
+    "core": 29,
+    "later": 62,
+    "local-law-redesign": 4,
+    "low-relevance": 5
+  },
+  "apps": [
+    {
+      "reference_id": "alli-ja-039",
+      "vendor_app_id": "039",
+      "analyst_title_ko": "격려 문구 상담",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/039",
+      "family": "text-form",
+      "priority": "low-relevance",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "업무 연관 낮음; 초기 범위 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-059",
+      "vendor_app_id": "059",
+      "analyst_title_ko": "전화 상담 코칭",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/059",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "민원 상담 기록의 응대 품질 점검 후보",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-013",
+      "vendor_app_id": "013",
+      "analyst_title_ko": "프롬프트 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/013",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "업무 비서 지시문 초안 구성",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-055",
+      "vendor_app_id": "055",
+      "analyst_title_ko": "영업 역할 연습",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/055",
+      "family": "text-form",
+      "priority": "low-relevance",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "민원 응대 교육 시나리오로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-079",
+      "vendor_app_id": "079",
+      "analyst_title_ko": "프로젝트 위험 검토",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/079",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "사업계획의 위험·대응 목록 작성",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-052",
+      "vendor_app_id": "052",
+      "analyst_title_ko": "일대일 면담 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/052",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "업무 면담 질문 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-092",
+      "vendor_app_id": "092",
+      "analyst_title_ko": "AI 문서 적합성 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/092",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "ReadLayer 읽기 품질·구조 점검 화면",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-033",
+      "vendor_app_id": "033",
+      "analyst_title_ko": "BANTC 항목 정리",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/033",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "상담 메모의 정해진 항목 추출 방식 참고",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-017",
+      "vendor_app_id": "017",
+      "analyst_title_ko": "엑셀 함수 도움말",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/017",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "직원이 설명한 계산에 맞는 수식 제안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-060",
+      "vendor_app_id": "060",
+      "analyst_title_ko": "FAQ 유지관리",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/060",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "문의 기록을 FAQ 후보로 정리 후 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-004",
+      "vendor_app_id": "004",
+      "analyst_title_ko": "FAQ 기반 응답",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/004",
+      "family": "rag-evidence",
+      "priority": "core",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 검증 FAQ를 근거로 질의응답",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-095",
+      "vendor_app_id": "095",
+      "analyst_title_ko": "FAQ 정비",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/095",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "유사·중복·저사용 FAQ 검토 목록",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-106",
+      "vendor_app_id": "106",
+      "analyst_title_ko": "문서에서 FAQ 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/106",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "기관 매뉴얼을 검토 가능한 FAQ 초안으로",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-054",
+      "vendor_app_id": "054",
+      "analyst_title_ko": "이미지 도표 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/054",
+      "family": "multimodal-file",
+      "priority": "later",
+      "reuse_candidates": [
+        "image",
+        "file_read",
+        "doc-fill",
+        "work/documents"
+      ],
+      "missing_dependencies": [
+        "이미지 입력 정확도 평가",
+        "출력 형식별 전용 생성·검사",
+        "PPTX는 신규 엔진·양식 설계"
+      ],
+      "proposed_acceptance": "이미지 판독·VBA 생성·DOCX 양식 구성·실제 PPTX 파일 생성을 서로 다른 기능으로 표시한다.",
+      "public_sector_adaptation": "스캔 표 추출·원본 대조에 활용",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-098",
+      "vendor_app_id": "098",
+      "analyst_title_ko": "IT 지식 검색·문제 해결",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/098",
+      "family": "rag-evidence",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 전산 매뉴얼 기반 직원 지원",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-108",
+      "vendor_app_id": "108",
+      "analyst_title_ko": "LLM·웹 정보 응답",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/108",
+      "family": "research-multistep",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "llm",
+        "work/runs"
+      ],
+      "missing_dependencies": [
+        "일반 웹 검색·본문 읽기",
+        "조사 범위·계획·재탐색",
+        "출처/기준일·비용·횟수 상한"
+      ],
+      "proposed_acceptance": "자료 범위와 기준일을 고정하고 출처를 남긴다. 검색 실패를 조사 완료로 처리하지 않는다.",
+      "public_sector_adaptation": "기관 자료와 외부 공개 정보의 범위 구분",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-036",
+      "vendor_app_id": "036",
+      "analyst_title_ko": "LLM 활용 제안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/036",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "업무 유형별 AI 사용 예시 안내",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-019",
+      "vendor_app_id": "019",
+      "analyst_title_ko": "Mac 문제 해결",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/019",
+      "family": "rag-evidence",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 기기 정책에 맞는 전산 도움말",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-056",
+      "vendor_app_id": "056",
+      "analyst_title_ko": "NDA 검토",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/056",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "표준 계약 대비 조항 누락·차이 확인",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-043",
+      "vendor_app_id": "043",
+      "analyst_title_ko": "OKR 설정",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/043",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확정 실적에 근거한 부서 목표 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-025",
+      "vendor_app_id": "025",
+      "analyst_title_ko": "PEST 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/025",
+      "family": "research-multistep",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "llm",
+        "work/runs"
+      ],
+      "missing_dependencies": [
+        "일반 웹 검색·본문 읽기",
+        "조사 범위·계획·재탐색",
+        "출처/기준일·비용·횟수 상한"
+      ],
+      "proposed_acceptance": "자료 범위와 기준일을 고정하고 출처를 남긴다. 검색 실패를 조사 완료로 처리하지 않는다.",
+      "public_sector_adaptation": "정책·경제·사회·기술 환경 조사",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-096",
+      "vendor_app_id": "096",
+      "analyst_title_ko": "발표자료 개요·VBA 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/096",
+      "family": "multimodal-file",
+      "priority": "later",
+      "reuse_candidates": [
+        "image",
+        "file_read",
+        "doc-fill",
+        "work/documents"
+      ],
+      "missing_dependencies": [
+        "이미지 입력 정확도 평가",
+        "출력 형식별 전용 생성·검사",
+        "PPTX는 신규 엔진·양식 설계"
+      ],
+      "proposed_acceptance": "이미지 판독·VBA 생성·DOCX 양식 구성·실제 PPTX 파일 생성을 서로 다른 기능으로 표시한다.",
+      "public_sector_adaptation": "발표 개요 참고; 임의 VBA 실행은 초기 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-011",
+      "vendor_app_id": "011",
+      "analyst_title_ko": "PR 기사 초안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/011",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확인된 사업자료로 보도자료 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-103",
+      "vendor_app_id": "103",
+      "analyst_title_ko": "RFP 작성 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/103",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "제안요청서·과업지시서 필수 항목 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-102",
+      "vendor_app_id": "102",
+      "analyst_title_ko": "SaaS 약관 검토",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/102",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "서비스 이용약관의 확인 사항 추출",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-028",
+      "vendor_app_id": "028",
+      "analyst_title_ko": "SPIN 질문 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/028",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "사업 수요조사·상담 질문으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-049",
+      "vendor_app_id": "049",
+      "analyst_title_ko": "SQL DDL·쿼리 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/049",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "읽기 전용 통계 질의 보조부터 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-034",
+      "vendor_app_id": "034",
+      "analyst_title_ko": "SWOT 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/034",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관·사업 환경의 근거 있는 분석",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-018",
+      "vendor_app_id": "018",
+      "analyst_title_ko": "Windows 문제 해결",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/018",
+      "family": "rag-evidence",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 전산 FAQ와 연계한 직원 지원",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-005",
+      "vendor_app_id": "005",
+      "analyst_title_ko": "메일 초안 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/005",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "직원이 확인한 사실로 안내 메일 작성",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-089",
+      "vendor_app_id": "089",
+      "analyst_title_ko": "하도급법 적용 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/089",
+      "family": "extract-review",
+      "priority": "local-law-redesign",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "일본 법률 앱; 국내 기준을 따로 설계",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-068",
+      "vendor_app_id": "068",
+      "analyst_title_ko": "사업 내용 산업 분류",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/068",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "국내 분류체계 기반 후보 제안으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-041",
+      "vendor_app_id": "041",
+      "analyst_title_ko": "인사평가 피드백 문안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/041",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확인된 평가 내용의 표현 보조만 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-022",
+      "vendor_app_id": "022",
+      "analyst_title_ko": "업무 진행 조언",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/022",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "매뉴얼 기반 처리 절차 안내",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-80",
+      "vendor_app_id": "80",
+      "analyst_title_ko": "기획서 개요 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/80",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "사업기획 목차·필요자료 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-086",
+      "vendor_app_id": "086",
+      "analyst_title_ko": "세미나 기획·모집 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/086",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 행사 개요·제목·안내문 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-026",
+      "vendor_app_id": "026",
+      "analyst_title_ko": "회의 용어 검색",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/026",
+      "family": "rag-evidence",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 용어집·공개 자료 확인",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-020",
+      "vendor_app_id": "020",
+      "analyst_title_ko": "회의 안건 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/020",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "이전 회의의 미결 안건을 다음 안건으로",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-058",
+      "vendor_app_id": "058",
+      "analyst_title_ko": "보도자료 제목 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/058",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확정 내용에서 제목 후보 생성",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-012",
+      "vendor_app_id": "012",
+      "analyst_title_ko": "홍보 문구 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/012",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 사업 안내 문구 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-105",
+      "vendor_app_id": "105",
+      "analyst_title_ko": "고객별 영업계획",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/105",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "협력기관 현황·협업계획으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-048",
+      "vendor_app_id": "048",
+      "analyst_title_ko": "광고 문구 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/048",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "시민 대상 안내 제목 후보",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-082",
+      "vendor_app_id": "082",
+      "analyst_title_ko": "문서 양식 구성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/082",
+      "family": "multimodal-file",
+      "priority": "core",
+      "reuse_candidates": [
+        "image",
+        "file_read",
+        "doc-fill",
+        "work/documents"
+      ],
+      "missing_dependencies": [
+        "이미지 입력 정확도 평가",
+        "출력 형식별 전용 생성·검사",
+        "PPTX는 신규 엔진·양식 설계"
+      ],
+      "proposed_acceptance": "이미지 판독·VBA 생성·DOCX 양식 구성·실제 PPTX 파일 생성을 서로 다른 기능으로 표시한다.",
+      "public_sector_adaptation": "기관 승인 양식의 항목 설계 보조",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-107",
+      "vendor_app_id": "107",
+      "analyst_title_ko": "페르소나 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/107",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "사업 대상자 유형의 가설 정리",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-074",
+      "vendor_app_id": "074",
+      "analyst_title_ko": "코드 수정 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/074",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "전산 담당자 보조; 일반 직원 초기 범위 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-081",
+      "vendor_app_id": "081",
+      "analyst_title_ko": "구내식당 메뉴 제안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/081",
+      "family": "text-form",
+      "priority": "low-relevance",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "핵심 업무 연관 낮음; 초기 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-035",
+      "vendor_app_id": "035",
+      "analyst_title_ko": "파이브 포스 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/035",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "산업 환경 조사 참고",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-045",
+      "vendor_app_id": "045",
+      "analyst_title_ko": "뉴스레터 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/045",
+      "family": "research-multistep",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "llm",
+        "work/runs"
+      ],
+      "missing_dependencies": [
+        "일반 웹 검색·본문 읽기",
+        "조사 범위·계획·재탐색",
+        "출처/기준일·비용·횟수 상한"
+      ],
+      "proposed_acceptance": "자료 범위와 기준일을 고정하고 출처를 남긴다. 검색 실패를 조사 완료로 처리하지 않는다.",
+      "public_sector_adaptation": "기관 소식지 반응·개선안 분석",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-064",
+      "vendor_app_id": "064",
+      "analyst_title_ko": "계정과목 분류 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/064",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "회계 기준에 따른 후보 제시; 확정은 담당자",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-002",
+      "vendor_app_id": "002",
+      "analyst_title_ko": "인지세 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/002",
+      "family": "extract-review",
+      "priority": "local-law-redesign",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "일본 세법 앱; 국내 기준 검증 없이는 미제공",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-044",
+      "vendor_app_id": "044",
+      "analyst_title_ko": "미팅 요청 편지",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/044",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 간 협조·면담 요청 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-075",
+      "vendor_app_id": "075",
+      "analyst_title_ko": "리뷰 답변 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/075",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 서비스 이용 의견 회신 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-076",
+      "vendor_app_id": "076",
+      "analyst_title_ko": "MECE 기획 검토",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/076",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "사업계획 검토 항목 누락 점검",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-078",
+      "vendor_app_id": "078",
+      "analyst_title_ko": "상품 이미지 홍보 문구",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/078",
+      "family": "multimodal-file",
+      "priority": "later",
+      "reuse_candidates": [
+        "image",
+        "file_read",
+        "doc-fill",
+        "work/documents"
+      ],
+      "missing_dependencies": [
+        "이미지 입력 정확도 평가",
+        "출력 형식별 전용 생성·검사",
+        "PPTX는 신규 엔진·양식 설계"
+      ],
+      "proposed_acceptance": "이미지 판독·VBA 생성·DOCX 양식 구성·실제 PPTX 파일 생성을 서로 다른 기능으로 표시한다.",
+      "public_sector_adaptation": "행사·시설 안내문 초안 후보",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-046",
+      "vendor_app_id": "046",
+      "analyst_title_ko": "FAQ 검색 후 회신 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/046",
+      "family": "rag-evidence",
+      "priority": "core",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "기관 근거 검색과 민원 회신 초안 연결",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-062",
+      "vendor_app_id": "062",
+      "analyst_title_ko": "문서 기반 질의응답",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/062",
+      "family": "rag-evidence",
+      "priority": "core",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "qa"
+      ],
+      "missing_dependencies": [
+        "앱별 지식/FAQ 범위",
+        "최신 판·근거 위치",
+        "답 없음·접근 거부·자료 장애 구분"
+      ],
+      "proposed_acceptance": "허용된 자료에서만 검색하고 근거를 표시한다. 자동 회신 발송은 별도 연동·승인 없이는 제공하지 않는다.",
+      "public_sector_adaptation": "ReadLayer 기반 규정·매뉴얼 확인",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-087",
+      "vendor_app_id": "087",
+      "analyst_title_ko": "일반 생성형 대화",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/087",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "가벼운 질문과 작성의 공통 입구",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-093",
+      "vendor_app_id": "093",
+      "analyst_title_ko": "챗봇 이용 데이터 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/093",
+      "family": "table-deterministic",
+      "priority": "later",
+      "reuse_candidates": [
+        "table-engine",
+        "table_merge",
+        "collection",
+        "settlement",
+        "xlsx-export"
+      ],
+      "missing_dependencies": [
+        "자료 열 대응",
+        "결측·중복·단위·모집단 규칙",
+        "이용 데이터·설문·청구/입금별 계산 규약"
+      ],
+      "proposed_acceptance": "집계·비율·대사는 프로그램이 수행하고 원본 대응·제외 이유·계산 근거를 남긴다.",
+      "public_sector_adaptation": "비서 미응답·반복 문의 개선",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-003",
+      "vendor_app_id": "003",
+      "analyst_title_ko": "계약 조항 추출·비교",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/003",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "계약 금액·기간·조건과 표준안 차이 대조",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-042",
+      "vendor_app_id": "042",
+      "analyst_title_ko": "재교육 학습계획",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/042",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "직무교육 계획 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-084",
+      "vendor_app_id": "084",
+      "analyst_title_ko": "정관 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/084",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "기관 정관의 권한·절차·요건 추출",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-014",
+      "vendor_app_id": "014",
+      "analyst_title_ko": "불만 응대 문구",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/014",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확인 사실과 기관 지침에 맞는 회신",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-097",
+      "vendor_app_id": "097",
+      "analyst_title_ko": "심리적 안전성 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/097",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "인사 판단 자동화는 제외; 검토 참고만",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-099",
+      "vendor_app_id": "099",
+      "analyst_title_ko": "아이디어 대화",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/099",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기획 초안 검토와 질문 정리",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-053",
+      "vendor_app_id": "053",
+      "analyst_title_ko": "채용 면접 질문",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/053",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "공통 직무역량 질문 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-091",
+      "vendor_app_id": "091",
+      "analyst_title_ko": "페르미 추정",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/091",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "가정 기반 기획 참고; 확정 실적으로 사용 금지",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-031",
+      "vendor_app_id": "031",
+      "analyst_title_ko": "마케팅 계획",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/031",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "공공사업 홍보계획 초안으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-040",
+      "vendor_app_id": "040",
+      "analyst_title_ko": "문법 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/040",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "공문·안내문 표현 교정",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-090",
+      "vendor_app_id": "090",
+      "analyst_title_ko": "문장 교정",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/090",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관명·날짜·용어 일관성 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-083",
+      "vendor_app_id": "083",
+      "analyst_title_ko": "표현 변환",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/083",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "개조식·공문체·시민 안내체 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-024",
+      "vendor_app_id": "024",
+      "analyst_title_ko": "메일 문구 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/024",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "수신 대상에 맞는 표현 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-038",
+      "vendor_app_id": "038",
+      "analyst_title_ko": "신입 환영 문구",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/038",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "신규 직원 안내·온보딩 자료",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-030",
+      "vendor_app_id": "030",
+      "analyst_title_ko": "신사업 아이디어",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/030",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 목적과 근거 자료에 맞는 사업 후보",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-066",
+      "vendor_app_id": "066",
+      "analyst_title_ko": "표시광고법 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/066",
+      "family": "extract-review",
+      "priority": "local-law-redesign",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "일본 법률 앱; 국내 법령으로 별도 평가",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-077",
+      "vendor_app_id": "077",
+      "analyst_title_ko": "주주총회 예상 질문",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/077",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "이사회·의회·평가 예상 질의 초안으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-071",
+      "vendor_app_id": "071",
+      "analyst_title_ko": "채용 제안 메일",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/071",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "채용 안내 문안 보조",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-088",
+      "vendor_app_id": "088",
+      "analyst_title_ko": "캐릭터 설정",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/088",
+      "family": "text-form",
+      "priority": "low-relevance",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 홍보 아이디어 참고; 후순위",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-070",
+      "vendor_app_id": "070",
+      "analyst_title_ko": "대화 시작 아이디어",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/070",
+      "family": "text-form",
+      "priority": "low-relevance",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "핵심 업무 연관 낮음; 후순위",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-094",
+      "vendor_app_id": "094",
+      "analyst_title_ko": "채용공고 표현 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/094",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "직무와 무관한 표현·누락 항목 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-009",
+      "vendor_app_id": "009",
+      "analyst_title_ko": "채용공고 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/009",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "확정 채용 조건에서 공고 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-008",
+      "vendor_app_id": "008",
+      "analyst_title_ko": "채용조건·이력 대조",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/008",
+      "family": "extract-review",
+      "priority": "later",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "채용 자격 증빙 대조 보조; 자동 선발 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-029",
+      "vendor_app_id": "029",
+      "analyst_title_ko": "교육 프로그램 제안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/029",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 직무교육 구성 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-109",
+      "vendor_app_id": "109",
+      "analyst_title_ko": "사내 자료 Deep Research",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/109",
+      "family": "research-multistep",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "llm",
+        "work/runs"
+      ],
+      "missing_dependencies": [
+        "일반 웹 검색·본문 읽기",
+        "조사 범위·계획·재탐색",
+        "출처/기준일·비용·횟수 상한"
+      ],
+      "proposed_acceptance": "자료 범위와 기준일을 고정하고 출처를 남긴다. 검색 실패를 조사 완료로 처리하지 않는다.",
+      "public_sector_adaptation": "내부 근거와 공개 자료로 정책·사업 조사",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-047",
+      "vendor_app_id": "047",
+      "analyst_title_ko": "조직 문제 해결 제안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/047",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 현안의 대안·확인사항 정리",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-006",
+      "vendor_app_id": "006",
+      "analyst_title_ko": "기안서 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/006",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 양식에 맞춘 기안 초안과 파일",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-085",
+      "vendor_app_id": "085",
+      "analyst_title_ko": "업무 관리표 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/085",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "요청사항·담당 확인·기한 관리표",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-073",
+      "vendor_app_id": "073",
+      "analyst_title_ko": "설문 결과 분석",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/073",
+      "family": "table-deterministic",
+      "priority": "core",
+      "reuse_candidates": [
+        "table-engine",
+        "table_merge",
+        "collection",
+        "settlement",
+        "xlsx-export"
+      ],
+      "missing_dependencies": [
+        "자료 열 대응",
+        "결측·중복·단위·모집단 규칙",
+        "이용 데이터·설문·청구/입금별 계산 규약"
+      ],
+      "proposed_acceptance": "집계·비율·대사는 프로그램이 수행하고 원본 대응·제외 이유·계산 근거를 남긴다.",
+      "public_sector_adaptation": "만족도 계산·의견 분류·개선안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-007",
+      "vendor_app_id": "007",
+      "analyst_title_ko": "번역",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/007",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "기관 용어집·원문 대조가 있는 번역",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-050",
+      "vendor_app_id": "050",
+      "analyst_title_ko": "약기법 점검",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/050",
+      "family": "extract-review",
+      "priority": "local-law-redesign",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "일본 특수 규제 앱; 초기 범위 제외",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-072",
+      "vendor_app_id": "072",
+      "analyst_title_ko": "스프레드시트 오류 해결",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/072",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "취합 파일 수식·데이터 오류 안내",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-065",
+      "vendor_app_id": "065",
+      "analyst_title_ko": "판매 제안 지원",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/065",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "유관기관 수요 분석으로 전환",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-027",
+      "vendor_app_id": "027",
+      "analyst_title_ko": "다수 일간·주간보고 요약",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/027",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "부서 주간보고를 항목별 종합",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-061",
+      "vendor_app_id": "061",
+      "analyst_title_ko": "문서 요약",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/061",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "공문·보고서의 핵심과 요청사항 정리",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-032",
+      "vendor_app_id": "032",
+      "analyst_title_ko": "해설형 블로그 초안",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/032",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "정책 설명·기관 소식 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-021",
+      "vendor_app_id": "021",
+      "analyst_title_ko": "뉴스 요약·번역",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/021",
+      "family": "research-multistep",
+      "priority": "later",
+      "reuse_candidates": [
+        "doc_search",
+        "public_data",
+        "regulations",
+        "llm",
+        "work/runs"
+      ],
+      "missing_dependencies": [
+        "일반 웹 검색·본문 읽기",
+        "조사 범위·계획·재탐색",
+        "출처/기준일·비용·횟수 상한"
+      ],
+      "proposed_acceptance": "자료 범위와 기준일을 고정하고 출처를 남긴다. 검색 실패를 조사 완료로 처리하지 않는다.",
+      "public_sector_adaptation": "기관 관심 정책·사업 동향 요약",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-023",
+      "vendor_app_id": "023",
+      "analyst_title_ko": "설문 질문 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/023",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "사업 평가·수요조사 설문 초안",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-057",
+      "vendor_app_id": "057",
+      "analyst_title_ko": "청구·입금 대조",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/057",
+      "family": "table-deterministic",
+      "priority": "core",
+      "reuse_candidates": [
+        "table-engine",
+        "table_merge",
+        "collection",
+        "settlement",
+        "xlsx-export"
+      ],
+      "missing_dependencies": [
+        "자료 열 대응",
+        "결측·중복·단위·모집단 규칙",
+        "이용 데이터·설문·청구/입금별 계산 규약"
+      ],
+      "proposed_acceptance": "집계·비율·대사는 프로그램이 수행하고 원본 대응·제외 이유·계산 근거를 남긴다.",
+      "public_sector_adaptation": "청구·수납·증빙 불일치 검토",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-051",
+      "vendor_app_id": "051",
+      "analyst_title_ko": "강연 제목 생성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/051",
+      "family": "text-form",
+      "priority": "later",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "교육·행사 제목 후보",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-001",
+      "vendor_app_id": "001",
+      "analyst_title_ko": "회의록 작성",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/001",
+      "family": "extract-review",
+      "priority": "core",
+      "reuse_candidates": [
+        "file_read",
+        "doc_search",
+        "items",
+        "qa",
+        "regulations",
+        "work/review"
+      ],
+      "missing_dependencies": [
+        "항목별 추출 JSON 계약",
+        "원문 대응·빠진 항목·변경 표",
+        "검토 결정과 결과 파일 연결"
+      ],
+      "proposed_acceptance": "추출값과 근거를 대응시키고 원문에 없는 담당·기한·조항을 채우지 않는다. 적합성/인사/법률 판단은 보조 범위를 명시한다.",
+      "public_sector_adaptation": "결정·미결·후속조치 정리",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    },
+    {
+      "reference_id": "alli-ja-015",
+      "vendor_app_id": "015",
+      "analyst_title_ko": "발표자료 기획",
+      "official_detail_url": "https://www.allganize.ai/ja/app-market/ja-app-markets/015",
+      "family": "text-form",
+      "priority": "core",
+      "reuse_candidates": [
+        "agents",
+        "assistant",
+        "file_read",
+        "document"
+      ],
+      "missing_dependencies": [
+        "앱별 입력 스키마·검증",
+        "용어·문체·출력 계약",
+        "문서 출력이 필요하면 양식 판과 작업 연결"
+      ],
+      "proposed_acceptance": "입력 사실을 보존하고 모르는 값은 비운다. 코드·SQL·수식 제안은 실행 결과와 구분한다.",
+      "public_sector_adaptation": "보고 발표 제목·목차 구성",
+      "implementation_status": "design-reference-not-installed",
+      "vendor_output_guarantee": "Only formats explicitly summarized in APP_CATALOG.md are documented; family classification is not evidence of a vendor file format."
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "checkedAt": "2026-10-29T09:52:30.324Z",
+  "readOnly": true,
+  "rowDataRequested": false,
+  "schemaColumnsReady": true,
+  "results": [
+    {
+      "id": "work-tasks",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "app-snapshot-0036",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-settings",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-installations",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-sources",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-runs",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-versions",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    },
+    {
+      "id": "work-artifacts",
+      "status": "passed",
+      "httpStatus": 200,
+      "errorCode": null
+    }
+  ],
+  "limitations": [
+    "컬럼 조회만 확인한다. RPC·RLS·트리거·워크플로우 CHECK 허용값·로그인 계정·기관 스위치·스토리지는 별도 검증이 필요하다."
+  ]
+}

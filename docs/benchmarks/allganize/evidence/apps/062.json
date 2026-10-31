@@ -1,0 +1,8 @@
+{
+  "url": "https://www.allganize.ai/ja/app-market/ja-app-markets/062",
+  "retrieved_at_utc": "2026-10-28T02:19:19.042613+00:00",
+  "sha256": "934eb168cdbad7081132631f429ef32ac3f50d7ccc9c4926801e7aca93428b26",
+  "http_status": 200,
+  "overview_excerpt_ja": "LLMを活用し、登録されたドキュメントから質問に対する回答を自動生成します。\n‍\n概要\n社内マニュアルやレポートなど、企業内外の特定情報から生成AIが自動でわかりやすく回答。\nFAQが不要で、問い合わせ対応やナレッジ共有の手間を大幅に削減。\nRAG (Retrieval Augmented Generation) など、回答精度を高める仕組みを実装し、回答精度の向上も可能。",
+  "purpose": "public product capability research; no authenticated execution"
+}

@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-10-30T11:56:45.789Z",
+  "scope": "Synthetic input, actual model stages and final stream; no DB or browser E2E",
+  "records": [
+    {
+      "name": "사실 정리",
+      "status": "completed",
+      "output": "- 참석자 수: 30명, 장소: 새빛회의실\n- 개최일: 미정 ⚠️ 확인 필요"
+    },
+    {
+      "name": "안내문 작성",
+      "status": "completed",
+      "output": "오는 가상 행사는 새빛회의실에서 참석자 30명을 대상으로 개최될 예정입니다. 개최일은 현재 미정으로, ⚠️ 확인이 필요합니다."
+    },
+    {
+      "name": "대조·완성",
+      "status": "completed",
+      "output": "**행사 안내문 초안**\n\n- 장소: 새빛회의실\n- 참석 인원: 30명\n- 개최일: ⚠️ 미정 (확인 필요)\n\n---\n> 이 텍스트 초안은 검토 후 업무에 사용하시기 바랍니다."
+    }
+  ],
+  "usage": {
+    "model": "claude-sonnet-4-6",
+    "input_tokens": 1712,
+    "output_tokens": 226
+  }
+}
