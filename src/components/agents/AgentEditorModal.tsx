@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { Agent } from '@/lib/db';
 import {
   settingsFromAgent,
@@ -265,6 +266,7 @@ export default function AgentEditorModal({
           ) : (
             <>
               <div className="grid grid-cols-[84px_1fr] gap-3">
+                {agent.app_definition && <Link href={`/apps/builder?agent=${agent.id}`} className="col-span-2 rounded-xl bg-teal-50 p-3 text-sm text-teal-800">입력 폼·응답 형식 편집하기 →</Link>}
                 <div>
                   <label className={label}>아이콘</label>
                   <input

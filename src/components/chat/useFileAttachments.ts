@@ -35,7 +35,7 @@ function deleteOnServer(chip: FileChip) {
  * 보내기 전에 붙여 둔 파일 칩. 올리기·읽기는 upload-client가 하고, 여기서는
  * 상태와 동시성만 다룬다. 화면 검사는 표시일 뿐 서버가 다시 본다.
  */
-export function useFileAttachments(enabled: boolean) {
+export function useFileAttachments(enabled: boolean, maxFiles = MAX_ATTACHMENTS_PER_SEND) {
   const [chips, setChips] = useState<FileChip[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const chipsRef = useRef<FileChip[]>([]);
@@ -85,7 +85,7 @@ export function useFileAttachments(enabled: boolean) {
 
       // 실패한 칩은 보내지 않으므로 상한에 세지 않는다
       const active = chipsRef.current.filter((c) => c.stage !== 'failed').length;
-      let room = MAX_ATTACHMENTS_PER_SEND - active;
+      let room = maxFiles - active;
       const added: FileChip[] = [];
       let overflow = false;
 
@@ -105,14 +105,14 @@ export function useFileAttachments(enabled: boolean) {
         queue.current.push({ key, file });
       }
 
-      if (overflow) setNotice(`파일은 한 번에 ${MAX_ATTACHMENTS_PER_SEND}개까지 보낼 수 있습니다.`);
+      if (overflow) setNotice(`파일은 한 번에 ${maxFiles}개까지 보낼 수 있습니다.`);
       if (added.length > 0) {
         chipsRef.current = [...chipsRef.current, ...added];
         setChips(chipsRef.current);
       }
       pump();
     },
-    [enabled, pump]
+    [enabled, pump, maxFiles]
   );
 
   const remove = useCallback((key: string) => {

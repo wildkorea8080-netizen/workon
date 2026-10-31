@@ -29,6 +29,7 @@ export type User = {
 };
 
 export type Agent = {
+  app_definition?: import('@/lib/apps/definition').AppDefinition | null;
   id: string;
   department_id: string;
   name: string;

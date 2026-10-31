@@ -103,17 +103,17 @@ describe('바뀐 칸 찾기', () => {
     ).toEqual(['capabilities']);
   });
 
-  it('판 사본 칸은 11개다', () => {
-    expect(SNAPSHOT_KEYS).toHaveLength(11);
+  it('입력형 앱을 포함한 판 사본 칸은 12개다', () => {
+    expect(SNAPSHOT_KEYS).toHaveLength(12);
   });
 
-  it('SNAPSHOT_KEYS가 0026의 agent_snapshot과 같다', () => {
+  it('SNAPSHOT_KEYS가 최신 0043의 agent_snapshot과 같다', () => {
     // 한쪽에만 칸을 더하면 바뀐 칸 찾기·되돌리기가 그 칸을 조용히 빠뜨린다.
-    const sql = readFileSync('supabase/migrations/0026_agent_tiers.sql', 'utf8');
+    const sql = readFileSync('supabase/migrations/0043_form_apps.sql', 'utf8');
     const start = sql.indexOf('CREATE OR REPLACE FUNCTION agent_snapshot');
     const body = sql.slice(start, sql.indexOf('$$;', start));
     const keys = [...body.matchAll(/'(\w+)',/g)].map((m) => m[1]);
-    expect(keys).toHaveLength(11);
+    expect(keys).toHaveLength(12);
     expect(new Set(keys)).toEqual(new Set(SNAPSHOT_KEYS));
   });
 });

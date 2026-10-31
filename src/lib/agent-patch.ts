@@ -1,6 +1,7 @@
 // src/lib/agent-patch.ts
 import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabilities/settings';
+import { validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
 
 /**
  * 비서 수정 요청을 두 갈래로 나눈다.
@@ -13,10 +14,11 @@ import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabiliti
  */
 export const SNAPSHOT_KEYS = [
   'name', 'description', 'icon', 'color', 'category', 'usage_guide',
-  'starter_prompts', 'system_prompt', 'model_id', 'capabilities', 'template_ids',
+  'starter_prompts', 'system_prompt', 'model_id', 'capabilities', 'template_ids', 'app_definition',
 ] as const;
 
 export interface AgentSettingsPatch {
+  app_definition?: AppDefinition | null;
   name?: string;
   description?: string | null;
   icon?: string | null;
@@ -49,6 +51,12 @@ export function splitAgentBody(
 ): SplitResult {
   const result: SplitResult = { settings: {}, operational: {} };
   const fail = (error: string): SplitResult => ({ ...result, error });
+  if (body.app_definition !== undefined) {
+    const parsed = validateAppDefinition(body.app_definition);
+    if (!parsed.ok) return fail(parsed.message);
+    if (opts.currentType === 'link' && parsed.value) return fail('외부 연결형 앱에는 입력 폼을 설정할 수 없습니다.');
+    result.settings.app_definition = parsed.value;
+  }
 
   if (body.template_ids !== undefined) {
     return fail('양식은 양식 관리에서 바꿔 주세요.');

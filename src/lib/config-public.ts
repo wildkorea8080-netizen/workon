@@ -8,3 +8,6 @@
 export const PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 export const PUBLIC_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 export const SUPABASE_DOCUMENTS_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET ?? 'documents';
+
+// 앱 중심 홈은 배포 환경별로 켠다. 기관의 실행 권한·사용 스위치는 서버가 계속 검사한다.
+export const PUBLIC_WORKSPACE_HOME = process.env.NEXT_PUBLIC_WORKSPACE_HOME === 'apps' ? 'apps' : 'legacy';

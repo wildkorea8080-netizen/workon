@@ -13,6 +13,7 @@ const A = '00000000-0000-4000-8000-00000000000a';
 const B = '00000000-0000-4000-8000-00000000000b';
 
 const calls: string[] = [];
+let appDefinition: unknown = null;
 
 vi.mock('@/lib/supabaseAdmin', () => {
   function from(table: string) {
@@ -25,7 +26,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
       eq: (col: string, v: unknown) => { eqs[col] = v; return q; },
       maybeSingle: async () => {
         if (table === 'agents') {
-          return { data: { id: 'agent', deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: { file_read: {} }, agent_type: null }, error: null };
+          return { data: { id: 'agent', deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: { file_read: {} }, agent_type: null, app_definition: appDefinition }, error: null };
         }
         if (table === 'conversations') return { data: eqs.id === OLD_CONV ? { id: OLD_CONV } : null, error: null };
         return { data: null, error: null };
@@ -86,6 +87,7 @@ vi.mock('@/lib/attachments/store', () => ({
 }));
 
 import { prepareTurn } from '@/lib/assistant/prepare';
+import { loadExtract } from '@/lib/attachments/store';
 
 const session = { user: { id: 'u1' } } as never;
 const summary = { kind: 'text', chars: 3, tables: [], warnings: [] };
@@ -95,6 +97,8 @@ const record = (id: string, name: string, created_at: string) => ({
 });
 
 beforeEach(() => {
+  appDefinition = null;
+  vi.mocked(loadExtract).mockReset();
   calls.length = 0;
   store.check = { ok: true };
   store.bind = null;
@@ -103,6 +107,28 @@ beforeEach(() => {
 });
 
 describe('prepareTurn — 첨부', () => {
+  it('loads authorized bound file content into the original input used by all app stages', async () => {
+    appDefinition = { schemaVersion: 1, fields: [{ key: 'task', label: '요청', type: 'text', required: true }], output: 'bullets', attachments: { required: true }, steps: [{ name: '추출', instruction: '사실 추출' }, { name: '작성', instruction: '요약' }] };
+    store.listed = [{ ...record(A, '자료.txt', '2026-10-31T00:00:00Z'), conversation_id: NEW_CONV }];
+    store.bind = { ok: true, rows: store.listed, newlyBound: [A] };
+    vi.mocked(loadExtract).mockResolvedValue({ kind: 'text', text: '새빛 행사 참석 30명', tables: [], warnings: [] });
+    const out = await prepareTurn(session, { agent_id: 'agent', message: '앱 실행', app_inputs: { task: '요약' }, app_version: 3, attachment_ids: [A] });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(JSON.stringify(out.turn.messages)).toContain('새빛 행사 참석 30명');
+    expect(out.turn.appSteps).toHaveLength(2);
+    expect(out.turn.ctx.message).toContain('새빛 행사 참석 30명');
+    expect(loadExtract).toHaveBeenCalledWith(store.listed[0]);
+  });
+  it('cleans up a new conversation when a bound app extract cannot be loaded', async () => {
+    appDefinition = { schemaVersion: 1, fields: [{ key: 'task', label: '요청', type: 'text', required: true }], output: 'bullets', attachments: { required: true } };
+    store.listed = [{ ...record(A, '자료.txt', '2026-10-31T00:00:00Z'), conversation_id: NEW_CONV }];
+    store.bind = { ok: true, rows: store.listed, newlyBound: [A] };
+    vi.mocked(loadExtract).mockResolvedValue(null);
+    const out = await prepareTurn(session, { agent_id: 'agent', message: '앱 실행', app_inputs: { task: '요약' }, app_version: 3, attachment_ids: [A] });
+    expect(out).toMatchObject({ ok: false, status: 400, details: { attachments_consumed: true } });
+    expect(calls.slice(-2)).toEqual([`cleanup:${NEW_CONV}`, `delete:conversations:${NEW_CONV}`]);
+  });
   it('묶기 전 확인에 걸리면 대화를 만들지 않는다', async () => {
     store.check = { ok: false, message: '쓸 수 없는 첨부가 있습니다.' };
     const out = await prepareTurn(session, { agent_id: 'agent', message: '질문', attachment_ids: [A] });

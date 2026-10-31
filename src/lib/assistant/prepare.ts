@@ -23,9 +23,15 @@ import { attachmentRequestError, toTurnAttachments } from './attachments';
 import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
 import { loadHistory } from './history';
+import { validateAppDefinition, renderAppInput, appOutputInstruction, APP_MAX_FILES } from '@/lib/apps/definition';
+import { appAttachmentContext } from '@/lib/apps/attachment-context';
+import { loadTurnExtract } from '@/lib/capabilities/attachment-access';
+import { restoreAppSteps, isInputOnlyRun } from '@/lib/apps/resume';
+import type { AppStepRecord } from '@/lib/apps/pipeline';
 import type { PrepareOutcome } from './types';
 
 type AgentRow = AgentAccessInfo & {
+  app_definition: unknown;
   name: string;
   system_prompt: string | null;
   model_id: string | null;
@@ -52,12 +58,16 @@ async function discardNewConversation(conversationId: string, userId: string): P
  * (스트림 시작 전 실패 규약).
  */
 export async function prepareTurn(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome> {
-  const { agent_id, message, conversation_id, images, attachment_ids } = body;
+  const { agent_id, message: rawMessage, conversation_id, images, attachment_ids } = body;
   // '문서 없이 일반 답변 받기'. 정확히 true일 때만 — 다른 값으로 문서 찾기가 꺼지면 안 된다
   const skipDocuments = body.skip_documents === true;
 
   if (typeof agent_id !== 'string' || !agent_id) return reject('에이전트 ID는 필수입니다.', 400);
-  if (typeof message !== 'string' || !message.trim()) return reject('메시지는 필수입니다.', 400);
+  if (typeof rawMessage !== 'string' || !rawMessage.trim()) return reject('메시지는 필수입니다.', 400);
+  let message: string = rawMessage;
+  let appStepInputs: Record<string, string> | undefined;
+  let appResumeRecords: AppStepRecord[] | undefined;
+  let appResumeFrom: string | undefined;
 
   // 화면에서도 거르지만 그건 표시일 뿐이고 실제 제한은 여기서 건다.
   const imageError = validateChatImages(images);
@@ -83,7 +93,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
 
   const { data } = await supabaseAdmin
     .from('agents')
-    .select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, capabilities, agent_type`)
+    .select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, capabilities, agent_type, app_definition`)
     .eq('id', agent_id)
     .maybeSingle();
   const agent = data as AgentRow | null;
@@ -91,6 +101,29 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   if (!agent || agent.deleted_at || !agent.is_active) return reject('에이전트를 찾을 수 없습니다.', 404);
   if (!canUseAgent(agent, actor)) return reject('해당 에이전트에 접근할 권한이 없습니다.', 403);
   if (agent.agent_type === 'link') return reject('링크형 비서는 대화할 수 없습니다.', 400);
+
+  const definition = validateAppDefinition(agent.app_definition ?? null);
+  if (!definition.ok) return reject('앱의 입력 설정을 확인해 주세요.', 400);
+  if (body.app_inputs !== undefined || (definition.value && !conversation_id)) {
+    if (!definition.value) return reject('입력 폼이 없는 비서입니다.', 400);
+    if (body.app_version !== agent.version) return reject('앱 설정이 변경됐습니다. 앱을 새로 열어 입력 항목을 확인해 주세요.', 409);
+    const input = renderAppInput(definition.value, body.app_inputs);
+    if (!input.ok) return reject(input.message, 400);
+    message = input.message;
+    appStepInputs = input.inputs;
+  }
+  if (body.resume_message_id !== undefined) {
+    if (typeof body.resume_message_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.resume_message_id) || !appStepInputs || !definition.value?.steps?.length || conversation_id) return reject('입력형 앱의 중단 기록을 선택해 새 실행으로 이어 주세요.', 400);
+    if (!isInputOnlyRun(Object.keys(agent.capabilities ?? {}), Array.isArray(attachment_ids) ? attachment_ids.length : 0) || attachedImages.length) return reject('자료·도구가 연결된 앱은 근거가 바뀔 수 있으므로 새로 실행해 주세요.', 409);
+    const { data: saved, error: resumeError } = await supabaseAdmin.from('messages').select('id,agent_version,source_references,conversation:conversations!inner(user_id,agent_id)').eq('id', body.resume_message_id).eq('role', 'assistant').eq('conversation.user_id', actor.userId).eq('conversation.agent_id', agent_id).maybeSingle();
+    if (resumeError) return reject('중단 기록을 확인하지 못했습니다.', 503);
+    const owner = Array.isArray(saved?.conversation) ? saved.conversation[0] : saved?.conversation;
+    if (!saved || owner?.user_id !== actor.userId || owner?.agent_id !== agent_id) return reject('중단 기록을 찾을 수 없습니다.', 404);
+    if (saved.agent_version !== agent.version) return reject('앱 설정이 바뀌어 이전 결과를 재사용할 수 없습니다. 새로 실행해 주세요.', 409);
+    const restored = restoreAppSteps(definition.value, saved.source_references ?? {}, message);
+    if (!restored.ok) return reject(restored.message, 409);
+    appResumeRecords = restored.records; appResumeFrom = saved.id;
+  }
 
   const capabilitySettings = effectiveCapabilities(agent.capabilities, {
     tier: agent.tier,
@@ -107,6 +140,11 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const attachmentError = attachmentRequestError(attachment_ids, capabilities);
   if (attachmentError) return reject(attachmentError, 400);
   const sentIds: string[] = Array.isArray(attachment_ids) ? (attachment_ids as string[]) : [];
+  if (appStepInputs) {
+    if (sentIds.length && !definition.value?.attachments) return reject('이 앱은 파일 입력을 받지 않습니다.', 400);
+    if (sentIds.length > APP_MAX_FILES) return reject('앱에는 파일을 최대 3개 첨부할 수 있습니다.', 400);
+    if (definition.value?.attachments?.required && !sentIds.length) return reject('이 앱은 파일 첨부가 필요합니다.', 400);
+  }
 
   const filterResult = await filterUserInput(actor.departmentId, message);
   if (!filterResult.isValid) {
@@ -217,6 +255,19 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     skipDocuments,
   };
 
+  let fileContext = '';
+  if (appStepInputs && sentIds.length) {
+    try {
+      const selected = attachments.filter(a => sentIds.includes(a.id));
+      if (selected.length !== new Set(sentIds).size) throw new Error('첨부 목록을 확인하지 못했습니다. 다시 첨부해 주세요.');
+      fileContext = appAttachmentContext(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) }))));
+      ctx.message = message + fileContext;
+    } catch (failure) {
+      if (isNewConversation) await discardNewConversation(conversationId, actor.userId);
+      return reject(failure instanceof Error ? failure.message : '첨부 내용을 읽지 못했습니다.', 400, { attachments_consumed: isNewConversation });
+    }
+  }
+
   const prepared: PrepareResult[] = await Promise.all(
     capabilities.map((cap) => (cap.prepare ? cap.prepare(ctx) : Promise.resolve({} as PrepareResult)))
   );
@@ -231,11 +282,15 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   return {
     ok: true,
     turn: {
+      appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
+      appStepInputs,
+      appResumeRecords,
+      appResumeFrom,
       ctx,
       modelId,
       modelSubstituted: substituted,
-      systemPrompt: buildSystemPrompt(agent.system_prompt, prepared.map((p) => p.systemAddendum)),
-      messages: [...history, { role: 'user', content: buildUserContent(message, attachedImages) }],
+      systemPrompt: buildSystemPrompt(agent.system_prompt, [...prepared.map((p) => p.systemAddendum), definition.value ? appOutputInstruction(definition.value) : undefined]),
+      messages: [...history, { role: 'user', content: buildUserContent(message + fileContext, attachedImages) }],
       tools,
       capabilities,
       conversationId,

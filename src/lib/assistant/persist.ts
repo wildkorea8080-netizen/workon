@@ -8,6 +8,9 @@ import type { RetrievedChunk } from '@/lib/db';
 import type { NodaVerifyResult } from '@/lib/noda';
 
 export interface MessageRowInput {
+  appSteps?: import('@/lib/apps/pipeline').AppStepRecord[];
+  appInputs?: Record<string, string>;
+  appResumeFrom?: string;
   conversationId: string;
   userId: string;
   userContent: string;
@@ -62,6 +65,9 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
       role: 'assistant',
       content: input.assistantText,
       source_references: {
+        ...(input.appSteps?.length ? { app_steps: input.appSteps } : {}),
+        ...(input.appSteps?.length && input.appInputs ? { app_inputs: input.appInputs } : {}),
+        ...(input.appResumeFrom ? { app_resume_from: input.appResumeFrom } : {}),
         chunks: input.chunks.map((c) => ({
           documentId: c.documentId,
           documentTitle: c.documentTitle,

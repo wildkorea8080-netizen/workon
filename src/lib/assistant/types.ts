@@ -15,6 +15,7 @@ export const MAX_OUTPUT_TOKENS = 4096;
  * 더했다(첨부 도구를 쓴 턴·S4-b부터 문서 근거 턴의 확인되지 않은 숫자, 없으면 null) — ChatInterface가 읽는다
  */
 export type TurnEvent =
+  | { event: 'app_step'; data: { index: number; total: number; step: import('@/lib/apps/pipeline').AppStepRecord } }
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'tool_start'; data: { name: string; input: Record<string, unknown> } }
@@ -26,6 +27,10 @@ export type TurnEvent =
 export type SendEvent = (event: TurnEvent) => void;
 
 export interface PreparedTurn {
+  appSteps?: import('@/lib/apps/definition').AppStep[];
+  appStepInputs?: Record<string, string>;
+  appResumeRecords?: import('@/lib/apps/pipeline').AppStepRecord[];
+  appResumeFrom?: string;
   ctx: TurnContext;
   modelId: string;
   /** 비서의 모델이 기관 허용 목록 밖이라 바꿨는가 */

@@ -31,6 +31,7 @@ export const TIER_LABELS = {
 } as const;
 
 const FIELD_LABELS: Record<string, string> = {
+  app_definition: '앱 입력 폼·응답 형식',
   name: '이름',
   description: '설명',
   icon: '아이콘',

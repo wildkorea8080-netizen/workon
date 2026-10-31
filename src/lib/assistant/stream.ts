@@ -11,6 +11,10 @@ import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors'
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
+import { runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
+import { isInputOnlyRun } from '@/lib/apps/resume';
+import { checkTokenLimit } from '@/lib/usage-limit';
+import { getAllowedModelIds } from '@/lib/model-policy';
 
 const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -239,6 +243,7 @@ async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Recor
         // 유사도 하한(0.80)을 다시 정할 근거. 질문 원문은 남기지 않는다(설계 5절)
         doc_dropped: turn.docDropped,
         model_substituted: turn.modelSubstituted,
+        ...(turn.appResumeFrom ? { app_resume_from: turn.appResumeFrom, app_reused_steps: turn.appResumeRecords?.filter(step => step.reused).length ?? 0 } : {}),
         ...extra,
       }),
     });
@@ -306,24 +311,55 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
     capabilityUsage: [],
   };
   let result: LoopResult;
+  const appRecords: AppStepRecord[] = turn.appResumeRecords?.map(record => ({ ...record })) ?? (turn.appSteps ?? []).map(step => ({ name: step.name, status: 'pending' }));
+  const savedInputs = isInputOnlyRun(Object.keys(turn.ctx.capabilities), turn.ctx.attachments.length) ? turn.appStepInputs : undefined;
+  const updateStep = (index: number) => send({ event: 'app_step', data: { index, total: appRecords.length, step: { ...appRecords[index] } } });
   try {
+    const staged = turn.appSteps?.length ? await runAppIntermediateSteps({
+      steps: turn.appSteps, records: appRecords, model: turn.modelId, system: turn.systemPrompt,
+      inputs: turn.appStepInputs,
+      messages: turn.messages, usage: progress.usage, complete, update: updateStep,
+      guard: async () => {
+        const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId);
+        const allowed = await getAllowedModelIds(turn.ctx.organizationId);
+        if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');
+      },
+    }) : null;
     result = await runToolLoop(
       {
         modelId: turn.modelId,
-        systemPrompt: turn.systemPrompt,
-        messages: turn.messages,
-        tools: turn.tools,
-        owners: toolsFor(turn.capabilities, turn.ctx).owners,
+        systemPrompt: staged?.system ?? turn.systemPrompt,
+        messages: staged?.messages ?? turn.messages,
+        tools: staged ? [] : turn.tools,
+        owners: staged ? new Map() : toolsFor(turn.capabilities, turn.ctx).owners,
         ctx: turn.ctx,
-        maxRounds: MAX_TOOL_ROUNDS,
+        maxRounds: staged ? 1 : MAX_TOOL_ROUNDS,
         progress,
       },
       send
     );
+    if (staged) {
+      if (!result.text.trim()) throw new Error('마지막 단계에서 결과가 생성되지 않았습니다.');
+      appRecords[appRecords.length - 1].status = 'completed'; appRecords[appRecords.length - 1].output = result.text;
+      updateStep(appRecords.length - 1);
+    }
   } catch (error) {
     console.error('[assistant] streaming error:', error);
     // 이미 끝난 라운드와 능력이 쓴 토큰은 청구 대상이다. 던졌다고 지우면 기록이 빠진다.
     await logChatUsage(turn, [progress.usage, ...progress.capabilityUsage], { aborted: true });
+    if (appRecords.length) {
+      for (let i = 0; i < appRecords.length; i++) {
+        if (appRecords[i].status === 'running') appRecords[i].status = 'failed';
+        else if (appRecords[i].status === 'pending') appRecords[i].status = 'not_run';
+        updateStep(i);
+      }
+      try {
+        await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
+          userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',
+          chunks: turn.chunks, links: [], files: [], attachments: [], agentVersion: turn.ctx.agentVersion,
+          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom }));
+      } catch { /* A failed persistence call must not suppress the SSE error or usage log. */ }
+    }
     // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
     // 크레딧·키 문제는 직원이 기다려도 풀리지 않으므로 슈퍼관리자 로그에서 바로 보이게 critical로 둔다.
     const kind = error instanceof LlmApiError ? llmErrorKind(error) : null;
@@ -346,7 +382,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   // 행 수·NODA 근거 묶음)와 직원의 질문에 적힌 숫자, 도구가 보여 준 숫자(법령·통계 포함)가 AI가 본 숫자다 — 그 합집합에
   // 없는 숫자만 '확인되지 않음'. 답변 글은 고치지 않는다
   let numberCheck: { unverified: string[] } | null = null;
-  if (result.attachmentToolSucceeded || turn.chunks.length > 0) {
+  if (result.attachmentToolSucceeded || turn.chunks.length > 0 || appRecords.length > 0) {
     const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message));
     const unverified = checkNumbers(result.text, shown);
     if (unverified.length > 0) numberCheck = { unverified };
@@ -366,6 +402,9 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       files: result.files,
       attachments: turn.ctx.attachments.filter((a) => a.isNew).map((a) => ({ id: a.id, file_name: a.fileName })),
       agentVersion: turn.ctx.agentVersion,
+      appSteps: appRecords,
+      appInputs: savedInputs,
+      appResumeFrom: turn.appResumeFrom,
       numberCheck,
       documentsSkipped: turn.documentsSkipped,
       verify,

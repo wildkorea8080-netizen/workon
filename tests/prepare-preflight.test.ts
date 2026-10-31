@@ -14,6 +14,8 @@ const A = '00000000-0000-4000-8000-00000000000a';
 
 const calls: string[] = [];
 const state = {
+  appDefinition: null as unknown,
+  savedMessage: null as unknown,
   capabilities: { doc_search: {}, file_read: {} } as Record<string, unknown>,
   docs: [{ id: DOC, title: '여비 규정', file_name: '규정.hwp', noda_status: 'ready' }] as unknown[],
 };
@@ -26,10 +28,11 @@ vi.mock('@/lib/supabaseAdmin', () => {
       select: () => q,
       insert: () => { op = 'insert'; return q; },
       delete: () => { op = 'delete'; return q; },
-      eq: (col: string, v: unknown) => { eqs[col] = v; return q; },
+      eq: (col: string, v: unknown) => { eqs[col] = v; if (table === 'messages') calls.push(`resume-filter:${col}:${String(v)}`); return q; },
       maybeSingle: async () => {
+        if (table === 'messages') return { data: state.savedMessage, error: null };
         if (table === 'agents') {
-          return { data: { id: AGENT, deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: state.capabilities, agent_type: null }, error: null };
+          return { data: { id: AGENT, deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: state.capabilities, agent_type: null, app_definition: state.appDefinition }, error: null };
         }
         return { data: null, error: null };
       },
@@ -92,6 +95,8 @@ import { DOCUMENTS_UNAVAILABLE_MESSAGE } from '@/lib/capabilities/doc-search';
 const session = { user: { id: 'u1' } } as never;
 
 beforeEach(() => {
+  state.appDefinition = null;
+  state.savedMessage = null;
   calls.length = 0;
   state.capabilities = { doc_search: {}, file_read: {} };
   state.docs = [{ id: DOC, title: '여비 규정', file_name: '규정.hwp', noda_status: 'ready' }];
@@ -102,6 +107,20 @@ beforeEach(() => {
 });
 
 describe('prepareTurn — 참고 문서 preflight', () => {
+  it('rejects missing required files and disabled file inputs before creating a conversation', async () => {
+    state.appDefinition = { schemaVersion: 1, fields: [{ key: 'source', label: '내용', type: 'text', required: true }], output: 'bullets', attachments: { required: true } };
+    const request = { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { source: '요약' } };
+    expect(await prepareTurn(session, request)).toMatchObject({ ok: false, status: 400, message: '이 앱은 파일 첨부가 필요합니다.' });
+    delete (state.appDefinition as Record<string, unknown>).attachments;
+    expect(await prepareTurn(session, { ...request, attachment_ids: [A] })).toMatchObject({ ok: false, status: 400, message: '이 앱은 파일 입력을 받지 않습니다.' });
+    expect(calls).toEqual([]);
+  });
+  it('rejects more than three app files on the server even if the screen check is bypassed', async () => {
+    state.appDefinition = { schemaVersion: 1, fields: [{ key: 'source', label: '내용', type: 'text', required: true }], output: 'bullets', attachments: { required: false } };
+    const ids = [1, 2, 3, 4].map(n => `00000000-0000-4000-8000-00000000000${n}`);
+    expect(await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { source: '요약' }, attachment_ids: ids })).toMatchObject({ ok: false, status: 400, message: '앱에는 파일을 최대 3개 첨부할 수 있습니다.' });
+    expect(calls).toEqual([]);
+  });
   it('NODA를 부르지 못하면 대화를 만들지 않고 첨부도 묶지 않은 채 503 documents_unavailable', async () => {
     const out = await prepareTurn(session, { agent_id: AGENT, message: '여비 규정', attachment_ids: [A] });
     expect(out).toEqual({
@@ -164,5 +183,88 @@ describe('prepareTurn — 참고 문서 preflight', () => {
     expect(out.turn.documentsSkipped).toBe(false);
     expect(out.turn.systemPrompt).not.toContain('참고 문서 없이');
     expect(calls).not.toContain(`documents:${AGENT}`);
+  });
+});
+
+
+describe('입력형 앱의 서버 실행 계약', () => {
+  const form = { schemaVersion: 1, fields: [{ key: 'source', label: '원문', type: 'textarea', required: true }], output: 'bullets' };
+  it('설정 판이 다르면 대화 생성 전에 거절한다', async () => {
+    state.appDefinition = form;
+    const out = await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 2, app_inputs: { source: '가상 자료' } });
+    expect(out).toMatchObject({ ok: false, status: 409 }); expect(calls).toEqual([]);
+  });
+  it('필수 항목 누락과 입력 폼 우회는 대화 생성 전에 거절한다', async () => {
+    state.appDefinition = form;
+    for (const extra of [{ app_version: 3, app_inputs: {} }, {}]) {
+      expect(await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', ...extra })).toMatchObject({ ok: false });
+      expect(calls).toEqual([]);
+    }
+  });
+  it('검증한 입력으로 메시지를 만들고 서버 응답 형식을 추가한다', async () => {
+    state.appDefinition = form; state.capabilities = {};
+    const out = await prepareTurn(session, { agent_id: AGENT, message: '무시되는 임의 메시지', app_version: 3, app_inputs: { source: '가상 자료 30건' } });
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.storedUserContent).toContain('가상 자료 30건');
+    expect(out.turn.storedUserContent).not.toContain('무시되는 임의 메시지');
+    expect(out.turn.systemPrompt).toContain('글머리 목록');
+    expect(calls).toContain('insert:conversations');
+  });
+});
+
+
+describe('조건 평가 입력의 신뢰 경계', () => {
+  it('검증한 선택값만 정규화하고 요청의 내부 단계 입력은 무시한다', async () => {
+    state.appDefinition = { schemaVersion: 1, fields: [{ key: 'review', label: '검토 여부', type: 'select', required: true, options: ['예', '아니오'] }], output: 'bullets', steps: [{ name: '검토', instruction: '검토하세요.', when: { field: 'review', equals: '예' } }, { name: '작성', instruction: '최종 작성' }] };
+    state.capabilities = {};
+    const out = await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { review: ' 아니오 ' }, appStepInputs: { review: '예' } });
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.appStepInputs).toEqual({ review: '아니오' });
+    expect(out.turn.appSteps?.[0].when).toEqual({ field: 'review', equals: '예' });
+  });
+});
+
+
+describe('재개 기록의 소유권·판·입력 검사', () => {
+  const resumeId = '11111111-1111-4111-8111-111111111111';
+  const definition = { schemaVersion: 1, fields: [{ key: 'source', label: '자료', type: 'text', required: true }], output: 'bullets', steps: [{ name: '정리', instruction: '정리' }, { name: '작성', instruction: '작성' }] };
+  const body = { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { source: '가상 자료' }, resume_message_id: resumeId };
+  beforeEach(() => {
+    state.capabilities = {}; state.appDefinition = definition;
+    state.savedMessage = { id: resumeId, agent_version: 3, conversation: { user_id: 'u1', agent_id: AGENT }, source_references: { app_inputs: { source: '가상 자료' }, app_steps: [{ name: '정리', status: 'completed', output: '서버에 저장된 결과' }, { name: '작성', status: 'failed' }] } };
+  });
+  it('서버 기록만 재사용하고 클라이언트가 보낸 중간 결과는 무시한다', async () => {
+    const out = await prepareTurn(session, { ...body, appResumeRecords: [{ output: '위조 결과' }] });
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.appResumeRecords?.[0]).toMatchObject({ output: '서버에 저장된 결과', reused: true });
+    expect(out.turn.appResumeFrom).toBe(resumeId);
+    expect(calls).toContain('resume-filter:conversation.user_id:u1'); expect(calls).toContain(`resume-filter:conversation.agent_id:${AGENT}`);
+  });
+  it.each([{ user_id: 'other', agent_id: AGENT }, { user_id: 'u1', agent_id: 'other' }])('다른 사용자/앱 기록은 대화 생성 전에 차단: %j', async owner => {
+    (state.savedMessage as Record<string, unknown>).conversation = owner;
+    expect(await prepareTurn(session, body)).toMatchObject({ ok: false, status: 404 }); expect(calls).not.toContain('insert:conversations');
+  });
+  it('판 또는 입력 변경은 거절한다', async () => {
+    (state.savedMessage as Record<string, unknown>).agent_version = 2;
+    expect(await prepareTurn(session, body)).toMatchObject({ ok: false, status: 409 });
+    (state.savedMessage as Record<string, unknown>).agent_version = 3;
+    expect(await prepareTurn(session, { ...body, app_inputs: { source: '바뀐 자료' } })).toMatchObject({ ok: false, status: 409 });
+    expect(calls).not.toContain('insert:conversations');
+  });
+  it('근거가 바뀔 수 있는 자료 연결 앱은 재사용하지 않는다', async () => {
+    state.capabilities = { doc_search: {} };
+    expect(await prepareTurn(session, body)).toMatchObject({ ok: false, status: 409 }); expect(calls).not.toContain('insert:conversations');
+  });
+  it('파일 첨부만 받는 앱은 이번 실행에 파일이 없으면 재개한다', async () => {
+    state.capabilities = { file_read: {} };
+    state.appDefinition = { ...definition, attachments: { required: false } };
+    const out = await prepareTurn(session, body);
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.appResumeFrom).toBe(resumeId);
+  });
+  it('파일 첨부만 받는 앱이라도 재개 요청에 파일을 붙이면 거절한다', async () => {
+    state.capabilities = { file_read: {} };
+    state.appDefinition = { ...definition, attachments: { required: false } };
+    expect(await prepareTurn(session, { ...body, attachment_ids: [A] })).toMatchObject({ ok: false, status: 409 }); expect(calls).not.toContain('insert:conversations');
   });
 });

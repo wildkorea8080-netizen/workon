@@ -11,6 +11,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 type Write = { table: string; op: 'insert' | 'update'; rows: Record<string, unknown>[] };
 const writes: Write[] = [];
+const policy = vi.hoisted(() => ({ allowed: true, models: ['claude-haiku-4-5'] }));
+vi.mock('@/lib/usage-limit', async original => ({ ...await original<typeof import('@/lib/usage-limit')>(), checkTokenLimit: async () => ({ allowed: policy.allowed }) }));
+vi.mock('@/lib/model-policy', async original => ({ ...await original<typeof import('@/lib/model-policy')>(), getAllowedModelIds: async () => policy.models }));
 
 vi.mock('@/lib/supabaseAdmin', () => {
   const result = { data: null, error: null };
@@ -100,6 +103,7 @@ async function run(t: PreparedTurn, send?: (e: TurnEvent) => void, deps?: { veri
 
 beforeEach(() => {
   writes.length = 0;
+  policy.allowed = true; policy.models = ['claude-haiku-4-5'];
 });
 afterEach(() => {
   setLlmAdapterForTests(null);
@@ -586,5 +590,74 @@ describe('streamTurn — 실패', () => {
     expect(inserted('messages')).toHaveLength(2);
     expect(inserted('usage_logs').map((r) => r.action).sort()).toEqual(['chat_message', 'conversation_title']);
     expect(details(inserted('usage_logs').find((r) => r.action === 'chat_message')!)).not.toHaveProperty('aborted');
+  });
+});
+
+
+describe('단계형 앱의 저장과 과금', () => {
+  const appSteps = [{ name: '정리', instruction: '정리하세요.' }, { name: '작성', instruction: '작성하세요.' }, { name: '검토', instruction: '검토하세요.' }];
+  it('조건에 따라 생략한 단계는 저장하되 모델 사용량은 추가하지 않는다', async () => {
+    setLlmAdapterForTests(adapter());
+    const conditional = [{ ...appSteps[0], when: { field: 'review', equals: '예' } }, ...appSteps.slice(1)];
+    await run(turn({ appSteps: conditional, appStepInputs: { review: '아니오' }, isNewConversation: false }));
+    const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
+    expect(records.map(s => s.status)).toEqual(['skipped', 'completed', 'completed']);
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 13, output_tokens: 7 });
+  });
+  it('모든 단계 사용량을 합산하고 작업 결과를 저장한다', async () => {
+    setLlmAdapterForTests(adapter());
+    const events = await run(turn({ appSteps, isNewConversation: false }));
+    const steps = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
+    expect(steps.map(s => s.status)).toEqual(['completed', 'completed', 'completed']);
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 16, output_tokens: 9 });
+    expect(events.filter(e => e.event === 'app_step')).toHaveLength(6);
+    expect(events.at(-1)?.event).toBe('done');
+  });
+  it('모델 정책이 단계 사이 바뀌면 다음 호출을 막고 완료 결과와 사용량을 보존한다', async () => {
+    const a = adapter(); const complete = a.complete;
+    a.complete = async req => { const result = await complete(req); policy.models = []; return result; };
+    const streaming = vi.fn(a.stream); a.stream = streaming;
+    setLlmAdapterForTests(a);
+    const events = await run(turn({ appSteps, isNewConversation: false }));
+    expect(streaming).not.toHaveBeenCalled();
+    const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string; output?: string }[];
+    expect(records.map(s => s.status)).toEqual(['completed', 'failed', 'not_run']);
+    expect(records[0].output).toBe('여비 문의');
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 3, output_tokens: 2, aborted: true });
+    expect(events.at(-1)?.event).toBe('error'); expect(events.some(e => e.event === 'done')).toBe(false);
+  });
+});
+
+
+describe('재개 실행의 저장·과금', () => {
+  it('중단된 텍스트 앱은 재개에 필요한 입력과 완료 결과를 같은 메시지에 남긴다', async () => {
+    const a = adapter(); const complete = a.complete; a.complete = async request => { const result = await complete(request); policy.models = []; return result; }; setLlmAdapterForTests(a);
+    const steps = [{ name: '정리', instruction: '정리' }, { name: '작성', instruction: '작성' }];
+    await run(turn({ appSteps: steps, appStepInputs: { source: '가상 자료' }, isNewConversation: false }));
+    const refs = inserted('messages')[1].source_references as Record<string, unknown>;
+    expect(refs.app_inputs).toEqual({ source: '가상 자료' });
+    expect((refs.app_steps as { status: string }[]).map(s => s.status)).toEqual(['completed', 'failed']);
+  });
+  it.each([
+    { name: '파일 첨부만 받는 앱 · 이번 실행에 파일 없음', capabilities: { file_read: {} }, attachments: 0, saved: true },
+    { name: '파일 첨부만 받는 앱 · 이번 실행에 파일 있음', capabilities: { file_read: {} }, attachments: 1, saved: false },
+    { name: '문서 찾기가 켜진 앱', capabilities: { doc_search: {} }, attachments: 0, saved: false },
+  ])('재개용 입력 저장 — $name', async ({ capabilities, attachments, saved }) => {
+    const a = adapter(); const complete = a.complete; a.complete = async request => { const result = await complete(request); policy.models = []; return result; }; setLlmAdapterForTests(a);
+    const t = turn({ appSteps: [{ name: '정리', instruction: '정리' }, { name: '작성', instruction: '작성' }], appStepInputs: { source: '가상 자료' }, isNewConversation: false });
+    t.ctx.capabilities = capabilities as never;
+    t.ctx.attachments = Array.from({ length: attachments }, (_, i) => ({ id: `att-${i}`, fileName: '자료.txt', isNew: true })) as never;
+    await run(t);
+    const refs = inserted('messages')[1].source_references as Record<string, unknown>;
+    expect(refs.app_inputs).toEqual(saved ? { source: '가상 자료' } : undefined);
+  });
+  it('완료 결과를 다시 호출하지 않고 새 호출만 과금하며 재개 출처를 남긴다', async () => {
+    setLlmAdapterForTests(adapter());
+    const steps = [{ name: '정리', instruction: '정리' }, { name: '작성', instruction: '작성' }, { name: '검토', instruction: '검토' }];
+    await run(turn({ appSteps: steps, appStepInputs: { source: '가상 자료' }, appResumeFrom: 'source-message', appResumeRecords: [{ name: '정리', status: 'completed', output: '저장된 결과', reused: true }, { name: '작성', status: 'pending' }, { name: '검토', status: 'pending' }], isNewConversation: false }));
+    const refs = inserted('messages')[1].source_references as Record<string, unknown>;
+    expect(refs.app_resume_from).toBe('source-message'); expect(refs.app_inputs).toEqual({ source: '가상 자료' });
+    expect((refs.app_steps as { reused?: boolean }[])[0].reused).toBe(true);
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 13, output_tokens: 7, app_reused_steps: 1 });
   });
 });

@@ -8,6 +8,7 @@ import { SNAPSHOT_KEYS, type AgentSettingsPatch } from '@/lib/agent-patch';
 import { jsonError, validateModelForOrganization, checkCapabilityScope } from '@/lib/agent-route-helpers';
 import { normalizeCapabilities } from '@/lib/capabilities/settings';
 import { connectorCatalog } from '@/lib/connectors';
+import { validateAppDefinition } from '@/lib/apps/definition';
 
 /**
  * 옛 판으로 되돌린다. 옛 사본을 현재로 다시 쓰고 그것도 새 판으로 남긴다.
@@ -41,6 +42,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     for (const key of SNAPSHOT_KEYS) {
       if (key in snapshot) (patch as Record<string, unknown>)[key] = snapshot[key];
     }
+    const definition = validateAppDefinition(snapshot.app_definition ?? null);
+    if (!definition.ok) return jsonError('그 판의 앱 입력 설정을 현재 사용할 수 없습니다.', 400);
+    patch.app_definition = definition.value;
 
     const caps = normalizeCapabilities(patch.capabilities, { knownConnectorIds: connectorCatalog().map((c) => c.id) });
     if (!caps.ok) return jsonError(`그 판의 능력 설정을 지금 쓸 수 없습니다: ${caps.message}`, 400);

@@ -3,6 +3,9 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { PUBLIC_WORKSPACE_HOME } from '@/lib/config-public';
+import { homeChatRedirect } from '@/lib/apps/home';
+import AppLibrary from '@/components/apps/AppLibrary';
 import ChatHome from '@/components/chat/ChatHome';
 import WorkShell from '@/components/work/WorkShell';
 import WorkHome from '@/components/work/WorkHome';
@@ -17,12 +20,18 @@ function HomeSwitch() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const params = useSearchParams();
-  const [mode, setMode] = useState<'loading' | 'work' | 'chat'>('loading');
+  const [mode, setMode] = useState<'loading' | 'work' | 'chat' | 'apps'>('loading');
 
   useEffect(() => {
     if (status === 'loading') return;
     if (!session?.user?.departmentId) {
       setMode('chat');
+      return;
+    }
+    if (PUBLIC_WORKSPACE_HOME === 'apps') {
+      const redirect = homeChatRedirect({ conv: params.get('conv'), agent: params.get('agent') });
+      if (redirect) { router.replace(redirect); return; }
+      setMode('apps');
       return;
     }
     let alive = true;
@@ -42,6 +51,7 @@ function HomeSwitch() {
     };
   }, [status, session, params, router]);
 
+  if (mode === 'apps') return <WorkShell><AppLibrary home /></WorkShell>;
   if (mode === 'chat') return <ChatHome />;
   if (mode === 'work')
     return (

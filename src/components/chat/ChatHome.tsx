@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ChatInterface from '@/components/chat/ChatInterface';
 import AgentSelector from '@/components/chat/AgentSelector';
@@ -11,22 +11,33 @@ import WelcomeTour from '@/components/chat/WelcomeTour';
 import Sidebar from '@/components/layout/Sidebar';
 import type { Agent } from '@/lib/db';
 import NoticesBanner from '@/components/NoticesBanner';
+import { chatLaunchTarget, loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 
 type ViewMode = 'welcome' | 'chat';
 
 // ?conv=ID 딥링크 처리 — useSearchParams는 Suspense 경계 안에서만 사용 가능
-function ConvLoader({ onLoad }: { onLoad: (id: string) => void }) {
+function ConvLoader({ onLoad, onAgent, onError }: { onLoad: (id: string) => void; onAgent: (agent: Agent) => void; onError: (message: string | null) => void }) {
   const params = useSearchParams();
+  const target = chatLaunchTarget(params);
+  const kind = target?.kind;
+  const id = target?.id;
   useEffect(() => {
-    const id = params.get('conv');
-    if (id) onLoad(id);
-  // onLoad ref는 안정적이므로 deps 생략
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!id) return;
+    let active = true;
+    onError(null);
+    if (kind === 'conversation') onLoad(id);
+    else void loadChatLaunchAgent(id).then((agent) => {
+      if (!active) return;
+      if (agent) onAgent(agent);
+      else onError('이 비서를 열 수 없습니다. 사용할 수 있는 비서를 다시 골라 주세요.');
+    }).catch(() => { if (active) onError('비서를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'); });
+    return () => { active = false; };
+  }, [kind, id, onLoad, onAgent, onError]);
   return null;
 }
 
 export default function ChatHome() {
+  const router = useRouter();
   const { data: session, status } = useSession();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -34,16 +45,18 @@ export default function ChatHome() {
   const [viewMode, setViewMode] = useState<ViewMode>('welcome');
   const [quickInput, setQuickInput] = useState('');
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const lastAgentRef = useRef<Agent | null>(null);
 
   const handleAgentSelect = useCallback((agent: Agent | null) => {
     if (!agent) return;
+    if (agent.app_definition) { router.push(`/apps/run?agent=${encodeURIComponent(agent.id)}`); return; }
     setSelectedAgent(agent);
     lastAgentRef.current = agent;
     setConversationId(null);
     setViewMode('chat');
-  }, []);
+  }, [router]);
 
   const handleConversationSelect = useCallback(async (id: string) => {
     try {
@@ -151,7 +164,7 @@ export default function ChatHome() {
   return (
     <div className="flex flex-col h-screen bg-[#F5F7FA] overflow-hidden" style={{ fontFamily: 'Pretendard, -apple-system, sans-serif' }}>
       <Suspense fallback={null}>
-        <ConvLoader onLoad={handleConversationSelect} />
+        <ConvLoader onLoad={handleConversationSelect} onAgent={handleAgentSelect} onError={setLaunchError} />
       </Suspense>
 
       {/* 헤더를 fixed로 두면 흐름에서 빠져 바로 아래 공지 배너가 그 뒤에 깔린다.
@@ -161,6 +174,7 @@ export default function ChatHome() {
       <WelcomeTour />
       <Header />
       <NoticesBanner />
+      {launchError && <p role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">{launchError} <Link href="/apps" className="underline">업무 앱 보기</Link></p>}
 
       <div className="flex flex-1 overflow-hidden">
         {/* 사이드바 */}
@@ -227,6 +241,9 @@ function WelcomeView({
         <p className="text-slate-500 text-sm mb-8">
           기관 문서를 근거로 답하고, 사진·화면 캡처도 읽습니다.
         </p>
+        <Link href="/apps" className="mb-5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-[#003087] hover:border-[#003087]">
+          업무 앱 둘러보기
+        </Link>
 
         {/* 빠른 입력창 */}
         <div className="w-full max-w-2xl">

@@ -21,3 +21,61 @@ body {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* 업무 공간: 기관 CI는 보존하고 탐색·입력·결과 카드에 공통 리듬을 적용한다. */
+.workspace-shell {
+  --workspace-accent: #087f8c;
+}
+.workspace-hero {
+  background: radial-gradient(ellipse at 95% 0%, #dcf0f3 0%, transparent 55%), linear-gradient(115deg, #e8f6f4, #f2f9f8 65%, #eaf4f8);
+}
+.workspace-card {
+  box-shadow: 0 3px 12px rgb(34 40 61 / 2%);
+}
+.workspace-shell .app-tile,
+.workspace-shell .featured-app {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.workspace-shell .app-tile:hover,
+.workspace-shell .featured-app:focus-within {
+  border-color: #9bc9ce;
+  box-shadow: 0 8px 24px rgb(17 97 108 / 7%);
+}
+.app-tone-0 .app-icon { background: #e3f3f4; color: #087581; }
+.app-tone-1 .app-icon { background: #e8f3ff; color: #4e8bbd; }
+.app-tone-2 .app-icon { background: #e5f5ef; color: #42937d; }
+.app-tone-3 .app-icon { background: #fff1e6; color: #bd8753; }
+.app-tone-4 .app-icon { background: #fcecf3; color: #b76e94; }
+.workspace-shell a[class*="bg-[#003087]"],
+.workspace-shell button[class*="bg-[#003087]"] {
+  background-color: var(--workspace-accent);
+}
+.workspace-shell a[class*="text-[#003087]"],
+.workspace-shell button[class*="text-[#003087]"] {
+  color: var(--workspace-accent);
+}
+.workspace-shell :is(a, button)[class*="bg-[#003087]"]:hover {
+  background-color: #066775;
+}
+.workspace-shell :is(a, button)[class*="border-[#003087]"] {
+  border-color: var(--workspace-accent);
+}
+.workspace-shell :is(a, button)[class*="hover:border-[#003087]"]:hover {
+  border-color: var(--workspace-accent);
+}
+.workspace-shell input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.workspace-shell select,
+.workspace-shell textarea {
+  border-radius: 10px;
+  border-color: #e0e4ed;
+}
+.workspace-shell :is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #16818c;
+  outline-offset: 3px;
+}
+.workspace-shell main { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell main { scroll-behavior: auto; }
+  .workspace-shell .app-tile,
+  .workspace-shell .featured-app { transition: none; }
+}

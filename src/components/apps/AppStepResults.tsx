@@ -1,0 +1,6 @@
+import type { AppStepRecord } from '@/lib/apps/pipeline';
+const labels: Record<AppStepRecord['status'], string> = { pending: '대기', running: '처리 중', completed: '완료', skipped: '조건에 따라 건너뜀', failed: '중단', not_run: '실행 안 됨' };
+export default function AppStepResults({ steps }: { steps: AppStepRecord[] }) {
+  if (!steps.length) return null;
+  return <section aria-label="단계별 작업 결과" className="my-5 rounded-xl border border-slate-200 bg-slate-50 p-4"><h3 className="mb-3 text-sm font-semibold">단계별 작업 결과</h3><ol className="space-y-3">{steps.map((step, index) => <li key={index} className="text-sm"><div className="flex items-center justify-between gap-3"><span>{index + 1}. {step.name}</span><span className={`text-xs ${step.status === 'failed' ? 'text-red-600' : step.status === 'running' ? 'text-[#087581]' : 'text-slate-500'}`}>{step.reused && step.status === 'completed' ? '이전 결과 재사용' : labels[step.status]}</span></div>{step.output && <details className="mt-2"><summary className="cursor-pointer text-xs text-[#087581]">작업 결과 보기</summary><div className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-xs leading-6">{step.output}</div></details>}</li>)}</ol></section>;
+}

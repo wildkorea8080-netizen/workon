@@ -8,6 +8,10 @@ import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
 import type { Agent, RetrievedChunk } from '@/lib/db';
+import AppStepResults from '@/components/apps/AppStepResults';
+import AppResultExport from '@/components/apps/AppResultExport';
+import AppResumeLink from '@/components/apps/AppResumeLink';
+import { appStepsCompleted, type AppStepRecord } from '@/lib/apps/pipeline';
 import {
   MAX_CHAT_IMAGES,
   IMAGE_ACCEPT_ATTRIBUTE,
@@ -26,6 +30,8 @@ interface ToolLink {
 }
 
 interface Message {
+  appSteps?: AppStepRecord[];
+  appInputs?: Record<string, string>;
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -191,6 +197,8 @@ export default function ChatInterface({
               role: 'user' | 'assistant';
               content: string;
               source_references?: {
+                app_steps?: AppStepRecord[];
+                app_inputs?: Record<string, string>;
                 chunks?: RetrievedChunk[];
                 links?: ToolLink[];
                 files?: { id: string; file_name: string; size_bytes: number }[];
@@ -206,6 +214,8 @@ export default function ChatInterface({
                 ? m.content.replace(/^\[첨부 파일: [^\n]*\]\n?/m, '')
                 : m.content,
               sources: m.source_references?.chunks,
+              appSteps: m.source_references?.app_steps,
+              appInputs: m.source_references?.app_inputs,
               links: m.source_references?.links,
               files: m.source_references?.files,
               attachments: m.role === 'user' ? m.source_references?.attachments : undefined,
@@ -650,8 +660,8 @@ export default function ChatInterface({
           </div>
         ) : (
           messages.map(msg => (
+            <div key={msg.id}>
             <MessageBubble
-              key={msg.id}
               role={msg.role}
               content={msg.content}
               imagePreviews={msg.imagePreviews}
@@ -668,6 +678,10 @@ export default function ChatInterface({
               onOpenSource={setOpenSource}
               error={msg.error}
             />
+            {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
+            {conversationId && msg.role === 'assistant' && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
+            {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} />}
+            </div>
           ))
         )}
 
