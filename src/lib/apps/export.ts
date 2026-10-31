@@ -2,9 +2,10 @@ import { fillHwpx } from '@/lib/doc-fill/hwpx';
 import { openHwpx, readEntry, scanParagraphs, applyEdits, writeHwpx } from '@/lib/doc-fill/hwpx-core';
 import { paragraphPrefix } from '@/lib/doc-fill/xml-scan';
 import { checkPackage } from '@/lib/work/documents/package-check';
-import { markdownToDocumentText } from '@/lib/apps/markdown-text';
+import { markdownToDocumentBlocks, tableAsText, type DocumentTable } from '@/lib/apps/markdown-text';
+import { insertHwpxTables, tableFits, tableMarker } from '@/lib/doc-fill/hwpx-table';
 
-/** Package the stored answer literally; never ask a model to rewrite an export. Only markdown markers are removed (markdownToDocumentText). */
+/** Package the stored answer literally; never ask a model to rewrite an export. Only markdown markers are removed (markdownToDocumentBlocks); markdown tables become real HWPX tables (too large ones stay ' | ' text). */
 export async function buildAppResultHwpx(template: Buffer, input: { name: string; version: number | null; content: string; references: Record<string, unknown>; createdAt: string }): Promise<Buffer> {
   if (!input.content.trim() || input.content.length > 60000) throw new Error('내보낼 결과의 길이를 확인해 주세요.');
   const doc = await openHwpx(template); const sections = new Map<string, string>();
@@ -33,13 +34,18 @@ export async function buildAppResultHwpx(template: Buffer, input: { name: string
     const link = raw as Record<string, unknown>;
     if (typeof link.url === 'string' && /^https?:\/\//i.test(link.url)) citations.push(`${typeof link.title === 'string' ? link.title : '외부 출처'}: ${link.url}`);
   }
-  const text = markdownToDocumentText(input.content);
+  const tables: DocumentTable[] = [];
+  const blocks = markdownToDocumentBlocks(input.content);
+  const text = blocks.map(b => b.kind === 'text' ? b.text : tableFits(b) ? tableMarker(tables.push(b) - 1) : tableAsText(b)).join('\n');
   if (!text.trim()) throw new Error('내보낼 결과의 길이를 확인해 주세요.');
+  const cellLines = tables.flatMap(t => [t.header, ...t.rows].flat()).flatMap(c => c.split(/<br\s*\/?>/i)).map(c => c.trim()).filter(Boolean);
   const body = text + (citations.length ? `\n\n참고한 출처\n${citations.join('\n')}` : '');
   const title = `[AI 작성 초안] ${input.name}`;
   const values = new Map([['제목', title], ['작성일', `파일 생성: ${input.createdAt}`], ['작성부서', ''], ['개요', overview.join('\n')], ['주요 내용', body]]);
   const result = await fillHwpx(base, values);
-  const checked = await checkPackage(result.bytes, { format: 'hwpx', values: [title, ...text.split('\n').filter(Boolean)] });
+  const bytes = await insertHwpxTables(result.bytes, tables);
+  const lines = text.split('\n').filter(line => line && !tables.some((_, i) => line === tableMarker(i)));
+  const checked = await checkPackage(bytes, { format: 'hwpx', values: [title, ...lines, ...cellLines] });
   if (!checked.valid) throw new Error('한글 파일 구조 검증을 통과하지 못했습니다.');
-  return result.bytes;
+  return bytes;
 }
