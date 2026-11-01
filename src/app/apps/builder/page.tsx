@@ -6,7 +6,7 @@ import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShe
 import AppFields from '@/components/apps/AppFields';
 import AppStepEditor from '@/components/apps/AppStepEditor';
 import { api } from '@/lib/work/client';
-import { validateAppDefinition, type AppDefinition, type AppField } from '@/lib/apps/definition';
+import { upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppField } from '@/lib/apps/definition';
 import type { Agent } from '@/lib/db';
 import { loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 import { appCopyDraft } from '@/lib/apps/copy';
@@ -42,7 +42,7 @@ function Builder() {
         const result = await api<Agent>(`/api/agents/${encodeURIComponent(id)}`);
         if (!active) return;
         if (!result.ok) throw new Error(result.error.message);
-        const a = result.data; setAgent(a); setName(a.name); setDescription(a.description ?? ''); setCategory(a.category || '문서 작성·정리'); setInstructions(a.system_prompt ?? ''); setDefinition(a.app_definition ?? initial);
+        const a = result.data; setAgent(a); setName(a.name); setDescription(a.description ?? ''); setCategory(a.category || '문서 작성·정리'); setInstructions(a.system_prompt ?? ''); setDefinition(a.app_definition ? upgradeAppConditions(a.app_definition) : initial);
       }
     })().catch(failure => { if (active) setError(failure instanceof Error ? failure.message : '앱을 불러오지 못했습니다.'); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

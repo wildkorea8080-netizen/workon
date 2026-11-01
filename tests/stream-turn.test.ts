@@ -598,7 +598,7 @@ describe('단계형 앱의 저장과 과금', () => {
   const appSteps = [{ name: '정리', instruction: '정리하세요.' }, { name: '작성', instruction: '작성하세요.' }, { name: '검토', instruction: '검토하세요.' }];
   it('조건에 따라 생략한 단계는 저장하되 모델 사용량은 추가하지 않는다', async () => {
     setLlmAdapterForTests(adapter());
-    const conditional = [{ ...appSteps[0], when: { field: 'review', equals: '예' } }, ...appSteps.slice(1)];
+    const conditional = [{ ...appSteps[0], when: { all: [{ field: 'review', op: 'equals' as const, value: '예' }] } }, ...appSteps.slice(1)];
     await run(turn({ appSteps: conditional, appStepInputs: { review: '아니오' }, isNewConversation: false }));
     const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
     expect(records.map(s => s.status)).toEqual(['skipped', 'completed', 'completed']);

@@ -1,8 +1,90 @@
 export type AppField = { key: string; label: string; type: 'text' | 'textarea' | 'number' | 'date' | 'select'; required: boolean; options?: string[] };
-export type AppStep = { name: string; instruction: string; when?: { field: string; equals: string } };
+export type AppConditionOp = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'before' | 'after' | 'filled' | 'empty';
+/** 입력 항목 하나에 대한 비교. filled·empty는 값이 없다 */
+export type AppRule = { field: string; op: AppConditionOp; value?: string };
+/** 단계 실행 조건 — 규칙이 **모두** 맞을 때만 실행(AND). 옛 `{ field, equals }`는 검사가 이 꼴로 바꾼다 */
+export type AppStepCondition = { all: AppRule[] };
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition };
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean } };
 export const APP_MAX_FILES = 3;
+export const APP_MAX_RULES = 3;
 const object = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+/** 항목 종류마다 쓸 수 있는 비교 — 화면 선택지와 서버 검사가 같은 표를 본다 */
+export const APP_CONDITION_OPS: Record<AppField['type'], AppConditionOp[]> = {
+  select: ['equals', 'not_equals', 'filled', 'empty'],
+  text: ['contains', 'not_contains', 'filled', 'empty'],
+  textarea: ['contains', 'not_contains', 'filled', 'empty'],
+  number: ['equals', 'not_equals', 'gt', 'gte', 'lt', 'lte', 'filled', 'empty'],
+  date: ['equals', 'before', 'after', 'filled', 'empty'],
+};
+export const APP_CONDITION_LABELS: Record<AppConditionOp, string> = {
+  equals: '같음', not_equals: '같지 않음', contains: '포함', not_contains: '포함하지 않음',
+  gt: '보다 큼', gte: '이상', lt: '보다 작음', lte: '이하', before: '이전', after: '이후', filled: '입력됨', empty: '비어 있음',
+};
+const NUMBER = /^-?\d+(\.\d+)?$/;
+const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v;
+const fold = (v: string) => v.normalize('NFC').toLowerCase();
+
+/**
+ * 저장된 정의의 옛 조건 `{ field, equals }`를 `{ all: [...] }` 꼴로만 바꾼다 — 편집 화면이 불러올 때.
+ * 검사는 하지 않는다(지워진 항목을 가리키는 조건도 그대로 보여 고치게 한다).
+ */
+export function upgradeAppConditions(def: AppDefinition): AppDefinition {
+  if (!def.steps) return def;
+  return { ...def, steps: def.steps.map(step => {
+    const when = step.when as unknown;
+    if (!object(when) || when.all !== undefined || typeof when.field !== 'string') return step;
+    return { ...step, when: { all: [{ field: when.field, op: 'equals', value: typeof when.equals === 'string' ? when.equals : '' }] } };
+  }) };
+}
+
+/** 규칙 하나를 검사·정규화한다. 맞지 않으면 null */
+function normalizeRule(raw: unknown, fields: AppField[]): AppRule | null {
+  if (!object(raw) || typeof raw.field !== 'string' || typeof raw.op !== 'string') return null;
+  const field = fields.find(f => f.key === raw.field);
+  const op = raw.op as AppConditionOp;
+  if (!field || !APP_CONDITION_OPS[field.type].includes(op)) return null;
+  if (op === 'filled' || op === 'empty') return raw.value === undefined || raw.value === '' ? { field: field.key, op } : null;
+  if (typeof raw.value !== 'string') return null;
+  const value = raw.value.trim();
+  if (field.type === 'select' && !field.options?.includes(value)) return null;
+  if ((field.type === 'text' || field.type === 'textarea') && (!value || value.length > 80 || /[\r\n]/.test(value))) return null;
+  if (field.type === 'number' && (!NUMBER.test(value) || !Number.isFinite(Number(value)))) return null;
+  if (field.type === 'date' && !isDate(value)) return null;
+  return { field: field.key, op, value };
+}
+
+/**
+ * 조건이 맞는가 — 서버가 검사한 입력값(renderAppInput의 inputs)으로만 본다. 코드·수식·모델로 평가하지 않는다.
+ * 비운 입력은 '비어 있음'에만 맞는다(같지 않음·포함하지 않음도 아니다 — 입력하지 않은 값을 판단 근거로 쓰지 않는다).
+ */
+export function conditionHolds(condition: AppStepCondition, inputs: Record<string, string> | undefined): boolean {
+  return condition.all.every(rule => {
+    const actual = (inputs?.[rule.field] ?? '').trim();
+    if (rule.op === 'empty') return !actual;
+    if (!actual) return false;
+    if (rule.op === 'filled') return true;
+    const value = rule.value ?? '';
+    switch (rule.op) {
+      case 'contains': return fold(actual).includes(fold(value));
+      case 'not_contains': return !fold(actual).includes(fold(value));
+      case 'before': return actual < value;
+      case 'after': return actual > value;
+    }
+    const numeric = NUMBER.test(actual) && NUMBER.test(value);
+    const a = Number(actual), b = Number(value);
+    switch (rule.op) {
+      case 'equals': return numeric ? a === b : actual === value;
+      case 'not_equals': return numeric ? a !== b : actual !== value;
+      case 'gt': return numeric && a > b;
+      case 'gte': return numeric && a >= b;
+      case 'lt': return numeric && a < b;
+      case 'lte': return numeric && a <= b;
+    }
+    return false;
+  });
+}
 
 export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefinition | null } | { ok: false; message: string } {
   if (raw === null) return { ok: true, value: null };
@@ -26,10 +108,18 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
       const normalized: AppStep = { name: step.name.trim(), instruction: step.instruction.trim() };
       if (step.when !== undefined) {
         const when = step.when;
-        if (!object(when) || typeof when.field !== 'string' || typeof when.equals !== 'string') return { ok: false, message: '단계 실행 조건을 확인해 주세요.' };
-        const field = fields.find(f => f.key === when.field);
-        if (!field || field.type !== 'select' || !field.options?.includes(when.equals.trim())) return { ok: false, message: '단계 조건은 현재 목록 선택 항목과 그 선택값만 사용할 수 있습니다.' };
-        normalized.when = { field: field.key, equals: when.equals.trim() };
+        if (object(when) && when.all === undefined) {
+          // 옛 꼴 { field, equals } — 목록 선택 항목의 선택값 하나
+          if (typeof when.field !== 'string' || typeof when.equals !== 'string') return { ok: false, message: '단계 실행 조건을 확인해 주세요.' };
+          const field = fields.find(f => f.key === when.field);
+          if (!field || field.type !== 'select' || !field.options?.includes(when.equals.trim())) return { ok: false, message: '단계 조건은 현재 목록 선택 항목과 그 선택값만 사용할 수 있습니다.' };
+          normalized.when = { all: [{ field: field.key, op: 'equals', value: when.equals.trim() }] };
+        } else {
+          if (!object(when) || !Array.isArray(when.all) || when.all.length < 1 || when.all.length > APP_MAX_RULES) return { ok: false, message: `단계 실행 조건은 1~${APP_MAX_RULES}개로 정해 주세요.` };
+          const rules = when.all.map(rule => normalizeRule(rule, fields));
+          if (rules.some(rule => !rule)) return { ok: false, message: '단계 조건은 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
+          normalized.when = { all: rules as AppRule[] };
+        }
       }
       steps.push(normalized);
     }
@@ -48,8 +138,8 @@ export function renderAppInput(def: AppDefinition, raw: unknown): { ok: true; me
     const text = value.trim();
     if (field.required && !text) return { ok: false, message: `${field.label} 항목을 입력해 주세요.` };
     if (text && field.type === 'select' && !field.options?.includes(text)) return { ok: false, message: `${field.label}: 목록에서 선택해 주세요.` };
-    if (text && field.type === 'number' && (!/^-?\d+(\.\d+)?$/.test(text) || !Number.isFinite(Number(text)))) return { ok: false, message: `${field.label}: 숫자를 입력해 주세요.` };
-    if (text && field.type === 'date' && (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(text)) || new Date(text).toISOString().slice(0, 10) !== text)) return { ok: false, message: `${field.label}: 올바른 날짜를 입력해 주세요.` };
+    if (text && field.type === 'number' && (!NUMBER.test(text) || !Number.isFinite(Number(text)))) return { ok: false, message: `${field.label}: 숫자를 입력해 주세요.` };
+    if (text && field.type === 'date' && !isDate(text)) return { ok: false, message: `${field.label}: 올바른 날짜를 입력해 주세요.` };
     values[field.label] = text || '(입력 없음)';
     inputs[field.key] = text;
   }

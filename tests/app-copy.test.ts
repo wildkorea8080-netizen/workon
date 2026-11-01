@@ -7,7 +7,7 @@ const source = (patch: Partial<Agent> = {}): Agent => ({
   id: 'source', name: '기관 안내문', department_id: 'original-dept', tier: 'official', is_active: true,
   version: 12, config: {}, created_at: '', updated_at: '', owner_id: 'original-owner', system_prompt: '자료의 사실만 사용해 안내문을 작성하세요.',
   model_id: 'original-model', capabilities: { doc_search: {}, public_data: { connectors: ['private'] } },
-  app_definition: { schemaVersion: 1, output: 'bullets', fields: [{ key: 'type', label: '종류', type: 'select', required: true, options: ['안내', '공지'] }], attachments: { required: true }, steps: [{ name: '정리', instruction: '사실 정리', when: { field: 'type', equals: '안내' } }, { name: '작성', instruction: '안내문 작성' }] },
+  app_definition: { schemaVersion: 1, output: 'bullets', fields: [{ key: 'type', label: '종류', type: 'select', required: true, options: ['안내', '공지'] }], attachments: { required: true }, steps: [{ name: '정리', instruction: '사실 정리', when: { all: [{ field: 'type', op: 'equals', value: '안내' }] } }, { name: '작성', instruction: '안내문 작성' }] },
   ...patch,
 });
 
@@ -25,10 +25,10 @@ describe('app copy draft', () => {
   it('creates independent fields, options, conditions and attachment settings', () => {
     const original = source(); const draft = appCopyDraft(original);
     draft.definition.fields[0].options![0] = '변경';
-    draft.definition.steps![0].when!.equals = '변경';
+    draft.definition.steps![0].when!.all[0].value = '변경';
     draft.definition.attachments!.required = false;
     expect(original.app_definition!.fields[0].options![0]).toBe('안내');
-    expect(original.app_definition!.steps![0].when!.equals).toBe('안내');
+    expect(original.app_definition!.steps![0].when!.all[0].value).toBe('안내');
     expect(original.app_definition!.attachments!.required).toBe(true);
   });
   it.each([{ is_active: false }, { deleted_at: '2026-10-31' }, { agent_type: 'link' as const }, { app_definition: null }, { system_prompt: '' }, { system_prompt: 'x'.repeat(12001) }])('rejects unavailable or uneditable source %j', patch => {

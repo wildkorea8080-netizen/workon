@@ -1,4 +1,4 @@
-import type { AppStep } from './definition';
+import { conditionHolds, type AppStep } from './definition';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
 
 export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean };
@@ -31,7 +31,7 @@ export async function runAppIntermediateSteps(args: {
   for (let index = 0; index < args.steps.length - 1; index++) {
     if (args.records[index].status === 'completed' && args.records[index].reused) { args.update(index); continue; }
     const condition = args.steps[index].when;
-    if (condition && args.inputs?.[condition.field] !== condition.equals) {
+    if (condition && !conditionHolds(condition, args.inputs)) {
       args.records[index].status = 'skipped'; args.update(index); continue;
     }
     args.records[index].status = 'running'; args.update(index);

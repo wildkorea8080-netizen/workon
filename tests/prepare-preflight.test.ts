@@ -220,7 +220,7 @@ describe('조건 평가 입력의 신뢰 경계', () => {
     const out = await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { review: ' 아니오 ' }, appStepInputs: { review: '예' } });
     expect(out.ok).toBe(true); if (!out.ok) return;
     expect(out.turn.appStepInputs).toEqual({ review: '아니오' });
-    expect(out.turn.appSteps?.[0].when).toEqual({ field: 'review', equals: '예' });
+    expect(out.turn.appSteps?.[0].when).toEqual({ all: [{ field: 'review', op: 'equals', value: '예' }] });
   });
 });
 

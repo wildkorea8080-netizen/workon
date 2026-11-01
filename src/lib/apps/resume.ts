@@ -1,4 +1,4 @@
-import { renderAppInput, type AppDefinition } from './definition';
+import { conditionHolds, renderAppInput, type AppDefinition } from './definition';
 import type { AppStepRecord } from './pipeline';
 
 export function restoreAppSteps(definition: AppDefinition, references: Record<string, unknown>, currentMessage: string): { ok: true; records: AppStepRecord[] } | { ok: false; message: string } {
@@ -13,10 +13,10 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
     const saved = references.app_steps[index]; const step = steps[index];
     if (!saved || typeof saved !== 'object' || saved.name !== step.name) return fail('단계 기록이 현재 앱과 다릅니다. 새로 실행해 주세요.');
     if (!failed && saved.status === 'completed') {
-      if (index === steps.length - 1 || typeof saved.output !== 'string' || !saved.output.trim() || saved.output.length > 12000 || (step.when && original.inputs[step.when.field] !== step.when.equals)) return fail('재사용할 단계 결과를 확인하지 못했습니다. 새로 실행해 주세요.');
+      if (index === steps.length - 1 || typeof saved.output !== 'string' || !saved.output.trim() || saved.output.length > 12000 || (step.when && !conditionHolds(step.when, original.inputs))) return fail('재사용할 단계 결과를 확인하지 못했습니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'completed', output: saved.output, reused: true }); completed++;
     } else if (!failed && saved.status === 'skipped') {
-      if (!step.when || original.inputs[step.when.field] === step.when.equals) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
+      if (!step.when || conditionHolds(step.when, original.inputs)) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'skipped' });
     } else {
       if (!failed && saved.status === 'failed') failed = true;

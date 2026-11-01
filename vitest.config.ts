@@ -19,6 +19,9 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
+  // tsconfig는 jsx를 Next에 맡기려고 'preserve'다. 화면 부품을 서버 렌더링으로 보는 시험(app-step-editor)이
+  // .tsx를 불러올 수 있게 시험에서만 JSX를 변환한다
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
