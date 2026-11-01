@@ -149,7 +149,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 
 | 그룹 | 경로 | 인증 방식 | 비고 |
 |---|---|---|---|
-| 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]`, `/api/noda/webhook`(NODA 서명으로만 받음), `/api/cron/noda-events`(Vercel 예약 작업 — `CRON_SECRET`으로만 받음) | 없음 | 초대 토큰 검증만 · 웹훅은 HMAC 서명 · 예약 작업은 Bearer 비밀값 |
+| 공개 | `/api/signup`, `/api/register`, `/api/shared/[token]`, `/api/noda/webhook`(NODA 서명으로만 받음), `/api/cron/noda-events`·`/api/cron/budget-alerts`(Vercel 예약 작업 — `CRON_SECRET`으로만 받음) | 없음 | 초대 토큰 검증만 · 웹훅은 HMAC 서명 · 예약 작업은 Bearer 비밀값 |
 | 직원 — 업무 | `/api/workflows`, `/api/work/**`(작업·원자료·실행·문서·판·AI 수정·검토·결과물·양식·대화 파일 가져오기, `PATCH …/tasks/[id]/currentize` = 현행화 대조 보기 조각 수정) | NextAuth 세션 + `getWorkActor`(대리 접근·비활성·소속 없음은 막음) | 권한은 `work/access.ts`(주인·명시 구성원만 — 관리자도 남의 작업 404) |
 | 업무 작업자 | `/api/work/worker` | `WORK_WORKER_SECRET` Bearer(상수 시간 비교, 없으면 503) | pg_cron이 1분마다 부름 |
 | 직원 | `/api/chat`, `/api/conversations/*`, `/api/agents`, `/api/agents/personal/*`, `/api/agents/favorite`, `/api/files/[id]` (내가 만든 파일 내려받기), `/api/attachments/*` (채팅 첨부 — 올리기 주소·확인·목록·삭제), `/api/my/stats`, `/api/reports/*` (화면 없음 — 정리 예정), `/api/notices/*` | NextAuth 세션 | `department_id` 필터 필수 |
@@ -206,6 +206,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | 0032 | 옛 임베딩 값 비우기 — `noda_status`가 NULL이 아닌 행의 `embedding`을 NULL로, `metadata`에서 `chunks`를 뺌. **사용자가 적용한다 — `npm run noda:migrate -- --dry-run`이 0건(문서가 모두 NODA로 옮겨짐)인 것을 확인한 뒤.** **되돌릴 수 없다**(비운 값은 다시 만들 수 없다). 코드는 이 값을 읽지 않으므로 적용 전에도 돈다. `embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC는 **지우지 않는다**(값만 비움). 적용 뒤 확인: `SELECT count(*) FROM documents WHERE embedding IS NOT NULL OR metadata ? 'chunks';` |
 | 0034 | **업무 작업(WORKON 개편)** — `work_org_settings`(기관 스위치)·`workflow_installations`·`work_template_versions`·`work_tasks`·`work_task_members`·`work_sources`·`work_document_versions`·`work_runs`·`work_run_steps`·`work_artifacts`·`work_review_items`·`work_evidence`·`work_revision_proposals`·`work_events`(task_id NULL = 기관 단위 사건) + RPC(`work_save_document_version`·`work_enqueue_run`·`work_claim_runs`·`work_heartbeat_run`·`work_finish_run`). 추가만(기존 표 무변경), 겹 외래 키로 같은 기관 강제, RLS 켜고 정책 없음(서비스 키만). **아직 어디에도 적용 안 됨** — 순서는 RELEASE_RUNBOOK 5절(**코드 배포 전**에 적용) (운영 적용은 RELEASE_RUNBOOK 1절 참조) |
 | 0035 | **현행화 작년 파일 용도** — `work_sources.purpose` CHECK(`work_sources_purpose_check`)에 `'prior'`를 더한다(값만 넓힘·추가만, 여러 번 적용해도 안전). 작년 HWPX를 올해 문서로 고치는 현행화 엔진(S6-1)이 쓴다. **코드 배포 전에 적용**(새 코드가 `purpose='prior'`로 올린다). 아직 어디에도 적용 안 됨 — RELEASE_RUNBOOK 8절 |
+| 0045 | **기관·부서 예산 알림 메일 기록**(`budget_alerts`) — 기관·대상(`org`·`dept:{부서 id}`)·기간(`contract:{계약 id}`·`month:YYYY-MM`)·기준(%) 유일 키, 상태(`sending`·`sent`·`failed`·`no_recipients`)·시도 수·받은 사람 수(주소는 저장하지 않음). 추가만, RLS 켜고 정책 없음. 하루 한 번 `/api/cron/budget-alerts`가 첫 경고 기준·90·100% 중 넘은 가장 높은 기준을 한 번만 보낸다(`src/lib/budget-alerts.ts`, `docs/benchmarks/allganize/BUDGET_ALERTS.md`). **코드 배포 전에 적용** |
 | 0033 | 공통 자료실(`common_documents`) — 기관 유형(`org_type`, 여섯 값 CHECK)·이름·기준 연도(2000~2100)·이용 조건 확인 기록(비면 안 됨)·원본 경로·NODA 읽기 상태(`documents`와 같은 칸 + `retired`)·`replaces_id`·`retired_at`·`uploaded_by`. **기관·부서 칸이 없다**(유형 단위 자료라 `visibilityFilter`·기관 트리거 대상이 아님). **코드 배포 전에 적용**(코드가 이 표를 읽고 쓴다) |
 
 **0014에 대한 주의**: `departments.organization_id`가 NOT NULL이 됐고 유일성

@@ -5,7 +5,8 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "crons": [
-    { "path": "/api/cron/noda-events", "schedule": "0 18 * * *" }
+    { "path": "/api/cron/noda-events", "schedule": "0 18 * * *" },
+    { "path": "/api/cron/budget-alerts", "schedule": "0 0 * * *" }
   ],
 
   "headers": [

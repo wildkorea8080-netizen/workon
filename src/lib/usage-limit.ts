@@ -57,6 +57,7 @@ function monthStartISO() {
 }
 
 interface ActiveContract {
+  id: string;
   billing_type: string;
   annual_budget_krw: number | null;
   budget_alert_percent: number;
@@ -68,7 +69,7 @@ interface ActiveContract {
 async function getActiveContract(organizationId: string): Promise<ActiveContract | null> {
   const { data } = await supabaseAdmin
     .from('contracts')
-    .select('billing_type, annual_budget_krw, budget_alert_percent, started_at, expires_at')
+    .select('id, billing_type, annual_budget_krw, budget_alert_percent, started_at, expires_at')
     .eq('organization_id', organizationId)
     .eq('status', 'active')
     .order('started_at', { ascending: false })
@@ -358,4 +359,131 @@ export async function checkTokenLimit(
     // 한도 확인 실패가 채팅을 막아서는 안 된다
     return ALLOWED;
   }
+}
+
+/** 기관 단위 사용률 — 예산 알림 메일(budget-alerts.ts)이 쓴다. 판정 기준은 위 `checkTokenLimit`과 같다 */
+export interface OrganizationBudgetStatus {
+  kind: 'annual_budget' | 'monthly_tokens';
+  /** 같은 기간 안에서만 같은 알림을 한 번 보낸다 — 연간 계약은 계약 id, 종량제는 KST 달 */
+  periodKey: string;
+  used: number;
+  limit: number;
+  percent: number;
+  /** 첫 경고 기준(%) — 연간 계약의 `budget_alert_percent`, 종량제는 80 */
+  alertPercent: number;
+  periodEndsAt: string | null;
+}
+
+/**
+ * 기관의 이번 기간 사용률. 한도가 없거나(무제한·금액 미설정) 정지된 기관·집계 실패는 null —
+ * 알림은 차단 판정과 달리 **모르면 보내지 않는다**(거짓 경보보다 하루 늦은 경보가 낫다).
+ */
+export async function organizationBudgetStatus(organizationId: string): Promise<OrganizationBudgetStatus | null> {
+  const contract = await getActiveContract(organizationId);
+  if (contract?.billing_type === 'annual_fixed') {
+    const totalKrw = Number(contract.annual_budget_krw ?? 0);
+    if (totalKrw <= 0) return null;
+    const { data, error } = await supabaseAdmin.rpc('organization_spend_krw', {
+      p_organization_id: organizationId,
+      p_from: contract.started_at,
+      p_to: contract.expires_at ?? new Date().toISOString(),
+    });
+    if (error) throw new Error(`organization_spend_krw: ${error.message}`);
+    const usedKrw = Number(data ?? 0);
+    return {
+      kind: 'annual_budget',
+      periodKey: `contract:${contract.id}`,
+      used: usedKrw,
+      limit: totalKrw,
+      percent: Math.floor((usedKrw / totalKrw) * 100),
+      alertPercent: contract.budget_alert_percent ?? 80,
+      periodEndsAt: contract.expires_at,
+    };
+  }
+
+  const { data: org, error: orgError } = await supabaseAdmin
+    .from('organizations')
+    .select('monthly_token_limit')
+    .eq('id', organizationId)
+    .maybeSingle();
+  if (orgError) throw new Error(`organizations: ${orgError.message}`);
+  const limitTokens = Number(org?.monthly_token_limit ?? 0);
+  if (limitTokens <= 0) return null;
+
+  const from = monthStartISO();
+  const { data: logs, error } = await supabaseAdmin
+    .from('usage_logs')
+    .select('details')
+    .eq('organization_id', organizationId)
+    .eq('action', 'chat_message')
+    .gte('created_at', from);
+  if (error) throw new Error(`usage_logs: ${error.message}`);
+  const usedTokens = (logs ?? []).reduce((sum: number, log: { details: any }) => {
+    const details = log.details ?? {};
+    return sum + (details.input_tokens ?? 0) + (details.output_tokens ?? 0);
+  }, 0);
+  return {
+    kind: 'monthly_tokens',
+    periodKey: monthPeriodKey(from),
+    used: usedTokens,
+    limit: limitTokens,
+    percent: Math.floor((usedTokens / limitTokens) * 100),
+    alertPercent: 80,
+    periodEndsAt: null,
+  };
+}
+
+/** 'month:YYYY-MM' — monthStartISO(KST 1일 0시 = UTC 전날 15시)의 한국 달력 달 */
+function monthPeriodKey(fromIso: string): string {
+  const kst = new Date(new Date(fromIso).getTime() + 9 * 60 * 60 * 1000);
+  return `month:${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** 부서 월 한도(0024) 사용률 — 예산 알림 메일이 쓴다. 판정 기준은 위 `checkMonthlyBudget`과 같다 */
+export interface DepartmentBudgetStatus {
+  departmentId: string;
+  departmentName: string;
+  periodKey: string;
+  used: number;
+  limit: number;
+  percent: number;
+}
+
+/**
+ * 기관 안에서 월 한도를 둔 부서들의 이번 달(KST) 사용률. 부서 목록을 못 읽으면 던지고,
+ * 한 부서의 집계가 실패하면 그 부서만 빼고 `failed`로 센다(모르면 보내지 않는다).
+ */
+export async function departmentBudgetStatuses(
+  organizationId: string
+): Promise<{ statuses: DepartmentBudgetStatus[]; failed: number }> {
+  const { data, error } = await supabaseAdmin
+    .from('departments')
+    .select('id, name, monthly_budget_krw')
+    .eq('organization_id', organizationId)
+    .gt('monthly_budget_krw', 0);
+  if (error) throw new Error(`departments: ${error.message}`);
+  const from = monthStartISO();
+  const to = new Date().toISOString();
+  const statuses: DepartmentBudgetStatus[] = [];
+  let failed = 0;
+  for (const dept of (data ?? []) as Array<{ id: string; name: string; monthly_budget_krw: number | string | null }>) {
+    const limit = Number(dept.monthly_budget_krw ?? 0);
+    if (!(limit > 0)) continue;
+    const { data: spent, error: spendError } = await supabaseAdmin.rpc('department_spend_krw', {
+      p_department_id: dept.id,
+      p_from: from,
+      p_to: to,
+    });
+    if (spendError) { failed += 1; continue; }
+    const used = Number(spent ?? 0);
+    statuses.push({
+      departmentId: dept.id,
+      departmentName: dept.name,
+      periodKey: monthPeriodKey(from),
+      used,
+      limit,
+      percent: Math.floor((used / limit) * 100),
+    });
+  }
+  return { statuses, failed };
 }

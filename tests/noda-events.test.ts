@@ -164,6 +164,6 @@ describe('다시 받기를 부르는 곳', () => {
     expect(src).toMatch(/status: 503/);
     expect(src).toMatch(/status: 401/);
     const vercel = JSON.parse(readFileSync('vercel.json', 'utf8'));
-    expect(vercel.crons).toEqual([{ path: '/api/cron/noda-events', schedule: '0 18 * * *' }]);
+    expect(vercel.crons).toContainEqual({ path: '/api/cron/noda-events', schedule: '0 18 * * *' });
   });
 });
