@@ -101,6 +101,27 @@ describe('markdown tables become real HWPX tables', () => {
     expect(Number(section.match(/<hp:sz width="(\d+)"/)![1])).toBe(widths[0] + widths[1]);
   });
 
+  it('applies column alignment with added paragraph styles and leaves unaligned columns as they were', async () => {
+    const { header, section } = await exportOf('| 구분 | 예산 | 상태 | 비고 |\n|---|---:|:---:|:---|\n| 총무과 | 1,200 | 완료 | 없음 |\n| 기획과 | 800 | 진행 | 없음 |');
+    const template = (await loadBuiltinTemplate(findBuiltinTemplate('builtin:report')!))!;
+    const original = await (await JSZip.loadAsync(template)).file('Contents/header.xml')!.async('string');
+    const cnt = Number(header.match(/<hh:paraProperties itemCnt="(\d+)"/)![1]);
+    expect(cnt).toBe(count(header, /<hh:paraPr /g));
+    expect(cnt).toBe(count(original, /<hh:paraPr /g) + 3);
+    const paraOf = (col: number) => [...section.matchAll(new RegExp(`<hp:tc [^>]*>(?:(?!</hp:tc>)[\\s\\S])*?paraPrIDRef="(\\d+)"(?:(?!</hp:tc>)[\\s\\S])*?<hp:cellAddr colAddr="${col}"`, 'g'))].map(m => m[1]);
+    const horizontal = (id: string) => header.match(new RegExp(`<hh:paraPr id="${id}"[^>]*><hh:align horizontal="(\\w+)"`))![1];
+    const base = paraOf(0);
+    expect(base).toHaveLength(3);
+    expect(new Set(base).size).toBe(1);
+    expect(horizontal(base[0])).toBe('JUSTIFY');
+    expect(paraOf(1).map(horizontal)).toEqual(['RIGHT', 'RIGHT', 'RIGHT']);
+    expect(paraOf(2).map(horizontal)).toEqual(['CENTER', 'CENTER', 'CENTER']);
+    expect(paraOf(3).map(horizontal)).toEqual(['LEFT', 'LEFT', 'LEFT']);
+    const clone = header.match(new RegExp(`<hh:paraPr id="${paraOf(1)[0]}"[\\s\\S]*?</hh:paraPr>`))![0];
+    const source = header.match(new RegExp(`<hh:paraPr id="${base[0]}"[\\s\\S]*?</hh:paraPr>`))![0];
+    expect(clone.replace(/id="\d+"/, '').replace('RIGHT', 'JUSTIFY')).toBe(source.replace(/id="\d+"/, ''));
+  });
+
   it('leaves oversized tables as text instead of building an unwieldy table', async () => {
     const wide = `| ${Array.from({ length: 21 }, (_, i) => `c${i}`).join(' | ')} |\n|${'---|'.repeat(21)}\n| ${Array.from({ length: 21 }, (_, i) => i).join(' | ')} |`;
     const { bytes, section } = await exportOf(wide);

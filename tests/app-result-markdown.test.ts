@@ -53,14 +53,18 @@ describe('markdownToDocumentBlocks — 구분 줄이 있는 표만 표 묶음으
     const md = '## 예산 현황\n\n| 부서 | 예산 |\n|---|---:|\n| **총무과** | 1,200 |\n| `기획과` | 800 |\n\n※ 단위: 천원';
     expect(markdownToDocumentBlocks(md)).toEqual([
       { kind: 'text', text: '예산 현황\n' },
-      { kind: 'table', header: ['부서', '예산'], rows: [['총무과', '1,200'], ['기획과', '800']] },
+      { kind: 'table', header: ['부서', '예산'], rows: [['총무과', '1,200'], ['기획과', '800']], align: [null, 'right'] },
       { kind: 'text', text: '\n※ 단위: 천원' },
     ]);
   });
   it('바깥 세로줄이 없는 표·칸 수가 다른 행·이스케이프한 세로줄', () => {
     expect(markdownToDocumentBlocks('구분 | 값\n--- | ---\n가 | 1 | 덧붙임\n나\\|다 |')).toEqual([
-      { kind: 'table', header: ['구분', '값'], rows: [['가', '1', '덧붙임'], ['나|다']] },
+      { kind: 'table', header: ['구분', '값'], rows: [['가', '1', '덧붙임'], ['나|다']], align: [null, null] },
     ]);
+  });
+  it('구분 줄에서 열 정렬을 읽는다 — 왼쪽·가운데·오른쪽·지정 없음', () => {
+    const [table] = markdownToDocumentBlocks('| a | b | c | d |\n|:---| :---: |---:|---|\n| 1 | 2 | 3 | 4 |');
+    expect(table).toMatchObject({ kind: 'table', align: ['left', 'center', 'right', null] });
   });
   it('구분 줄이 없는 세로줄 글은 표가 아니라 글이다', () => {
     expect(markdownToDocumentBlocks('| 가 | 나 |\n| 다 | 라 |')).toEqual([{ kind: 'text', text: '가 | 나\n다 | 라' }]);

@@ -9,12 +9,16 @@
  * 표: 세로줄 줄 바로 다음 줄이 구분 줄(`|---|---:|`)이면 표다(GFM과 같은 규칙). 빈 줄이나 세로줄 없는 줄에서 끝난다.
  * `markdownToDocumentBlocks`는 표를 칸 배열로 따로 돌려준다 — 한글 내보내기가 진짜 표로 넣는다.
  * 구분 줄이 없는 세로줄 글은 표가 아니라 칸을 ` | `로 이은 글이다.
+ * 열 정렬은 구분 줄에서 읽는다(`:---` 왼쪽 · `:---:` 가운데 · `---:` 오른쪽 · `---` 지정 없음).
  */
+export type ColumnAlign = 'left' | 'center' | 'right' | null;
 export interface DocumentTable {
   kind: 'table';
   /** 칸 글(표시 기호를 걷어냄). 행마다 칸 수가 다를 수 있다 — 칸을 버리지 않는다 */
   header: string[];
   rows: string[][];
+  /** 구분 줄의 열 정렬(열 순서). 구분 줄보다 칸이 많은 열은 지정 없음 */
+  align: ColumnAlign[];
 }
 export type DocumentBlock = { kind: 'text'; text: string } | DocumentTable;
 
@@ -37,6 +41,15 @@ function cellsOf(line: string): string[] {
   return body.split(/(?<!\\)\|/).map((c) => inline(c.trim().replace(/\\\|/g, '|')));
 }
 
+/** 구분 줄 → 열 정렬 */
+function alignsOf(line: string): ColumnAlign[] {
+  return cellsOf(line).map((c) => {
+    const left = c.startsWith(':');
+    const right = c.endsWith(':');
+    return left && right ? 'center' : right ? 'right' : left ? 'left' : null;
+  });
+}
+
 export function markdownToDocumentBlocks(markdown: string): DocumentBlock[] {
   const raw = markdown.replace(/\r\n?/g, '\n').split('\n');
   const out: (string | DocumentTable)[] = [];
@@ -44,7 +57,7 @@ export function markdownToDocumentBlocks(markdown: string): DocumentBlock[] {
     let line = raw[i].replace(/\s+$/, '');
     if (/^\s*(`{3,}|~{3,})/.test(line)) continue;
     if (line.includes('|') && !isSeparator(line) && i + 1 < raw.length && isSeparator(raw[i + 1])) {
-      const table: DocumentTable = { kind: 'table', header: cellsOf(line), rows: [] };
+      const table: DocumentTable = { kind: 'table', header: cellsOf(line), rows: [], align: alignsOf(raw[i + 1]) };
       i += 1;
       while (i + 1 < raw.length && raw[i + 1].trim() !== '' && raw[i + 1].includes('|')) {
         i += 1;
