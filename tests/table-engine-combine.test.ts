@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import ExcelJS from 'exceljs';
+import { readAttachment } from '@/lib/attachments/reader';
 import { buildTable } from '@/lib/attachments/header';
 import type { Cell, TableMerge } from '@/lib/attachments/types';
 import { combineTables, roundValue, stackTables } from '@/lib/table-engine/combine';
@@ -1827,5 +1829,45 @@ describe('재검토 수정 — 보이는 이름으로 열 찾기(N3)', () => {
     const r = combine([src('a1', [['부서', a, b], ['총무과', 1, 2]])], { aggregate: [{ column: `${'나'.repeat(40)}…`, fn: 'sum' }] });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('여럿입니다');
+  });
+});
+
+describe('캡션 단위 — 사람 열(참여자 사례)', () => {
+  async function workbook(): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('사업');
+    ws.addRow(['(단위: 천원)']);
+    ws.addRow(['사업명', '예산', '집행', '참여자']);
+    ws.addRow(['청년 일자리', 1200, 900, 35]);
+    ws.addRow(['노인 돌봄', 800, 640, 120]);
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  }
+
+  it('엑셀 첨부의 (단위: 천원) 표에서 참여자 열은 천원이 아니다 — 예산·집행만 천원', async () => {
+    const ex = await readAttachment(await workbook(), 'x.xlsx');
+    const table = ex.tables[0];
+    expect(table.caption).toContain('단위: 천원');
+    const r = stackTables([{ file: 'a1', fileName: 'x.xlsx', table }], { sources: [{ file: 'a1', table: table.id }] });
+    if (!r.ok) throw new Error(r.error);
+    const byName = Object.fromEntries(r.columns.map((c) => [c.name, c]));
+    expect(byName['참여자']).toMatchObject({ unit: null, unitSource: null, numeric: true });
+    expect(byName['예산(천원)']).toMatchObject({ unit: '천원', unitSource: 'caption' });
+    expect(byName['집행(천원)']).toMatchObject({ unit: '천원', unitSource: 'caption' });
+  });
+
+  it('참여자 합계는 천원 이름도 배율 안내도 없이 낸다', () => {
+    const r = ok(
+      combine(
+        [
+          src('a1', [['사업명', '예산', '참여자'], ['A', 1200, 35]], { caption: CAP_THOUSAND }),
+          src('a2', [['사업명', '예산', '참여자'], ['B', 800000, 120]], { caption: '(단위: 원)', spec: { scale: { 예산: 0.001 } } }),
+        ],
+        { total_row: true }
+      )
+    );
+    expect(r.columns.map((c) => c.name)).toEqual(['사업명', '예산(천원)', '참여자']);
+    expect(r.columns[2]).toMatchObject({ unit: null });
+    expect(r.total).toEqual(['합계', 2000, 155]);
+    expect(r.lineage.unitWarnings.join('\n')).not.toContain('참여자');
   });
 });

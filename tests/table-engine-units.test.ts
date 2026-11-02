@@ -217,3 +217,41 @@ describe('isKeyLikeName', () => {
     }
   });
 });
+
+describe('차원 — 사람을 뜻하는 …자·…원 열(참여자 사례)', () => {
+  const PEOPLE = ['참여자', '참석자', '수혜자', '이용자', '대상자', '신청자', '사업 참여자', '교육 대상자', '직원', '인원'];
+
+  it('사람 낱말로 끝나는 열 이름은 사람 차원', () => {
+    for (const w of PEOPLE) expect(nameDimension(w), w).toBe('사람');
+    expect(nameDimension('참여자(명)')).toBe('사람');
+  });
+
+  it('(단위: 천원) 표의 사람 열에는 천원이 붙지 않고, 명 캡션은 붙는다', () => {
+    for (const w of PEOPLE) {
+      expect(columnUnitInfo({ columnName: w, caption: '(단위: 천원)', cells: [12, 30] }), w).toBeNull();
+      expect(columnUnit({ columnName: w, caption: '(단위: 명)', cells: [12] }), w).toBe('명');
+    }
+  });
+
+  it('돈을 뜻하는 …자·…원 열은 사람이 아니다 — 캡션 천원을 그대로 받는다', () => {
+    // '…자'를 통째로 사람으로 보면 이자·투자 열의 단위가 빠져 천원·원 표가 말없이 섞인다(1,000배 오류)
+    for (const w of ['이자', '투자', '출자', '융자', '적자', '흑자', '재원', '지원', '예산 지원']) {
+      expect(nameDimension(w), w).not.toBe('사람');
+      expect(columnUnit({ columnName: w, caption: '(단위: 천원)', cells: [100] }), w).toBe('천원');
+    }
+    // 사람 낱말이 이름 중간에 들어도 끝이 아니면 사람이 아니다
+    expect(nameDimension('위원회 예산')).toBe('돈');
+    expect(nameDimension('참여자 지원금')).not.toBe('사람');
+  });
+
+  it('무리 이름은 사람으로 보지 않는다 — 대상별 예산 머리글(노인·장애인·근로자·공무원)의 천원을 지킨다', () => {
+    for (const w of ['노인', '장애인', '청년', '근로자', '공무원']) {
+      expect(columnUnit({ columnName: w, caption: '(단위: 천원)', cells: [100] }), w).toBe('천원');
+    }
+  });
+
+  it('…자수·…원수는 셈이다(사람 낱말 끝이 아님) — 돈 캡션은 여전히 붙지 않는다', () => {
+    expect(columnUnit({ columnName: '참여자수', caption: '(단위: 천원)', cells: [1] })).toBeNull();
+    expect(columnUnit({ columnName: '참여자수', caption: '(단위: 명)', cells: [1] })).toBe('명');
+  });
+});
