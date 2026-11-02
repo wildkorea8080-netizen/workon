@@ -12,19 +12,23 @@ const state = {
   owned: null as null | { storage_path: string; file_name: string },
   removeThrows: false,
   selectThrows: false,
+  selectError: null as null | { message: string },
+  removeFailOn: null as null | number, // n번째 remove 호출만 실패
 };
 
 vi.mock('@/lib/supabaseAdmin', () => {
-  const chain = (table: string, result: () => unknown) => {
+  const chain = (table: string, result: (range?: [number, number]) => unknown) => {
     const q: Record<string, unknown> = {};
-    for (const m of ['select', 'eq', 'is', 'order']) {
+    let range: [number, number] | undefined;
+    for (const m of ['select', 'eq', 'is', 'order', 'range']) {
       q[m] = (...args: unknown[]) => {
         calls.push({ table, op: m, args });
+        if (m === 'range') range = args as [number, number];
         return q;
       };
     }
     q.maybeSingle = () => Promise.resolve(result());
-    q.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result()).then(resolve);
+    q.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result(range)).then(resolve);
     return q;
   };
   return {
@@ -38,10 +42,12 @@ vi.mock('@/lib/supabaseAdmin', () => {
           select(...args: unknown[]) {
             calls.push({ table, op: 'select', args });
             if (state.selectThrows) throw new Error('network down');
-            return chain(table, () =>
+            return chain(table, (range) =>
               state.owned !== null || table !== 'generated_files'
                 ? { data: state.owned, error: null }
-                : { data: state.selectRows, error: null }
+                : state.selectError
+                  ? { data: null, error: state.selectError }
+                  : { data: range ? state.selectRows.slice(range[0], range[1] + 1) : state.selectRows, error: null }
             );
           },
         };
@@ -56,6 +62,8 @@ vi.mock('@/lib/supabaseAdmin', () => {
             remove(paths: string[]) {
               calls.push({ op: 'remove', args: [bucket, paths] });
               if (state.removeThrows) return Promise.reject(new Error('network down'));
+              const n = calls.filter((c) => c.op === 'remove').length;
+              if (state.removeFailOn !== null) return Promise.resolve({ error: n === state.removeFailOn ? { message: 'denied' } : null });
               return Promise.resolve({ error: state.removeError });
             },
             createSignedUrl(path: string, ttl: number, ...rest: unknown[]) {
@@ -80,6 +88,8 @@ import {
   findOwnedFile,
   signedDownloadUrl,
   deleteConversationFiles,
+  listUserFilePaths,
+  removeUserFiles,
 } from '@/lib/generated-files';
 
 const input = {
@@ -91,7 +101,7 @@ const input = {
 beforeEach(() => {
   calls.length = 0;
   logged.length = 0;
-  Object.assign(state, { uploadError: null, insertError: null, removeError: null, selectRows: [], owned: null, removeThrows: false, selectThrows: false });
+  Object.assign(state, { uploadError: null, insertError: null, removeError: null, selectRows: [], owned: null, removeThrows: false, selectThrows: false, selectError: null, removeFailOn: null });
 });
 
 describe('파일 이름', () => {
@@ -217,5 +227,76 @@ describe('대화 삭제 때', () => {
     expect(callAt).toBeGreaterThan(-1);
     expect(deleteAt).toBeGreaterThan(-1);
     expect(callAt).toBeLessThan(deleteAt);
+  });
+});
+
+describe('사용자 삭제 때', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ storage_path: `generated/o/c/${i}.hwpx` }));
+
+  it('그 사용자의 파일 경로를 모은다 — 주인 조건으로, 1000행 넘게도', async () => {
+    state.selectRows = rows(2500);
+    const paths = await listUserFilePaths('u1');
+    expect(paths).toHaveLength(2500);
+    expect(new Set(paths).size).toBe(2500);
+    expect(calls.filter((c) => c.op === 'eq').map((c) => c.args)).toContainEqual(['user_id', 'u1']);
+    expect(calls.filter((c) => c.op === 'range').map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+    expect(calls.some((c) => c.op === 'remove')).toBe(false); // 모으기만 한다
+  });
+
+  it('조회가 실패하거나 던지면 빈 목록과 로그 — 사용자 삭제를 막지 않는다', async () => {
+    state.selectError = { message: 'boom' };
+    await expect(listUserFilePaths('u1')).resolves.toEqual([]);
+    expect(JSON.stringify(logged)).toContain('u1');
+
+    logged.length = 0;
+    state.selectError = null;
+    state.selectThrows = true;
+    await expect(listUserFilePaths('u1')).resolves.toEqual([]);
+    expect(logged.length).toBe(1);
+  });
+
+  it('1000개씩 나눠 지운다', async () => {
+    const paths = rows(1500).map((r) => r.storage_path);
+    await removeUserFiles('u1', paths);
+    const removes = calls.filter((c) => c.op === 'remove').map((c) => c.args[1] as string[]);
+    expect(removes.map((r) => r.length)).toEqual([1000, 500]);
+    expect(removes.flat()).toEqual(paths);
+    expect(logged).toEqual([]);
+  });
+
+  it('파일이 없으면 저장소를 부르지 않는다', async () => {
+    await removeUserFiles('u1', []);
+    expect(calls.some((c) => c.op === 'remove')).toBe(false);
+  });
+
+  it('한 묶음이 실패해도 나머지는 지우고 실패한 경로만 로그에 남긴다', async () => {
+    const paths = rows(1500).map((r) => r.storage_path);
+    state.removeFailOn = 1;
+    await expect(removeUserFiles('u1', paths)).resolves.toBeUndefined();
+    expect(calls.filter((c) => c.op === 'remove')).toHaveLength(2);
+    const details = (logged[0] as { details: { userId: string; paths: string[] } }).details;
+    expect(details.userId).toBe('u1');
+    expect(details.paths).toEqual(paths.slice(0, 1000));
+  });
+
+  it('저장소가 던져도 던지지 않고 경로를 로그에 남긴다', async () => {
+    state.removeThrows = true;
+    await expect(removeUserFiles('u1', ['generated/a.hwpx'])).resolves.toBeUndefined();
+    expect(JSON.stringify(logged)).toContain('generated/a.hwpx');
+  });
+
+  it('사용자 삭제(탈퇴 처리): 경로는 DB 처리 전에 모으고, 저장소는 DB 처리가 성공한 뒤 지운다', () => {
+    // 대화를 지우면 generated_files 행이 연쇄 삭제돼 경로를 잃는다. 저장소를 먼저 지우면
+    // DB 단계가 실패했을 때 기록은 남고 파일만 사라진다. 실제 순서는 user-withdrawal.test.ts가 실행으로 본다
+    const src = readFileSync('src/lib/user-withdrawal.ts', 'utf8');
+    const body = src.slice(src.indexOf('export async function withdrawUser'));
+    const listAt = body.indexOf('listUserFilePaths(');
+    const convAt = body.search(/\.from\('conversations'\)\.delete\(\)/);
+    const stampFailAt = body.indexOf('if (stampError) return');
+    const removeAt = body.indexOf('removeUserFiles(');
+    expect(listAt).toBeGreaterThan(-1);
+    expect(listAt).toBeLessThan(convAt);
+    expect(stampFailAt).toBeGreaterThan(convAt);
+    expect(removeAt).toBeGreaterThan(stampFailAt);
   });
 });

@@ -98,7 +98,8 @@ export async function GET(
     const { count: userCount } = await supabaseAdmin
       .from('users')
       .select('id', { count: 'exact', head: true })
-      .in('department_id', (org.departments ?? []).map((d: any) => d.id));
+      .in('department_id', (org.departments ?? []).map((d: any) => d.id))
+      .is('deleted_at', null);
 
     // 이번달 토큰
     const { data: usageLogs } = await supabaseAdmin

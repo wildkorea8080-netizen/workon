@@ -208,6 +208,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | 0034 | **업무 작업(WORKON 개편)** — `work_org_settings`(기관 스위치)·`workflow_installations`·`work_template_versions`·`work_tasks`·`work_task_members`·`work_sources`·`work_document_versions`·`work_runs`·`work_run_steps`·`work_artifacts`·`work_review_items`·`work_evidence`·`work_revision_proposals`·`work_events`(task_id NULL = 기관 단위 사건) + RPC(`work_save_document_version`·`work_enqueue_run`·`work_claim_runs`·`work_heartbeat_run`·`work_finish_run`). 추가만(기존 표 무변경), 겹 외래 키로 같은 기관 강제, RLS 켜고 정책 없음(서비스 키만). **아직 어디에도 적용 안 됨** — 순서는 RELEASE_RUNBOOK 5절(**코드 배포 전**에 적용) (운영 적용은 RELEASE_RUNBOOK 1절 참조) |
 | 0035 | **현행화 작년 파일 용도** — `work_sources.purpose` CHECK(`work_sources_purpose_check`)에 `'prior'`를 더한다(값만 넓힘·추가만, 여러 번 적용해도 안전). 작년 HWPX를 올해 문서로 고치는 현행화 엔진(S6-1)이 쓴다. **코드 배포 전에 적용**(새 코드가 `purpose='prior'`로 올린다). 아직 어디에도 적용 안 됨 — RELEASE_RUNBOOK 8절 |
 | 0046 | **앱 실행 상태 읽기 함수**(`app_run_states(uuid[], timestamptz, int)`) — 관리자용 입력형 앱 실행 현황(`/admin/stats`, `src/lib/apps/run-overview.ts`)이 쓴다. 답 메시지의 `app_steps`에서 **단계 이름(40자)·상태만** 돌려준다(중간 결과 글·입력·질문·사람은 내보내지 않음). 함수 추가만, 실행 권한 service_role만. **코드 배포 전에 적용** — 운영 DB 적용 2026-11-02(함수·권한 확인) |
+| 0047 | **사용자 탈퇴 처리**(`users.deleted_at`) — 슈퍼관리자 '계정 삭제'가 행을 지우지 않고 도장을 찍는다(아래 '사용자 삭제 = 탈퇴 처리'). 추가만, 여러 번 적용해도 안전. **코드 배포 전에 적용** — 로그인이 이 칸을 select 하므로, 칸이 없으면 users 조회가 실패해 로그인이 막힌다. 아직 운영 미적용 |
 | 0045 | **기관·부서 예산 알림 메일 기록**(`budget_alerts`) — 기관·대상(`org`·`dept:{부서 id}`)·기간(`contract:{계약 id}`·`month:YYYY-MM`)·기준(%) 유일 키, 상태(`sending`·`sent`·`failed`·`no_recipients`)·시도 수·받은 사람 수(주소는 저장하지 않음). 추가만, RLS 켜고 정책 없음. 하루 한 번 `/api/cron/budget-alerts`가 첫 경고 기준·90·100% 중 넘은 가장 높은 기준을 한 번만 보낸다(`src/lib/budget-alerts.ts`, `docs/benchmarks/allganize/BUDGET_ALERTS.md`). **코드 배포 전에 적용** — 운영 DB 적용 2026-11-02(표·유일 키 확인). Vercel 운영 환경 변수 `CRON_SECRET`·`RESEND_API_KEY`·`MAIL_FROM`도 같은 날 넣었다 |
 | 0033 | 공통 자료실(`common_documents`) — 기관 유형(`org_type`, 여섯 값 CHECK)·이름·기준 연도(2000~2100)·이용 조건 확인 기록(비면 안 됨)·원본 경로·NODA 읽기 상태(`documents`와 같은 칸 + `retired`)·`replaces_id`·`retired_at`·`uploaded_by`. **기관·부서 칸이 없다**(유형 단위 자료라 `visibilityFilter`·기관 트리거 대상이 아님). **코드 배포 전에 적용**(코드가 이 표를 읽고 쓴다) |
 
@@ -517,6 +518,8 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
   이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
 - 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
+- 사용자를 지우면(슈퍼관리자 '계정 삭제' = 탈퇴 처리) DB 처리 **전에** 경로를 모으고(`listUserFilePaths`) **성공한 뒤** 저장소를 지운다(`removeUserFiles`).
+  대화를 지우면 `generated_files` 행이 연쇄 삭제돼 경로를 잃고, 저장소를 먼저 지우면 DB 단계가 실패했을 때 기록만 남고 파일이 사라진다
 - 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드(배지는 확장자에 따라 `DOC`·`HWP`)
 - 생성 기록은 `usage_logs.action='document_generated'`(토큰 없음 — 과금 규약 대상 아님). `details.mode`(`fill`·`fallback`)를 남긴다
 - 만든 파일 안내(`fill_template` 결과)는 확장자에 따라 '한글 파일' / 'Word(DOCX) 파일'이라 말한다
@@ -621,7 +624,7 @@ POST /api/attachments/upload-url  (pending 행 + 서명 주소 발급)
   ① 조건부로 묘비로 바꾸며 경로를 받고 ② 원본·읽은 내용 객체를 지우고 ③ **지워졌을 때만** 행을 지웁니다(실패하면 다음에 다시)
 - **대화를 지우면 첨부도 지웁니다**(`deleteConversationAttachments`가 저장소를 먼저, DB 연쇄 삭제가 행을). 대화에 묶인 첨부는 그 대화와 수명을 같이 하고
   따로 지우는 길이 없습니다. 서비스 정의서 6절에도 그렇게 적혀 있습니다
-- **알려진 공백**: 슈퍼관리자 화면의 **사용자 삭제**로 대화가 연쇄 삭제되면 저장소 객체가 남습니다. 생성 파일(`generated_files`)과 같은 구멍이고 따로 고칩니다
+- 슈퍼관리자 화면의 **사용자 삭제**(탈퇴 처리, 0047 — 아래 '사용자 삭제 = 탈퇴 처리')는 대화를 지우기 **전에** 그 사용자의 첨부 객체 경로를 모두 모으고(`listUserAttachmentPaths` — 묶인 것·안 묶인 것·묘비), DB 단계가 끝난 뒤 지웁니다(`removeUserAttachmentObjects`). 대화에 안 묶인 첨부 행은 사용자 행이 남아 연쇄 삭제가 닿지 않으므로 `user_id`로 따로 지웁니다. 2026-11-02 전에는 저장소 객체가 남는 공백이었습니다
 - 격리는 전부 `store.ts`의 조건에 달려 있습니다(RLS 없음). **모든 조회·변경에 `user_id = 요청자`** — 관리자도 남의 첨부를 보지 못합니다.
   화면으로 나가는 행은 `toClientRow`로 저장소 경로를 뗍니다
 
@@ -1183,6 +1186,7 @@ MAIL_FROM=
    | `doc-fill-hwpx-auto.test.ts` | 자동 자리 — 번호 제목 영역·표 빈칸 이름 규칙·컨트롤 문단 제외·이미 글이 쓰인 영역 제외, 채운 뒤 재읽기·줄 배치 캐시·읽기/채우기 자리 번호 일치, **이미 쓴 개조식 문서에 끼워 넣지 않음**·위 급 제목까지 쓰인 글 표시·0열 숫자 행 머리·값 칸 행은 '왼쪽 / 열 머리'·공백 값 안 채움, 채운 XML 올바름 |
    | `doc-fill-docx.test.ts` | DOCX 표시 읽기·채우기, 조각난 표시, 여러 줄 이을 때 `sectPr` 이동·쪽 나눔/번호/변경 추적 표시 제거, 압축 방식 유지, 채운 XML 올바름 |
    | `doc-fill-fallback.test.ts` | 대체 목차(HWPX·DOCX·깨진 파일), 표준 보고서 채우기, `{{주요 내용}}` 표시 없으면 실패, 공백 값은 안 채움, 글머리는 목차가 아님 |
+   | `user-withdrawal.test.ts` | 사용자 삭제는 행을 지우지 않는 탈퇴 처리, 순서(경로(생성 파일·첨부) → 대화 → 안 묶인 첨부 행 → 개인 비서 → 도장 → 저장소 → Auth), 도중 실패 시 저장소를 건드리지 않음, 로그인이 비활성·삭제 계정을 막음, 0047 |
    | `attachments-header.test.ts` | 머리글 추정(2단 머리글·제목 줄 아래·숫자뿐인 줄·3줄 상한), 연도·월·분기 꼴은 한 줄에 2개 이상이거나 바로 아래가 숫자일 때 머리글('기준연도·2025' 메타 줄 제외), 하위 머리글의 연도꼴·번호 (1)은 값이 아님, 가로 병합 아래 숫자 줄·병합 밖에 글이 있는 줄은 데이터, △·괄호·단위 접미사·줄표는 값, 캡션 500자 상한, 열 이름 중복·병합 채움, `buildTable`, 허용 확장자·옛 형식 안내 |
    | `attachments-tables-sheet.test.ts` | **계산용 표** — 숫자는 숫자로·수식은 결과값·날짜는 글, 세로 병합은 주인 칸에만, 빈 행 2줄로 표 분리, 200열·20,000행 상한과 경고, 숨긴 시트 제외, CSV EUC-KR·앞자리 0 보존, 한 칸짜리 블록은 다음 표의 캡션, CSV 끝 빈 레코드로 거짓 잘림 없음, 병합 2,000개도 빠르게, 넓은 병합(10만 칸 초과) 경로는 병합 기록만 끼운 작은 파일로 |
    | `attachments-tables-hwp.test.ts` | HWPX 표를 칸 배열로(주소·병합·안쪽 표 분리·바로 든 문단만·앞 문단 + `hp:caption` 잇기·칸 안 그림 캡션 제외), 행 25,000개 표도 안 터짐, HWP 5.0 표(압축 구역·깨진 구역 건너뜀·열 상한), **색인 출력(`extractTextFromHwp`)은 그대로** |
@@ -1708,6 +1712,24 @@ details: {
 
 **CSV에는 반드시 UTF-8 BOM(`﻿`)을 붙이세요.** 없으면 Excel에서 한글이 깨집니다.
 기존 클라이언트 측 내보내기(`super/logs`, `super/usage`)도 같은 방식입니다.
+
+### 사용자 삭제 = 탈퇴 처리 (0047)
+
+슈퍼관리자의 '계정 삭제'는 **users 행을 지우지 않습니다** (`src/lib/user-withdrawal.ts`의 `withdrawUser`).
+
+- `conversations`·`messages`·`usage_logs`·`documents.uploaded_by`·`agents.created_by/updated_by`·`report_templates`가
+  users를 **ON DELETE 없이**(NO ACTION) 가리킵니다. 행을 지우면 한 번이라도 대화한 사용자는 23503으로 막힙니다
+- 외래 키를 SET NULL로 풀지 않은 이유: 사용 기록은 남아도 **누가 썼는지가 영영 사라집니다.** 감사에서
+  "그 직원의 사용 내역"을 낼 수 없게 되고, 한번 NULL이 된 귀속은 되살릴 수 없습니다
+- 탈퇴 = 저장소 경로 모으기(생성 파일 — 앱 결과 내보내기 포함 — 과 채팅 첨부) → 대화 삭제(메시지·생성 파일·묶인 첨부 연쇄) → 안 묶인 첨부 행 삭제(`user_id`) → 개인 비서 숨김 → 행 도장(`deleted_at`·`is_active=false`·이메일을
+  `withdrawn+{id}@deleted.invalid`로 — 같은 주소로 다시 가입 가능) → 저장소 객체 삭제(생성 파일·첨부) → Supabase Auth 계정 삭제.
+  가지 `claude/compassionate-volhard-252086`(2026-10-17, 마이그레이션 번호 0030)을 2026-11-02에 합치며 **0047로 번호를 바꾸고** 첨부 정리를 더했다.
+  **이름·부서는 남깁니다** (사용 기록의 귀속). 대화를 도장보다 먼저 지우는 이유는, 도장 뒤에 실패하면 '이미 삭제됨'이라 다시 시도할 수 없어서입니다
+- **로그인은 `canSignIn`이 막습니다** — 비활성(`is_active=false`)도 같이. 예전에는 로그인이 `is_active`를 보지 않아
+  슈퍼관리자 화면의 '비활성'이 표시뿐이었습니다. 이미 발급된 세션(JWT)은 만료까지 남습니다
+- 사용자 목록·인원 수는 `.is('deleted_at', null)`로 거릅니다. 감사·사용 기록 조회는 거르지 않습니다
+- 슈퍼관리자 계정은 이 경로로 처리하지 않습니다(슈퍼관리자 탭에서 비활성화). `super_admin_logs.admin_user_id`가
+  SET NULL인데 NOT NULL이라 행 삭제는 어차피 23502로 막힙니다
 
 ---
 

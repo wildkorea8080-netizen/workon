@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NEXTAUTH_SECRET } from '@/lib/config';
+import { canSignIn } from '@/lib/user-withdrawal';
 
 const ADMIN_EMAILS = ['admin@welfare.org', 'admin@researchcenter.kr'];
 const ADMIN_DEPARTMENT_SLUG = 'admin-team';
@@ -90,9 +91,12 @@ export const authOptions: AuthOptions = {
         const isAdminEmail = ADMIN_EMAILS.includes(authUser.email ?? '');
         const { data: existingUser, error: fetchError } = await supabaseAdmin
           .from('users')
-          .select('id, email, role, full_name, department_id')
+          .select('id, email, role, full_name, department_id, is_active, deleted_at')
           .eq('id', authUser.id)
           .maybeSingle();
+
+        // 비활성·삭제(탈퇴) 계정은 Supabase Auth가 통과시켜도 들이지 않는다
+        if (existingUser && !canSignIn(existingUser)) return null;
 
         if (fetchError) {
           console.warn('[nextAuth] users table access failed, continue with auth user only:', fetchError.message);
@@ -207,11 +211,11 @@ export const authOptions: AuthOptions = {
 async function authorizeWithPasswordHash(email: string, password: string) {
   const { data: user, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, role, full_name, department_id, password_hash')
+    .select('id, email, role, full_name, department_id, password_hash, is_active, deleted_at')
     .eq('email', email)
     .maybeSingle();
 
-  if (error || !user?.password_hash) return null;
+  if (error || !user?.password_hash || !canSignIn(user)) return null;
 
   const isValid = await bcrypt.compare(password, user.password_hash);
   if (!isValid) return null;

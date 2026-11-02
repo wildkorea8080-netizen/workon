@@ -658,6 +658,46 @@ export async function deleteConversationAttachments(conversationId: string): Pro
   }
 }
 
+const USER_PATHS_PAGE = 500;
+
+/**
+ * 사용자 탈퇴 처리(`user-withdrawal.ts`)가 **DB를 지우기 전에** 모으는 그 사용자의 첨부 객체 경로 전부 —
+ * 대화에 묶인 것·안 묶인 것·묘비 모두. 대화를 지우면 묶인 행이 연쇄 삭제돼 경로를 잃고, 행(`user_id`)이 남은
+ * 안 묶인 첨부는 사용자 행이 남는 탈퇴에서는 아무도 치우지 않는다(`purgeOrphans`는 그 사용자가 올릴 때만 돈다).
+ * 실패하면 기록만 남기고 빈 목록 — 탈퇴를 막지 않는다(저장소에 남는 쪽이 탈퇴가 안 되는 쪽보다 낫다)
+ */
+export async function listUserAttachmentPaths(userId: string): Promise<string[]> {
+  try {
+    const rows: StoredPaths[] = [];
+    for (let from = 0; ; from += USER_PATHS_PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from(TABLE)
+        .select('storage_path, extract_path')
+        .eq('user_id', userId)
+        .order('id')
+        .range(from, from + USER_PATHS_PAGE - 1);
+      if (error) throw new Error(error.message);
+      const page = (data ?? []) as StoredPaths[];
+      rows.push(...page);
+      if (page.length < USER_PATHS_PAGE) break;
+    }
+    return objectPaths(rows);
+  } catch (e) {
+    await logSystem({
+      level: 'error',
+      category: 'database',
+      message: '사용자 첨부 목록 조회 실패 — 탈퇴 처리 뒤 저장소에 첨부가 남을 수 있음',
+      details: { userId, error: e instanceof Error ? e.message : String(e) },
+    });
+    return [];
+  }
+}
+
+/** 탈퇴 처리가 DB 단계를 끝낸 뒤 부른다. 실패는 기록만(경로를 남겨 손으로 지울 수 있게) */
+export async function removeUserAttachmentObjects(userId: string, paths: string[]): Promise<void> {
+  await removeObjects(paths, { userId }, '사용자 탈퇴 뒤 첨부 저장소 삭제 실패');
+}
+
 /**
  * 대화에 묶이지 못한 채 남은 첨부를 치운다 — 24시간 지난 것(안 보냄·pending·묘비)과, 서명 주소 시한
  * (TOMBSTONE_WINDOW_MS)이 지난 failed 묘비. 실패해도 던지지 않는다 — 정리 때문에 새 업로드가 막히면 안 된다.

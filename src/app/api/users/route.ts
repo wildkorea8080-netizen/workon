@@ -31,6 +31,7 @@ export async function GET(_request: NextRequest) {
       .from('users')
       .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, departments(id, name)')
       .in('department_id', managedDeptIds)
+      .is('deleted_at', null) // 삭제(탈퇴)한 계정은 행만 남아 있다 (0047)
       .order('created_at', { ascending: false });
 
     if (error) {
