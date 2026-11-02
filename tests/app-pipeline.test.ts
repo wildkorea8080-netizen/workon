@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { conditionHolds, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { chooseBranch, conditionHolds, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 import { runAppIntermediateSteps, stageMessages, appStepsCompleted, type AppStepRecord, APP_INTERMEDIATE_TOKENS } from '@/lib/apps/pipeline';
 const isYes: AppStepCondition = { all: [{ field: 'review', op: 'equals', value: '예' }] };
 const steps: AppStep[] = [{ name: '정리', instruction: '사실을 정리하세요.' }, { name: '초안', instruction: '초안을 작성하세요.' }, { name: '검토', instruction: '원문과 대조하세요.' }];
@@ -121,5 +121,67 @@ describe('step conditions — AND rules per field type', () => {
     expect(upgradeAppConditions(stored).steps).toEqual([{ name: '검토', instruction: '검토', when: { all: [{ field: 'gone', op: 'equals', value: '예' }] } }, { name: '작성', instruction: '작성' }]);
     const current = { ...stored, steps: [{ name: '작성', instruction: '작성', when: { all: [{ field: 'gone', op: 'filled' as const }] } }] };
     expect(upgradeAppConditions(current)).toEqual(current);
+  });
+});
+
+describe('step branches — first matching branch top to bottom, else the base instruction', () => {
+  const fields = [
+    { key: 'kind', label: '민원 종류', type: 'select', required: true, options: ['질의', '요구', '불만'] },
+    { key: 'count', label: '인원', type: 'number', required: false },
+  ];
+  const base = { schemaVersion: 1, fields, output: 'bullets' as const };
+  const branched: AppStep = {
+    name: '초안', instruction: '일반 안내 초안을 쓰세요.',
+    branches: [
+      { name: '요구 회신', when: { all: [{ field: 'kind', op: 'equals', value: '요구' }] }, instruction: '요구 사항별 처리 가능 여부를 쓰세요.' },
+      { name: '대규모', when: { all: [{ field: 'count', op: 'gte', value: '30' }] }, instruction: '단체 민원 회신을 쓰세요.' },
+    ],
+  };
+  const final: AppStep = { name: '검토', instruction: '원문과 대조하세요.', branches: [{ name: '불만 검토', when: { all: [{ field: 'kind', op: 'equals', value: '불만' }] }, instruction: '사과 문구와 재발 방지를 넣어 마무리하세요.' }] };
+  it('accepts 1~3 named branches with a condition and instruction each — also on the final step — and rejects the rest', () => {
+    const r = validateAppDefinition({ ...base, steps: [{ ...branched, branches: branched.branches!.map(b => ({ ...b, name: ` ${b.name} `, instruction: `${b.instruction} ` })) }, final] });
+    expect(r).toMatchObject({ ok: true, value: { steps: [branched, final] } });
+    const bad = [
+      { ...branched, branches: [] },
+      { ...branched, branches: [...branched.branches!, ...branched.branches!] },
+      { ...branched, branches: [{ ...branched.branches![0], name: '' }] },
+      { ...branched, branches: [{ ...branched.branches![0], instruction: '  ' }] },
+      { ...branched, branches: [{ name: '조건 없음', instruction: '지시' }] },
+      { ...branched, branches: [{ ...branched.branches![0], when: { all: [{ field: 'kind', op: 'equals', value: '없는 값' }] } }] },
+      { ...branched, branches: [{ ...branched.branches![0], when: { all: [{ field: 'count', op: 'contains', value: '3' }] } }] },
+      { ...branched, branches: [branched.branches![0], { ...branched.branches![1], name: '요구 회신' }] },
+      { ...branched, branches: 'pick()' },
+    ];
+    for (const step of bad) expect(validateAppDefinition({ ...base, steps: [step, final] }).ok).toBe(false);
+  });
+  it('chooseBranch takes the first branch whose rules all hold; none → null', () => {
+    expect(chooseBranch(branched, { kind: '요구', count: '50' })?.name).toBe('요구 회신');
+    expect(chooseBranch(branched, { kind: '질의', count: '50' })?.name).toBe('대규모');
+    expect(chooseBranch(branched, { kind: '질의', count: '3' })).toBeNull();
+    expect(chooseBranch(branched, { kind: '질의' })).toBeNull();
+    expect(chooseBranch({ name: 'x', instruction: 'x' }, { kind: '요구' })).toBeNull();
+  });
+  const firstSystem = (fn: { mock: { calls: unknown[][] } }) => String((fn.mock.calls[0][0] as { system: string }).system);
+  it('runs the chosen branch instruction, records the branch name, and falls back to the base instruction', async () => {
+    const args = setup(); args.steps = [branched, steps[1], final].map(s => ({ ...s }));
+    const result = await runAppIntermediateSteps({ ...args, inputs: { kind: '불만', count: '40' } });
+    expect(args.records.map(r => r.branch)).toEqual(['대규모', undefined, '불만 검토']);
+    expect(firstSystem(args.complete)).toContain('현재 처리 단계: 초안 — 대규모');
+    expect(firstSystem(args.complete)).toContain('단체 민원 회신을 쓰세요.');
+    expect(firstSystem(args.complete)).not.toContain('일반 안내 초안');
+    expect(result.system).toContain('현재 처리 단계: 검토 — 불만 검토');
+    expect(result.system).toContain('사과 문구와 재발 방지');
+    const plain = setup(); plain.steps = [branched, steps[1], final].map(s => ({ ...s }));
+    const r2 = await runAppIntermediateSteps({ ...plain, inputs: { kind: '질의', count: '2' } });
+    expect(plain.records.map(r => r.branch)).toEqual([undefined, undefined, undefined]);
+    expect(firstSystem(plain.complete)).toContain('일반 안내 초안을 쓰세요.');
+    expect(r2.system).toContain('원문과 대조하세요.');
+    expect(r2.system).not.toContain('사과 문구');
+  });
+  it('a skipped step chooses no branch and spends nothing', async () => {
+    const args = setup(); args.steps = [{ ...branched, when: { all: [{ field: 'count', op: 'filled' }] } }, steps[1], steps[2]];
+    await runAppIntermediateSteps({ ...args, inputs: { kind: '요구' } });
+    expect(args.records[0]).toMatchObject({ status: 'skipped' }); expect(args.records[0].branch).toBeUndefined();
+    expect(args.complete).toHaveBeenCalledTimes(1);
   });
 });

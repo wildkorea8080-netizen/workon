@@ -1,4 +1,4 @@
-import { conditionHolds, renderAppInput, type AppDefinition } from './definition';
+import { chooseBranch, conditionHolds, renderAppInput, type AppDefinition } from './definition';
 import type { AppStepRecord } from './pipeline';
 
 export function restoreAppSteps(definition: AppDefinition, references: Record<string, unknown>, currentMessage: string): { ok: true; records: AppStepRecord[] } | { ok: false; message: string } {
@@ -14,7 +14,10 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
     if (!saved || typeof saved !== 'object' || saved.name !== step.name) return fail('단계 기록이 현재 앱과 다릅니다. 새로 실행해 주세요.');
     if (!failed && saved.status === 'completed') {
       if (index === steps.length - 1 || typeof saved.output !== 'string' || !saved.output.trim() || saved.output.length > 12000 || (step.when && !conditionHolds(step.when, original.inputs))) return fail('재사용할 단계 결과를 확인하지 못했습니다. 새로 실행해 주세요.');
-      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true }); completed++;
+      // 기록의 갈래가 지금 정의·입력으로 고를 갈래와 다르면(갈래를 고쳤거나 없앴음) 다른 지시로 만든 결과라 재사용하지 않는다
+      const branch = chooseBranch(step, original.inputs)?.name;
+      if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
+      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}) }); completed++;
     } else if (!failed && saved.status === 'skipped') {
       if (!step.when || conditionHolds(step.when, original.inputs)) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'skipped' });

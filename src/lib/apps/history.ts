@@ -28,6 +28,6 @@ export function historySummary(row: { id: string; agent_id: string; title: strin
     const input = renderAppInput(definition.value, refs.app_inputs);
     canResume = input.ok && restoreAppSteps(definition.value, refs, input.message).ok;
   }
-  const steps: AppStepRecord[] = raw.slice(0, 3).filter(step => step && typeof step.name === 'string' && ['pending', 'running', 'completed', 'skipped', 'failed', 'not_run'].includes(step.status)).map(step => ({ name: step.name.slice(0, 40), status: step.status, ...(step.reused === true ? { reused: true } : {}) }));
+  const steps: AppStepRecord[] = raw.slice(0, 3).filter(step => step && typeof step.name === 'string' && ['pending', 'running', 'completed', 'skipped', 'failed', 'not_run'].includes(step.status)).map(step => ({ name: step.name.slice(0, 40), status: step.status, ...(step.reused === true ? { reused: true } : {}), ...(typeof step.branch === 'string' && step.branch ? { branch: step.branch.slice(0, 40) } : {}) }));
   return { id: row.id, agentId: row.agent_id, appName: row.agent.name, title: row.title, createdAt: row.created_at, status, preview: (message?.content ?? '').replace(/\s+/g, ' ').slice(0, 160), messageId: message?.id ?? null, version: message?.agent_version ?? null, canResume, steps };
 }

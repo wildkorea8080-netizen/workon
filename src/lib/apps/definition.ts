@@ -4,10 +4,16 @@ export type AppConditionOp = 'equals' | 'not_equals' | 'contains' | 'not_contain
 export type AppRule = { field: string; op: AppConditionOp; value?: string };
 /** 단계 실행 조건 — 규칙이 **모두** 맞을 때만 실행(AND). 옛 `{ field, equals }`는 검사가 이 꼴로 바꾼다 */
 export type AppStepCondition = { all: AppRule[] };
-export type AppStep = { name: string; instruction: string; when?: AppStepCondition };
+/**
+ * 단계의 갈래 하나 — 조건이 맞으면 단계의 기본 지시 대신 이 지시로 실행한다(알리웍스 조건 노드의 '옵션' 꼴).
+ * 갈래는 **위에서부터 처음 맞는 하나**만 고르고, 맞는 갈래가 없으면 기본 지시다. 갈래에는 조건이 반드시 있다
+ */
+export type AppBranch = { name: string; when: AppStepCondition; instruction: string };
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[] };
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean } };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
+export const APP_MAX_BRANCHES = 3;
 const object = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
 /** 항목 종류마다 쓸 수 있는 비교 — 화면 선택지와 서버 검사가 같은 표를 본다 */
@@ -86,6 +92,21 @@ export function conditionHolds(condition: AppStepCondition, inputs: Record<strin
   });
 }
 
+/**
+ * 이 입력에서 단계가 갈 갈래 — 위에서부터 처음 맞는 것, 없으면 null(기본 지시). 실행기(pipeline.ts)와 재개 검사(resume.ts)가 함께 쓴다.
+ * `when`(건너뛰기)과는 별개다: 단계가 건너뛰어지지 않을 때만 갈래를 본다
+ */
+export function chooseBranch(step: AppStep, inputs: Record<string, string> | undefined): AppBranch | null {
+  return step.branches?.find(branch => conditionHolds(branch.when, inputs)) ?? null;
+}
+
+/** 조건 꼴 `{ all: [...] }` 하나를 검사·정규화한다. 맞지 않으면 null */
+function normalizeCondition(raw: unknown, fields: AppField[]): AppStepCondition | null {
+  if (!object(raw) || !Array.isArray(raw.all) || raw.all.length < 1 || raw.all.length > APP_MAX_RULES) return null;
+  const rules = raw.all.map(rule => normalizeRule(rule, fields));
+  return rules.some(rule => !rule) ? null : { all: rules as AppRule[] };
+}
+
 export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefinition | null } | { ok: false; message: string } {
   if (raw === null) return { ok: true, value: null };
   if (!object(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.fields) || raw.fields.length < 1 || raw.fields.length > 8 || !['paragraphs', 'bullets', 'checklist'].includes(String(raw.output))) return { ok: false, message: '입력 항목은 1~8개이며 지원하는 응답 형식을 선택해야 합니다.' };
@@ -116,10 +137,23 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           normalized.when = { all: [{ field: field.key, op: 'equals', value: when.equals.trim() }] };
         } else {
           if (!object(when) || !Array.isArray(when.all) || when.all.length < 1 || when.all.length > APP_MAX_RULES) return { ok: false, message: `단계 실행 조건은 1~${APP_MAX_RULES}개로 정해 주세요.` };
-          const rules = when.all.map(rule => normalizeRule(rule, fields));
-          if (rules.some(rule => !rule)) return { ok: false, message: '단계 조건은 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
-          normalized.when = { all: rules as AppRule[] };
+          const condition = normalizeCondition(when, fields);
+          if (!condition) return { ok: false, message: '단계 조건은 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
+          normalized.when = condition;
         }
+      }
+      if (step.branches !== undefined) {
+        if (!Array.isArray(step.branches) || step.branches.length < 1 || step.branches.length > APP_MAX_BRANCHES) return { ok: false, message: `단계의 갈래는 1~${APP_MAX_BRANCHES}개로 정해 주세요.` };
+        const branches: AppBranch[] = [];
+        for (const branch of step.branches) {
+          if (!object(branch) || typeof branch.name !== 'string' || !branch.name.trim() || branch.name.length > 40 || /[\r\n]/.test(branch.name) || typeof branch.instruction !== 'string' || !branch.instruction.trim() || branch.instruction.length > 2000) return { ok: false, message: '각 갈래의 이름(40자 이내)과 처리 지시(2,000자 이내)를 입력해 주세요.' };
+          const name = branch.name.trim();
+          if (branches.some(b => b.name === name)) return { ok: false, message: '한 단계 안의 갈래 이름은 서로 달라야 합니다.' };
+          const when = normalizeCondition(branch.when, fields);
+          if (!when) return { ok: false, message: `갈래마다 조건을 1~${APP_MAX_RULES}개 두고, 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.` };
+          branches.push({ name, when, instruction: branch.instruction.trim() });
+        }
+        normalized.branches = branches;
       }
       steps.push(normalized);
     }

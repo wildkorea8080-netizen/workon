@@ -37,3 +37,13 @@ describe('app history API access and pagination', () => {
   it('applies a validated app filter and cursor together', async () => { const cursor = encodeHistoryCursor(row().created_at,id); await GET(request(`?agent=${agentId}&cursor=${cursor}`)); expect(state.calls).toContainEqual(['conversations','eq','agent_id',agentId]); expect(state.calls).toContainEqual(['conversations','or',`created_at.lt.${row().created_at},and(created_at.eq.${row().created_at},id.lt.${id})`]); });
   it('returns an actionable storage error', async () => { state.error = true; expect((await GET(request())).status).toBe(503); });
 });
+
+describe('history keeps the chosen branch name without outputs', () => {
+  it('passes branch through, bounded, and drops it when absent', () => {
+    const r = row(); (r.messages[0].source_references as Record<string, unknown>).app_steps = [{ name: '정리', status: 'completed', output: 'private-output', branch: '요구 정리' }, { name: '작성', status: 'failed' }];
+    const result = historySummary(r);
+    expect(result.steps[0]).toEqual({ name: '정리', status: 'completed', branch: '요구 정리' });
+    expect(result.steps[1]).not.toHaveProperty('branch');
+    expect(JSON.stringify(result)).not.toContain('private-output');
+  });
+});

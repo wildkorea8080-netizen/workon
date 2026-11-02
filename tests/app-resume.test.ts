@@ -26,3 +26,24 @@ describe('validated app resume checkpoints', () => {
     expect(await loadAppResumeSource(agent, 'c', 'm', response('a', 4))).toBeNull();
   });
 });
+
+describe('resume with step branches', () => {
+  const kind = { key: 'kind', label: '종류', type: 'select' as const, required: true, options: ['질의', '요구'] };
+  const branchDef: AppDefinition = { ...def, fields: [...def.fields, kind], steps: [
+    { name: '정리', instruction: '정리', branches: [{ name: '요구 정리', when: { all: [{ field: 'kind', op: 'equals', value: '요구' }] }, instruction: '요구 정리' }] },
+    def.steps![1], def.steps![2],
+  ] };
+  const msg = (k: string) => { const r = renderAppInput(branchDef, { source: '가상 자료', kind: k }); if (!r.ok) throw Error('fixture'); return r.message; };
+  const refsWith = (k: string, branch?: string) => ({ app_inputs: { source: '가상 자료', kind: k }, app_steps: [{ name: '정리', status: 'completed', output: '기존 정리 결과', ...(branch ? { branch } : {}) }, { name: '작성', status: 'failed' }, { name: '검토', status: 'not_run' }] });
+  it('reuses a completed step only when the recorded branch equals the one the current inputs choose', () => {
+    expect(restoreAppSteps(branchDef, refsWith('요구', '요구 정리'), msg('요구'))).toMatchObject({ ok: true, records: [{ name: '정리', status: 'completed', reused: true, branch: '요구 정리' }, { name: '작성', status: 'pending' }, { name: '검토', status: 'pending' }] });
+    const plain = restoreAppSteps(branchDef, refsWith('질의'), msg('질의'));
+    expect(plain).toMatchObject({ ok: true, records: [{ name: '정리', status: 'completed', reused: true }, { name: '작성', status: 'pending' }, { name: '검토', status: 'pending' }] });
+    expect((plain as { records: { branch?: string }[] }).records[0]).not.toHaveProperty('branch');
+  });
+  it('rejects a reused result made under a branch the current definition no longer chooses (or vice versa)', () => {
+    expect(restoreAppSteps(branchDef, refsWith('요구'), msg('요구')).ok).toBe(false);
+    expect(restoreAppSteps(branchDef, refsWith('요구', '옛 갈래'), msg('요구')).ok).toBe(false);
+    expect(restoreAppSteps(branchDef, refsWith('질의', '요구 정리'), msg('질의')).ok).toBe(false);
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import AppStepEditor, { defaultRule } from '@/components/apps/AppStepEditor';
+import AppStepEditor, { defaultBranch, defaultRule } from '@/components/apps/AppStepEditor';
 import { validateAppDefinition, type AppDefinition, type AppField, type AppStepCondition } from '@/lib/apps/definition';
 
 const fields: AppField[] = [
@@ -46,5 +46,38 @@ describe('step condition editor', () => {
     const page = html(base());
     expect(page).not.toContain('조건 1 항목');
     expect(page).toMatch(/<option value="when" disabled="">아래 조건이 모두 맞을 때만 실행<\/option>/);
+  });
+});
+
+describe('step branch editor', () => {
+  const branchDef: AppDefinition = { ...base(), steps: [
+    { name: '검토', instruction: '검토하세요.', branches: [
+      { name: '공지 검토', when: { all: [{ field: 'kind', op: 'equals', value: '공지' }, { field: 'count', op: 'gte', value: '30' }] }, instruction: '공지 기준으로 검토하세요.' },
+    ] },
+    { name: '작성', instruction: '작성하세요.', branches: [
+      { name: '갈래 1', when: { all: [{ field: 'memo', op: 'filled' }] }, instruction: '메모를 반영하세요.' },
+      { name: '갈래 2', when: { all: [{ field: 'due', op: 'before', value: '2026-03-01' }] }, instruction: '서둘러 작성하세요.' },
+      { name: '갈래 3', when: { all: [{ field: 'kind', op: 'not_equals', value: '안내' }] }, instruction: '그 밖.' },
+    ] },
+  ] };
+  it('renders each branch with its name, rules and instruction, and offers to add a branch below the limit', () => {
+    const page = html(branchDef);
+    expect(page).toContain('갈래 (선택)');
+    expect(page).toMatch(/aria-label="단계 1 갈래 1 이름"[^>]*value="공지 검토"|value="공지 검토"[^>]*aria-label="단계 1 갈래 1 이름"/);
+    expect(page).toContain('aria-label="단계 1 갈래 1 조건 1 항목"');
+    expect(page).toContain('aria-label="단계 1 갈래 1 조건 2 값"');
+    expect(page).toContain('aria-label="단계 1 갈래 1 처리 지시"');
+    expect(page).toContain('공지 기준으로 검토하세요.');
+    // 단계 1은 갈래 1개라 더할 수 있고, 단계 2는 3개라 더하지 못한다 — '+ 갈래 추가'는 한 번만
+    expect(page.match(/\+ 갈래 추가/g)).toHaveLength(1);
+    // 마지막 단계도 갈래를 둘 수 있다(조건은 둘 수 없어도)
+    expect(page).toContain('aria-label="단계 2 갈래 3 처리 지시"');
+    expect(page).toContain('갈래 삭제');
+  });
+  it('a new branch starts with one rule on the first field and an empty instruction, and the step stays valid once filled', () => {
+    expect(defaultBranch(fields, 2)).toEqual({ name: '갈래 2', when: { all: [{ field: 'kind', op: 'equals', value: '안내' }] }, instruction: '' });
+    expect(validateAppDefinition({ ...base(), steps: [{ name: '검토', instruction: '검토하세요.', branches: [defaultBranch(fields, 1)] }, { name: '작성', instruction: '작성하세요.' }] }).ok).toBe(false);
+    expect(validateAppDefinition({ ...base(), steps: [{ name: '검토', instruction: '검토하세요.', branches: [{ ...defaultBranch(fields, 1), instruction: '안내 기준' }] }, { name: '작성', instruction: '작성하세요.' }] }).ok).toBe(true);
+    expect(validateAppDefinition(branchDef)).toMatchObject({ ok: true });
   });
 });
