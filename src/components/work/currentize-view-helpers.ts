@@ -1,6 +1,6 @@
 // 작업실 '대조' 보기(CurrentizeView)가 쓰는 순수 함수 — 시험(tests/work-currentize-ui.test.ts)이 그리는 규칙을 고정한다.
 // plan.ts는 순수 모듈(형식만 가져옴)이라 화면에서 가져와도 서버 코드가 섞이지 않는다.
-import { CHANGE_KIND_LABEL, CHANGE_STATUS_LABEL, changeEditBlock, isNoopChange } from '@/lib/work/workflows/currentize/plan';
+import { CHANGE_KIND_LABEL, CHANGE_STATUS_LABEL, changeEditBlock, hasProposedAfter, isNoopChange } from '@/lib/work/workflows/currentize/plan';
 import type { CurrentizeChangeDto, CurrentizeCitationDto, CurrentizeDto } from './types';
 
 export type ChangeFilter = 'all' | 'needs_check' | 'proposed' | 'changed';
@@ -58,6 +58,34 @@ export function draftFor(change: CurrentizeChangeDto, changes: CurrentizeChangeD
  */
 export function canAcknowledge(change: Pick<CurrentizeChangeDto, 'status'>): boolean {
   return change.status === 'needs_check';
+}
+
+/**
+ * 단추 이름(N2). 올해 글이 있는 확인 요청(밀린 날짜·다른 연도 문장·확인 필요로 내린 고치기·단위 모르는 칸)에서는
+ * '확인함'이 "이 올해 글이 맞다"로 읽혀 눌렀는데 파일에는 작년 글이 남았다 — 서버의 확인함은 언제나 작년 글 그대로 두기다.
+ * 그래서 올해 글을 넣는 길(저장)은 '이 글로 확인', 작년 글을 두는 길(확인함)은 '작년 글 그대로 두기'로 가른다.
+ * 제안은 '이 글로 받아들이기', 올해 글 없는 확인 요청·바꿈 고치기는 '올해 글 저장'·'확인함' 그대로
+ */
+export function saveLabel(change: Pick<CurrentizeChangeDto, 'status' | 'before' | 'after'>): string {
+  if (change.status === 'proposed') return '이 글로 받아들이기';
+  if (change.status === 'needs_check' && hasProposedAfter(change)) return '이 글로 확인';
+  return '올해 글 저장';
+}
+
+/** 올해 글이 있고 그 글을 저장할 수도 있는 행 — 확인함과 저장이 갈리는 곳(글을 넣을 수 없는 빈 칸·여러 줄 칸은 확인함 한 길뿐) */
+function hasSavableAfter(change: Pick<CurrentizeChangeDto, 'kind' | 'before' | 'after'>): boolean {
+  return hasProposedAfter(change) && changeEditBlock(change) === null;
+}
+
+export function acknowledgeLabel(change: Pick<CurrentizeChangeDto, 'kind' | 'before' | 'after'>): string {
+  return hasSavableAfter(change) ? '작년 글 그대로 두기' : '확인함';
+}
+
+/** 단추에 마우스를 올리면 보이는 설명 — 올해 글이 있는 행은 그 글이 파일에 들어가지 않는다는 것을 미리 말한다 */
+export function acknowledgeHint(change: Pick<CurrentizeChangeDto, 'kind' | 'before' | 'after'>): string {
+  if (hasSavableAfter(change)) return '올해 글을 넣지 않고 작년 글을 그대로 둡니다 — 파일은 바뀌지 않습니다. 올해 글을 넣으려면 "이 글로 확인"을 누르세요';
+  if (hasProposedAfter(change)) return '보이는 올해 글은 파일에 들어가지 않습니다 — 한글에서 직접 고친 뒤 확인함으로 닫으세요';
+  return '작년 글 그대로 두어도 된다고 확인했습니다 — 파일은 바뀌지 않습니다';
 }
 
 /** 저장 단추 — 빈 글은 안 되고, 이미 바꾼 변경에 같은 글이면 바뀐 것이 없다(확인 필요·제안은 같은 글이어도 '이대로 받아들임') */

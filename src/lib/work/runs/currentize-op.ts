@@ -222,21 +222,22 @@ async function tableWork(bytes: Buffer, segments: Segment[], findings: Map<strin
   return out;
 }
 
-const YEARISH = new Set<Finding['kind']>(['year', 'period', 'date']);
-const YEAR_SENTENCE_KINDS = new Set<Finding['kind']>(['year', 'period', 'date', 'number', 'citation']);
-/** 연도 표지를 뺀 나머지 글이 이만큼(공백 빼고) 있어야 문장으로 본다 — '2025년 ○○ 사업계획' 같은 제목은 모델에 보내지 않는다 */
-const YEAR_SENTENCE_MIN_CHARS = 10;
+const MARKED_SENTENCE_KINDS = new Set<Finding['kind']>(['year', 'period', 'date', 'number', 'citation']);
+/** 표지를 뺀 나머지 글이 이만큼(공백 빼고) 있어야 문장으로 본다 — '2025년 ○○ 사업계획'·'참여 35명' 같은 제목·항목은 모델에 보내지 않는다 */
+const MARKED_SENTENCE_MIN_CHARS = 10;
 
 /**
- * 연도·기간·날짜가 든 본문 문장(I4) — 그 밖의 표지는 수치·인용뿐이고, 표지를 뺀 글이 10자 이상. 연도만 밀면 내용(사업 B 중단 등)이
- * 작년 그대로 남으므로 모델이 메모·원자료로 고칠 수 있게 보낸다. 고치기가 없으면 연도 밀기가 그대로 남는다
+ * 표지(연도·기간·날짜·수치·인용)가 든 본문 문장(I4·N1) — 표지를 뺀 글이 10자 이상. 표지가 있으면 `prose`가 아니라 모델에 가지 않았는데,
+ * 연도만 밀거나 수치만 대조하면 내용(사업 B 중단 등)이 작년 그대로 남으므로 모델이 메모·원자료로 고칠 수 있게 보낸다.
+ * 처음(I4)에는 연도·기간·날짜가 든 문장만 보내 '사업 B에 1,200백만원을 투입하였다'처럼 수치만 든 문장은 메모가 반영되지 않았다(N1) —
+ * 수치·조문은 모델이 바꾸지 못하니(`verifyRewrites`가 새 숫자·조문 보존을 본다) 수치·인용만 든 문장도 보낸다. 고치기가 없으면 글은 그대로다
  */
-export function isYearSentence(s: Pick<Segment, 'text' | 'cell'>, findings: Finding[]): boolean {
+export function isMarkedSentence(s: Pick<Segment, 'text' | 'cell'>, findings: Finding[]): boolean {
   if (s.cell || findings.length === 0) return false;
-  if (!findings.every((f) => YEAR_SENTENCE_KINDS.has(f.kind)) || !findings.some((f) => YEARISH.has(f.kind))) return false;
+  if (!findings.every((f) => MARKED_SENTENCE_KINDS.has(f.kind))) return false;
   let rest = s.text;
   for (const f of [...findings].sort((a, b) => b.start - a.start)) rest = rest.slice(0, f.start) + rest.slice(f.end);
-  return rest.replace(/\s+/g, '').length >= YEAR_SENTENCE_MIN_CHARS;
+  return rest.replace(/\s+/g, '').length >= MARKED_SENTENCE_MIN_CHARS;
 }
 
 /** 모델 한 묶음의 입력 글자 수 어림 — 원가 예상(입력 글자/4 토큰) */
@@ -347,10 +348,10 @@ export async function opGenerateCurrentize(ctx: WorkContext, run: WorkRunRow, ta
   const citations = evidence.citations;
   const warnings = [...tables.warnings, ...(evidence.warning ? [evidence.warning] : [])];
 
-  // 5) 줄글 고치기 — 줄글 조각 + 인용이 바뀐 조각 + 연도가 든 문장, 문서 순서로 묶음마다(모델에는 연도를 민 글)
+  // 5) 줄글 고치기 — 줄글 조각 + 인용이 바뀐 조각 + 표지(연도·수치·인용)가 든 문장, 문서 순서로 묶음마다(모델에는 연도를 민 글)
   const changedCitation = new Set(citations.filter((c) => c.status === 'changed').map((c) => c.segmentId));
   const isProse = (s: Segment) => (findings.get(s.id) ?? []).some((f) => f.kind === 'prose');
-  const targets = segments.filter((s) => !tables.frozen.has(s.id) && (isProse(s) || changedCitation.has(s.id) || isYearSentence(s, findings.get(s.id) ?? [])));
+  const targets = segments.filter((s) => !tables.frozen.has(s.id) && (isProse(s) || changedCitation.has(s.id) || isMarkedSentence(s, findings.get(s.id) ?? [])));
   const batches: Segment[][] = [];
   for (let i = 0; i < targets.length; i += MODEL_BATCH_SEGMENTS) batches.push(targets.slice(i, i + MODEL_BATCH_SEGMENTS));
   const options = batches.length ? await workModelOptions(ctx, task) : null;

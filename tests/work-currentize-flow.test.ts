@@ -17,13 +17,14 @@ import type { RegulationProviders } from '@/lib/work/workflows/regulations/gathe
 import type { RawEvidence } from '@/lib/work/workflows/regulations/evidence';
 import { mockRegulationModel } from '@/lib/work/workflows/regulations/model';
 import { mockCurrentizeModel, type CurrentizeModel, type RewriteInput } from '@/lib/work/workflows/currentize/model';
-import { applyUserEdit, NOTE_PROPOSAL_STALE, type Change, type CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
+import { applyUserEdit, hasProposedAfter, NOTE_KEPT_PRIOR, NOTE_PROPOSAL_STALE, type Change, type CurrentizeContent } from '@/lib/work/workflows/currentize/plan';
 import { currentizeReviewItems } from '@/lib/work/workflows/currentize/review';
 import { readSegments } from '@/lib/work/workflows/currentize/segments';
 import { readHwpxTables } from '@/lib/attachments/tables-hwpx';
 import * as svc from '@/lib/work/services';
 import { runWorker } from '@/lib/work/runs/worker';
-import { rewriteStepName, NOTE_MULTI_PARAGRAPH_CELL, NOTE_UNPLANNED_TABLE } from '@/lib/work/runs/currentize-op';
+import { isMarkedSentence, rewriteStepName, NOTE_MULTI_PARAGRAPH_CELL, NOTE_UNPLANNED_TABLE } from '@/lib/work/runs/currentize-op';
+import { classifySegment } from '@/lib/work/workflows/currentize/classify';
 import { priorFixture } from './helpers/prior-fixture';
 import { para, tableAt, sectionXml } from './fixtures/hwpx';
 import { buildHwp, para as hwpPara } from './fixtures/hwp5';
@@ -133,6 +134,25 @@ describe('현행화 묶음 단계 이름', () => {
     expect(rewriteStepName(26)).toBe('rewrite_ba');
     expect(names.every((n) => /^[a-z_]{1,40}$/.test(n))).toBe(true);
     expect(new Set(names).size).toBe(200);
+  });
+});
+
+describe('모델에 보내는 표지 문장(isMarkedSentence, I4·N1)', () => {
+  const cctx = { basisDate: '2026-01-10', regulationNames: ['지방공기업법'], personNames: [] };
+  const marked = (text: string, cell = false) => isMarkedSentence({ text, cell: cell ? { table: 0, row: 0, col: 0 } : null }, classifySegment(text, cctx));
+  it('연도·수치·인용이 든 본문 문장은 모두 보낸다 — 수치만 든 문장도(N1: 전에는 연도가 있어야 했다)', () => {
+    expect(marked('2025년에는 사업 A·B를 추진하였다.')).toBe(true);
+    expect(marked('사업 B에 1,200백만원을 투입하여 운영하였다.')).toBe(true);
+    expect(marked('참여 인원은 35명으로 전년과 같이 운영하였다.')).toBe(true);
+    expect(marked('「지방공기업법」 제64조에 따라 예산을 편성하였다.')).toBe(true);
+  });
+  it('표지를 뺀 글이 짧은 제목·항목, 표 칸, 표지 없는 글은 보내지 않는다(줄글은 prose로 따로 간다)', () => {
+    expect(marked('2025년 ○○ 사업계획')).toBe(false);
+    expect(marked('참여 35명')).toBe(false);
+    expect(marked('총 1,200백만원')).toBe(false);
+    expect(marked('사업 B에 1,200백만원을 투입하여 운영하였다.', true)).toBe(false);
+    expect(marked('상반기에는 관계 기관과 협의를 거쳐 세부 추진 방향을 정하였다.')).toBe(false);
+    expect(isMarkedSentence({ text: '아무 표지도 없음', cell: null }, [])).toBe(false);
   });
 });
 
@@ -576,12 +596,14 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
       },
     };
     let task = await svc.createTask(ctx, actor, { workflowKey: 'report', title: '2026년 사업 B 중단', form: { reportType: '사업계획', period: '2026년', emphasis: '사업 B 중단' } });
-    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': '2025년에는 사업 A·B를 추진하였다.' });
+    const prior = await priorFixture({ 제목: '2025년 ○○ 사업계획', '추진 경과': '2025년에는 사업 A·B를 추진하였다.', '주요 내용': '사업 B에 1,200백만원을 투입하여 운영하였다.' });
     task = await upload(task, '2025 사업계획.hwpx', prior, 'prior');
     task = await upload(task, '2026 예산.xlsx', await dataWorkbook(), 'data');
     const c = (await generate(task)).version!.currentize!;
     const sent = seen.flatMap((i) => i.segments.map((x) => x.text));
     expect(sent).toContain('2026년에는 사업 A·B를 추진하였다.');
+    // N1: 연도 없이 수치만 든 문장도 간다 — 아니면 '사업 B 중단' 메모가 이 문장에 반영될 길이 없다
+    expect(sent).toContain('사업 B에 1,200백만원을 투입하여 운영하였다.');
     // 제목('2025년 ○○ 사업계획')은 연도를 뺀 글이 짧아 보내지 않는다
     expect(sent).not.toContain('2026년 ○○ 사업계획');
     expect(seen[0].memo).toBe('사업 B 중단');
@@ -618,8 +640,11 @@ describe.skipIf(!url)('현행화 흐름(실제 Postgres·실제 파일)', () => 
     const d2 = await svc.getTaskDetail(ctx, actor, task.id);
     const c2 = d2.version!.currentize!;
     expect(c2.changes.filter((x) => x.status === 'needs_check')).toEqual([]);
+    // 올해 글이 있던 행(빈 칸에 넣을 값·밀린 날짜)은 그 글을 버렸다는 기록이 붙는다(N2)
+    expect(open1.some((x) => hasProposedAfter(x))).toBe(true);
     for (const ch of open1) {
-      expect(c2.changes.find((x) => x.id === ch.id)).toMatchObject({ status: 'changed', after: ch.before, basis: ['user'], note: ch.note ? `${ch.note} · 확인함` : '확인함' });
+      const notes = [ch.note, hasProposedAfter(ch) ? NOTE_KEPT_PRIOR : null, '확인함'].filter(Boolean).join(' · ');
+      expect(c2.changes.find((x) => x.id === ch.id)).toMatchObject({ status: 'changed', after: ch.before, basis: ['user'], note: notes });
     }
     expect(d2.review.filter((x) => x.code === 'NEEDS_CHECK')).toEqual([]);
     // 확인함은 파일을 바꾸지 않는다 — 처음 판의 HWPX 글과 같다

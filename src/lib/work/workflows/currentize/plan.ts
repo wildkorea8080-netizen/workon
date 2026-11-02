@@ -66,14 +66,24 @@ export function isNoopChange(c: Pick<Change, 'status' | 'before' | 'after'>): bo
 }
 
 export const NOTE_ACKNOWLEDGED = '확인함';
+/** 올해 글(밀린 날짜·고친 문장·계산한 칸)이 있던 확인 요청을 '작년 글 그대로'로 닫았다 — 그 올해 글은 파일에 들어가지 않았다는 기록 */
+export const NOTE_KEPT_PRIOR = '올해 글을 넣지 않고 작년 글 그대로 둠';
+
+/** 확인 요청에 프로그램·모델이 낸 올해 글이 있는가(밀린 날짜·다른 연도 문장·확인 필요로 내린 고치기·단위 모르는 칸) */
+export function hasProposedAfter(c: Pick<Change, 'before' | 'after'>): boolean {
+  return c.after !== null && c.after !== c.before;
+}
 
 /**
- * 확인 요청 하나를 '확인함'으로 넘긴다(순수, S6-1 I6). 그 행은 바꿈이 되지만 올해 글 = 작년 글이라 파일은 바뀌지 않는다 —
- * 근거 'user', 메모 끝에 '확인함'. 빈 칸·표 구조 확인처럼 글을 넣을 수 없는 행도 이 길로 닫는다. 확인 요청이 아니면 null
+ * 확인 요청 하나를 '확인함'으로 넘긴다(순수, S6-1 I6). 그 행은 바꿈이 되지만 **올해 글 = 작년 글**이라 파일은 바뀌지 않는다 —
+ * 근거 'user', 메모 끝에 '확인함'. 빈 칸·표 구조 확인처럼 글을 넣을 수 없는 행도 이 길로 닫는다. 확인 요청이 아니면 null.
+ * 올해 글이 있던 행(N2 — 밀린 날짜 등)은 그 글이 버려지고 작년 글이 남는다는 뜻이라 메모에 적는다(`NOTE_KEPT_PRIOR`) —
+ * 그 글을 넣으려면 '확인함'이 아니라 올해 글 저장(`applyUserEdit`)이다. 화면 단추 이름도 이 둘을 가른다(`currentize-view-helpers.ts`)
  */
 export function acknowledgeChange(changes: Change[], change: Change): { changes: Change[]; target: Change } | null {
   if (change.status !== 'needs_check') return null;
-  const target: Change = { ...change, status: 'changed', after: change.before, basis: ['user'], note: change.note ? `${change.note} · ${NOTE_ACKNOWLEDGED}` : NOTE_ACKNOWLEDGED };
+  const notes = [change.note, hasProposedAfter(change) ? NOTE_KEPT_PRIOR : null, NOTE_ACKNOWLEDGED].filter((n): n is string => !!n);
+  const target: Change = { ...change, status: 'changed', after: change.before, basis: ['user'], note: notes.join(' · ') };
   return { changes: changes.map((c) => (c.id === change.id ? target : c)), target };
 }
 

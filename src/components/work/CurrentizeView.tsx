@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Card } from './WorkShell';
 import type { CurrentizeChangeDto, CurrentizeDto } from './types';
-import { FILTERS, canAcknowledge, canSave, citationFor, countByStatus, draftFor, editableChange, filterChanges, kindLabel, statusLabel, type ChangeFilter } from './currentize-view-helpers';
+import { FILTERS, acknowledgeHint, acknowledgeLabel, canAcknowledge, canSave, citationFor, countByStatus, draftFor, editableChange, filterChanges, kindLabel, saveLabel, statusLabel, type ChangeFilter } from './currentize-view-helpers';
 
 const STATUS_TONE: Record<CurrentizeChangeDto['status'], string> = {
   changed: 'bg-emerald-50 text-emerald-800 border-emerald-200',
@@ -161,17 +161,17 @@ function ChangeCard({ change, content, canEdit, busy, onEdit, onAcknowledge }: {
               disabled={busy || saving || !canSave(change, draft)}
               className="rounded-[10px] bg-[#003087] px-4 py-2 text-[14px] font-semibold text-white disabled:bg-slate-300"
             >
-              {saving ? '저장 중…' : change.status === 'proposed' ? '이 글로 받아들이기' : '올해 글 저장'}
+              {saving ? '저장 중…' : saveLabel(change)}
             </button>
           )}
           {canAcknowledge(change) && (
             <button
               onClick={acknowledge}
               disabled={busy || saving}
-              title="작년 글 그대로 두어도 된다고 확인했습니다 — 파일은 바뀌지 않습니다"
+              title={acknowledgeHint(change)}
               className="rounded-[10px] border border-[#DCE3EC] bg-white px-4 py-2 text-[14px] font-semibold text-slate-700 hover:border-[#003087] disabled:text-slate-300"
             >
-              확인함
+              {acknowledgeLabel(change)}
             </button>
           )}
         </div>

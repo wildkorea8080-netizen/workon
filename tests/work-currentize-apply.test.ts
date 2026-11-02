@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readSegments, type Segment } from '@/lib/work/workflows/currentize/segments';
-import { acknowledgeChange, applyUserEdit, buildPlan, type Change } from '@/lib/work/workflows/currentize/plan';
+import { acknowledgeChange, applyUserEdit, buildPlan, hasProposedAfter, NOTE_KEPT_PRIOR, type Change } from '@/lib/work/workflows/currentize/plan';
 import { applyChanges } from '@/lib/work/workflows/currentize/apply';
 import type { CitationPair } from '@/lib/work/workflows/currentize/citations';
 import { classifySegment } from '@/lib/work/workflows/currentize/classify';
@@ -609,6 +609,23 @@ describe('확인함(acknowledgeChange) — 파일은 바뀌지 않는다(I6)', (
     const u = applyUserEdit(a.changes, rows[0], '2026년 예산 1,300')!;
     expect(u.target.id).toBe('c1');
     expect(u.changes.map((c) => c.id)).toEqual(['c1', 'c3']);
+  });
+
+  it('N2: 올해 글이 있던 확인 요청(밀린 날짜 등)을 확인함으로 닫으면 작년 글이 남고, 그 사실을 메모에 적는다', () => {
+    const date: Change = { id: 'c1', segmentId: '0:10', kind: 'date', before: '2025. 3. 1. 개최', after: '2026. 3. 1. 개최', status: 'needs_check', basis: [], note: '일정 확인 — 요일·날짜를 확인하세요' };
+    const table: Change = { id: 'c2', segmentId: '0:20', kind: 'table', before: '1,100', after: '1,200', status: 'needs_check', basis: [], note: null };
+    const plain: Change = { id: 'c3', segmentId: '0:30', kind: 'number', before: '예산 1,200', after: null, status: 'needs_check', basis: [], note: null };
+    expect(hasProposedAfter(date)).toBe(true);
+    expect(hasProposedAfter(plain)).toBe(false);
+    expect(hasProposedAfter({ before: 'x', after: 'x' })).toBe(false);
+    const a = acknowledgeChange([date, table, plain], date)!;
+    // 파일은 바뀌지 않는다(올해 글 = 작년 글) — 밀린 날짜는 버려졌다는 것이 변경 내역표에 남는다
+    expect(a.target).toMatchObject({ status: 'changed', after: '2025. 3. 1. 개최', basis: ['user'], note: `일정 확인 — 요일·날짜를 확인하세요 · ${NOTE_KEPT_PRIOR} · 확인함` });
+    expect(acknowledgeChange(a.changes, table)!.target.note).toBe(`${NOTE_KEPT_PRIOR} · 확인함`);
+    expect(acknowledgeChange(a.changes, plain)!.target.note).toBe('확인함');
+    // 올해 글을 넣는 길은 저장이다 — 밀린 글을 그대로 저장하면 그 글이 파일에 든다
+    const s = applyUserEdit([date, table, plain], date, date.after!)!;
+    expect(s.target).toMatchObject({ status: 'changed', after: '2026. 3. 1. 개최', basis: ['user'], note: null });
   });
 
   it('확인함 행은 적용하지 않는다 — 같은 문단의 연도 바꿈과 겹쳐도 파일이 만들어진다', async () => {

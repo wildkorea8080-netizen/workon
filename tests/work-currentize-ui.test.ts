@@ -9,6 +9,9 @@ import {
   draftFor,
   canSave,
   canAcknowledge,
+  saveLabel,
+  acknowledgeLabel,
+  acknowledgeHint,
 } from '@/components/work/currentize-view-helpers';
 import { inputsFor } from '@/components/work/file-set-helpers';
 import type { CurrentizeChangeDto, CurrentizeDto } from '@/components/work/types';
@@ -136,6 +139,29 @@ describe('대조 보기 — 확인함(I6)', () => {
   });
   it('넣을 값이 없는 구조 확인(열을 못 가린 표)은 표를 한글에서 고치라고 한다', () => {
     expect(editableChange(ch('c5', { kind: 'structure', before: '', after: null, status: 'needs_check' }))).toEqual({ ok: false, reason: '표는 한글에서 직접 고쳐 주세요' });
+  });
+  it('N2: 올해 글이 있는 확인 요청은 단추를 "이 글로 확인"·"작년 글 그대로 두기"로 가른다 — 확인함이 올해 글을 넣는 것으로 읽히지 않게', () => {
+    const date = ch('c6', { kind: 'date', status: 'needs_check', before: '2025. 3. 1. 개최', after: '2026. 3. 1. 개최', note: '일정 확인 — 요일·날짜를 확인하세요' });
+    expect(saveLabel(date)).toBe('이 글로 확인');
+    expect(acknowledgeLabel(date)).toBe('작년 글 그대로 두기');
+    expect(acknowledgeHint(date)).toContain('이 글로 확인');
+    expect(saveLabel(LIST[3])).toBe('이 글로 확인');
+    expect(acknowledgeLabel(LIST[3])).toBe('작년 글 그대로 두기');
+    // 올해 글 없는 확인 요청·제안·바꿈은 그대로
+    expect(saveLabel(LIST[1])).toBe('올해 글 저장');
+    expect(acknowledgeLabel(LIST[1])).toBe('확인함');
+    expect(acknowledgeHint(LIST[1])).not.toContain('이 글로 확인');
+    expect(saveLabel(LIST[2])).toBe('이 글로 받아들이기');
+    expect(saveLabel(LIST[0])).toBe('올해 글 저장');
+    // 올해 글 = 작년 글인 행은 올해 글이 있는 것이 아니다
+    expect(acknowledgeLabel(ch('c7', { status: 'needs_check', before: '같음', after: '같음' }))).toBe('확인함');
+    // 글을 넣을 수 없는 빈 칸·여러 줄 칸은 저장 길이 없어 '확인함' 하나 — 설명은 보이는 올해 글이 파일에 안 들어간다고 말한다
+    const blank = ch('c8', { kind: 'structure', status: 'needs_check', before: '', after: '1,300', note: '빈 칸에 값을 넣어야 합니다 — 직접 입력하세요' });
+    expect(acknowledgeLabel(blank)).toBe('확인함');
+    expect(acknowledgeHint(blank)).toContain('파일에 들어가지 않습니다');
+    expect(acknowledgeHint(blank)).not.toContain('이 글로 확인');
+    const multi = ch('c9', { kind: 'table', status: 'needs_check', before: '1,100\n(추경)', after: '1,200\n(추경)' });
+    expect(acknowledgeLabel(multi)).toBe('확인함');
   });
   it('확인함으로 닫은 행(올해 글 = 작년 글)은 입력칸의 처음 글이 되지 않는다', () => {
     const acked = ch('c7', { kind: 'number', before: '2025년 계획', after: '2025년 계획', status: 'changed', basis: ['user'], note: '확인함' });
