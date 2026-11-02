@@ -12,7 +12,7 @@
 
 - 브랜치: `feat/s6-1-currentize`. 2026-10-31 미커밋이던 앱 플랫폼·업무 흐름 확장을 다섯 커밋으로 넣었다(`89fb3d2` 시험 도우미·배포 설정 → `7f7fb60` 앱 플랫폼 → `887952a` 앱 설정·근거와 업무 작업 연결 → `30e470c` 업무 5종 → `3704443` 문서). 각 커밋 시점의 타입 검사 통과를 확인했다.
 - `npx tsc --noEmit --incremental false` 오류 0. 전체 Vitest는 `NODE_OPTIONS=--max-old-space-size=4096`로 2,144개 통과(시험 DB 없이, 8파일 건너뜀), 시험 DB를 띄우면 124파일 2,212개 통과.
-- 운영은 이 내용과 같은 작업 트리에서 배포한 `dpl_6XBqcsTTXeNDsh5LCfTLtYYouCY2`(2026-10-31 20:12 KST)다. 아직 `main`에 합치거나 원격에 올리지 않았다.
+- 운영은 이 내용과 같은 작업 트리에서 배포한 `dpl_6XBqcsTTXeNDsh5LCfTLtYYouCY2`(2026-10-31 20:12 KST)다. (그때는 `main`에 합치거나 원격에 올리지 않았다 — 2026-11-02에 `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋(`bdc93b3`)으로 fast-forward해 푸시했다. 이제 `main` = 이 가지 = 운영 코드.)
 - (2026-11-02) 그 뒤 커밋 `2df4e75`·`6707326`·`784cb02`·`559a433`·`b936502`·`9604b88`을 `dpl_8NSnzYddrnAAJGwcHehPqiofdG4T`로 운영 배포했다(0045·0046 운영 적용, `CRON_SECRET`·`RESEND_API_KEY`·`MAIL_FROM` 운영 환경 변수 추가). 같은 날 옆 가지 둘을 합친 `3eea05a`(표 엔진 사람 열)·`59e349d`(사용자 탈퇴 처리, 0047)를 `dpl_82VPrkePcwcQYgyMULyhDguAu2Yz`로 배포했다(0047 운영 적용). 기록은 `PRODUCTION_DEPLOYMENT.md` 맨 위.
 - 자세한 완료 범위·위험·우선순위·검증 순서는 인수인계 문서를 따른다.
 
