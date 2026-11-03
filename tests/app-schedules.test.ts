@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   APP_MAX_SCHEDULES_PER_USER, KST_OFFSET_MS, describeSchedule, nextRunAt, parseScheduleSpec, scheduleView, specOfRow, type AppScheduleSpec,
 } from '@/lib/apps/schedule-spec';
@@ -98,7 +98,8 @@ function fakeDeps(rows: AppScheduleRow[], outcomes: Record<string, ScheduleOutco
     finish: vi.fn(async () => {}), notifyFailure: vi.fn(async () => {}), log: vi.fn(async () => {}),
     now: vi.fn(() => clock), ...patch,
   };
-  return { deps: deps as ScheduleDeps & typeof deps, advance: (ms: number) => { clock += ms; } };
+  // 덮어쓴 칸도 vi.fn이다 — 모두 모의 함수로 본다(덮어쓰기가 Partial<ScheduleDeps>라 그냥 두면 .mock 타입을 잃는다)
+  return { deps: deps as unknown as { [K in keyof ScheduleDeps]: ScheduleDeps[K] & Mock<ScheduleDeps[K]> }, advance: (ms: number) => { clock += ms; } };
 }
 
 describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실패가 다른 예약을 막지 않는다', () => {

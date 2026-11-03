@@ -25,7 +25,8 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 
 import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/apps/schedules/route';
-import { DELETE, PATCH, PAUSED_BY_USER } from '@/app/api/apps/schedules/[id]/route';
+import { DELETE, PATCH } from '@/app/api/apps/schedules/[id]/route';
+import { PAUSED_BY_USER } from '@/lib/apps/schedule-spec';
 
 beforeEach(() => { state.session = true; state.actor = true; state.results = {}; state.calls = []; });
 

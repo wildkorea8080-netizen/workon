@@ -18,6 +18,8 @@ export const APP_MAX_SCHEDULES_PER_USER = 5;
 /** 활성 예약의 다음 실행 시각이 이만큼 지났는데 실행되지 않았으면 화면에 '지연'을 보인다(실행기가 안 도는 신호) */
 export const SCHEDULE_OVERDUE_MS = 60 * 60 * 1000;
 export const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+/** 직원이 멈춘 예약의 이유 글(라우트 파일은 핸들러·설정 외에는 내보낼 수 없어 여기 둔다) */
+export const PAUSED_BY_USER = '직원이 멈췄습니다.';
 export const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'] as const;
 export const FREQUENCY_LABELS: Record<AppScheduleFrequency, string> = { daily: '매일', weekdays: '평일(월~금)', weekly: '매주', monthly: '매월' };
 

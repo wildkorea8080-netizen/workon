@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { nextRunAt, scheduleView, specOfRow, type AppScheduleRowLike } from '@/lib/apps/schedule-spec';
+import { PAUSED_BY_USER, nextRunAt, scheduleView, specOfRow, type AppScheduleRowLike } from '@/lib/apps/schedule-spec';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at';
-export const PAUSED_BY_USER = '직원이 멈췄습니다.';
 
 /** 멈추기·다시 켜기 — 내 예약만. 다시 켜면 다음 실행 시각을 지금부터 다시 세고 실패 횟수를 지운다 */
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
