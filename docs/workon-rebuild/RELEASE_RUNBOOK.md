@@ -75,7 +75,7 @@ npm run work:testdb -- stop
       timeout_milliseconds := 290000);
   $$);
   ```
-- **입력형 앱 예약 실행기(0048)도 pg_cron이 부른다** — `*/5 * * * *`로 `/api/cron/app-schedules`를 `Bearer {CRON_SECRET}`(Vault `cron_secret`)로. SQL은 `docs/benchmarks/allganize/APP_SCHEDULES.md` '실행기와 운영 설정'
+- **입력형 앱 예약 실행기(0048)도 pg_cron이 부른다** — `*/5 * * * *`로 `/api/cron/app-schedules`를 `Bearer {WORK_WORKER_SECRET}`(위와 같은 Vault `work_worker_secret`)로(`CRON_SECRET`도 받는다). SQL은 `docs/benchmarks/allganize/APP_SCHEDULES.md` '실행기와 운영 설정'
 - **상시 작업자**: `npm run work:worker`(DB 직결 + Supabase Storage), `-- --once` 한 바퀴, `-- --local-files 폴더` 시험용
 - **한글 렌더러(미리보기 PDF)**: Windows·한글 설치 PC에서 `npm run work:worker -- --hancom`. 서버에는 렌더러가 없어 화면은 '실제 파일 미리보기 없음'으로 표시한다(ADR 0002). 운영 렌더러(한컴 서버 제품 등)는 사용권·데이터 경로 결정이 필요하다
 

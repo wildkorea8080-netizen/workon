@@ -1,0 +1,46 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/** 앱 예약 실행기 라우트의 자격 — 업무 작업자 비밀값(pg_cron이 Vault로 싣는 값) 또는 CRON_SECRET, 둘 다 없으면 503 */
+const state = vi.hoisted(() => ({ worker: 'w'.repeat(64) as string | undefined, cron: 'c'.repeat(40) as string | undefined, runs: 0 }));
+vi.mock('@/lib/config', () => ({
+  get WORK_WORKER_SECRET() { return state.worker; },
+  get CRON_SECRET() { return state.cron; },
+}));
+vi.mock('@/lib/apps/schedules', () => ({
+  scheduleDeps: () => ({}),
+  runDueSchedules: async () => { state.runs++; return { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, partial: false }; },
+}));
+
+import { GET, POST } from '@/app/api/cron/app-schedules/route';
+
+const call = (method: 'GET' | 'POST', auth?: string) =>
+  (method === 'GET' ? GET : POST)(new Request('http://localhost/api/cron/app-schedules', { method, headers: auth ? { Authorization: auth } : {} }));
+
+beforeEach(() => { state.worker = 'w'.repeat(64); state.cron = 'c'.repeat(40); state.runs = 0; });
+
+describe('/api/cron/app-schedules 자격', () => {
+  it('업무 작업자 비밀값·CRON_SECRET 어느 쪽이든 실행하고, GET·POST가 같다', async () => {
+    expect((await call('POST', `Bearer ${'w'.repeat(64)}`)).status).toBe(200);
+    expect((await call('GET', `Bearer ${'c'.repeat(40)}`)).status).toBe(200);
+    expect(state.runs).toBe(2);
+  });
+  it('비밀값이 없거나 틀리거나 꼴이 다르면 401(머리글 앞뒤 공백은 Headers가 지운다)이고 실행하지 않는다', async () => {
+    for (const auth of [undefined, 'Bearer wrong', `bearer ${'w'.repeat(64)}`, 'w'.repeat(64)]) {
+      expect((await call('POST', auth)).status).toBe(401);
+    }
+    expect(state.runs).toBe(0);
+  });
+  it('한쪽만 설정돼도 그쪽으로 열리고, 빈 비밀값은 자격이 아니다', async () => {
+    state.cron = undefined;
+    expect((await call('POST', `Bearer ${'w'.repeat(64)}`)).status).toBe(200);
+    expect((await call('POST', 'Bearer ')).status).toBe(401);
+    state.worker = undefined; state.cron = 'c'.repeat(40);
+    expect((await call('GET', `Bearer ${'c'.repeat(40)}`)).status).toBe(200);
+  });
+  it('두 비밀값이 모두 없으면 503 — 실행하지 않는다', async () => {
+    state.worker = undefined; state.cron = undefined;
+    const res = await call('POST', 'Bearer anything');
+    expect(res.status).toBe(503);
+    expect(state.runs).toBe(0);
+  });
+});

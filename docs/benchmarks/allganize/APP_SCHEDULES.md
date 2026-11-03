@@ -24,18 +24,17 @@
 
 ## 실행기와 운영 설정
 
-- 라우트 `GET|POST /api/cron/app-schedules`(`maxDuration` 300). `CRON_SECRET` Bearer 상수 시간 비교가 유일한 자격이고 없으면 503. 한 번에 예약 3개(`SCHEDULE_BATCH`)까지, 시간 예산 180초(`SCHEDULE_RUN_BUDGET_MS`)를 넘기면 남은 것은 다음 호출에(`partial`). 응답 `{ checked, completed, failed, paused, skipped, partial }`.
-- **Vercel 예약 작업에는 넣지 않는다** — Hobby 요금제는 예약 작업이 2개·하루 한 번이라(이미 NODA·예산 알림이 쓴다) 시각을 맞출 수 없다. 업무 작업자(`/api/work/worker`)처럼 **Supabase pg_cron**이 부른다. 운영 설정(사용자가 한다, Vault에 `cron_secret`을 Vercel의 `CRON_SECRET`과 같은 값으로):
+- 라우트 `GET|POST /api/cron/app-schedules`(`maxDuration` 300). 자격은 Bearer 비밀값 하나 — **업무 작업자와 같은 `WORK_WORKER_SECRET`**(pg_cron이 Vault `work_worker_secret`으로 이미 싣는 값) 또는 `CRON_SECRET`, 상수 시간 비교. 둘 다 없으면 503(2026-11-03에 작업자 비밀값을 더했다 — `CRON_SECRET`은 Vercel에만 있고 Vault·`.env.local`에 없어 pg_cron이 실을 수 없었다. 비밀값을 새로 만들어 돌리는 대신 이미 맞는 값을 쓴다). 한 번에 예약 3개(`SCHEDULE_BATCH`)까지, 시간 예산 180초(`SCHEDULE_RUN_BUDGET_MS`)를 넘기면 남은 것은 다음 호출에(`partial`). 응답 `{ checked, completed, failed, paused, skipped, partial }`.
+- **Vercel 예약 작업에는 넣지 않는다** — Hobby 요금제는 예약 작업이 2개·하루 한 번이라(이미 NODA·예산 알림이 쓴다) 시각을 맞출 수 없다. 업무 작업자(`/api/work/worker`)처럼 **Supabase pg_cron**이 부른다. 운영 설정(2026-11-03 등록함 — Vault의 `work_worker_secret`을 그대로 쓴다):
   ```sql
-  select vault.create_secret('<CRON_SECRET 값>', 'cron_secret');
   select cron.schedule('workon-app-schedules', '*/5 * * * *', $$
     select net.http_post(url := 'https://workon-ai.vercel.app/api/cron/app-schedules',
-      headers := jsonb_build_object('Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret')),
+      headers := jsonb_build_object('Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'work_worker_secret')),
       timeout_milliseconds := 290000);
   $$);
   ```
   5분마다 부르므로 실제 실행은 예정 시각에서 **최대 5분** 늦는다. 한 호출이 290초를 넘기면 pg_net이 끊지만 함수는 300초까지 이어 간다.
-- 확인: `curl -H "Authorization: Bearer $CRON_SECRET" https://workon-ai.vercel.app/api/cron/app-schedules` → `{ ok: true, data: { checked: 0, … } }`. 비밀값 없이 부르면 401, Vercel에 비밀값이 없으면 503.
+- 확인: `cron.job_run_details`(성공)와 `net._http_response`(`/api/cron/app-schedules` 응답 200)를 본다. 비밀값 없이 부르면 401, Vercel에 두 비밀값이 모두 없으면 503.
 
 ## 코드
 
@@ -56,7 +55,7 @@
 ## 배포 순서
 
 1. 운영 DB에 0048 적용(`npm run db:migrate -- 0048`) — **코드 배포 전**. 적용하지 않으면 예약 화면·API만 503이고 다른 기능에는 영향이 없다.
-2. 코드 배포. `CRON_SECRET`은 이미 운영 환경 변수에 있다.
+2. 코드 배포. `WORK_WORKER_SECRET`·`CRON_SECRET`은 이미 운영 환경 변수에 있다.
 3. Supabase SQL 편집기에서 위 Vault·pg_cron을 건다(사용자). `cron.job_run_details`에서 5분마다 200이 찍히는지, 비밀값 없이 부른 요청이 401인지 본다.
 4. 직원 계정으로 앱 하나에 '매일 (몇 분 뒤) 예약'을 걸어 다음 차례에 `[예약]` 대화가 생기는지, 예약 목록의 '실행 N회'·마지막 결과가 바뀌는지 본다.
 

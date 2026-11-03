@@ -211,7 +211,7 @@ describe('실패 안내 메일·마이그레이션·실행기 라우트', () => 
     const paused = scheduleFailureMail({ appName: '앱', description: '매일 09:00', error: PAUSED_AFTER_FAILURES, paused: true, nextRunAt: '2026-11-04T00:00:00.000Z', schedulesUrl: 'https://x/apps/schedules', failedAt: new Date() });
     expect(paused.subject).toContain('멈췄습니다'); expect(paused.html).not.toContain('다음 실행'); expect(paused.html).toContain('다시 켜');
   });
-  it('0048은 추가만·RLS·권한 회수·주기와 요일/날 짝 CHECK, 실행기 라우트는 CRON_SECRET만(없으면 503)·300초', () => {
+  it('0048은 추가만·RLS·권한 회수·주기와 요일/날 짝 CHECK, 실행기 라우트는 서버 예약 비밀값만(없으면 503)·300초', () => {
     const sql = readFileSync('supabase/migrations/0048_app_schedules.sql', 'utf8');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS public.app_schedules');
     expect(sql).toContain('ENABLE ROW LEVEL SECURITY'); expect(sql).toContain('REVOKE ALL ON public.app_schedules FROM anon, authenticated');
@@ -219,7 +219,7 @@ describe('실패 안내 메일·마이그레이션·실행기 라우트', () => 
     expect(sql).toContain('run_minute IN (0, 30)'); expect(sql).toContain('month_day BETWEEN 1 AND 28');
     expect(sql).not.toMatch(/DROP|ALTER TABLE public\.(agents|users|conversations)/);
     const route = readFileSync('src/app/api/cron/app-schedules/route.ts', 'utf8');
-    expect(route).toContain('CRON_SECRET'); expect(route).toContain('timingSafeEqual'); expect(route).toContain('status: 503'); expect(route).toContain('maxDuration = 300');
+    expect(route).toContain('WORK_WORKER_SECRET'); expect(route).toContain('CRON_SECRET'); expect(route).toContain('timingSafeEqual'); expect(route).toContain('status: 503'); expect(route).toContain('maxDuration = 300');
     // Vercel Hobby 예약 작업(2개·하루 한 번)에는 넣지 않는다 — pg_cron이 부른다
     const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: { path: string }[] };
     expect(vercel.crons.some(c => c.path === '/api/cron/app-schedules')).toBe(false);
