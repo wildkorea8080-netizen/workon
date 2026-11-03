@@ -52,7 +52,8 @@
 - `tests/user-withdrawal.test.ts`: 탈퇴 순서에 예약 삭제·연동 회수, 실패하면 도장 전에 멈춤.
 - `tests/app-automation-admin-db.test.ts`(3, 시험 DB): 다시 적용 안전, 회수 사유 CHECK, 잠금 CHECK·직원 조건부 다시 켜기 0행·풀면 1행.
 - 전체 Vitest 139파일 2,409개 통과(시험 DB 포함), tsc 0, `next build` 통과.
-- **하지 않은 것**: 브라우저로 관리자 화면을 열어 보지 않았다(이 PC의 Docker Desktop이 켜지지 않아 로컬 Supabase 스택을 못 띄움). PostgREST의 `owner:users(…)`·`agent:agents(…)` 이어 읽기는 실제 Supabase에서 확인하지 않았다(외래 키가 하나뿐이라 모호하지 않다). 운영 DB 0050 적용·배포는 2026-11-03(`dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`, `PRODUCTION_DEPLOYMENT.md`) — 로그인 화면 확인은 아직이다.
+- **로컬 시험 Supabase 실측(2026-11-03 밤)**: Docker의 시험 스택(`workon-e2e`, 0051까지 적용)에 **실제 라우트 처리기**를 돌렸다(로그인 세션만 가짜, PostgREST·RPC·보안 로그는 진짜, 모델 키 막음 — 비용 없음). 직원이 예약·연동을 만들고(201, 토큰 원문은 만든 응답에만·DB엔 해시와 앞 12자) → 관리자 목록 200(실제 `owner:users(…)`·`agent:agents(…)` 이어 읽기로 직원 이름·부서 '총무과'·앱 이름·'매일 09:00', 입력값·토큰 없음), 일반 직원은 403 → 연동 호출은 필수 입력이 빠져 400 `행사 자료 항목을 입력해 주세요.`, **같은 `Idempotency-Key`로 다시 보내면 실행 없이 같은 400 + `Idempotent-Replayed: true`**, 같은 키·다른 입력 422, 새 키는 60초 안이라 429(`Retry-After: 60`), 사용 횟수 1·호출 기록 `done 400` → 관리자 회수 200(`관리자가 회수했습니다 — 사유`, `security_logs` `app_webhook_revoked` medium에 연동·직원·앱 id·사유·대리 접근 거짓), 직원 목록에 같은 사유, 그 토큰 호출 401 → 관리자 멈춤 200(잠금) → 직원 다시 켜기 403(`관리자가 멈춘 예약입니다…`)·직원 목록에 잠금·사유 → 관리자 잠금 풀기 200(예약은 멈춘 채) → 직원 다시 켜기 200 `active`, 보안 로그 `app_schedule_paused`·`app_schedule_unlocked`. 모두 기대대로였고 고칠 것은 없었다.
+- **하지 않은 것**: 브라우저로 관리자 화면을 열어 보지 않았다— Docker를 켜니 다른 프로젝트 컨테이너도 함께 떠 이 PC 메모리가 모자라 `next dev`가 두 번 메모리 부족으로 죽었다(위 실측은 화면 없이 라우트만). 운영 DB 0050 적용·배포는 2026-11-03(`dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`, `PRODUCTION_DEPLOYMENT.md`) — 로그인 화면 확인은 아직이다.
 
 ## 알려진 한계
 

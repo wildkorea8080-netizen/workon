@@ -11,7 +11,7 @@
 - 들어간 커밋: `815cdf4`(0049 배포 기록), `922bf2e` 관리자 통제(0050 — `/admin/app-automations`, 연동 회수·예약 멈춤·잠금 풀기, 탈퇴 때 예약 삭제·연동 회수), `3deae59` 연동 `Idempotency-Key`(0051).
 - **배포 전**: 운영 DB에 0050·0051 적용(`db:migrate -- 0050`, `-- 0051`). 확인: `app_webhooks.revoked_reason`·`app_schedules.admin_paused_at` 칸과 CHECK 둘, 색인 셋, `app_webhook_calls` RLS 켜짐·anon·authenticated 권한 없음, `app_webhook_claim`은 6인자 하나뿐이고 실행 권한 `service_role`(과 소유자 `postgres`)만, 없는 토큰 해시로 키 없이·키와 함께 부르면 둘 다 `invalid`. **적용 직후 아직 옛 코드(5717be2)가 돌던 운영 주소에 모르는 토큰을 보내 401** — 옛 4인자 호출이 새 함수에서 도는 것을 확인했다. 가지 Preview(`3deae59`) Ready를 확인한 뒤 `main`에 올렸다(로컬 `next build`도 통과).
 - 배포 뒤 확인: `/apps/webhooks`·`/apps/schedules` 200, `/admin/app-automations` 로그인 없이 `/login?error=unauthorized`로 307, 로그인 없는 `GET /api/admin/app-automations`·`PATCH …/webhooks/[id]`·`PATCH …/schedules/[id]` 401, `POST /api/apps/webhook` 모르는 토큰 401(키 없이·키와 함께), 꼴이 틀린 `Idempotency-Key` 400, 예약 실행기 비밀값 없이 401. 배포 뒤 pg_cron `workon-app-schedules` 12:20·12:25·12:30(UTC) succeeded·200.
-- **확인하지 못한 것**: 관리자 로그인 화면에서 목록·회수·멈춤(이 PC의 Docker Desktop이 켜지지 않아 로컬 스택도 못 띄움), 실제 토큰으로 같은 키를 두 번 보내 `Idempotent-Replayed`를 받는지.
+- 같은 날 밤 로컬 시험 Supabase(0051까지)에서 실제 라우트 처리기로 예약·연동 만들기 → 관리자 목록 → 같은 키 다시 보내기(`Idempotent-Replayed`) → 회수 → 멈춤·잠금·풀기를 끝까지 확인했다(`APP_AUTOMATION_ADMIN.md` 검증). **확인하지 못한 것**: 브라우저 화면(이 PC 메모리 부족으로 `next dev`가 죽음), 운영에서 실제 토큰 호출.
 
 ## 2026-11-03(저녁): 앱 외부 연동(Webhook, 0049)
 
