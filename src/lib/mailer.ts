@@ -182,3 +182,44 @@ export function budgetAlertMail(params: {
 export function sendBudgetAlertEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
   return sendMail(to, mail.subject, mail.html);
 }
+
+/** 입력형 앱 예약 실행 실패 안내의 글(보내지 않음 — 시험이 글을 본다). 입력값·결과 글은 싣지 않는다 */
+export function scheduleFailureMail(params: {
+  appName: string;
+  description: string;
+  error: string;
+  paused: boolean;
+  nextRunAt: string | null;
+  schedulesUrl: string;
+  failedAt: Date;
+}): { subject: string; html: string } {
+  const { appName, description, error, paused, nextRunAt, schedulesUrl, failedAt } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const rows: Array<[string, string]> = [
+    ['앱', appName],
+    ['예약', description],
+    ['실패 시각', `${kst(failedAt)} (한국 시간)`],
+    ['이유', error],
+  ];
+  if (!paused && nextRunAt) rows.push(['다음 실행', `${kst(new Date(nextRunAt))} (한국 시간)`]);
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  const next = paused
+    ? '이 예약은 멈췄습니다. 입력과 앱 설정을 확인한 뒤 예약 화면에서 다시 켜 주세요.'
+    : '다음 차례에 다시 실행합니다. 연속 3회 실패하면 예약을 멈추고 알립니다.';
+  return {
+    subject: paused ? `[${APP_NAME}] 앱 예약이 멈췄습니다 — ${appName}` : `[${APP_NAME}] 앱 예약 실행 실패 — ${appName}`,
+    html: layout(
+      paused ? `${appName} 예약 실행을 멈췄습니다` : `${appName} 예약 실행이 실패했습니다`,
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:15px;line-height:1.7">${escapeHtml(next)}</p>
+       ${button(schedulesUrl, '앱 예약 보기')}`
+    ),
+  };
+}
+
+/** 예약 실패 안내 한 통 — 예약한 직원에게만 */
+export function sendScheduleFailureEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}

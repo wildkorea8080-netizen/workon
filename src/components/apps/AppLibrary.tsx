@@ -68,7 +68,7 @@ export default function AppLibrary({ home = false }: { home?: boolean }) {
   return (
     <div className="app-library mx-auto max-w-[1320px] px-5 py-8 md:px-10 md:py-10">
       <p className="mb-3 text-[11px] font-bold tracking-[.18em] text-[#467b82]">{home ? 'YOUR DAILY WORKSPACE' : 'EXPLORE WORK APPS'}</p>
-      <div className="mb-4 flex flex-wrap justify-end gap-3"><Link href="/apps/history" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#087581]">앱 실행 기록</Link><Link href="/apps/builder" className="rounded-xl bg-[#087f8c] px-4 py-2.5 text-sm font-semibold text-white">+ 입력형 앱 만들기</Link></div>
+      <div className="mb-4 flex flex-wrap justify-end gap-3"><Link href="/apps/history" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#087581]">앱 실행 기록</Link><Link href="/apps/schedules" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-[#087581]">앱 예약</Link><Link href="/apps/builder" className="rounded-xl bg-[#087f8c] px-4 py-2.5 text-sm font-semibold text-white">+ 입력형 앱 만들기</Link></div>
       <PageTitle title={home ? '오늘 어떤 업무를 처리할까요?' : '업무 앱'} subtitle={home ? '자료를 넣고, 초안을 만들고, 근거를 검토해 결과 파일로 받으세요.' : '질문에 답하는 비서와 파일을 만드는 업무를 한곳에서 찾아보세요.'} action={home ? <Link href="/tasks" className="rounded-[10px] border border-[#003087] bg-white px-5 py-3 text-[15px] font-semibold text-[#003087]">내 작업 이어서 하기</Link> :
         <button type="button" onClick={() => setCreating(true)} className="rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white hover:bg-[#002070]">비서 만들기</button>
       } />
