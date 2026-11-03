@@ -2,10 +2,10 @@ import { readFileSync } from 'fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_TITLE_PREFIX,
-  bearerWebhookToken, parseWebhookCreate, webhookCurlExample, webhookView,
+  bearerWebhookToken, canonicalInputs, parseIdempotencyKey, parseWebhookCreate, webhookCurlExample, webhookView,
 } from '@/lib/apps/webhook-spec';
 import {
-  WEBHOOK_APP_CHANGED, WEBHOOK_DEPARTMENT_CHANGED, WEBHOOK_INVALID_TOKEN, WEBHOOK_USER_UNAVAILABLE,
+  REPLAYED_HEADER, WEBHOOK_APP_CHANGED, WEBHOOK_DEPARTMENT_CHANGED, WEBHOOK_IN_PROGRESS, WEBHOOK_INVALID_TOKEN, WEBHOOK_KEY_MISMATCH, WEBHOOK_USER_UNAVAILABLE,
   generateWebhookToken, handleWebhookCall, hashWebhookToken, type ClaimResult, type WebhookDeps,
 } from '@/lib/apps/webhooks';
 import type { RunAsOutcome } from '@/lib/apps/run-as';
@@ -18,11 +18,11 @@ function deps(outcome: RunAsOutcome | Error = { kind: 'completed', conversationI
   return {
     claim: vi.fn<WebhookDeps['claim']>(async () => claim),
     execute: vi.fn<WebhookDeps['execute']>(async () => { if (outcome instanceof Error) throw outcome; return outcome; }),
-    finish: vi.fn<WebhookDeps['finish']>(async () => {}), log: vi.fn<WebhookDeps['log']>(async () => {}), now: vi.fn<WebhookDeps['now']>(() => Date.parse('2026-11-03T00:00:00Z')),
+    finish: vi.fn<WebhookDeps['finish']>(async () => {}), recordCall: vi.fn<WebhookDeps['recordCall']>(async () => {}), log: vi.fn<WebhookDeps['log']>(async () => {}), now: vi.fn<WebhookDeps['now']>(() => Date.parse('2026-11-03T00:00:00Z')),
   } satisfies WebhookDeps;
 }
-const call = (d: WebhookDeps, body: unknown = { inputs: { title: '주간 보고' } }, auth: string | null = `Bearer ${token.token}`) =>
-  handleWebhookCall(d, { authorization: auth, bodyText: typeof body === 'string' ? body : JSON.stringify(body) });
+const call = (d: WebhookDeps, body: unknown = { inputs: { title: '주간 보고' } }, auth: string | null = `Bearer ${token.token}`, idempotencyKey: string | null = null) =>
+  handleWebhookCall(d, { authorization: auth, bodyText: typeof body === 'string' ? body : JSON.stringify(body), idempotencyKey });
 
 describe('토큰', () => {
   it('wo_wh_ + 43자, 해시는 SHA-256 16진 64자, 앞부분 12자만 화면에 — 매번 다르다', () => {
@@ -60,7 +60,7 @@ describe('handleWebhookCall — 상태 가르기', () => {
     const d = deps();
     const res = await call(d, { inputs: { title: '주간 보고', count: 3, urgent: true, memo: null } });
     expect(res).toEqual({ status: 200, body: { ok: true, data: { status: 'completed', conversation_id: 'c1' } } });
-    expect(d.claim).toHaveBeenCalledWith(token.hash, expect.any(Number));
+    expect(d.claim).toHaveBeenCalledWith(token.hash, expect.any(Number), undefined);
     expect(d.execute).toHaveBeenCalledWith(claimed, { title: '주간 보고', count: '3', urgent: 'true', memo: '' });
     expect(d.finish).toHaveBeenCalledWith('w1', expect.objectContaining({ last_status: 'completed', last_error: null, last_conversation_id: 'c1' }));
     expect(d.log).not.toHaveBeenCalled();
@@ -126,5 +126,69 @@ describe('0049·호출 라우트', () => {
     expect(sql).toContain('FROM PUBLIC, anon, authenticated'); expect(sql).toContain('TO service_role');
     const route = readFileSync('src/app/api/apps/webhook/route.ts', 'utf8');
     expect(route).toContain('maxDuration = 300'); expect(route).not.toMatch(/getServerAuthSession/);
+  });
+});
+
+describe('Idempotency-Key(0051)', () => {
+  it('머리글은 없으면 null, 영문·숫자·_.:- 1~100자만(앞뒤 공백 뗌). 입력 해시용 글은 키 순서와 무관하다', () => {
+    expect(parseIdempotencyKey(null)).toEqual({ ok: true, key: null });
+    expect(parseIdempotencyKey(' order-2026.11.03:42 ')).toEqual({ ok: true, key: 'order-2026.11.03:42' });
+    for (const bad of ['', '한글키', 'a b', 'x'.repeat(101), 'a/b']) expect(parseIdempotencyKey(bad).ok).toBe(false);
+    expect(canonicalInputs({ b: '2', a: '1' })).toBe(canonicalInputs({ a: '1', b: '2' }));
+    expect(canonicalInputs({ a: '1' })).not.toBe(canonicalInputs({ a: '2' }));
+    expect(webhookCurlExample('https://x.kr', token.token, {})).toContain('Idempotency-Key:');
+  });
+  it('키가 있으면 키와 입력 해시(키 순서 무관)를 차지에 넘기고, 완료 결과를 그 호출 기록에 남긴다. 꼴이 틀린 키는 차지 전에 400', async () => {
+    const d = deps(undefined, { ok: true, webhook: claimed, call_id: 'call1' });
+    await call(d, { inputs: { b: '2', a: '1' } }, undefined, 'key-1');
+    const first = d.claim.mock.calls[0][2]!;
+    expect(first.key).toBe('key-1'); expect(first.requestHash).toMatch(/^[0-9a-f]{64}$/);
+    await call(d, { inputs: { a: '1', b: '2' } }, undefined, 'key-1');
+    expect(d.claim.mock.calls[1][2]!.requestHash).toBe(first.requestHash);
+    expect(d.recordCall).toHaveBeenCalledWith('call1', { http_status: 200, conversation_id: 'c1', message: null });
+    // 키가 없으면 차지에 넘기지 않고 기록도 없다
+    const plain = deps();
+    await call(plain);
+    expect(plain.claim.mock.calls[0][2]).toBeUndefined(); expect(plain.recordCall).not.toHaveBeenCalled();
+    const bad = deps();
+    expect((await call(bad, undefined, undefined, '한글')).status).toBe(400); expect(bad.claim).not.toHaveBeenCalled();
+  });
+  it('다시 보내기: 완료는 처음 상태·대화 id를 200으로(replayed·머리글), 거절은 처음 상태·안내 그대로 — 실행하지 않는다', async () => {
+    const done = deps(undefined, { ok: false, reason: 'replay', call: { http_status: 200, conversation_id: 'c1', message: null } });
+    expect(await call(done, undefined, undefined, 'k')).toEqual({ status: 200, body: { ok: true, data: { status: 'completed', conversation_id: 'c1', replayed: true } }, headers: { [REPLAYED_HEADER]: 'true' } });
+    const rejected = deps(undefined, { ok: false, reason: 'replay', call: { http_status: 400, conversation_id: null, message: '제목은 필수입니다' } });
+    expect(await call(rejected, undefined, undefined, 'k')).toMatchObject({ status: 400, body: { error: { message: '제목은 필수입니다' } }, headers: { [REPLAYED_HEADER]: 'true' } });
+    const mismatch = deps(undefined, { ok: false, reason: 'key_mismatch' });
+    expect(await call(mismatch, undefined, undefined, 'k')).toMatchObject({ status: 422, body: { error: { message: WEBHOOK_KEY_MISMATCH } } });
+    const running = deps(undefined, { ok: false, reason: 'in_progress' });
+    expect(await call(running, undefined, undefined, 'k')).toMatchObject({ status: 409, body: { error: { message: WEBHOOK_IN_PROGRESS } }, headers: { 'Retry-After': '30' } });
+    for (const d of [done, rejected, mismatch, running]) { expect(d.execute).not.toHaveBeenCalled(); expect(d.recordCall).not.toHaveBeenCalled(); }
+  });
+  it('4xx 거절은 기록해 같은 키에 같은 응답을, 지나가는 실패(502·실행 오류·기관 한도 429)는 기록을 지워 같은 키로 다시 돌 수 있게', async () => {
+    const claim = { ok: true as const, webhook: claimed, call_id: 'call1' };
+    const rejected = deps({ kind: 'rejected', status: 400, message: '제목은 필수입니다' }, claim);
+    await call(rejected, undefined, undefined, 'k');
+    expect(rejected.recordCall).toHaveBeenCalledWith('call1', { http_status: 400, conversation_id: null, message: '제목은 필수입니다' });
+    for (const outcome of [{ kind: 'failed', error: '모델 오류', conversationId: 'c9' }, new Error('끊김'), { kind: 'rejected', status: 429, message: '한도' }] as Array<RunAsOutcome | Error>) {
+      const d = deps(outcome, claim);
+      await call(d, undefined, undefined, 'k');
+      expect(d.recordCall).toHaveBeenCalledWith('call1', null);
+    }
+    // 기록 저장이 실패해도 응답은 그대로 간다
+    const d = deps(undefined, claim); d.recordCall.mockRejectedValueOnce(new Error('db'));
+    expect((await call(d, undefined, undefined, 'k')).status).toBe(200);
+    expect(d.log.mock.calls.map(c => c[1])).toContain('앱 연동 호출 기록을 저장하지 못함');
+  });
+  it('0051: 입력값은 저장하지 않고 해시만, 키 꼴·짝 CHECK, RLS, 차지 함수는 6인자(기본값 NULL)로 바꾸고 service_role만', () => {
+    const sql = readFileSync('supabase/migrations/0051_app_webhook_idempotency.sql', 'utf8');
+    expect(sql).toContain("request_hash text NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$')");
+    expect(sql).not.toMatch(/\binputs\b\s+jsonb/);
+    expect(sql).toContain('UNIQUE (webhook_id, idempotency_key)');
+    expect(sql).toContain('ENABLE ROW LEVEL SECURITY');
+    expect(sql).toContain('DROP FUNCTION IF EXISTS public.app_webhook_claim(text, timestamptz, integer, integer);');
+    expect(sql).toContain('p_idempotency_key text DEFAULT NULL, p_request_hash text DEFAULT NULL');
+    expect(sql).toContain('TO service_role');
+    const route = readFileSync('src/app/api/apps/webhook/route.ts', 'utf8');
+    expect(route).toContain('request.headers.get(IDEMPOTENCY_HEADER)');
   });
 });

@@ -16,6 +16,24 @@ export const WEBHOOK_EXPIRY_DAYS = [30, 90, 365] as const;
 export const WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
 export const WEBHOOK_TITLE_PREFIX = '[연동] ';
 
+/** 재시도 중복 막기 머리글(0051). 같은 연동·같은 키는 24시간 동안 앱을 다시 돌리지 않고 처음 결과를 돌려준다 */
+export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
+export const IDEMPOTENCY_WINDOW_HOURS = 24;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_.:-]{1,100}$/;
+
+/** Idempotency-Key 머리글 — 없으면 null(키 없이 처리), 꼴이 틀리면 거절. 앞뒤 공백은 뗀다 */
+export function parseIdempotencyKey(header: string | null): { ok: true; key: string | null } | { ok: false; message: string } {
+  if (header === null) return { ok: true, key: null };
+  const key = header.trim();
+  if (!IDEMPOTENCY_KEY.test(key)) return { ok: false, message: `${IDEMPOTENCY_HEADER}는 영문·숫자·_.:- 1~100자여야 합니다.` };
+  return { ok: true, key };
+}
+
+/** 입력값을 키 순서대로 맞춘 JSON — 같은 내용이면 키 순서가 달라도 같은 글(해시는 서버가 낸다) */
+export function canonicalInputs(inputs: Record<string, string>): string {
+  return JSON.stringify(Object.keys(inputs).sort().map((key) => [key, inputs[key]]));
+}
+
 export type WebhookExpiryDays = (typeof WEBHOOK_EXPIRY_DAYS)[number];
 
 /** 만들기 요청의 이름·유효 기간. 틀리면 한국어 이유 */
@@ -67,5 +85,5 @@ export function webhookView(row: AppWebhookRowLike, appName: string | null, nowM
 /** 화면에 보일 호출 예시(토큰은 만든 직후 한 번만 보인다) */
 export function webhookCurlExample(origin: string, token: string, inputs: Record<string, string>): string {
   const body = JSON.stringify({ inputs }).replace(/'/g, "'\\''");
-  return `curl -X POST '${origin}/api/apps/webhook' \\\n  -H 'Authorization: Bearer ${token}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${body}'`;
+  return `curl -X POST '${origin}/api/apps/webhook' \\\n  -H 'Authorization: Bearer ${token}' \\\n  -H 'Content-Type: application/json' \\\n  -H '${IDEMPOTENCY_HEADER}: 요청마다-다른-값' \\\n  -d '${body}'`;
 }

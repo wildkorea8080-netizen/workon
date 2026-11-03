@@ -130,9 +130,11 @@ describe('POST /api/apps/webhook — 호출 라우트', () => {
   const callRoute = (headers: Record<string, string>, body = '{"inputs":{}}') => CALL(new Request('http://localhost/api/apps/webhook', { method: 'POST', headers, body }));
   it('Authorization·본문을 처리기에 그대로 넘기고 상태·머리글을 돌려준다', async () => {
     state.handlerResult = { status: 429, body: { ok: false, error: { message: '잠시' } }, headers: { 'Retry-After': '30' } };
-    const res = await callRoute({ Authorization: 'Bearer wo_wh_x' });
+    const res = await callRoute({ Authorization: 'Bearer wo_wh_x', 'Idempotency-Key': 'order-42' });
     expect(res.status).toBe(429); expect(res.headers.get('Retry-After')).toBe('30');
-    expect(state.handled[0]).toEqual({ authorization: 'Bearer wo_wh_x', bodyText: '{"inputs":{}}' });
+    expect(state.handled[0]).toEqual({ authorization: 'Bearer wo_wh_x', idempotencyKey: 'order-42', bodyText: '{"inputs":{}}' });
+    await callRoute({ Authorization: 'Bearer wo_wh_x' });
+    expect(state.handled[1]).toMatchObject({ idempotencyKey: null });
   });
   it('Content-Length가 상한을 넘으면 읽기 전에 413, 처리기가 던지면 500(원문 없이)', async () => {
     expect((await callRoute({ 'Content-Length': String(70 * 1024) })).status).toBe(413);

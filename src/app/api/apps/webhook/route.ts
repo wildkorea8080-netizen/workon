@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { handleWebhookCall, webhookDeps } from '@/lib/apps/webhooks';
-import { WEBHOOK_MAX_BODY_BYTES } from '@/lib/apps/webhook-spec';
+import { IDEMPOTENCY_HEADER, WEBHOOK_MAX_BODY_BYTES } from '@/lib/apps/webhook-spec';
 import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: { message: '보내는 내용이 너무 큽니다(64KB까지).' } }, { status: 413 });
   }
   try {
-    const result = await handleWebhookCall(webhookDeps(), { authorization: request.headers.get('authorization'), bodyText: await request.text() });
+    const result = await handleWebhookCall(webhookDeps(), { authorization: request.headers.get('authorization'), idempotencyKey: request.headers.get(IDEMPOTENCY_HEADER), bodyText: await request.text() });
     return NextResponse.json(result.body, { status: result.status, headers: result.headers });
   } catch (error) {
     await logSystem({ level: 'error', category: 'api', message: '앱 연동 호출 처리 실패', details: { error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' } });

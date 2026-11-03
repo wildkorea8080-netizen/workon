@@ -8,13 +8,16 @@
 // - **응답에는 앱의 결과 글을 싣지 않는다** — 상태와 대화 id만. 결과가 기관 밖 시스템으로 나가지 않게(보안성 검토에서 데이터 흐름을 늘리지 않는다).
 // - 같은 토큰은 60초에 한 번·하루 100번까지(`app_webhook_claim`이 행 잠금으로 원자적으로 본다). 재시도·동시 호출이 겹쳐도 한 번만 돈다.
 // - 무효 토큰(없음·회수·만료)은 모두 같은 401 — 어느 토큰이 있었는지 밖에 가르지 않는다.
+// - `Idempotency-Key` 머리글(0051)이 있으면 같은 연동·같은 키의 호출은 24시간 동안 앱을 다시 돌리지 않고 처음 응답(상태·대화 id·안내)을 돌려준다
+//   (`Idempotent-Replayed: true`). 같은 키로 다른 입력이면 422, 처음 호출이 아직 돌면 409. 다시 보내기는 간격·하루 상한·사용 횟수를 쓰지 않는다.
+//   지나가는 실패(5xx·기관 한도 429)는 기록하지 않아 같은 키로 다시 시도할 수 있다.
 import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
 import { defaultRunAsIo, runAppAs, type RunAsOutcome } from './run-as';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
-  bearerWebhookToken,
+  IDEMPOTENCY_HEADER, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
 } from './webhook-spec';
 
 export function hashWebhookToken(token: string): string {
@@ -27,13 +30,18 @@ export function generateWebhookToken(): { token: string; hash: string; prefix: s
 }
 
 export type ClaimedWebhook = { id: string; agent_id: string; user_id: string; department_id: string; organization_id: string; app_version: number };
+export type ReplayedCall = { http_status: number; conversation_id: string | null; message: string | null };
 export type ClaimResult =
-  | { ok: true; webhook: ClaimedWebhook }
-  | { ok: false; reason: 'invalid' | 'daily_limit' }
-  | { ok: false; reason: 'too_soon'; retry_after: number };
+  | { ok: true; webhook: ClaimedWebhook; call_id?: string | null }
+  | { ok: false; reason: 'invalid' | 'daily_limit' | 'key_mismatch' | 'in_progress' }
+  | { ok: false; reason: 'too_soon'; retry_after: number }
+  | { ok: false; reason: 'replay'; call: ReplayedCall };
+export type CallRecord = { http_status: number; conversation_id: string | null; message: string | null };
 
 export interface WebhookDeps {
-  claim(tokenHash: string, nowMs: number): Promise<ClaimResult>;
+  claim(tokenHash: string, nowMs: number, idempotency?: { key: string; requestHash: string }): Promise<ClaimResult>;
+  /** 키 있는 호출의 결과를 남긴다(null이면 지워 같은 키로 다시 시도할 수 있게 — 서버 쪽 실패) */
+  recordCall(callId: string, record: CallRecord | null): Promise<void>;
   execute(webhook: ClaimedWebhook, inputs: Record<string, string>): Promise<RunAsOutcome>;
   finish(id: string, patch: { last_status: 'completed' | 'failed'; last_error: string | null; last_conversation_id: string | null; updated_at: string }): Promise<void>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string | null): Promise<void>;
@@ -45,6 +53,9 @@ export type WebhookResponse = { status: number; body: Record<string, unknown>; h
 export const WEBHOOK_INVALID_TOKEN = '연동 토큰이 올바르지 않거나 회수·만료됐습니다.';
 export const WEBHOOK_APP_CHANGED = '앱 설정이 바뀌어 이 연동으로 실행할 수 없습니다. 앱 화면에서 연동을 다시 만들어 주세요.';
 export const WEBHOOK_USER_UNAVAILABLE = '연동을 만든 직원의 계정을 쓸 수 없습니다.';
+export const WEBHOOK_KEY_MISMATCH = `같은 ${IDEMPOTENCY_HEADER}로 다른 입력을 보냈습니다. 요청마다 새 키를 쓰세요.`;
+export const WEBHOOK_IN_PROGRESS = `같은 ${IDEMPOTENCY_HEADER} 요청을 아직 처리하고 있습니다. 잠시 뒤 같은 키로 다시 보내면 결과를 돌려받습니다.`;
+export const REPLAYED_HEADER = 'Idempotent-Replayed';
 export const WEBHOOK_DEPARTMENT_CHANGED = '연동을 만든 직원의 소속 부서가 바뀌었습니다. 연동을 다시 만들어 주세요.';
 
 const fail = (status: number, message: string, headers?: Record<string, string>): WebhookResponse => ({ status, body: { ok: false, error: { message } }, headers });
@@ -65,17 +76,23 @@ function readInputs(raw: unknown): Record<string, string> | null {
 }
 
 /** 호출 하나 처리 — 토큰 꼴 → 본문 → 차지(간격·하루 상한) → 실행 → 기록. 앱 결과 글은 응답에 싣지 않는다 */
-export async function handleWebhookCall(deps: WebhookDeps, request: { authorization: string | null; bodyText: string }): Promise<WebhookResponse> {
+export async function handleWebhookCall(deps: WebhookDeps, request: { authorization: string | null; bodyText: string; idempotencyKey?: string | null }): Promise<WebhookResponse> {
   const token = bearerWebhookToken(request.authorization);
   if (!token) return fail(401, WEBHOOK_INVALID_TOKEN);
+  const idem = parseIdempotencyKey(request.idempotencyKey ?? null);
+  if (!idem.ok) return fail(400, idem.message);
   if (Buffer.byteLength(request.bodyText, 'utf8') > WEBHOOK_MAX_BODY_BYTES) return fail(413, '보내는 내용이 너무 큽니다(64KB까지).');
   let parsed: unknown;
   try { parsed = request.bodyText ? JSON.parse(request.bodyText) : {}; } catch { return fail(400, '본문은 JSON이어야 합니다 — { "inputs": { "항목 키": "값" } }'); }
   const inputs = readInputs((parsed as { inputs?: unknown } | null)?.inputs ?? {});
   if (!inputs) return fail(400, 'inputs는 항목 키와 글·숫자 값의 객체여야 합니다.');
 
-  const claim = await deps.claim(hashWebhookToken(token), deps.now());
+  const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs), 'utf8').digest('hex') } : undefined;
+  const claim = await deps.claim(hashWebhookToken(token), deps.now(), idempotency);
   if (!claim.ok) {
+    if (claim.reason === 'replay') return replayResponse(claim.call);
+    if (claim.reason === 'key_mismatch') return fail(422, WEBHOOK_KEY_MISMATCH);
+    if (claim.reason === 'in_progress') return fail(409, WEBHOOK_IN_PROGRESS, { 'Retry-After': '30' });
     if (claim.reason === 'too_soon') return fail(429, `같은 연동은 ${WEBHOOK_MIN_INTERVAL_SECONDS}초에 한 번만 실행합니다. ${claim.retry_after}초 뒤 다시 보내 주세요.`, { 'Retry-After': String(claim.retry_after) });
     if (claim.reason === 'daily_limit') return fail(429, `이 연동은 하루 ${WEBHOOK_DAILY_LIMIT}번까지 실행합니다. 내일 다시 보내 주세요.`);
     return fail(401, WEBHOOK_INVALID_TOKEN);
@@ -103,16 +120,33 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
       updated_at: new Date(deps.now()).toISOString(),
     });
   } catch (error) { await deps.log('warning', '앱 연동 실행 결과를 저장하지 못함', { webhook_id: webhook.id, error: errorText(error) }, webhook.organization_id); }
+  if (claim.call_id) {
+    // 지나가는 실패(5xx·기관 한도 429)는 남기지 않는다 — 같은 키로 다시 시도하면 새로 돈다. 그 밖(완료·4xx)은 같은 키에 같은 응답을 돌려준다
+    const record: CallRecord | null = response.status >= 500 || response.status === 429 ? null : {
+      http_status: response.status, message,
+      conversation_id: outcome.kind === 'completed' ? outcome.conversationId : null,
+    };
+    try { await deps.recordCall(claim.call_id, record); }
+    catch (error) { await deps.log('warning', '앱 연동 호출 기록을 저장하지 못함', { webhook_id: webhook.id, error: errorText(error) }, webhook.organization_id); }
+  }
   // 입력값·결과 글은 남기지 않는다 — 연동 id·앱·상태만
   if (failed) await deps.log('warning', '앱 연동 실행 실패', { webhook_id: webhook.id, agent_id: webhook.agent_id, status: response.status, kind: outcome.kind }, webhook.organization_id);
   return response;
 }
 
+/** 같은 키의 처음 응답을 그대로 — 완료면 상태·대화 id, 거절이면 그 상태·안내 */
+function replayResponse(call: ReplayedCall): WebhookResponse {
+  const headers = { [REPLAYED_HEADER]: 'true' };
+  if (call.http_status === 200) return { status: 200, body: { ok: true, data: { status: 'completed', conversation_id: call.conversation_id, replayed: true } }, headers };
+  return fail(call.http_status, call.message ?? '처음 요청이 거절됐습니다.', headers);
+}
+
 export function webhookDeps(): WebhookDeps {
   return {
-    async claim(tokenHash, nowMs) {
+    async claim(tokenHash, nowMs, idempotency) {
       const { data, error } = await supabaseAdmin.rpc('app_webhook_claim', {
         p_token_hash: tokenHash, p_now: new Date(nowMs).toISOString(), p_min_interval_seconds: WEBHOOK_MIN_INTERVAL_SECONDS, p_daily_limit: WEBHOOK_DAILY_LIMIT,
+        p_idempotency_key: idempotency?.key ?? null, p_request_hash: idempotency?.requestHash ?? null,
       });
       if (error) throw new Error(`app_webhook_claim: ${error.message}`);
       return data as ClaimResult;
@@ -121,6 +155,12 @@ export function webhookDeps(): WebhookDeps {
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_webhooks').update(patch).eq('id', id);
       if (error) throw new Error(`app_webhooks finish: ${error.message}`);
+    },
+    async recordCall(callId, record) {
+      const { error } = record
+        ? await supabaseAdmin.from('app_webhook_calls').update({ status: 'done', ...record, updated_at: new Date().toISOString() }).eq('id', callId)
+        : await supabaseAdmin.from('app_webhook_calls').delete().eq('id', callId);
+      if (error) throw new Error(`app_webhook_calls: ${error.message}`);
     },
     log: (level, message, details, organizationId) => logSystem({ level, category: 'api', message, details, orgId: organizationId }),
     now: () => Date.now(),
