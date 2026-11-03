@@ -661,3 +661,33 @@ describe('재개 실행의 저장·과금', () => {
     expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 13, output_tokens: 7, app_reused_steps: 1 });
   });
 });
+
+describe('긴 첨부 나눠 읽기(맵) — 단계 앞에서 조각마다 추리고 원자료 자리에 넣는다', () => {
+  const appSteps = [{ name: '정리', instruction: '정리하세요.' }, { name: '검토', instruction: '검토하세요.' }];
+  const pieces = ['[{"file":"a.txt","text":"조각 하나 30명"}]', '[{"file":"a.txt","text":"조각 둘 40명"}]'];
+  it('조각 수만큼 모델을 먼저 부르고, 추린 글이 사용자 메시지에 덧붙어 단계로 가며, 기록·사용량에 남는다', async () => {
+    const a = adapter(); const seen: { system?: string; user: string }[] = [];
+    a.complete = async req => { seen.push({ system: req.system, user: String(req.messages.at(-1)?.content) }); return { text: req.system?.includes('자료 추리기') ? '추린 결과: 참석 30명' : '정리 결과', usage: { model: req.model, input_tokens: 3, output_tokens: 2 } }; };
+    setLlmAdapterForTests(a);
+    const t = turn({ appSteps, appStepInputs: { source: 'x' }, appMaterialPieces: { pieces, chars: 45_000 }, isNewConversation: false });
+    const events = await run(t);
+    // 추리기 2회 → 중간 단계 1회(마지막 단계는 스트림)
+    expect(seen.map(s => s.system?.includes('자료 추리기 (1/2)') || s.system?.includes('자료 추리기 (2/2)'))).toEqual([true, true, false]);
+    expect(seen[0].user).toContain('조각 하나 30명');
+    expect(seen[2].user).toContain('첨부 원자료 추림'); expect(seen[2].user).toContain('[조각 2/2]');
+    expect(events.filter(e => e.event === 'app_material').map(e => (e.data as { index: number }).index)).toEqual([0, 1]);
+    const refs = inserted('messages')[1].source_references as Record<string, unknown>;
+    expect(refs.app_material).toEqual({ pieces: 2, chars: 45_000 });
+    expect(JSON.stringify(refs)).not.toContain('추린 결과');
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 3 * 3 + 10, output_tokens: 2 * 3 + 5 });
+  });
+  it('추리기가 비면 단계를 시작하지 않고 중단으로 남긴다', async () => {
+    const a = adapter(); a.complete = async req => ({ text: '', usage: { model: req.model, input_tokens: 3, output_tokens: 2 } });
+    const streaming = vi.fn(a.stream); a.stream = streaming; setLlmAdapterForTests(a);
+    const events = await run(turn({ appSteps, appStepInputs: { source: 'x' }, appMaterialPieces: { pieces, chars: 45_000 }, isNewConversation: false }));
+    expect(streaming).not.toHaveBeenCalled();
+    expect(events.some(e => e.event === 'error' && String((e.data as { message: string }).message).includes('첨부를 줄여'))).toBe(true);
+    const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
+    expect(records.every(s => s.status !== 'completed')).toBe(true);
+  });
+});

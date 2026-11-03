@@ -12,6 +12,7 @@ import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
+import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
 import { isInputOnlyRun } from '@/lib/apps/resume';
 import { checkTokenLimit } from '@/lib/usage-limit';
 import { getAllowedModelIds } from '@/lib/model-policy';
@@ -314,16 +315,28 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   const appRecords: AppStepRecord[] = turn.appResumeRecords?.map(record => ({ ...record })) ?? (turn.appSteps ?? []).map(step => ({ name: step.name, status: 'pending' }));
   const savedInputs = isInputOnlyRun(Object.keys(turn.ctx.capabilities), turn.ctx.attachments.length) ? turn.appStepInputs : undefined;
   const updateStep = (index: number) => send({ event: 'app_step', data: { index, total: appRecords.length, step: { ...appRecords[index] } } });
+  // 모델을 한 번 더 부르기 전마다 기관 한도·모델 정책을 다시 본다 — 긴 첨부 추리기와 중간 단계가 같은 검사를 쓴다
+  const guard = async () => {
+    const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId);
+    const allowed = await getAllowedModelIds(turn.ctx.organizationId);
+    if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');
+  };
+  const appMaterial = turn.appMaterialPieces ? { pieces: turn.appMaterialPieces.pieces.length, chars: turn.appMaterialPieces.chars } : undefined;
   try {
+    // 긴 첨부 — 조각마다 추린 글을 원자료 자리(마지막 사용자 메시지·숫자 확인의 질문 글)에 덧붙인 뒤 단계로 간다
+    if (turn.appMaterialPieces) {
+      const digest = await digestPieces({
+        ...turn.appMaterialPieces, model: turn.modelId, system: turn.systemPrompt, usage: progress.usage, complete, guard,
+        update: (index, total) => send({ event: 'app_material', data: { index, total } }),
+      });
+      turn.messages = appendToLastUserMessage(turn.messages, digest);
+      turn.ctx.message += digest;
+    }
     const staged = turn.appSteps?.length ? await runAppIntermediateSteps({
       steps: turn.appSteps, records: appRecords, model: turn.modelId, system: turn.systemPrompt,
       inputs: turn.appStepInputs,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
-      guard: async () => {
-        const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId);
-        const allowed = await getAllowedModelIds(turn.ctx.organizationId);
-        if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');
-      },
+      guard,
     }) : null;
     result = await runToolLoop(
       {
@@ -357,7 +370,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
         await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
           userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',
           chunks: turn.chunks, links: [], files: [], attachments: [], agentVersion: turn.ctx.agentVersion,
-          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom }));
+          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appMaterial }));
       } catch { /* A failed persistence call must not suppress the SSE error or usage log. */ }
     }
     // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
@@ -374,7 +387,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       },
       orgId: turn.ctx.organizationId,
     });
-    send({ event: 'error', data: { message: friendlyLlmMessage(error) ?? GENERIC_TURN_ERROR } });
+    // 직원이 고칠 수 있는 입력 문제(긴 첨부 추리기 실패)는 그 글을 그대로 — 일반 안내로는 무엇을 줄여야 하는지 모른다
+    send({ event: 'error', data: { message: friendlyLlmMessage(error) ?? (error instanceof AppInputError ? error.message : GENERIC_TURN_ERROR) } });
     return;
   }
 
@@ -405,6 +419,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       appSteps: appRecords,
       appInputs: savedInputs,
       appResumeFrom: turn.appResumeFrom,
+      appMaterial,
       numberCheck,
       documentsSkipped: turn.documentsSkipped,
       verify,

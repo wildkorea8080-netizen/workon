@@ -24,11 +24,11 @@ import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
 import { loadHistory } from './history';
 import { validateAppDefinition, renderAppInput, appOutputInstruction, APP_MAX_FILES } from '@/lib/apps/definition';
-import { appAttachmentContext } from '@/lib/apps/attachment-context';
+import { appAttachmentMaterial } from '@/lib/apps/attachment-context';
 import { loadTurnExtract } from '@/lib/capabilities/attachment-access';
 import { restoreAppSteps, isInputOnlyRun } from '@/lib/apps/resume';
 import type { AppStepRecord } from '@/lib/apps/pipeline';
-import type { PrepareOutcome } from './types';
+import type { PrepareOutcome, PreparedTurn } from './types';
 
 type AgentRow = AgentAccessInfo & {
   app_definition: unknown;
@@ -256,11 +256,15 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   };
 
   let fileContext = '';
+  let appMaterialPieces: PreparedTurn['appMaterialPieces'];
   if (appStepInputs && sentIds.length) {
     try {
       const selected = attachments.filter(a => sentIds.includes(a.id));
       if (selected.length !== new Set(sentIds).size) throw new Error('첨부 목록을 확인하지 못했습니다. 다시 첨부해 주세요.');
-      fileContext = appAttachmentContext(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) }))));
+      const material = appAttachmentMaterial(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) }))));
+      // 긴 첨부는 조각으로 넘긴다 — 실행기(stream.ts)가 조각마다 추린 글을 사용자 메시지에 덧붙인다(모델 호출이라 여기서는 못 한다)
+      if (material.context !== undefined) fileContext = material.context;
+      else appMaterialPieces = { pieces: material.pieces, chars: material.chars };
       ctx.message = message + fileContext;
     } catch (failure) {
       if (isNewConversation) await discardNewConversation(conversationId, actor.userId);
@@ -284,6 +288,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     turn: {
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       appStepInputs,
+      appMaterialPieces,
       appResumeRecords,
       appResumeFrom,
       ctx,

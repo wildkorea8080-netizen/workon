@@ -16,6 +16,8 @@ export const MAX_OUTPUT_TOKENS = 4096;
  */
 export type TurnEvent =
   | { event: 'app_step'; data: { index: number; total: number; step: import('@/lib/apps/pipeline').AppStepRecord } }
+  /** 긴 첨부 나눠 읽기 — 조각 index를 추리는 중 */
+  | { event: 'app_material'; data: { index: number; total: number } }
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'tool_start'; data: { name: string; input: Record<string, unknown> } }
@@ -29,6 +31,8 @@ export type SendEvent = (event: TurnEvent) => void;
 export interface PreparedTurn {
   appSteps?: import('@/lib/apps/definition').AppStep[];
   appStepInputs?: Record<string, string>;
+  /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
+  appMaterialPieces?: { pieces: string[]; chars: number };
   appResumeRecords?: import('@/lib/apps/pipeline').AppStepRecord[];
   appResumeFrom?: string;
   ctx: TurnContext;

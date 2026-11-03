@@ -11,6 +11,8 @@ export interface MessageRowInput {
   appSteps?: import('@/lib/apps/pipeline').AppStepRecord[];
   appInputs?: Record<string, string>;
   appResumeFrom?: string;
+  /** 긴 첨부를 나눠 읽은 턴 — 조각 수와 원문 글자 수(추린 글·원문은 남기지 않는다) */
+  appMaterial?: { pieces: number; chars: number };
   conversationId: string;
   userId: string;
   userContent: string;
@@ -68,6 +70,7 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
         ...(input.appSteps?.length ? { app_steps: input.appSteps } : {}),
         ...(input.appSteps?.length && input.appInputs ? { app_inputs: input.appInputs } : {}),
         ...(input.appResumeFrom ? { app_resume_from: input.appResumeFrom } : {}),
+        ...(input.appMaterial ? { app_material: input.appMaterial } : {}),
         chunks: input.chunks.map((c) => ({
           documentId: c.documentId,
           documentTitle: c.documentTitle,
