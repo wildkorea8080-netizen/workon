@@ -5,12 +5,11 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { validateAppDefinition } from '@/lib/apps/definition';
 import { generateWebhookToken } from '@/lib/apps/webhooks';
-import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike } from '@/lib/apps/webhook-spec';
+import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS } from '@/lib/apps/webhook-spec';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const WEBHOOK_COLUMNS = 'id, agent_id, app_version, name, token_prefix, status, expires_at, revoked_at, last_used_at, use_count, last_status, last_error, last_conversation_id, created_at';
 type WebhookRow = AppWebhookRowLike & { agent: { name: string } | { name: string }[] | null };
 const agentName = (row: WebhookRow) => (Array.isArray(row.agent) ? row.agent[0]?.name : row.agent?.name) ?? null;
 

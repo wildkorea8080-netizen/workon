@@ -27,6 +27,7 @@ import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/apps/schedules/route';
 import { DELETE, PATCH } from '@/app/api/apps/schedules/[id]/route';
 import { PAUSED_BY_USER } from '@/lib/apps/schedule-spec';
+import { ADMIN_LOCKED_MESSAGE } from '@/lib/apps/automation-admin-spec';
 
 beforeEach(() => { state.session = true; state.actor = true; state.results = {}; state.calls = []; });
 
@@ -116,6 +117,23 @@ describe('PATCH·DELETE /api/apps/schedules/[id]', () => {
     expect((await patchReq('nope', { action: 'pause' })).status).toBe(400);
     state.results.app_schedules = [{ data: null }];
     expect((await patchReq(SCHEDULE, { action: 'pause' })).status).toBe(404);
+  });
+  it('관리자가 멈춘 예약(0050)은 직원이 켜지도 멈춤 사유를 덮지도 못하고(403, 바꾸지 않음), 바꾸기도 잠금 없는 행에만 건다', async () => {
+    for (const action of ['resume', 'pause']) {
+      state.calls = [];
+      state.results.app_schedules = [{ data: { ...scheduleRow({ status: 'paused', paused_reason: '관리자가 멈췄습니다 — 비용 점검', admin_paused_at: '2026-11-03T00:00:00Z' }), agent: { name: '앱' } } }];
+      const res = await json(await patchReq(SCHEDULE, { action }));
+      expect(res).toMatchObject({ status: 403, body: { error: { message: ADMIN_LOCKED_MESSAGE } } });
+      expect(state.calls.some(c => c[0] === 'app_schedules' && c[1] === 'update')).toBe(false);
+    }
+    // 읽은 뒤 관리자가 멈춰 조건부 바꾸기가 0행이면 같은 403
+    state.calls = [];
+    state.results.app_schedules = [{ data: { ...scheduleRow({ status: 'paused' }), agent: { name: '앱' } } }, { data: null }];
+    expect((await patchReq(SCHEDULE, { action: 'resume' })).status).toBe(403);
+    expect(state.calls).toContainEqual(['app_schedules', 'is', 'admin_paused_at', null]);
+    // 화면 보기에 잠금 표시가 실린다
+    state.results.app_schedules = [{ data: [{ ...scheduleRow({ status: 'paused', admin_paused_at: '2026-11-03T00:00:00Z' }), agent: { name: '앱' } }] }];
+    expect((await json(await GET())).body.data[0]).toMatchObject({ adminPaused: true, status: 'paused' });
   });
   it('지우기는 내 것만 지우고 없으면 404', async () => {
     const req = new NextRequest(`http://localhost/api/apps/schedules/${SCHEDULE}`, { method: 'DELETE' });

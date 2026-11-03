@@ -1,0 +1,167 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { parseAdminReason, type AdminAutomationList, type AdminScheduleView, type AdminWebhookView } from '@/lib/apps/automation-admin-spec';
+
+const kst = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—');
+
+const WEBHOOK_STATE: Record<AdminWebhookView['state'], { label: string; className: string }> = {
+  active: { label: '쓰는 중', className: 'bg-emerald-50 text-emerald-800' },
+  expired: { label: '만료', className: 'bg-slate-100 text-slate-600' },
+  revoked: { label: '회수함', className: 'bg-slate-100 text-slate-600' },
+};
+
+function scheduleState(s: AdminScheduleView): { label: string; className: string } {
+  if (s.adminPaused) return { label: '관리자가 멈춤', className: 'bg-red-50 text-red-800' };
+  if (s.status === 'paused') return { label: '멈춤', className: 'bg-amber-50 text-amber-900' };
+  if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, className: 'bg-amber-50 text-amber-900' };
+  return { label: '예약 중', className: 'bg-emerald-50 text-emerald-800' };
+}
+
+/** 사유를 받는다(취소하면 null). 규칙은 서버와 같은 parseAdminReason — 서버가 다시 본다 */
+function askReason(question: string): string | null {
+  const raw = window.prompt(`${question}\n\n사유(5자 이상)는 보안 로그에 남고 직원 화면에도 보입니다.`);
+  if (raw === null) return null;
+  const parsed = parseAdminReason(raw);
+  if (!parsed.ok) { window.alert(parsed.message); return null; }
+  return parsed.reason;
+}
+
+/** 관리자용 앱 예약·연동 현황 — 회수·멈춤·잠금 풀기 */
+export default function AppAutomationAdmin() {
+  const [data, setData] = useState<AdminAutomationList | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [onlyLive, setOnlyLive] = useState(true);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/app-automations', { cache: 'no-store' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) setError(body?.error?.message ?? '앱 예약·연동을 불러오지 못했습니다.');
+      else setData(body.data as AdminAutomationList);
+    } catch { setError('앱 예약·연동을 불러오지 못했습니다.'); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function act<T>(id: string, url: string, payload: Record<string, unknown>, apply: (item: T) => void) {
+    setBusy(id); setError(null);
+    try {
+      const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) setError(body?.error?.message ?? '처리하지 못했습니다.');
+      else apply(body.data as T);
+    } catch { setError('처리하지 못했습니다.'); }
+    setBusy(null);
+  }
+
+  function revoke(w: AdminWebhookView) {
+    const reason = askReason(`${w.ownerName}의 '${w.name}' 연동을 회수할까요? 이 토큰으로는 더 실행할 수 없고 되돌릴 수 없습니다.`);
+    if (!reason) return;
+    void act<AdminWebhookView>(w.id, `/api/admin/app-automations/webhooks/${encodeURIComponent(w.id)}`, { action: 'revoke', reason },
+      (item) => setData((d) => (d ? { ...d, webhooks: d.webhooks.map((x) => (x.id === item.id ? item : x)) } : d)));
+  }
+  function schedule(s: AdminScheduleView, action: 'pause' | 'unlock') {
+    const reason = askReason(action === 'pause'
+      ? `${s.ownerName}의 '${s.appName}' 예약(${s.description})을 멈출까요? 직원은 관리자가 잠금을 풀 때까지 다시 켜지 못합니다.`
+      : `${s.ownerName}의 '${s.appName}' 예약의 잠금을 풀까요? 예약은 멈춘 채로 남고 직원이 다시 켤 수 있게 됩니다.`);
+    if (!reason) return;
+    void act<AdminScheduleView>(s.id, `/api/admin/app-automations/schedules/${encodeURIComponent(s.id)}`, { action, reason },
+      (item) => setData((d) => (d ? { ...d, schedules: d.schedules.map((x) => (x.id === item.id ? item : x)) } : d)));
+  }
+
+  if (!data) return error ? <p role="alert" className="text-sm text-red-700">{error}</p> : <p role="status" className="text-sm text-slate-500">불러오는 중…</p>;
+  const webhooks = onlyLive ? data.webhooks.filter((w) => w.state === 'active') : data.webhooks;
+  const schedules = onlyLive ? data.schedules.filter((s) => s.status === 'active' || s.adminPaused) : data.schedules;
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
+          쓰는 연동·켜진 예약만 보기
+        </label>
+        <button type="button" onClick={() => void load()} className="text-sm text-[#003087]">새로고침</button>
+      </div>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {data.truncated && <p className="text-xs text-amber-700">항목이 많아 최근 것만 보입니다.</p>}
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">외부 시스템 연동(Webhook)</h2>
+        <p className="text-sm text-slate-500 mt-0.5 mb-3">외부 시스템이 이 토큰으로 직원 권한으로 앱을 실행합니다. 퇴사·유출·용도 종료 때 회수하세요.</p>
+        {webhooks.length ? (
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">연동</th><th className="px-3 py-2">앱</th><th className="px-3 py-2">직원·부서</th><th className="px-3 py-2">토큰</th>
+                  <th className="px-3 py-2">상태</th><th className="px-3 py-2">만료</th><th className="px-3 py-2 text-right">실행</th><th className="px-3 py-2">마지막 실행</th><th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {webhooks.map((w) => (
+                  <tr key={w.id} className="border-t border-slate-100 align-top">
+                    <td className="px-3 py-2 font-medium text-slate-900">{w.name}</td>
+                    <td className="px-3 py-2 text-slate-600">{w.appName}</td>
+                    <td className="px-3 py-2 text-slate-600">{w.ownerName}<br /><span className="text-xs text-slate-400">{w.departmentName ?? '—'}</span></td>
+                    <td className="px-3 py-2"><code className="text-xs">{w.tokenPrefix}…</code></td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${WEBHOOK_STATE[w.state].className}`}>{WEBHOOK_STATE[w.state].label}</span>
+                      {w.revokedReason && <p className="mt-1 max-w-xs text-xs text-slate-500">{w.revokedReason}</p>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{kst(w.expiresAt)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{w.useCount.toLocaleString('ko-KR')}</td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{kst(w.lastUsedAt)}{w.lastStatus === 'failed' ? ' · 실패' : ''}</td>
+                    <td className="px-3 py-2">{w.state === 'active' && <button type="button" disabled={busy === w.id} onClick={() => revoke(w)} className="rounded-lg border border-red-200 px-3 py-1 text-xs text-red-700 disabled:opacity-40">회수</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-sm text-slate-500">{onlyLive ? '쓰는 연동이 없습니다.' : '연동이 없습니다.'}</p>}
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">앱 예약</h2>
+        <p className="text-sm text-slate-500 mt-0.5 mb-3">직원이 저장한 입력으로 정해진 시각에 앱이 돕니다. 관리자가 멈추면 직원은 다시 켜지 못하고, 잠금을 풀면 직원이 다시 켤 수 있습니다.</p>
+        {schedules.length ? (
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">앱</th><th className="px-3 py-2">직원·부서</th><th className="px-3 py-2">일정</th><th className="px-3 py-2">상태</th>
+                  <th className="px-3 py-2">다음 실행</th><th className="px-3 py-2 text-right">실행</th><th className="px-3 py-2">마지막 실행</th><th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {schedules.map((s) => {
+                  const state = scheduleState(s);
+                  return (
+                    <tr key={s.id} className="border-t border-slate-100 align-top">
+                      <td className="px-3 py-2 font-medium text-slate-900">{s.appName}</td>
+                      <td className="px-3 py-2 text-slate-600">{s.ownerName}<br /><span className="text-xs text-slate-400">{s.departmentName ?? '—'}</span></td>
+                      <td className="px-3 py-2 text-slate-600">{s.description}</td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${state.className}`}>{state.label}</span>
+                        {s.status === 'paused' && s.pausedReason && <p className="mt-1 max-w-xs text-xs text-slate-500">{s.pausedReason}</p>}
+                      </td>
+                      <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{s.status === 'active' ? kst(s.nextRunAt) : '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{s.runCount.toLocaleString('ko-KR')}</td>
+                      <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{kst(s.lastRunAt)}</td>
+                      <td className="px-3 py-2">
+                        {s.adminPaused
+                          ? <button type="button" disabled={busy === s.id} onClick={() => schedule(s, 'unlock')} className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-700 disabled:opacity-40">잠금 풀기</button>
+                          : <button type="button" disabled={busy === s.id} onClick={() => schedule(s, 'pause')} className="rounded-lg border border-red-200 px-3 py-1 text-xs text-red-700 disabled:opacity-40">멈추기</button>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-sm text-slate-500">{onlyLive ? '켜진 예약이 없습니다.' : '예약이 없습니다.'}</p>}
+      </div>
+    </div>
+  );
+}

@@ -4,6 +4,7 @@ import { listUserFilePaths, removeUserFiles } from '@/lib/generated-files';
 import { listUserAttachmentPaths, removeUserAttachmentObjects } from '@/lib/attachments/store';
 import { softDeleteAgent } from '@/lib/agent-store';
 import { logSystem } from '@/lib/logger';
+import { WITHDRAWAL_REVOKED_REASON } from '@/lib/apps/automation-admin-spec';
 
 /**
  * 사용자 탈퇴 처리 — 슈퍼관리자 '계정 삭제'의 실제 동작 (0047).
@@ -16,6 +17,7 @@ import { logSystem } from '@/lib/logger';
  *   ① 생성 파일·채팅 첨부의 저장소 경로를 모은다 (대화를 지우면 generated_files·chat_attachments 행이 연쇄 삭제돼 경로를 잃는다)
  *   ② 대화를 지운다 → messages·generated_files·묶인 chat_attachments 연쇄 삭제. 대화에 안 묶인 첨부 행(pending·묘비)은
  *      user_id로 따로 지운다 — 사용자 행이 남는 탈퇴에서는 연쇄 삭제가 닿지 않는다
+ *      앱 예약(저장한 입력값이 든 개인 내용)은 지우고, 앱 연동 토큰은 회수 도장을 찍는다(행은 남긴다 — 외부 호출 기록의 귀속, 0050)
  *   ③ 개인 비서를 숨긴다 (softDeleteAgent — 비서 문서도 정리)
  *   ④ 행에 도장: deleted_at · is_active=false · 이메일을 비석 주소로 (같은 주소로 다시 가입할 수 있게)
  *   ⑤ DB가 끝난 뒤에야 저장소 파일을 지운다 — DB 단계가 실패하면 행은 남고 파일만 사라지면 안 된다
@@ -78,6 +80,15 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   // 대화에 안 묶인 첨부 행(보내지 않은 것·묘비) — 사용자 행은 남으므로 user_id로 직접 지운다
   const { error: attachError } = await supabaseAdmin.from('chat_attachments').delete().eq('user_id', userId);
   if (attachError) return dbFailure('첨부 삭제', userId, attachError);
+  // 앱 예약 — 저장한 입력값이 개인 내용이라 지운다. 앱 연동 — 외부 시스템이 더 부르지 못하게 회수한다(실행 때도 계정 검사가 막지만 '쓰는 중'으로 남지 않게)
+  const { error: scheduleError } = await supabaseAdmin.from('app_schedules').delete().eq('user_id', userId);
+  if (scheduleError) return dbFailure('앱 예약 삭제', userId, scheduleError);
+  const revokedAt = new Date().toISOString();
+  const { error: webhookError } = await supabaseAdmin.from('app_webhooks')
+    .update({ status: 'revoked', revoked_at: revokedAt, revoked_reason: WITHDRAWAL_REVOKED_REASON, updated_at: revokedAt })
+    .eq('user_id', userId)
+    .eq('status', 'active');
+  if (webhookError) return dbFailure('앱 연동 회수', userId, webhookError);
 
   // ③ 개인 비서. 실패해도 계속한다 — 개인 비서는 주인만 보는데 주인은 이제 로그인하지 못한다
   const { data: agents, error: agentsError } = await supabaseAdmin

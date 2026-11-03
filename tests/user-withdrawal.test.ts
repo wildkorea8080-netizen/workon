@@ -15,6 +15,10 @@ const state = {
   loadError: null as null | DbError,
   convError: null as null | DbError,
   attachError: null as null | DbError,
+  scheduleError: null as null | DbError,
+  webhookError: null as null | DbError,
+  webhookPatch: null as null | Record<string, unknown>,
+  webhookFilters: [] as unknown[][],
   agents: [] as { id: string }[],
   stampError: null as null | DbError,
   stampedRows: [{ id: 'u1' }] as { id: string }[],
@@ -38,6 +42,8 @@ vi.mock('@/lib/supabaseAdmin', () => {
       }
       if (table === 'conversations' && op === 'delete') return { error: state.convError };
       if (table === 'chat_attachments' && op === 'delete') return { error: state.attachError };
+      if (table === 'app_schedules' && op === 'delete') return { error: state.scheduleError };
+      if (table === 'app_webhooks' && op === 'update') { state.webhookFilters = filters; return { error: state.webhookError }; }
       if (table === 'agents' && op === 'select') {
         state.agentFilters = filters;
         return { data: state.agents, error: null };
@@ -50,7 +56,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
         return q;
       },
       update(patch: Record<string, unknown>) {
-        op = 'update'; state.updatePatch = patch; steps.push(`${table}.update`); return q;
+        op = 'update'; if (table === 'users') state.updatePatch = patch; else state.webhookPatch = patch; steps.push(`${table}.update`); return q;
       },
       delete() { op = 'delete'; steps.push(`${table}.delete`); return q; },
       eq(...args: unknown[]) { filters.push(['eq', ...args]); return q; },
@@ -102,6 +108,10 @@ beforeEach(() => {
     loadError: null,
     convError: null,
     attachError: null,
+    scheduleError: null,
+    webhookError: null,
+    webhookPatch: null,
+    webhookFilters: [],
     agents: [{ id: 'a1' }],
     stampError: null,
     stampedRows: [{ id: 'u1' }],
@@ -114,7 +124,7 @@ beforeEach(() => {
 });
 
 describe('withdrawUser — 순서', () => {
-  it('경로 수집(생성 파일·첨부) → 대화 삭제 → 안 묶인 첨부 행 삭제 → 개인 비서 → 행 도장 → 저장소 → Auth 순으로 간다', async () => {
+  it('경로 수집(생성 파일·첨부) → 대화 삭제 → 안 묶인 첨부 행 삭제 → 앱 예약 삭제·연동 회수 → 개인 비서 → 행 도장 → 저장소 → Auth 순으로 간다', async () => {
     const r = await withdrawUser('u1', 'admin1');
     expect(r).toEqual({ ok: true, before: { email: 'kim@gov.kr', full_name: '김주무관' } });
     expect(steps).toEqual([
@@ -123,6 +133,8 @@ describe('withdrawUser — 순서', () => {
       'listUserAttachmentPaths:u1',
       'conversations.delete',
       'chat_attachments.delete',
+      'app_schedules.delete',
+      'app_webhooks.update',
       'agents.select',
       'softDeleteAgent:a1:admin1',
       'users.update',
@@ -139,6 +151,24 @@ describe('withdrawUser — 순서', () => {
     expect(steps).not.toContain('users.update');
     expect(steps.some((s) => s.startsWith('removeUserFiles') || s.startsWith('removeUserAttachmentObjects'))).toBe(false);
     expect(steps.some((s) => s.startsWith('auth.deleteUser'))).toBe(false);
+  });
+
+  it('앱 예약은 지우고(저장한 입력값이 개인 내용) 쓰는 앱 연동은 탈퇴 사유와 함께 회수한다(0050)', async () => {
+    await withdrawUser('u1', 'admin1');
+    expect(state.webhookPatch).toMatchObject({ status: 'revoked', revoked_reason: '계정 탈퇴로 회수했습니다.' });
+    expect(typeof state.webhookPatch?.revoked_at).toBe('string');
+    expect(state.webhookFilters).toEqual([['eq', 'user_id', 'u1'], ['eq', 'status', 'active']]);
+  });
+
+  it('앱 예약 삭제나 연동 회수가 실패하면 500으로 멈추고 도장은 찍지 않는다(다시 시도할 수 있게)', async () => {
+    for (const key of ['scheduleError', 'webhookError'] as const) {
+      steps.length = 0;
+      state.scheduleError = null; state.webhookError = null;
+      state[key] = { message: 'down' };
+      expect(await withdrawUser('u1', 'admin1')).toMatchObject({ ok: false, status: 500 });
+      expect(steps).not.toContain('users.update');
+      expect(steps.some((s) => s.startsWith('auth.deleteUser'))).toBe(false);
+    }
   });
 
   it('사용자 행을 지우지 않는다 — 도장만 찍는다', async () => {

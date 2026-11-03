@@ -32,6 +32,7 @@ function Webhooks() {
     <div className="my-5 flex justify-end"><button type="button" disabled={loading} onClick={() => void load()} className="text-sm text-[#087581] disabled:opacity-40">새로고침</button></div>
     {loading ? <p role="status" className="py-10 text-center text-slate-500">연동을 불러오는 중…</p> : items.length ? <div className="space-y-4">{items.map(w => { const badge = STATE_LABEL[w.state]; return <Card key={w.id}>
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-[#087581]">{w.appName} · 앱 판 {w.appVersion}</p><h2 className="font-semibold">{w.name}</h2><p className="mt-2 text-xs text-slate-500">토큰 <code>{w.tokenPrefix}…</code> · {formatDateTime(w.expiresAt)}까지 · 실행 {w.useCount}회{w.lastUsedAt ? ` · 마지막 ${formatDateTime(w.lastUsedAt)}` : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
+      {w.state === 'revoked' && w.revokedReason && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">{w.revokedReason}</p>}
       {w.lastStatus === 'failed' && w.lastError && <p className="mt-3 text-xs leading-5 text-slate-600">마지막 실패 이유: {w.lastError}</p>}
       <div className="mt-5 flex flex-wrap gap-3">
         {w.state === 'active' && <button type="button" disabled={busy === w.id} onClick={() => void revoke(w)} className="rounded-xl border border-red-200 px-4 py-2 text-sm text-red-700 disabled:opacity-40">회수</button>}

@@ -79,6 +79,9 @@ const ACTION_LABEL: Record<string, string> = {
 
 const SECURITY_LABEL: Record<string, string> = {
   query_revealed: '질문 원문 열람',
+  app_webhook_revoked: '앱 연동 회수(관리자)',
+  app_schedule_paused: '앱 예약 멈춤(관리자)',
+  app_schedule_unlocked: '앱 예약 잠금 풀기(관리자)',
   forbidden_word: '금지어 감지',
   personal_info: '개인정보 패턴 감지',
   blocked_upload: '업로드 차단',

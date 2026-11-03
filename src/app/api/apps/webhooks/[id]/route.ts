@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { webhookView, type AppWebhookRowLike } from '@/lib/apps/webhook-spec';
+import { webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS } from '@/lib/apps/webhook-spec';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const WEBHOOK_COLUMNS = 'id, agent_id, app_version, name, token_prefix, status, expires_at, revoked_at, last_used_at, use_count, last_status, last_error, last_conversation_id, created_at';
 
 /** 연동 회수 — 내 것만. 행은 지우지 않고 회수 도장을 찍는다(사용 기록이 남게). 이미 회수된 연동도 그대로 성공 */
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {

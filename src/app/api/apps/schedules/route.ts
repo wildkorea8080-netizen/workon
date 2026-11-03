@@ -4,12 +4,11 @@ import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { renderAppInput, validateAppDefinition } from '@/lib/apps/definition';
-import { APP_MAX_SCHEDULES_PER_USER, nextRunAt, parseScheduleSpec, scheduleView, type AppScheduleRowLike } from '@/lib/apps/schedule-spec';
+import { APP_MAX_SCHEDULES_PER_USER, nextRunAt, parseScheduleSpec, scheduleView, type AppScheduleRowLike, SCHEDULE_COLUMNS } from '@/lib/apps/schedule-spec';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at';
 type ScheduleRow = AppScheduleRowLike & { agent: { name: string } | { name: string }[] | null };
 const agentName = (row: ScheduleRow) => (Array.isArray(row.agent) ? row.agent[0]?.name : row.agent?.name) ?? null;
 

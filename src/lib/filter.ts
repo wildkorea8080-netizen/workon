@@ -8,7 +8,11 @@ export type SecurityEventType =
   | 'suspicious_content'
   | 'rate_limit_exceeded'
   /** 관리자가 감사 화면에서 직원 질문 원문을 열람함 (D1) */
-  | 'query_revealed';
+  | 'query_revealed'
+  /** 관리자가 직원의 앱 연동을 회수함 / 예약을 멈춤(잠금) / 잠금을 풂 (0050) */
+  | 'app_webhook_revoked'
+  | 'app_schedule_paused'
+  | 'app_schedule_unlocked';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(
