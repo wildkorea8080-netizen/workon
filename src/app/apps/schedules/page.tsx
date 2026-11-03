@@ -3,15 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, formatDateTime } from '@/lib/work/client';
-import { APP_MAX_SCHEDULES_PER_USER, type AppScheduleView } from '@/lib/apps/schedule-spec';
-
-/** 예약 한 줄의 상태 칩 — 멈춤 > 지연 > 마지막 실패 > 활성 */
-export function scheduleBadge(s: AppScheduleView): { label: string; tone: 'neutral' | 'warn' | 'ok' | 'busy' | 'bad' } {
-  if (s.status === 'paused') return { label: '멈춤', tone: 'warn' };
-  if (s.overdue) return { label: '실행 지연', tone: 'bad' };
-  if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, tone: 'warn' };
-  return { label: '예약 중', tone: 'ok' };
-}
+import { APP_MAX_SCHEDULES_PER_USER, scheduleBadge, type AppScheduleView } from '@/lib/apps/schedule-spec';
 
 function Schedules() {
   const [items, setItems] = useState<AppScheduleView[]>([]); const [loading, setLoading] = useState(true);

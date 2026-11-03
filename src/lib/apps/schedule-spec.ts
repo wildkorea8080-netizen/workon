@@ -122,3 +122,11 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
     createdAt: row.created_at,
   };
 }
+
+/** 예약 한 줄의 상태 칩 — 멈춤 > 지연 > 마지막 실패 > 활성 */
+export function scheduleBadge(s: AppScheduleView): { label: string; tone: 'neutral' | 'warn' | 'ok' | 'busy' | 'bad' } {
+  if (s.status === 'paused') return { label: '멈춤', tone: 'warn' };
+  if (s.overdue) return { label: '실행 지연', tone: 'bad' };
+  if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, tone: 'warn' };
+  return { label: '예약 중', tone: 'ok' };
+}
