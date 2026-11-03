@@ -14,9 +14,9 @@ import WorkspaceIcon from './WorkspaceIcon';
  */
 const NAV = [
   { href: '/', icon: 'home', label: '업무 홈', match: (p: string) => p === '/' },
-  { href: '/apps', icon: 'apps', label: '업무 앱', match: (p: string) => p.startsWith('/apps') && !p.startsWith('/apps/history') && !p.startsWith('/apps/schedules') },
+  { href: '/apps', icon: 'apps', label: '업무 앱', match: (p: string) => p.startsWith('/apps') && !p.startsWith('/apps/history') && !p.startsWith('/apps/schedules') && !p.startsWith('/apps/webhooks') },
   { href: '/apps/history', icon: 'tasks', label: '앱 실행 기록', match: (p: string) => p.startsWith('/apps/history') },
-  { href: '/apps/schedules', icon: 'tasks', label: '앱 예약', match: (p: string) => p.startsWith('/apps/schedules') },
+  { href: '/apps/schedules', icon: 'tasks', label: '앱 예약·연동', match: (p: string) => p.startsWith('/apps/schedules') || p.startsWith('/apps/webhooks') },
   { href: '/assistants', icon: 'assistant', label: '업무 비서', match: (p: string) => p.startsWith('/assistants') },
   { href: '/tasks', icon: 'tasks', label: '내 작업함', match: (p: string) => p.startsWith('/tasks') },
   { href: '/files', icon: 'files', label: '결과물', match: (p: string) => p.startsWith('/files') },

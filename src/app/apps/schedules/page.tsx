@@ -27,7 +27,7 @@ function Schedules() {
     setBusy(null);
   }
   return <div className="mx-auto max-w-6xl px-5 py-9 md:px-9">
-    <PageTitle title="앱 예약" subtitle={`저장한 입력으로 입력형 앱을 정해진 시각(한국 시간)에 자동 실행합니다. 결과는 앱 실행 기록에 [예약] 제목으로 남습니다. 한 사람당 ${APP_MAX_SCHEDULES_PER_USER}개까지.`} action={<Link href="/apps" className="text-sm font-semibold text-[#087581]">업무 앱으로</Link>} />
+    <PageTitle title="앱 예약" subtitle={`저장한 입력으로 입력형 앱을 정해진 시각(한국 시간)에 자동 실행합니다. 결과는 앱 실행 기록에 [예약] 제목으로 남습니다. 한 사람당 ${APP_MAX_SCHEDULES_PER_USER}개까지.`} action={<span className="flex gap-4"><Link href="/apps/webhooks" className="text-sm font-semibold text-[#087581]">앱 연동</Link><Link href="/apps" className="text-sm font-semibold text-[#087581]">업무 앱으로</Link></span>} />
     <ErrorNote message={error} />
     <div className="my-5 flex justify-end"><button type="button" disabled={loading} onClick={() => void load()} className="text-sm text-[#087581] disabled:opacity-40">새로고침</button></div>
     {loading ? <p role="status" className="py-10 text-center text-slate-500">예약을 불러오는 중…</p> : items.length ? <div className="space-y-4">{items.map(s => { const badge = scheduleBadge(s); return <Card key={s.id}>

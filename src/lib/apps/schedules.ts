@@ -10,14 +10,11 @@
 //   다음 차례에 다시 하고, 연속 3회 실패하면 멈춘다. 실패·멈춤은 예약한 직원에게 메일로 알린다(메일이 설정돼 있을 때 — 주소는 기록에 남기지 않는다).
 // - 파일 입력은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 실행기는 `/api/cron/app-schedules`(CRON_SECRET)이고 pg_cron이 5분마다 부른다.
 //   Vercel Hobby 예약 작업은 하루 한 번·2개까지라 쓰지 않는다 — docs/benchmarks/allganize/APP_SCHEDULES.md.
-import type { Session } from 'next-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
 import { isMailConfigured, scheduleFailureMail, sendScheduleFailureEmail } from '@/lib/mailer';
-import { prepareTurn } from '@/lib/assistant/prepare';
-import { streamTurn } from '@/lib/assistant/stream';
-import type { PrepareOutcome, PreparedTurn, SendEvent } from '@/lib/assistant/types';
+import { defaultRunAsIo, runAppAs, type RunAsIo } from './run-as';
 import { describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
 
 export const SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
@@ -126,66 +123,25 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
   return result;
 }
 
-type ScheduleUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
-
-export interface ExecuteIo {
-  loadUser(userId: string): Promise<ScheduleUser | null>;
-  prepare(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome>;
-  stream(turn: PreparedTurn, send: SendEvent): Promise<void>;
-  /** 대화 제목 앞에 `[예약] `을 붙인다(실행 기록에서 예약 실행을 가르게) */
-  retitle(conversationId: string): Promise<void>;
-}
+/** 예약 실행의 바깥 입출력 — 공용 `runAppAs`와 같다(시험이 바꿔 끼운다) */
+export type ExecuteIo = RunAsIo;
 
 /**
- * 예약 하나를 그 직원으로 실행한다. 거절 상태 403·404(앱을 쓸 수 없음)·409(앱 판 바뀜)는 '멈춤', 그 밖(한도 429·검사 400·모델 오류)은 '실패'.
- * 스트림의 `error` 이벤트가 하나라도 오면 실패다 — 저장은 실행기가 이미 했다
+ * 예약 하나를 그 직원으로 실행한다(`run-as.ts`). 거절 상태 403·404(앱을 쓸 수 없음)·409(앱 판 바뀜)와 계정·부서 문제는 '멈춤',
+ * 그 밖(한도 429·검사 400·모델 오류)은 '실패'. 스트림의 `error` 이벤트가 하나라도 오면 실패다 — 저장은 실행기가 이미 했다
  */
-export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultExecuteIo()): Promise<ScheduleOutcome> {
-  const user = await io.loadUser(row.user_id);
-  if (!user || user.is_active === false || user.deleted_at) return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
-  if (!user.department_id || user.department_id !== row.department_id) return { kind: 'pause', reason: PAUSED_DEPARTMENT_CHANGED };
-  const session = {
-    user: { id: user.id, email: user.email ?? undefined, role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: user.department_id },
-    expires: new Date(Date.now() + 5 * 60_000).toISOString(),
-  } as Session;
-  const prepared = await io.prepare(session, { agent_id: row.agent_id, message: '앱 실행', app_inputs: row.inputs, app_version: row.app_version });
-  if (!prepared.ok) {
-    if (prepared.status === 409) return { kind: 'pause', reason: PAUSED_APP_CHANGED };
-    if (prepared.status === 403 || prepared.status === 404) return { kind: 'pause', reason: PAUSED_APP_UNAVAILABLE };
-    return { kind: 'failed', error: prepared.message };
+export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultRunAsIo()): Promise<ScheduleOutcome> {
+  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs }, SCHEDULE_TITLE_PREFIX, io);
+  switch (outcome.kind) {
+    case 'completed': return { kind: 'completed', conversationId: outcome.conversationId };
+    case 'user_unavailable': return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
+    case 'department_changed': return { kind: 'pause', reason: PAUSED_DEPARTMENT_CHANGED };
+    case 'rejected':
+      if (outcome.status === 409) return { kind: 'pause', reason: PAUSED_APP_CHANGED };
+      if (outcome.status === 403 || outcome.status === 404) return { kind: 'pause', reason: PAUSED_APP_UNAVAILABLE };
+      return { kind: 'failed', error: outcome.message };
+    case 'failed': return { kind: 'failed', error: outcome.error, conversationId: outcome.conversationId };
   }
-  let conversationId: string | null = null; let error: string | null = null; let done = false;
-  try {
-    await io.stream(prepared.turn, (event) => {
-      if (event.event === 'meta') conversationId = event.data.conversation_id;
-      else if (event.event === 'error') error = error ?? event.data.message;
-      else if (event.event === 'done') done = true;
-    });
-  } catch (failure) { error = error ?? errorText(failure); }
-  if (error) return { kind: 'failed', error, conversationId };
-  if (!done) return { kind: 'failed', error: '응답이 끝나지 않았습니다.', conversationId };
-  if (conversationId) {
-    try { await io.retitle(conversationId); } catch { /* 제목은 표시일 뿐 — 실행 결과를 바꾸지 않는다 */ }
-  }
-  return { kind: 'completed', conversationId };
-}
-
-export function defaultExecuteIo(): ExecuteIo {
-  return {
-    async loadUser(userId) {
-      const { data, error } = await supabaseAdmin.from('users').select('id, email, role, department_id, is_active, deleted_at').eq('id', userId).maybeSingle();
-      if (error) throw new Error(`users: ${error.message}`);
-      return (data as ScheduleUser | null) ?? null;
-    },
-    prepare: prepareTurn,
-    stream: (turn, send) => streamTurn(turn, send),
-    async retitle(conversationId) {
-      const { data } = await supabaseAdmin.from('conversations').select('title').eq('id', conversationId).maybeSingle();
-      const title: string = data?.title ?? '';
-      if (title.startsWith(SCHEDULE_TITLE_PREFIX)) return;
-      await supabaseAdmin.from('conversations').update({ title: `${SCHEDULE_TITLE_PREFIX}${title || '앱 실행'}`.slice(0, 200) }).eq('id', conversationId);
-    },
-  };
 }
 
 export function scheduleDeps(): ScheduleDeps {

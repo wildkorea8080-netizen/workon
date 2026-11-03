@@ -163,7 +163,7 @@ describe('executeSchedule — 예약한 직원의 권한으로 대화 실행기�
     const [session, body] = fake.prepare.mock.calls[0];
     expect(session.user).toMatchObject({ id: 'u1', role: 'USER', departmentId: 'd1' });
     expect(body).toEqual({ agent_id: 'a1', message: '앱 실행', app_inputs: { title: '주간 보고' }, app_version: 3 });
-    expect(fake.retitle).toHaveBeenCalledWith('c1');
+    expect(fake.retitle).toHaveBeenCalledWith('c1', SCHEDULE_TITLE_PREFIX);
     expect(SCHEDULE_TITLE_PREFIX).toBe('[예약] ');
     const admin = io({ loadUser: vi.fn(async () => ({ ...user, role: 'ADMIN' })) });
     await executeSchedule(row(), admin);
