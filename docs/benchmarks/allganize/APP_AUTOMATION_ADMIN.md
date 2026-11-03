@@ -52,7 +52,7 @@
 - `tests/user-withdrawal.test.ts`: 탈퇴 순서에 예약 삭제·연동 회수, 실패하면 도장 전에 멈춤.
 - `tests/app-automation-admin-db.test.ts`(3, 시험 DB): 다시 적용 안전, 회수 사유 CHECK, 잠금 CHECK·직원 조건부 다시 켜기 0행·풀면 1행.
 - 전체 Vitest 139파일 2,409개 통과(시험 DB 포함), tsc 0, `next build` 통과.
-- **하지 않은 것**: 브라우저로 관리자 화면을 열어 보지 않았다(이 PC의 Docker Desktop이 켜지지 않아 로컬 Supabase 스택을 못 띄움). PostgREST의 `owner:users(…)`·`agent:agents(…)` 이어 읽기는 실제 Supabase에서 확인하지 않았다(외래 키가 하나뿐이라 모호하지 않다). 운영 DB 0050 적용·배포 전.
+- **하지 않은 것**: 브라우저로 관리자 화면을 열어 보지 않았다(이 PC의 Docker Desktop이 켜지지 않아 로컬 Supabase 스택을 못 띄움). PostgREST의 `owner:users(…)`·`agent:agents(…)` 이어 읽기는 실제 Supabase에서 확인하지 않았다(외래 키가 하나뿐이라 모호하지 않다). 운영 DB 0050 적용·배포는 2026-11-03(`dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`, `PRODUCTION_DEPLOYMENT.md`) — 로그인 화면 확인은 아직이다.
 
 ## 알려진 한계
 
