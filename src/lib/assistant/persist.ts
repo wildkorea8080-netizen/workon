@@ -90,6 +90,8 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           // 공통 자료실 조각(S5) — 화면이 '[공통]'과 기준 연도를 보인다. 비서 조각에는 없어 JSON에서 빠진다
           scope: c.scope,
           editionYear: c.editionYear,
+          // 비서 문서의 시행일(0055) — 어느 판을 근거로 답했는지. 없으면 JSON에서 빠진다
+          effectiveFrom: c.effectiveFrom,
         })),
         links: dedupeLinks(input.links),
         files: input.files,

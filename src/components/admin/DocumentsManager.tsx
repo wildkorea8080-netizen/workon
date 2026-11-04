@@ -8,6 +8,7 @@ import {
 } from '@/lib/file-types';
 import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
+import { isInForce, kstToday } from '@/lib/edition-dates';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -15,11 +16,17 @@ export function replaceCandidates(docs: Document[], agentIds: string[]): Documen
   return docs.filter((d) => d.agent_id === agentIds[0] && !d.retired_at && d.noda_status !== 'retired' && d.noda_status !== 'deleting');
 }
 
-/** 새 판 줄의 안내 — 옛 판을 이미 내렸는지, 읽히면 내릴지 */
-export function editionNote(doc: Document, docs: Document[]): string {
+/** 새 판 줄의 안내 — 옛 판을 이미 내렸는지, 읽히면 내릴지, 시행일을 기다리는지 */
+export function editionNote(doc: Document, docs: Document[], today: string = kstToday()): string {
   const old = docs.find((d) => d.id === doc.replaces_id);
   const name = old ? old.title || old.file_name : '옛 판';
   if (old?.noda_status === 'retired') return `← ‘${name}’을(를) 대신합니다(옛 판은 지난 판).`;
+  // 시행일 전 — 새 판이 읽혔어도 그날까지는 옛 판이 근거다(document-editions.ts notCitableEditionIds)
+  if (!isInForce(doc.effective_from, today)) {
+    return doc.noda_status === 'ready'
+      ? `← ‘${name}’을(를) 대신할 새 판 — 시행일(${doc.effective_from})까지는 옛 판을 근거로 쓰고, 그날부터 새 판으로 바꿉니다.`
+      : `← ‘${name}’을(를) 대신할 새 판 — 다 읽히면 시행일(${doc.effective_from})에 옛 판을 지난 판으로 내립니다.`;
+  }
   if (doc.noda_status === 'ready') return `← ‘${name}’을(를) 대신합니다 — 옛 판을 내리는 중입니다(그동안에도 옛 판은 근거로 쓰지 않습니다).`;
   return `← ‘${name}’을(를) 대신할 새 판 — 다 읽히면 옛 판을 지난 판으로 내립니다.`;
 }
@@ -395,7 +402,7 @@ export default function DocumentsManager() {
                 onChange={(e) => setUploadForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))}
                 className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-normal"
               />
-              <span className="mt-1 block text-xs font-normal text-slate-500">목록에 표시만 합니다(시행일에 맞춰 자동으로 바꾸지는 않습니다).</span>
+              <span className="mt-1 block text-xs font-normal text-slate-500">바꿀 옛 판을 고르고 시행일을 오늘 뒤로 적으면, 그날까지는 옛 판을 근거로 쓰고 시행일부터 새 판으로 바꿉니다. 그 밖에는 목록과 근거 창에 표시합니다.</span>
             </label>
           </div>
 

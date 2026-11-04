@@ -14,6 +14,7 @@ import {
   type NodaSource,
 } from '@/lib/noda';
 import type { NodaStatus, RetrievedChunk } from '@/lib/db';
+import { kstToday, notCitableEditionIds } from '@/lib/edition-dates';
 import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-types';
 import type { Capability, PreflightResult } from './types';
 import {
@@ -54,6 +55,8 @@ export interface AgentDocument {
   noda_status: NodaStatus | null;
   /** 이 문서가 대신하는 옛 판(0055). `ready`인 새 판이 가리키는 옛 판은 근거로 치지 않는다 */
   replaces_id?: string | null;
+  /** 시행일(0055). 옛 판을 가리키는 새 판은 이 날(KST)부터 근거다 — 그 전에는 옛 판이 근거 */
+  effective_from?: string | null;
 }
 
 export interface DocSearchDeps {
@@ -83,7 +86,7 @@ const defaultDeps: DocSearchDeps = {
     // 비서당 문서는 50개가 상한(MAX_AGENT_DOCUMENTS)이라 API 상한(1,000행)에 닿지 않는다 — 매 대화마다 도는 길이라 개수 조회 없이 한 번만
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, title, file_name, noda_status, replaces_id')
+      .select('id, title, file_name, noda_status, replaces_id, effective_from')
       .eq('agent_id', agentId)
       .order('id')
       .limit(1000);
@@ -220,13 +223,13 @@ export function isCleanMatch(m: SourceMatch): boolean {
 export function sourcesToChunks(
   sources: NodaSource[],
   docs: AgentDocument[],
-  passages: Map<number, string> = new Map()
+  passages: Map<number, string> = new Map(),
+  today: string = kstToday()
 ): SourceMatch {
   const byId = new Map(docs.map((d) => [d.id.toLowerCase(), d]));
-  // 새 판이 읽힌(`ready`) 옛 판 — 판 바꾸기(사본 지우기)가 끝나기 전에도 근거가 아니다(공통 자료실의 citableCommonIds와 같은 규칙)
-  const replaced = new Set(
-    docs.filter((d) => d.noda_status === 'ready' && typeof d.replaces_id === 'string' && d.replaces_id).map((d) => (d.replaces_id as string).toLowerCase())
-  );
+  // 판과 시행일로 근거가 아닌 문서(document-editions.ts) — 시행 중인 `ready` 새 판이 대신하는 옛 판(판 바꾸기가 끝나기 전에도),
+  // 그리고 시행일 전인 새 판(그때까지는 옛 판이 근거). 공통 자료실의 citableCommonIds와 같은 규칙에 시행일을 더했다
+  const replaced = notCitableEditionIds(docs, today);
   const match: SourceMatch = { chunks: [], unknown: [], unparsable: [], malformed: 0, superseded: 0 };
   const chunks = match.chunks;
   for (const source of sources) {
@@ -250,14 +253,15 @@ export function sourcesToChunks(
       continue;
     }
 
-    chunks.push(
-      chunkFromSource(source, {
-        documentId: doc.id,
-        documentTitle: doc.title || doc.file_name,
-        chunkIndex: chunks.length,
-        passages,
-      })
-    );
+    const chunk = chunkFromSource(source, {
+      documentId: doc.id,
+      documentTitle: doc.title || doc.file_name,
+      chunkIndex: chunks.length,
+      passages,
+    });
+    // 시행일이 적힌 문서는 근거 창에 '시행 YYYY-MM-DD'를 보인다(어느 판을 근거로 답했는지). 없으면 칸을 두지 않는다
+    const effective = typeof doc.effective_from === 'string' ? doc.effective_from.slice(0, 10) : '';
+    chunks.push(/^\d{4}-\d{2}-\d{2}$/.test(effective) ? { ...chunk, effectiveFrom: effective } : chunk);
   }
   return match;
 }

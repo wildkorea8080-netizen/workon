@@ -159,7 +159,7 @@ describe('화면·연결(원본 확인)', () => {
     const confirm = readFileSync('src/app/api/documents/confirm/route.ts', 'utf8');
     expect(confirm).toContain('replaceTargetError(');
     expect(confirm).toContain('replaces_id: replacesId, effective_from: effectiveFrom');
-    expect(readFileSync('src/lib/capabilities/doc-search.ts', 'utf8')).toContain(".select('id, title, file_name, noda_status, replaces_id')");
+    expect(readFileSync('src/lib/capabilities/doc-search.ts', 'utf8')).toContain(".select('id, title, file_name, noda_status, replaces_id, effective_from')");
   });
   it('문서 화면은 지난 판을 칩으로 보이고 시행일·대신하는 판을 적는다', () => {
     const ui = readFileSync('src/components/admin/DocumentsManager.tsx', 'utf8');

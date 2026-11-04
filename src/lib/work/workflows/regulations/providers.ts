@@ -39,7 +39,8 @@ function chunkEvidence(c: RetrievedChunk, kind: 'org_doc' | 'common', editionYea
     ...(kind === 'org_doc' ? { documentId: c.documentId } : {}),
     title: stripNodaPrefixes(c.documentTitle || '제목 없는 문서'),
     location: locationOf(c),
-    effectiveDate: null,
+    // 기관 문서의 시행일(0055)이 있으면 적용 판정에 쓴다 — 없으면 예전처럼 '시행일 확인 필요'
+    effectiveDate: kind === 'org_doc' ? c.effectiveFrom ?? null : null,
     editionYear,
     issuer: null,
     text: stripNodaPrefixes(c.text),
@@ -70,7 +71,7 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
   if (!agents.length) return { status: 'ok', items: [] };
   const { data: docRows, error: docErr } = await pagedRows<any>((a, b, w) => supabaseAdmin
     .from('documents')
-    .select('id, title, file_name, noda_status, agent_id, organization_id, department_id, visibility', w ? { count: 'exact' } : undefined)
+    .select('id, title, file_name, noda_status, replaces_id, effective_from, agent_id, organization_id, department_id, visibility', w ? { count: 'exact' } : undefined)
     .eq('organization_id', scope.organizationId)
     .in('agent_id', agents.map((x) => x.id))
     .order('id')

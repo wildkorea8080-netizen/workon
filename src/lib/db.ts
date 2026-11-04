@@ -228,6 +228,8 @@ export type RetrievedChunk = {
   scope?: 'common';
   /** 공통 문서의 기준 연도 — 출처 칩에 `(2026)`으로 보인다 */
   editionYear?: number;
+  /** 비서 문서의 시행일(YYYY-MM-DD, 0055) — 근거 창에 '시행 …'으로 보인다. 적지 않은 문서·옛 메시지에는 없다 */
+  effectiveFrom?: string;
 };
 
 export type RetrievalResult = {

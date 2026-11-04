@@ -53,6 +53,9 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
                 <div className="text-xs text-slate-500 mt-0.5 truncate" title={title}>
                   [{sourceNumber(source)}] {title}
                 </div>
+                {source.scope !== 'common' && typeof source.effectiveFrom === 'string' && (
+                  <div className="text-xs text-slate-500 mt-0.5">시행 {source.effectiveFrom}</div>
+                )}
                 {source.scope === 'common' && (
                   <div className="text-xs text-[#003087] mt-0.5">
                     공통 기준{typeof source.editionYear === 'number' ? ` · ${source.editionYear}년 판` : ''}
