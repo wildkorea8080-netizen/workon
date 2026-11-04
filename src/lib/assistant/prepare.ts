@@ -2,7 +2,8 @@
 import type { Session } from 'next-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
-import { canUseAgent, AGENT_ACCESS_COLUMNS, type AgentAccessInfo } from '@/lib/agent-permissions';
+import { canEditAgent, canUseAgent, AGENT_ACCESS_COLUMNS, type AgentAccessInfo } from '@/lib/agent-permissions';
+import { readAppDraft, withDraftSettings } from '@/lib/apps/draft';
 import { getCapabilityScope } from '@/lib/connector-scope';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { filterUserInput } from '@/lib/filter';
@@ -37,6 +38,7 @@ type AgentRow = AgentAccessInfo & {
   model_id: string | null;
   capabilities: unknown;
   agent_type: string | null;
+  app_draft?: unknown;
 };
 
 function reject(message: string, status: number, details?: Record<string, unknown>): PrepareOutcome {
@@ -93,14 +95,28 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
 
   const { data } = await supabaseAdmin
     .from('agents')
-    .select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, capabilities, agent_type, app_definition`)
+    .select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, capabilities, agent_type, app_definition, app_draft`)
     .eq('id', agent_id)
     .maybeSingle();
-  const agent = data as AgentRow | null;
+  const loadedAgent = data as AgentRow | null;
 
-  if (!agent || agent.deleted_at || !agent.is_active) return reject('에이전트를 찾을 수 없습니다.', 404);
+  if (!loadedAgent || loadedAgent.deleted_at || !loadedAgent.is_active) return reject('에이전트를 찾을 수 없습니다.', 404);
+  let agent: AgentRow = loadedAgent;
   if (!canUseAgent(agent, actor)) return reject('해당 에이전트에 접근할 권한이 없습니다.', 403);
   if (agent.agent_type === 'link') return reject('링크형 비서는 대화할 수 없습니다.', 400);
+
+  // 시험 판 실행(0053) — 고칠 수 있는 사람만, 실행 화면이 본 그 시험 판(`app_draft` = 저장 시각)일 때만, 새 실행에서만.
+  // 지금 판 위에 시험 판의 이름·지시문·입력 설정·능력을 덮는다(모델·판 번호는 지금 판). 예약·연동은 이 칸을 보내지 않는다
+  let appDraftSavedAt: string | undefined;
+  if (body.app_draft !== undefined) {
+    if (typeof body.app_draft !== 'string' || conversation_id || body.resume_message_id !== undefined) return reject('시험 판은 새 실행으로만 시험할 수 있습니다.', 400);
+    if (!canEditAgent(agent, actor)) return reject('이 앱의 시험 판을 실행할 권한이 없습니다.', 403);
+    const draft = readAppDraft(agent.app_draft);
+    if (!draft || draft.saved_at !== body.app_draft) return reject('시험 판이 바뀌었거나 없습니다. 앱 설정을 새로 열어 확인해 주세요.', 409);
+    if (draft.base_version !== agent.version) return reject('시험 판을 만든 뒤 앱이 새로 배포됐습니다. 지금 판을 보고 시험 판을 다시 저장해 주세요.', 409);
+    agent = withDraftSettings(agent, draft);
+    appDraftSavedAt = draft.saved_at;
+  }
 
   const definition = validateAppDefinition(agent.app_definition ?? null);
   if (!definition.ok) return reject('앱의 입력 설정을 확인해 주세요.', 400);
@@ -291,6 +307,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       appMaterialPieces,
       appResumeRecords,
       appResumeFrom,
+      ...(appDraftSavedAt ? { appDraftSavedAt } : {}),
       ctx,
       modelId,
       modelSubstituted: substituted,

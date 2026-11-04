@@ -35,6 +35,8 @@ export interface PreparedTurn {
   appMaterialPieces?: { pieces: string[]; chars: number };
   appResumeRecords?: import('@/lib/apps/pipeline').AppStepRecord[];
   appResumeFrom?: string;
+  /** 시험 판으로 실행한 턴(0053) — 그 시험 판의 저장 시각. 답변 행·사용 기록에 남긴다 */
+  appDraftSavedAt?: string;
   ctx: TurnContext;
   modelId: string;
   /** 비서의 모델이 기관 허용 목록 밖이라 바꿨는가 */

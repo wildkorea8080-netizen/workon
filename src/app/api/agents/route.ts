@@ -5,6 +5,10 @@ import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 import { splitAgentBody } from '@/lib/agent-patch';
 import { getActorScope } from '@/lib/actor-scope';
 import { jsonError, knownIds, validateModelForOrganization } from '@/lib/agent-route-helpers';
+import { withoutAppDraft } from '@/lib/apps/draft';
+
+/** 목록에는 시험 판(0053)을 싣지 않는다 — 고칠 수 없는 사람에게 배포 전 설정이 가지 않게(시험 판은 편집 창 GET /api/agents/[id]만) */
+const listRows = (rows: Array<Record<string, unknown>> | null) => (rows ?? []).map(withoutAppDraft);
 
 export async function GET(request: NextRequest) {
   try {
@@ -89,7 +93,7 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         );
       }
-      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
     }
 
     // 내 비서 탭 — 나만의 비서. 부서를 옮겨도 내 것이므로 부서로 거르지 않는다.
@@ -108,7 +112,7 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         );
       }
-      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
     }
 
     // 관리 화면 — 관리 범위의 공식·부서 비서. 꺼 둔 것도 보인다(다시 켜려면 보여야 한다).
@@ -132,7 +136,7 @@ export async function GET(request: NextRequest) {
         .order('display_order', { ascending: true })
         .order('name', { ascending: true });
       if (error) return jsonError('에이전트 조회 중 오류가 발생했습니다.', 500);
-      return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
     }
 
     // 카테고리 / 전체 비서 — 공식 비서 + 내 부서 계통의 부서 비서.
@@ -168,7 +172,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: agents, meta: { favoriteIds } });
+    return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
   } catch (error) {
     console.error('에이전트 목록 조회 오류:', error);
     return NextResponse.json(

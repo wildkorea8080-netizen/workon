@@ -60,6 +60,7 @@ const EMPLOYEE_ROUTES = new Set([
   '/agents/[id]',
   '/agents/favorite',
   '/agents/[id]/history',
+  '/agents/[id]/app-draft',
   '/agents/[id]/promote',
   '/agents/[id]/revert',
   '/agents/[id]/templates',

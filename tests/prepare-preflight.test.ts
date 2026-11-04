@@ -15,6 +15,8 @@ const A = '00000000-0000-4000-8000-00000000000a';
 const calls: string[] = [];
 const state = {
   appDefinition: null as unknown,
+  appDraft: null as unknown,
+  canEdit: true,
   savedMessage: null as unknown,
   capabilities: { doc_search: {}, file_read: {} } as Record<string, unknown>,
   docs: [{ id: DOC, title: '여비 규정', file_name: '규정.hwp', noda_status: 'ready' }] as unknown[],
@@ -32,7 +34,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
       maybeSingle: async () => {
         if (table === 'messages') return { data: state.savedMessage, error: null };
         if (table === 'agents') {
-          return { data: { id: AGENT, deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: state.capabilities, agent_type: null, app_definition: state.appDefinition }, error: null };
+          return { data: { id: AGENT, deleted_at: null, is_active: true, tier: 'official', version: 3, name: '비서', system_prompt: null, model_id: null, capabilities: state.capabilities, agent_type: null, app_definition: state.appDefinition, app_draft: state.appDraft }, error: null };
         }
         return { data: null, error: null };
       },
@@ -63,7 +65,7 @@ vi.mock('@/lib/logger', () => ({ logSystem: vi.fn(async () => {}) }));
 vi.mock('@/lib/actor-scope', () => ({
   getActorScope: async () => ({ userId: 'u1', departmentId: 'd1', organizationId: 'o1' }),
 }));
-vi.mock('@/lib/agent-permissions', () => ({ canUseAgent: () => true, AGENT_ACCESS_COLUMNS: 'id' }));
+vi.mock('@/lib/agent-permissions', () => ({ canUseAgent: () => true, canEditAgent: () => state.canEdit, AGENT_ACCESS_COLUMNS: 'id' }));
 vi.mock('@/lib/connector-scope', () => ({ getCapabilityScope: async () => ({ publicDataConnectors: new Set() }) }));
 vi.mock('@/lib/usage-limit', () => ({ checkTokenLimit: async () => ({ allowed: true }), limitMessage: () => '' }));
 vi.mock('@/lib/filter', () => ({ filterUserInput: async () => ({ isValid: true }) }));
@@ -96,6 +98,8 @@ const session = { user: { id: 'u1' } } as never;
 
 beforeEach(() => {
   state.appDefinition = null;
+  state.appDraft = null;
+  state.canEdit = true;
   state.savedMessage = null;
   calls.length = 0;
   state.capabilities = { doc_search: {}, file_read: {} };
@@ -209,6 +213,51 @@ describe('입력형 앱의 서버 실행 계약', () => {
     expect(out.turn.storedUserContent).not.toContain('무시되는 임의 메시지');
     expect(out.turn.systemPrompt).toContain('글머리 목록');
     expect(calls).toContain('insert:conversations');
+  });
+});
+
+
+describe('시험 판 실행(0053)', () => {
+  const live = { schemaVersion: 1, fields: [{ key: 'source', label: '원문', type: 'textarea', required: true }], output: 'bullets' };
+  const SAVED = '2026-11-04T12:00:00.000Z';
+  const draft = (over: Record<string, unknown> = {}) => ({
+    settings: { name: '시험 비서', description: null, category: null, system_prompt: '시험 판 지시문입니다', app_definition: { schemaVersion: 1, fields: [{ key: 'memo', label: '메모', type: 'text', required: true }], output: 'checklist' }, capabilities: {} },
+    base_version: 3, saved_by: 'u1', saved_at: SAVED, ...over,
+  });
+  const body = (extra: Record<string, unknown> = {}) => ({ agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { memo: '시험 입력' }, app_draft: SAVED, ...extra });
+  beforeEach(() => { state.appDefinition = live; state.capabilities = {}; });
+
+  it('고칠 수 있는 사람이 본 그 시험 판이면 시험 판의 지시문·입력 설정으로 준비하고 표시를 남긴다', async () => {
+    state.appDraft = draft();
+    const out = await prepareTurn(session, body());
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.systemPrompt).toContain('시험 판 지시문입니다');
+    expect(out.turn.systemPrompt).toContain('체크리스트');
+    expect(out.turn.storedUserContent).toContain('시험 입력');
+    expect(out.turn.appDraftSavedAt).toBe(SAVED);
+  });
+  it('시험 판 표시 없이 부르면 지금 판 그대로(예약·연동·일반 실행)', async () => {
+    state.appDraft = draft();
+    const out = await prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { source: '지금 판 입력' } });
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.systemPrompt).not.toContain('시험 판 지시문입니다');
+    expect(out.turn).not.toHaveProperty('appDraftSavedAt');
+  });
+  it('고칠 수 없으면 403, 시험 판이 없거나 바뀌었거나 그 사이 배포됐으면 409, 이어 쓰기·재개는 400 — 모두 대화를 만들기 전에', async () => {
+    state.appDraft = draft(); state.canEdit = false;
+    expect(await prepareTurn(session, body())).toMatchObject({ ok: false, status: 403 });
+    state.canEdit = true;
+    state.appDraft = null;
+    expect(await prepareTurn(session, body())).toMatchObject({ ok: false, status: 409 });
+    state.appDraft = draft({ saved_at: '2026-11-04T13:00:00.000Z' });
+    expect(await prepareTurn(session, body())).toMatchObject({ ok: false, status: 409 });
+    state.appDraft = draft({ base_version: 2 });
+    expect(await prepareTurn(session, body())).toMatchObject({ ok: false, status: 409, message: expect.stringContaining('새로 배포') });
+    state.appDraft = draft();
+    expect(await prepareTurn(session, body({ conversation_id: NEW_CONV }))).toMatchObject({ ok: false, status: 400 });
+    expect(await prepareTurn(session, body({ resume_message_id: '11111111-1111-4111-8111-111111111111' }))).toMatchObject({ ok: false, status: 400 });
+    expect(await prepareTurn(session, body({ app_draft: 1 }))).toMatchObject({ ok: false, status: 400 });
+    expect(calls).toEqual([]);
   });
 });
 

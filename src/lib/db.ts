@@ -30,6 +30,8 @@ export type User = {
 
 export type Agent = {
   app_definition?: import('@/lib/apps/definition').AppDefinition | null;
+  /** 배포 전 시험 판(0053) — 편집 창 GET /api/agents/[id]에만 실린다(목록에는 없음). 읽을 때는 readAppDraft */
+  app_draft?: unknown;
   id: string;
   department_id: string;
   name: string;

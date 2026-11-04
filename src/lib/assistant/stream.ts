@@ -248,6 +248,7 @@ async function logChatUsage(turn: PreparedTurn, usages: LlmUsage[], extra: Recor
         doc_dropped: turn.docDropped,
         model_substituted: turn.modelSubstituted,
         ...(turn.appResumeFrom ? { app_resume_from: turn.appResumeFrom, app_reused_steps: turn.appResumeRecords?.filter(step => step.reused).length ?? 0 } : {}),
+        ...(turn.appDraftSavedAt ? { app_draft: true } : {}),
         ...extra,
       }),
     });
@@ -373,7 +374,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
         await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
           userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',
           chunks: turn.chunks, links: [], files: [], attachments: [], agentVersion: turn.ctx.agentVersion,
-          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appMaterial }));
+          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appDraftSavedAt: turn.appDraftSavedAt, appMaterial }));
       } catch { /* A failed persistence call must not suppress the SSE error or usage log. */ }
     }
     // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
@@ -425,6 +426,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       appSteps: appRecords,
       appInputs: savedInputs,
       appResumeFrom: turn.appResumeFrom,
+      appDraftSavedAt: turn.appDraftSavedAt,
       appMaterial,
       numberCheck,
       documentsSkipped: turn.documentsSkipped,

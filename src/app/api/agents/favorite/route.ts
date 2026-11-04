@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { withoutAppDraft } from '@/lib/apps/draft';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -45,7 +46,8 @@ export async function GET(_request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: agents });
+    // 목록에는 시험 판(0053)을 싣지 않는다
+    return NextResponse.json({ ok: true, data: (agents ?? []).map(withoutAppDraft) });
   } catch (error) {
     console.error('[favorite GET]', error);
     return NextResponse.json(
