@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { CRON_SECRET, WORK_WORKER_SECRET } from '@/lib/config';
 import { runDueSchedules, scheduleDeps } from '@/lib/apps/schedules';
+import { recordRunnerHeartbeat } from '@/lib/apps/schedule-health';
 
 export const dynamic = 'force-dynamic';
 // 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 실행기의 시간 예산(180초)보다 길게
@@ -29,6 +30,8 @@ export async function GET(request: Request) {
   if (!matches(header, WORK_WORKER_SECRET) && !matches(header, CRON_SECRET)) {
     return NextResponse.json({ ok: false, error: { message: '인증이 필요합니다.' } }, { status: 401 });
   }
+  // '살아 있음' 도장 — 하루 한 번 Vercel 예약 작업이 이 도장으로 pg_cron이 멈췄는지 본다(schedule-health.ts). 실패해도 실행은 이어 간다
+  await recordRunnerHeartbeat(Date.now());
   const result = await runDueSchedules(scheduleDeps());
   return NextResponse.json({ ok: true, data: result });
 }

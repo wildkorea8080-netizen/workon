@@ -223,3 +223,39 @@ export function scheduleFailureMail(params: {
 export function sendScheduleFailureEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
   return sendMail(to, mail.subject, mail.html);
 }
+
+/** 앱 예약 실행기 점검 안내의 글(슈퍼관리자에게) — 숫자·시각·조치만, 직원·입력값은 싣지 않는다 */
+export function scheduleRunnerAlertMail(params: {
+  problems: string[];
+  runnerLastRunAt: string | null;
+  activeCount: number;
+  checkedAt: Date;
+  superUrl: string;
+}): { subject: string; html: string } {
+  const { problems, runnerLastRunAt, activeCount, checkedAt, superUrl } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const rows: Array<[string, string]> = [
+    ['점검 시각', `${kst(checkedAt)} (한국 시간)`],
+    ['실행기 마지막 호출', runnerLastRunAt ? `${kst(new Date(runnerLastRunAt))} (한국 시간)` : '기록 없음'],
+    ['켜진 예약', `${activeCount}개`],
+  ];
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  const list = problems.map((p) => `<li style="margin:4px 0">${escapeHtml(p)}</li>`).join('');
+  return {
+    subject: `[${APP_NAME}] 앱 예약 실행기 확인 필요`,
+    html: layout(
+      '앱 예약 실행기를 확인해 주세요',
+      `<ul style="font-size:15px;line-height:1.7;padding-left:20px">${list}</ul>
+       <table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:14px;line-height:1.7;color:#475569">Supabase pg_cron 작업 <b>workon-app-schedules</b>(5분마다)가 돌고 있는지, cron.job_run_details·net._http_response의 최근 결과가 200인지 확인해 주세요. 응답이 401이면 Vault <b>work_worker_secret</b>과 Vercel <b>WORK_WORKER_SECRET</b>이 같은지 봅니다.</p>
+       ${button(superUrl, '운영 기록 보기')}`
+    ),
+  };
+}
+
+/** 앱 예약 실행기 점검 안내 한 통 — 슈퍼관리자마다 따로 */
+export function sendScheduleRunnerAlertEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}

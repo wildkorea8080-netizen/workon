@@ -9,7 +9,7 @@ type Result = { data?: unknown; error?: { message: string } | null };
 const state = vi.hoisted(() => ({
   session: 'admin' as 'admin' | 'user' | 'impersonating' | null,
   managed: ['dept'] as string[],
-  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][],
+  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][], healthScope: null as unknown, healthFails: false,
 }));
 vi.mock('@/lib/auth', () => ({
   getServerAuthSession: async () => (state.session ? { user: { id: 'adm', role: state.session === 'user' ? 'USER' : 'ADMIN', departmentId: 'dept', ...(state.session === 'impersonating' ? { isImpersonating: true } : {}) } } : null),
@@ -19,6 +19,9 @@ vi.mock('@/lib/actor-scope', () => ({
   getActorScope: async () => ({ userId: 'adm', isAdmin: true, organizationId: 'org', departmentId: 'dept', visibleDepartmentIds: ['dept'], managedDepartmentIds: state.managed, managesWholeOrganization: false }),
 }));
 vi.mock('@/lib/filter', () => ({ logSecurityEvent: async (...args: unknown[]) => { state.security.push(args); } }));
+vi.mock('@/lib/apps/schedule-health', () => ({
+  readScheduleHealth: async (_now: number, scope: unknown) => { state.healthScope = scope; if (state.healthFails) throw new Error('down'); return { runnerAlive: false, runnerLastRunAt: '2026-11-02T00:00:00Z', activeCount: 2, overdueCount: 1, stuckClaimCount: 0, problems: ['예약 실행기가 30분 넘게 불리지 않았습니다.'] }; },
+}));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {
     from(table: string) {
@@ -56,7 +59,7 @@ const scheduleRow = (patch: Record<string, unknown> = {}) => ({
   department_id: 'dept', agent: { name: '주간 보고 앱', tier: 'department' }, owner: { full_name: '이주무관', deleted_at: null }, ...patch,
 });
 
-beforeEach(() => { state.session = 'admin'; state.managed = ['dept']; state.results = {}; state.calls = []; state.security = []; });
+beforeEach(() => { state.session = 'admin'; state.managed = ['dept']; state.results = {}; state.calls = []; state.security = []; state.healthScope = null; state.healthFails = false; });
 const json = async (res: Response) => ({ status: res.status, body: await res.json() });
 const patchHook = (body: unknown, id = HOOK) => PATCH_HOOK(new NextRequest(`http://localhost/api/admin/app-automations/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), { params: { id } });
 const patchSchedule = (body: unknown, id = SCHEDULE) => PATCH_SCHEDULE(new NextRequest(`http://localhost/api/admin/app-automations/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), { params: { id } });
@@ -76,9 +79,13 @@ describe('규칙·보기(순수)', () => {
     expect(personal).toMatchObject({ appName: PERSONAL_APP_LABEL, ownerName: '박주무관(탈퇴)' });
     expect(JSON.stringify(personal)).not.toContain('내 비밀 앱');
 
-    const schedule = adminScheduleView({ ...scheduleRow({ admin_paused_at: '2026-11-03T00:00:00Z', status: 'paused' }), inputs: { title: '비밀 입력' }, last_error: '오류 원문' } as never, '총무과');
+    const schedule = adminScheduleView({ ...scheduleRow({ admin_paused_at: '2026-11-03T00:00:00Z', status: 'paused' }), inputs: { title: '비밀 입력' }, last_error: '오류 원문' } as never, '총무과', now);
     expect(schedule).toMatchObject({ description: '매주 월요일 09:30', adminPaused: true, status: 'paused', ownerName: '이주무관', departmentName: '총무과' });
     expect(JSON.stringify(schedule)).not.toMatch(/비밀 입력|오류 원문/);
+    // 켜진 예약이 예정 시각보다 1시간 넘게 지났으면 지연, 멈춘 예약은 지연이 아니다
+    expect(adminScheduleView(scheduleRow({ next_run_at: '2026-11-02T22:59:00Z' }) as never, null, now).overdue).toBe(true);
+    expect(adminScheduleView(scheduleRow({ next_run_at: '2026-11-02T23:30:00Z' }) as never, null, now).overdue).toBe(false);
+    expect(adminScheduleView(scheduleRow({ next_run_at: '2026-11-01T00:00:00Z', status: 'paused' }) as never, null, now).overdue).toBe(false);
   });
 });
 
@@ -94,6 +101,13 @@ describe('GET /api/admin/app-automations', () => {
       expect(state.calls).toContainEqual([table, 'in', 'department_id', ['dept']]);
     }
     expect(body.data.truncated).toBe(false);
+    // 실행기 상태는 관리 범위로 센 숫자와 함께 실린다
+    expect(body.data.runner).toMatchObject({ alive: false, overdueCount: 1, problems: ['예약 실행기가 30분 넘게 불리지 않았습니다.'] });
+    expect(state.healthScope).toEqual({ organizationId: 'org', departmentIds: ['dept'] });
+    state.healthFails = true;
+    state.results = { app_webhooks: [{ data: [] }], app_schedules: [{ data: [] }], departments: [{ data: [] }] };
+    const failed = await json(await GET());
+    expect(failed.status).toBe(200); expect(failed.body.data.runner).toBeNull();
   });
   it('관리자가 아니면 403, 로그인 없으면 401, 관리 범위가 없으면 읽지 않고 403, 읽기 실패는 503', async () => {
     state.session = 'user'; expect((await GET()).status).toBe(403);

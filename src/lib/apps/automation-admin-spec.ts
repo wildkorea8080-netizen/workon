@@ -1,4 +1,4 @@
-import { describeSchedule, specOfRow, type AppScheduleFrequency } from '@/lib/apps/schedule-spec';
+import { SCHEDULE_OVERDUE_MS, describeSchedule, specOfRow, type AppScheduleFrequency } from '@/lib/apps/schedule-spec';
 
 /**
  * 앱 예약·연동 관리자 통제의 순수 규칙(0050) — 화면과 서버가 함께 쓴다. DB·저장소를 모른다.
@@ -53,8 +53,12 @@ export type AdminScheduleView = {
   id: string; appName: string; ownerName: string; departmentName: string | null; description: string; frequency: AppScheduleFrequency;
   status: 'active' | 'paused'; pausedReason: string | null; adminPaused: boolean; nextRunAt: string; lastRunAt: string | null;
   lastStatus: 'completed' | 'failed' | null; consecutiveFailures: number; runCount: number; createdAt: string;
+  /** 켜진 예약인데 예정 시각이 1시간 넘게 지났다 — 실행기가 멈춘 신호(직원 화면의 '실행 지연'과 같은 기준) */
+  overdue: boolean;
 };
-export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; truncated: boolean };
+/** 예약 실행기 상태(`schedule-health.ts`) — 실행기 도장은 서비스 전체, 숫자는 관리 범위 안 예약만. 읽지 못하면 null */
+export type AdminRunnerStatus = { alive: boolean; lastRunAt: string | null; overdueCount: number; stuckClaimCount: number; problems: string[] };
+export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; truncated: boolean; runner: AdminRunnerStatus | null };
 
 const appLabel = (agent: AgentJoin | null) => (!agent ? '삭제된 앱' : agent.tier === 'personal' ? PERSONAL_APP_LABEL : agent.name);
 const ownerLabel = (owner: UserJoin | null) => (!owner ? '알 수 없음' : owner.deleted_at ? `${owner.full_name ?? '이름 없음'}(탈퇴)` : owner.full_name ?? '이름 없음');
@@ -71,14 +75,16 @@ export function adminWebhookView(row: AdminWebhookRow, departmentName: string | 
 }
 
 /** 관리자용 예약 한 줄 — 입력값·마지막 오류·결과 대화는 싣지 않는다 */
-export function adminScheduleView(row: AdminScheduleRow, departmentName: string | null): AdminScheduleView {
+export function adminScheduleView(row: AdminScheduleRow, departmentName: string | null, nowMs: number): AdminScheduleView {
   const spec = specOfRow(row);
+  const status = row.status === 'paused' ? 'paused' : 'active';
   return {
     id: row.id, appName: appLabel(one(row.agent)), ownerName: ownerLabel(one(row.owner)), departmentName,
     description: describeSchedule(spec), frequency: spec.frequency,
-    status: row.status === 'paused' ? 'paused' : 'active', pausedReason: row.paused_reason, adminPaused: row.admin_paused_at !== null,
+    status, pausedReason: row.paused_reason, adminPaused: row.admin_paused_at !== null,
     nextRunAt: row.next_run_at, lastRunAt: row.last_run_at, lastStatus: lastStatusOf(row.last_status),
     consecutiveFailures: row.consecutive_failures, runCount: row.run_count, createdAt: row.created_at,
+    overdue: status === 'active' && Date.parse(row.next_run_at) < nowMs - SCHEDULE_OVERDUE_MS,
   };
 }
 

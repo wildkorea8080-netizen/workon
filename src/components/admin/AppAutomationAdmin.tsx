@@ -12,6 +12,7 @@ const WEBHOOK_STATE: Record<AdminWebhookView['state'], { label: string; classNam
 };
 
 function scheduleState(s: AdminScheduleView): { label: string; className: string } {
+  if (s.overdue) return { label: '실행 지연', className: 'bg-red-50 text-red-800' };
   if (s.adminPaused) return { label: '관리자가 멈춤', className: 'bg-red-50 text-red-800' };
   if (s.status === 'paused') return { label: '멈춤', className: 'bg-amber-50 text-amber-900' };
   if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, className: 'bg-amber-50 text-amber-900' };
@@ -86,6 +87,16 @@ export default function AppAutomationAdmin() {
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {data.truncated && <p className="text-xs text-amber-700">항목이 많아 최근 것만 보입니다.</p>}
+      {data.runner && data.runner.problems.length > 0 && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <p className="font-semibold">예약 실행기를 확인해야 합니다</p>
+          <ul className="mt-1 list-disc pl-5">{data.runner.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+          <p className="mt-2 text-xs text-red-800">실행기 마지막 호출: {kst(data.runner.lastRunAt)} · 서비스 운영자(슈퍼관리자)에게 알려 주세요. 하루 한 번 점검에서도 운영자에게 메일이 갑니다.</p>
+        </div>
+      )}
+      {data.runner && !data.runner.problems.length && (
+        <p className="text-xs text-slate-500">예약 실행기 {data.runner.alive ? '정상' : '소식 없음'} · 마지막 호출 {kst(data.runner.lastRunAt)}</p>
+      )}
 
       <div>
         <h2 className="text-lg font-semibold text-slate-900">외부 시스템 연동(Webhook)</h2>

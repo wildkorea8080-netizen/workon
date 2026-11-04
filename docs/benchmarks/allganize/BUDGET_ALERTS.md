@@ -4,7 +4,7 @@
 
 ## 동작
 
-하루 한 번, 09:00 KST에 예약 작업 `/api/cron/budget-alerts`(`vercel.json`의 `0 0 * * *`)가 돈다. 정지되지 않은 기관마다 아래 두 대상의 사용률을 계산하고, 계산 기준은 차단 판정(`checkTokenLimit`)과 같다.
+하루 한 번, 09:00 KST에 예약 작업 `/api/cron/budget-alerts`(`vercel.json`의 `0 0 * * *`)가 돈다. (2026-11-04부터 같은 호출이 먼저 **앱 예약 실행기 점검**을 한다 — [앱 예약](APP_SCHEDULES.md) '실행기 멈춤 감지'. 응답 `data.scheduleHealth`) 정지되지 않은 기관마다 아래 두 대상의 사용률을 계산하고, 계산 기준은 차단 판정(`checkTokenLimit`)과 같다.
 
 | 대상 | 계산 | 기간 키 | 기준 | 받는 사람 | 메일 단추 |
 | --- | --- | --- | --- | --- | --- |

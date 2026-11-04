@@ -1,6 +1,7 @@
 import type { ActorScope } from '@/lib/agent-permissions';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSecurityEvent } from '@/lib/filter';
+import { readScheduleHealth } from '@/lib/apps/schedule-health';
 import {
   ADMIN_AUTOMATION_LIMIT, ADMIN_UNLOCKED_REASON, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
   type AdminAutomationList, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
@@ -28,6 +29,10 @@ function scoped(actor: ActorScope): actor is ActorScope & { organizationId: stri
 
 export async function listAdminAutomations(actor: ActorScope, nowMs: number): Promise<AdminResult<AdminAutomationList>> {
   if (!scoped(actor)) return { ok: false, status: 403, message: '관리 범위를 확인할 수 없습니다.' };
+  // 실행기 상태는 곁들이는 정보 — 읽지 못해도 목록은 보인다(null)
+  const runnerPromise = readScheduleHealth(nowMs, { organizationId: actor.organizationId, departmentIds: actor.managedDepartmentIds })
+    .then((h) => ({ alive: h.runnerAlive, lastRunAt: h.runnerLastRunAt, overdueCount: h.overdueCount, stuckClaimCount: h.stuckClaimCount, problems: h.problems }))
+    .catch(() => null);
   const [webhooks, schedules, departments] = await Promise.all([
     supabaseAdmin.from('app_webhooks').select(WEBHOOK_SELECT).eq('organization_id', actor.organizationId)
       .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_AUTOMATION_LIMIT + 1),
@@ -43,8 +48,9 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
     ok: true,
     data: {
       webhooks: hookRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminWebhookView(r, deptName.get(r.department_id) ?? null, nowMs)),
-      schedules: scheduleRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminScheduleView(r, deptName.get(r.department_id) ?? null)),
+      schedules: scheduleRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminScheduleView(r, deptName.get(r.department_id) ?? null, nowMs)),
       truncated: hookRows.length > ADMIN_AUTOMATION_LIMIT || scheduleRows.length > ADMIN_AUTOMATION_LIMIT,
+      runner: await runnerPromise,
     },
   };
 }
@@ -91,7 +97,7 @@ async function readSchedule(actor: ActorScope & { organizationId: string }, id: 
   const { data, error } = await findScoped('app_schedules', id, actor, SCHEDULE_SELECT);
   if (error || !data) return { ok: false, status: 503, message: '예약을 불러오지 못했습니다.' };
   const row = data as unknown as AdminScheduleRow;
-  return { ok: true, data: adminScheduleView(row, await departmentName(row.department_id, actor.organizationId)) };
+  return { ok: true, data: adminScheduleView(row, await departmentName(row.department_id, actor.organizationId), Date.now()) };
 }
 
 async function departmentName(id: string, organizationId: string): Promise<string | null> {
