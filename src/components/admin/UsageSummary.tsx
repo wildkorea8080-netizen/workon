@@ -52,7 +52,7 @@ export default function UsageSummary() {
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [rows, setRows] = useState<SummaryRow[]>([]);
-  const [meta, setMeta] = useState<{ totalCount: number; totalCostKrw: number } | null>(null);
+  const [meta, setMeta] = useState<{ totalCount: number; totalCostKrw: number; truncated?: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   // 펼쳐 둔 행. 마우스 올림(툴팁) 대신 눌러서 펴는 방식을 쓴다 —
   // 태블릿에는 호버가 없고, 툴팁 안의 표는 읽기도 옮겨 적기도 어렵다.
@@ -142,6 +142,7 @@ export default function UsageSummary() {
             사용액 <strong className="text-slate-900">{Math.round(meta.totalCostKrw).toLocaleString()}원</strong>
           </span>
           <span className="text-slate-400 text-xs self-center">기간은 한국 시간(KST) 기준입니다</span>
+          {meta.truncated && <span role="alert" className="text-xs self-center text-amber-700">기록이 많아 앞의 50,000건만 셈습니다 — 기간을 줄여 다시 보세요.</span>}
         </div>
       )}
 

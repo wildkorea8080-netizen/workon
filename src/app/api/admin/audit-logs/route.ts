@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { logSecurityEvent } from '@/lib/filter';
@@ -167,10 +168,12 @@ export async function GET(request: NextRequest) {
     }
 
     // 관리 범위 안의 직원만 대상으로 한다
-    const { data: members } = await supabaseAdmin
+    // 직원이 1,000명을 넘는 기관에서도 이름이 빠지지 않게 쪽마다 끝까지('(삭제된 계정)'으로 잘못 보이지 않게)
+    const { data: members } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('users')
-      .select('id, full_name, email, department_id, departments(name)')
-      .in('department_id', managedDeptIds);
+      .select('id, full_name, email, department_id, departments(name)', w ? { count: 'exact' } : undefined)
+      .in('department_id', managedDeptIds)
+      .order('id').range(a, b));
 
     // 명시적 제네릭이 없으면 [키, 값] 배열이 유니온으로 추론돼 Map 값 타입이 {}가 된다
     interface MemberInfo { name: string; email: string; dept: string }
@@ -226,26 +229,32 @@ export async function GET(request: NextRequest) {
 
     const table = kind === 'security' ? 'security_logs' : 'usage_logs';
 
-    let query = supabaseAdmin
-      .from(table)
-      .select(
-        kind === 'security'
-          ? 'id, user_id, department_id, event_type, severity, details, created_at'
-          : 'id, user_id, department_id, action, resource_type, details, created_at',
-        { count: 'exact' }
-      )
-      .in('department_id', managedDeptIds)
-      .gte('created_at', from.toISOString())
-      .lte('created_at', to.toISOString())
-      .order('created_at', { ascending: false });
+    const build = (withCount: boolean) => {
+      let query = supabaseAdmin
+        .from(table)
+        .select(
+          kind === 'security'
+            ? 'id, user_id, department_id, event_type, severity, details, created_at'
+            : 'id, user_id, department_id, action, resource_type, details, created_at',
+          withCount ? { count: 'exact' } : undefined
+        )
+        .in('department_id', managedDeptIds)
+        .gte('created_at', from.toISOString())
+        .lte('created_at', to.toISOString())
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false });
+      if (userId) query = query.eq('user_id', userId);
+      return query;
+    };
 
-    if (userId) query = query.eq('user_id', userId);
-
-    query = isExport
-      ? query.limit(MAX_EXPORT_ROWS)
-      : query.range((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE - 1);
-
-    const { data: logs, count, error } = await query;
+    // 내보내기는 쪽마다 끝까지(최대 5만 건). 예전에는 한도 5만(limit)이었지만 API가 1,000행까지만 돌려줘
+    // 감사 자료 CSV가 **경고 없이 1,000건에서 잘렸다**(2026-11-05). 화면은 쓰던 대로 한 쪽만
+    const result = isExport
+      ? await pagedRows<any>((a, b, withCount) => build(withCount).range(a, b), { cap: MAX_EXPORT_ROWS })
+      : await build(true).range((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE - 1);
+    const logs = result.data;
+    const error = result.error;
+    const count = 'total' in result ? result.total : result.count;
 
     if (error) {
       console.error('[audit-logs]', error);

@@ -80,10 +80,13 @@ export interface DocSearchDeps {
 
 const defaultDeps: DocSearchDeps = {
   async documentsOf(agentId) {
+    // 비서당 문서는 50개가 상한(MAX_AGENT_DOCUMENTS)이라 API 상한(1,000행)에 닿지 않는다 — 매 대화마다 도는 길이라 개수 조회 없이 한 번만
     const { data, error } = await supabaseAdmin
       .from('documents')
       .select('id, title, file_name, noda_status, replaces_id')
-      .eq('agent_id', agentId);
+      .eq('agent_id', agentId)
+      .order('id')
+      .limit(1000);
     if (error) throw new Error(error.message);
     return (data ?? []) as AgentDocument[];
   },

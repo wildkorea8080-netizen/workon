@@ -6,7 +6,7 @@ vi.mock('@/lib/logger', () => ({ logSystem: async () => {} }));
 vi.mock('@/lib/noda', async (original) => ({ ...await original<typeof import('@/lib/noda')>(), noda: { getContext: async (args: Record<string, unknown>) => { state.searches.push(args); return { sources: state.sources, context: '' }; } } }));
 vi.mock('@/lib/supabaseAdmin', () => ({ supabaseAdmin: { from(table: string) {
   let rows = table === 'agents' ? state.agents : state.docs;
-  const q = { select: () => q, eq: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return q; }, is: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return q; }, in: (col: string, ids: unknown[]) => { state.queries.push([table, col, ids]); rows = rows.filter((r) => ids.includes(r[col])); return q; }, then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve({ data: rows, error: state.error ? { message: 'test' } : null }).then(resolve, reject) }; return q;
+  const q = { select: () => q, eq: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return q; }, is: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return q; }, in: (col: string, ids: unknown[]) => { state.queries.push([table, col, ids]); rows = rows.filter((r) => ids.includes(r[col])); return q; }, order: () => q, limit: () => q, range: () => q, then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve({ data: rows, error: state.error ? { message: 'test' } : null }).then(resolve, reject) }; return q;
 } } }));
 import { defaultRegulationProviders } from '@/lib/work/workflows/regulations/providers';
 import { nodaTenant, nodaFilename } from '@/lib/noda';

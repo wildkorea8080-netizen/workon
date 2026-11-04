@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
 import { estimateCostUsd } from '@/lib/models';
@@ -34,11 +35,12 @@ export async function GET(request: NextRequest) {
 
   // 이번달 시스템 키 사용 토큰 (org_id가 없는 usage_logs)
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const { data: usage } = await supabaseAdmin
+  const { data: usage } = await pagedRows<{ details: any }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
-    .select('details')
+    .select('details', w ? { count: 'exact' } : undefined)
     .is('organization_id', null)
-    .gte('created_at', monthStart);
+    .gte('created_at', monthStart)
+    .order('id').range(a, b));
 
   const totalTokens = (usage ?? []).reduce((s: number, r: any) =>
     s + ((r.details?.input_tokens ?? 0) + (r.details?.output_tokens ?? 0)), 0);

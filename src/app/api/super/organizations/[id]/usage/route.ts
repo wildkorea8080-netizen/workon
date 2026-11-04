@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
@@ -25,13 +26,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   try {
     // usage_logs에서 기간 내 chat_message 로그 조회
-    const { data: logs, error } = await supabaseAdmin
+    const { data: logs, error } = await pagedRows<{ user_id: string | null; details: any; created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs')
-      .select('user_id, details, created_at')
+      .select('user_id, details, created_at', w ? { count: 'exact' } : undefined)
       .eq('organization_id', params.id)
       .eq('action', 'chat_message')
       .gte('created_at', start.toISOString())
-      .order('created_at', { ascending: true });
+      .order('id').range(a, b));
 
     if (error) throw error;
 

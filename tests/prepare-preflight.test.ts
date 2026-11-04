@@ -31,6 +31,9 @@ vi.mock('@/lib/supabaseAdmin', () => {
       insert: () => { op = 'insert'; return q; },
       delete: () => { op = 'delete'; return q; },
       eq: (col: string, v: unknown) => { eqs[col] = v; if (table === 'messages') calls.push(`resume-filter:${col}:${String(v)}`); return q; },
+      order: () => q,
+      limit: () => q,
+      range: () => q,
       maybeSingle: async () => {
         if (table === 'messages') return { data: state.savedMessage, error: null };
         if (table === 'agents') {

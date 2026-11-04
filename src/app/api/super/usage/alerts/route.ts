@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,10 +14,11 @@ export async function GET(request: NextRequest) {
   const [{ data: orgs }, { data: logs }] = await Promise.all([
     supabaseAdmin.from('organizations')
       .select('id, name, monthly_token_limit').eq('status', 'active'),
-    supabaseAdmin.from('usage_logs')
-      .select('organization_id, details')
+    pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs')
+      .select('organization_id, details', w ? { count: 'exact' } : undefined)
       .eq('action', 'chat_message')
-      .gte('created_at', monthStart),
+      .gte('created_at', monthStart)
+      .order('id').range(a, b)),
   ]);
 
   const usageMap = new Map<string, number>();

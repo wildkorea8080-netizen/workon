@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,11 +13,12 @@ export async function GET(request: NextRequest) {
   const oneHourAgo = new Date(now.getTime() - 3600000);
   const fiveMinAgo = new Date(now.getTime() -  300000);
 
-  const { data: hourLogs } = await supabaseAdmin
+  const { data: hourLogs } = await pagedRows<{ user_id?: string; details: any; created_at: string }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
-    .select('user_id, details, created_at')
+    .select('user_id, details, created_at', w ? { count: 'exact' } : undefined)
     .eq('action', 'chat_message')
-    .gte('created_at', oneHourAgo.toISOString());
+    .gte('created_at', oneHourAgo.toISOString())
+    .order('id').range(a, b));
 
   const rows = hourLogs ?? [];
   const activeNow = new Set(

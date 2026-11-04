@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { maskApiKey } from '@/lib/crypto';
 
 export const dynamic = 'force-dynamic';
@@ -18,12 +19,13 @@ export async function GET(request: NextRequest) {
   ]);
 
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-  const { data: usageLogs } = await supabaseAdmin
+  const { data: usageLogs } = await pagedRows<{ organization_id: string }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
-    .select('organization_id')
+    .select('organization_id', w ? { count: 'exact' } : undefined)
     .not('organization_id', 'is', null)
     .eq('action', 'chat_message')
-    .gte('created_at', monthStart);
+    .gte('created_at', monthStart)
+    .order('id').range(a, b));
 
   const usageCountMap = new Map<string, number>();
   for (const l of usageLogs ?? []) {

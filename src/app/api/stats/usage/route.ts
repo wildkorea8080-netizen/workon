@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export const dynamic = 'force-dynamic';
@@ -79,24 +80,13 @@ export async function GET(request: NextRequest) {
   const to = end.toISOString();
 
   const [documents, conversations, logs] = await Promise.all([
-    supabaseAdmin
-      .from('documents')
-      .select('created_at')
-      .in('department_id', managedDeptIds)
-      .gte('created_at', from)
-      .lte('created_at', to),
-    supabaseAdmin
-      .from('conversations')
-      .select('created_at')
-      .in('department_id', managedDeptIds)
-      .gte('created_at', from)
-      .lte('created_at', to),
-    supabaseAdmin
-      .from('usage_logs')
-      .select('created_at, action, details')
-      .in('department_id', managedDeptIds)
-      .gte('created_at', from)
-      .lte('created_at', to),
+    // 셋 다 쪽마다 끝까지(1,000행 상한에서 덜 세지 않게)
+    pagedRows<{ created_at: string }>((a, b, withCount) =>
+      supabaseAdmin.from('documents').select('created_at', withCount ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).gte('created_at', from).lte('created_at', to).order('id').range(a, b)),
+    pagedRows<{ created_at: string }>((a, b, withCount) =>
+      supabaseAdmin.from('conversations').select('created_at', withCount ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).gte('created_at', from).lte('created_at', to).order('id').range(a, b)),
+    pagedRows<{ created_at: string; action: string; details: any }>((a, b, withCount) =>
+      supabaseAdmin.from('usage_logs').select('created_at, action, details', withCount ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).gte('created_at', from).lte('created_at', to).order('id').range(a, b)),
   ]);
 
   // 기간 안의 모든 날짜를 미리 채운다. 빈 날을 건너뛰면 차트에서

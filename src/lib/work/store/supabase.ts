@@ -1,5 +1,6 @@
 // src/lib/work/store/supabase.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { mapDbError } from './errors';
 import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow, WorkflowInstallationRow, LegacyFileRow, WorkStatsRow } from './types';
 import type {
@@ -441,9 +442,10 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
     },
     async workStats(organizationId, sinceIso) {
       // 실행 ↔ 작업은 (task_id, organization_id) 겹 외래 키라 PostgREST 끼워 넣기를 쓰지 않고 둘을 따로 읽어 맞춘다
+      // 한도 1만(limit)은 API 상한(1,000행)을 넘지 못한다 — 쪽마다 끝까지(상한 50,000행)
       const [tasks, runs] = await Promise.all([
-        db.from('work_tasks').select('id, workflow_key, status').eq('organization_id', organizationId).limit(10000),
-        db.from('work_runs').select('task_id, error').eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).limit(10000),
+        pagedRows<{ id: string; workflow_key: string; status: string }>((a, b, w) => db.from('work_tasks').select('id, workflow_key, status', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId).order('id').range(a, b)),
+        pagedRows<{ task_id: string; error: { code?: string } | null }>((a, b, w) => db.from('work_runs').select('task_id, error', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).order('id').range(a, b)),
       ]);
       if (tasks.error) fail(tasks.error);
       if (runs.error) fail(runs.error);

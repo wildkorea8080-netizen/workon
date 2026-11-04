@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 import { getActorScope } from '@/lib/actor-scope';
 import { canDeleteAgent } from '@/lib/agent-permissions';
@@ -40,14 +41,18 @@ export async function GET(_request: NextRequest) {
     const scope = await getAccessScope(departmentId);
     const visibleFilter = visibilityFilter(scope);
 
-    const { data, error } = await supabaseAdmin
+    // 문서가 1,000개를 넘는 기관에서도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)
+    const { data, error } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('documents')
       .select(
         'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
-          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from'
+          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from',
+        w ? { count: 'exact' } : undefined
       )
       .or(visibleFilter)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(a, b));
 
     if (error) {
       return NextResponse.json(

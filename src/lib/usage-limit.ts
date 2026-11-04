@@ -330,19 +330,15 @@ export async function checkTokenLimit(
     const limitTokens = org.monthly_token_limit ?? 0;
     if (limitTokens <= 0) return ALLOWED; // 0 = 무제한
 
-    const { data: logs, error } = await supabaseAdmin
-      .from('usage_logs')
-      .select('details')
-      .eq('organization_id', organizationId)
-      .eq('action', 'chat_message')
-      .gte('created_at', monthStartISO());
+    // 합은 DB가 난다(0057) — 앱으로 읽으면 API가 1,000행까지만 돌려줘 한도가 걸리지 않았다
+    const { data: tokens, error } = await supabaseAdmin.rpc('organization_chat_tokens', {
+      p_organization_id: organizationId,
+      p_from: monthStartISO(),
+    });
 
     if (error) return ALLOWED;
 
-    const usedTokens = (logs ?? []).reduce((sum: number, log: { details: any }) => {
-      const details = log.details ?? {};
-      return sum + (details.input_tokens ?? 0) + (details.output_tokens ?? 0);
-    }, 0);
+    const usedTokens = Number(tokens ?? 0);
 
     if (usedTokens >= limitTokens) {
       return {
@@ -411,17 +407,10 @@ export async function organizationBudgetStatus(organizationId: string): Promise<
   if (limitTokens <= 0) return null;
 
   const from = monthStartISO();
-  const { data: logs, error } = await supabaseAdmin
-    .from('usage_logs')
-    .select('details')
-    .eq('organization_id', organizationId)
-    .eq('action', 'chat_message')
-    .gte('created_at', from);
-  if (error) throw new Error(`usage_logs: ${error.message}`);
-  const usedTokens = (logs ?? []).reduce((sum: number, log: { details: any }) => {
-    const details = log.details ?? {};
-    return sum + (details.input_tokens ?? 0) + (details.output_tokens ?? 0);
-  }, 0);
+  // 한도 판정과 같은 DB 합(0057) — 1,000행 상한에서 덜 세지 않게
+  const { data: tokens, error } = await supabaseAdmin.rpc('organization_chat_tokens', { p_organization_id: organizationId, p_from: from });
+  if (error) throw new Error(`organization_chat_tokens: ${error.message}`);
+  const usedTokens = Number(tokens ?? 0);
   return {
     kind: 'monthly_tokens',
     periodKey: monthPeriodKey(from),

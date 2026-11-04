@@ -1,6 +1,7 @@
 // src/lib/work/workflows/regulations/providers.ts
 import { restrictDocumentAgents } from './scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { NODA_API_KEY } from '@/lib/config';
 import { noda, nodaTenant, stripNodaPrefixes, CONTEXT_BUDGET_AGENT_SHARED, CONTEXT_BUDGET_COMMON_SHARED } from '@/lib/noda';
 import { contextPassages, sourcesToChunks, isCleanMatch, type AgentDocument } from '@/lib/capabilities/doc-search';
@@ -67,11 +68,13 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
   );
   const agents = restrictDocumentAgents(eligible, scope.agentId);
   if (!agents.length) return { status: 'ok', items: [] };
-  const { data: docRows, error: docErr } = await supabaseAdmin
+  const { data: docRows, error: docErr } = await pagedRows<any>((a, b, w) => supabaseAdmin
     .from('documents')
-    .select('id, title, file_name, noda_status, agent_id, organization_id, department_id, visibility')
+    .select('id, title, file_name, noda_status, agent_id, organization_id, department_id, visibility', w ? { count: 'exact' } : undefined)
     .eq('organization_id', scope.organizationId)
-    .in('agent_id', agents.map((a) => a.id));
+    .in('agent_id', agents.map((x) => x.id))
+    .order('id')
+    .range(a, b));
   if (docErr) throw new Error(docErr.message);
   const docsByAgent = new Map<string, AgentDocument[]>();
   for (const d of (docRows ?? []) as (AgentDocument & { agent_id: string; visibility: string; department_id: string })[]) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
@@ -21,12 +22,13 @@ export async function GET(request: NextRequest) {
       .lte('started_at', `${year}-12-31T23:59:59`);
 
     // 해당 연도 usage_logs (API 비용 추정)
-    const { data: usageLogs } = await supabaseAdmin
+    const { data: usageLogs } = await pagedRows<{ details: any; created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs')
-      .select('details, created_at')
+      .select('details, created_at', w ? { count: 'exact' } : undefined)
       .eq('action', 'chat_message')
       .gte('created_at', `${year}-01-01`)
-      .lte('created_at', `${year}-12-31T23:59:59`);
+      .lte('created_at', `${year}-12-31T23:59:59`)
+      .order('id').range(a, b));
 
     // 월별 집계
     const monthly: any[] = [];

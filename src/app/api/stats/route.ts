@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -87,11 +88,16 @@ export async function GET(_request: NextRequest) {
     }
 
     // 토큰 사용량 계산 (usage_logs에서 추출)
-    const { data: tokenUsage } = await supabaseAdmin
-      .from('usage_logs')
-      .select('details')
-      .eq('department_id', departmentId)
-      .not('details', 'is', null);
+    // 쪽마다 끝까지(1,000행 상한에서 덜 세지 않게)
+    const { data: tokenUsage } = await pagedRows<{ details: any }>((a, b, withCount) =>
+      supabaseAdmin
+        .from('usage_logs')
+        .select('details', withCount ? { count: 'exact' } : undefined)
+        .eq('department_id', departmentId)
+        .not('details', 'is', null)
+        .order('id')
+        .range(a, b)
+    );
 
     let totalTokens = 0;
     if (tokenUsage) {

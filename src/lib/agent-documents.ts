@@ -1,5 +1,6 @@
 // src/lib/agent-documents.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { logSystem } from '@/lib/logger';
 import { noda, nodaErrorFields, nodaTenant, type NodaClient } from '@/lib/noda';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
@@ -49,10 +50,13 @@ export interface AgentDocumentsResult {
 function defaultStore(): AgentDocumentsDeps['store'] {
   return {
     async listRows(agentId) {
-      const { data, error } = await supabaseAdmin
+      // 비서를 지울 때 남는 행이 없게 쪽마다 끝까지(API 상한 1,000행)
+      const { data, error } = await pagedRows<AgentDocumentRow>((a, b, w) => supabaseAdmin
         .from('documents')
-        .select('id, storage_path, noda_status')
-        .eq('agent_id', agentId);
+        .select('id, storage_path, noda_status', w ? { count: 'exact' } : undefined)
+        .eq('agent_id', agentId)
+        .order('id')
+        .range(a, b));
       if (error) {
         console.error('[agent-documents] 지운 비서의 문서 조회 실패', agentId, error.message);
         return null;

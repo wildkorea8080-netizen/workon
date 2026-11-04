@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
@@ -33,14 +34,14 @@ export async function GET(request: NextRequest) {
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).gte('created_at', monthStart),
       supabaseAdmin.from('usage_logs').select('user_id', { count: 'exact', head: true }).eq('action', 'chat_message').gte('created_at', todayStart),
-      supabaseAdmin.from('usage_logs').select('details').eq('action', 'chat_message').gte('created_at', todayStart),
-      supabaseAdmin.from('usage_logs').select('details').eq('action', 'chat_message').gte('created_at', monthStart),
+      pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', todayStart).order('id').range(a, b)),
+      pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b)),
       supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', monthStart),
       supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', lastMonthStart).lt('started_at', monthStart),
       // 80~100% 경고 기관
       (async () => {
         const { data: orgs } = await supabaseAdmin.from('organizations').select('id, monthly_token_limit').eq('status', 'active');
-        const { data: logs } = await supabaseAdmin.from('usage_logs').select('organization_id, details').eq('action', 'chat_message').gte('created_at', monthStart);
+        const { data: logs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
         const usageMap = new Map<string, number>();
         for (const l of logs ?? []) {
           const oid = l.organization_id;
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
       })(),
       (async () => {
         const { data: orgs } = await supabaseAdmin.from('organizations').select('id, monthly_token_limit').eq('status', 'active');
-        const { data: logs } = await supabaseAdmin.from('usage_logs').select('organization_id, details').eq('action', 'chat_message').gte('created_at', monthStart);
+        const { data: logs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
         const usageMap = new Map<string, number>();
         for (const l of logs ?? []) {
           const oid = l.organization_id; if (!oid) continue;
@@ -86,10 +87,10 @@ export async function GET(request: NextRequest) {
     const growthPercent    = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100);
 
     // ── 최근 30일 일별 대화수 ──────────────────────────
-    const { data: dailyLogs } = await supabaseAdmin
-      .from('usage_logs').select('created_at').eq('action', 'chat_message')
+    const { data: dailyLogs } = await pagedRows<{ created_at: string }>((a, b, w) => supabaseAdmin
+      .from('usage_logs').select('created_at', w ? { count: 'exact' } : undefined).eq('action', 'chat_message')
       .gte('created_at', new Date(now.getTime() - 29 * 86400000).toISOString())
-      .order('created_at', { ascending: true });
+      .order('id').range(a, b));
 
     const dailyMap = new Map<string, number>();
     for (const l of dailyLogs ?? []) {
@@ -113,9 +114,9 @@ export async function GET(request: NextRequest) {
     const planChart = [...planMap.entries()].map(([name, value]) => ({ name, value }));
 
     // ── 이번달 사용량 Top 5 기관 ──────────────────────
-    const { data: topLogs } = await supabaseAdmin
-      .from('usage_logs').select('organization_id, details')
-      .eq('action', 'chat_message').gte('created_at', monthStart);
+    const { data: topLogs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin
+      .from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined)
+      .eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
     const topMap = new Map<string, number>();
     for (const l of topLogs ?? []) {
       const oid = l.organization_id; if (!oid) continue;

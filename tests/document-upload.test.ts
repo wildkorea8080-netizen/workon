@@ -20,7 +20,10 @@ vi.mock('@/lib/supabaseAdmin', () => ({
       select: () => ({
         in: (column: string, values: string[]) => {
           inCalls.push({ column, values });
-          return Promise.resolve({ data: existingRows, error: countError });
+          // 쪽 읽기(pagedRows) — order·range를 거쳐 같은 행을 한 쪽으로
+          const result = { data: existingRows, error: countError, count: countError ? null : existingRows.length };
+          const page = { order: () => page, range: () => Promise.resolve(result) };
+          return page;
         },
       }),
     }),

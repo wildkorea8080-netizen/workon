@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import {
   UPLOAD_FORMATS_LABEL,
   MAX_UPLOAD_BYTES,
@@ -198,10 +199,13 @@ export async function checkUploadTargets(agentIdsInput: unknown, actor: ActorSco
 
   // 비서당 문서 수 상한. 문서는 비서마다 한 행씩 들어가므로 선택한 비서 전부를 본다.
   // 화면 검사는 표시일 뿐이고 서버가 판정한다.
-  const { data: existing, error: countError } = await supabaseAdmin
+  // 여러 비서의 문서를 합하면 1,000행을 넘을 수 있다 — 쪽마다 끝까지(덜 세면 상한이 안 걸린다)
+  const { data: existing, error: countError } = await pagedRows<{ agent_id: string }>((a, b, w) => supabaseAdmin
     .from('documents')
-    .select('agent_id')
-    .in('agent_id', agentIds);
+    .select('agent_id', w ? { count: 'exact' } : undefined)
+    .in('agent_id', agentIds)
+    .order('id')
+    .range(a, b));
 
   const perAgent = new Map<string, number>();
   for (const row of existing ?? []) {

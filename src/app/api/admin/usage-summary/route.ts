@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { getModel, LEGACY_PRICING_MODEL_ID } from '@/lib/models';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -129,12 +130,17 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { data: logs, error } = await supabaseAdmin
-    .from('usage_logs')
-    .select('user_id, department_id, action, details, created_at')
-    .in('department_id', managedDeptIds)
-    .gte('created_at', from.toISOString())
-    .lte('created_at', to.toISOString());
+  // 쪽마다 끝까지 읽는다 — API는 한 번에 1,000행까지만 돌려줘, 그대로 읽으면 기록이 많은 기간을 조용히 덜 셈다(2026-11-05)
+  const { data: logs, error, truncated } = await pagedRows<{ user_id: string | null; department_id: string | null; action: string; details: any; created_at: string }>((a, b, withCount) =>
+    supabaseAdmin
+      .from('usage_logs')
+      .select('user_id, department_id, action, details, created_at', withCount ? { count: 'exact' } : undefined)
+      .in('department_id', managedDeptIds)
+      .gte('created_at', from.toISOString())
+      .lte('created_at', to.toISOString())
+      .order('id')
+      .range(a, b)
+  );
 
   if (error) {
     console.error('[usage-summary]', error);
@@ -147,8 +153,8 @@ export async function GET(request: NextRequest) {
   // ── 이름 사전 ──
   // 로그에는 id만 있다. 집계 후 이름을 붙이려면 미리 모아 둬야 한다.
   const [{ data: members }, { data: agents }, { data: depts }] = await Promise.all([
-    supabaseAdmin.from('users').select('id, full_name, email').in('department_id', managedDeptIds),
-    supabaseAdmin.from('agents').select('id, name, icon').in('department_id', managedDeptIds),
+    pagedRows<any>((a, b, w) => supabaseAdmin.from('users').select('id, full_name, email', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b)),
+    pagedRows<any>((a, b, w) => supabaseAdmin.from('agents').select('id, name, icon', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b)),
     supabaseAdmin.from('departments').select('id, name').in('id', managedDeptIds),
   ]);
 
@@ -281,6 +287,8 @@ export async function GET(request: NextRequest) {
       to: to.toISOString(),
       totalCount: rows.reduce((sum, r) => sum + r.count, 0),
       totalCostKrw: rows.reduce((sum, r) => sum + r.costKrw, 0),
+      // 상한(50,000행)에 닿아 앞부분만 셈 — 화면이 '일부만' 표시를 한다. 기간을 줄여 다시 보세요
+      truncated,
     },
   });
 }

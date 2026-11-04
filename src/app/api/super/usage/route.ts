@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
@@ -50,16 +51,17 @@ export async function GET(request: NextRequest) {
     const orgMap = new Map<string, OrgRow>((orgs ?? []).map((o: OrgRow) => [o.id, o]));
 
     // usage_logs 조회
-    let query = supabaseAdmin
-      .from('usage_logs')
-      .select('organization_id, user_id, details, created_at')
-      .eq('action', 'chat_message')
-      .gte('created_at', start.toISOString())
-      .lte('created_at', end.toISOString());
-
-    if (orgId !== 'all') query = query.eq('organization_id', orgId);
-
-    const { data: logs, error } = await query.order('created_at', { ascending: true });
+    // 쪽마다 끝까지(1,000행 상한에서 덜 세지 않게) — 기관 거르기는 쪽마다 같은 조건으로
+    const { data: logs, error } = await pagedRows<{ organization_id: string | null; user_id: string | null; details: any; created_at: string }>((a, b, w) => {
+      let query = supabaseAdmin
+        .from('usage_logs')
+        .select('organization_id, user_id, details, created_at', w ? { count: 'exact' } : undefined)
+        .eq('action', 'chat_message')
+        .gte('created_at', start.toISOString())
+        .lte('created_at', end.toISOString());
+      if (orgId !== 'all') query = query.eq('organization_id', orgId);
+      return query.order('id').range(a, b);
+    });
     if (error) throw error;
 
     const rows = logs ?? [];

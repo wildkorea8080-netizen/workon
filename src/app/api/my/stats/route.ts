@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,13 +51,16 @@ export async function GET(request: NextRequest) {
     const { start: periodStart, end: periodEnd } = getPeriodRange(period);
 
     // 1) 기간 내 대화 (agent 정보 포함)
-    const { data: periodConvs } = await supabaseAdmin
+    // 쪽마다 끝까지 — API는 한 번에 1,000행까지만 돌려준다(2026-11-05)
+    const { data: periodConvs } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('conversations')
-      .select('id, agent_id, title, created_at, agents(name, icon)')
+      .select('id, agent_id, title, created_at, agents(name, icon)', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
       .gte('created_at', periodStart.toISOString())
       .lte('created_at', periodEnd.toISOString())
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .order('id')
+      .range(a, b));
 
     const convs = periodConvs ?? [];
     const convIds = convs.map((c: { id: string }) => c.id);
@@ -64,31 +68,41 @@ export async function GET(request: NextRequest) {
     // 2) 기간 내 메시지 (토큰 추정용)
     let msgData: { conversation_id: string; content: string }[] = [];
     if (convIds.length > 0) {
-      const { data: msgs } = await supabaseAdmin
+      // 대화 id 목록을 in()으로 넘기면 주소가 길어지고 1,000행에서 잘린다 — 대화를 끼워 걸러 쪽마다 끝까지
+      const { data: msgs } = await pagedRows<{ conversation_id: string; content: string }>((a, b, w) => supabaseAdmin
         .from('messages')
-        .select('conversation_id, content')
-        .in('conversation_id', convIds)
-        .in('role', ['user', 'assistant']);
-      msgData = msgs ?? [];
+        .select('conversation_id, content, conversation:conversations!inner(user_id, created_at)', w ? { count: 'exact' } : undefined)
+        .eq('conversation.user_id', userId)
+        .gte('conversation.created_at', periodStart.toISOString())
+        .lte('conversation.created_at', periodEnd.toISOString())
+        .in('role', ['user', 'assistant'])
+        .order('id')
+        .range(a, b));
+      msgData = (msgs ?? []).map((m) => ({ conversation_id: m.conversation_id, content: m.content }));
     }
 
     // 3) 이번달 전체 대화 수 + 토큰 (summary 카드용 — 기간 필터와 무관)
     const now = new Date();
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const { data: thisMonthConvs } = await supabaseAdmin
+    const { data: thisMonthConvs } = await pagedRows<{ id: string }>((a, b, w) => supabaseAdmin
       .from('conversations')
-      .select('id')
+      .select('id', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
-      .gte('created_at', thisMonthStart.toISOString());
+      .gte('created_at', thisMonthStart.toISOString())
+      .order('id')
+      .range(a, b));
 
     const thisMonthIds = (thisMonthConvs ?? []).map((c: { id: string }) => c.id);
     let monthlyTokenEstimate = 0;
     if (thisMonthIds.length > 0) {
-      const { data: monthMsgs } = await supabaseAdmin
+      const { data: monthMsgs } = await pagedRows<{ content: string }>((a, b, w) => supabaseAdmin
         .from('messages')
-        .select('content')
-        .in('conversation_id', thisMonthIds)
-        .in('role', ['user', 'assistant']);
+        .select('content, conversation:conversations!inner(user_id, created_at)', w ? { count: 'exact' } : undefined)
+        .eq('conversation.user_id', userId)
+        .gte('conversation.created_at', thisMonthStart.toISOString())
+        .in('role', ['user', 'assistant'])
+        .order('id')
+        .range(a, b));
       monthlyTokenEstimate = (monthMsgs ?? []).reduce(
         (sum: number, m: { content: string }) => sum + Math.ceil(m.content.length / 4),
         0
@@ -96,11 +110,13 @@ export async function GET(request: NextRequest) {
     }
 
     // 4) 연속 사용일 (전체 기간)
-    const { data: allConvDates } = await supabaseAdmin
+    const { data: allConvDates } = await pagedRows<{ created_at: string }>((a, b, w) => supabaseAdmin
       .from('conversations')
-      .select('created_at')
+      .select('created_at', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(a, b));
 
     const dateSet = new Set<string>();
     for (const c of allConvDates ?? []) {

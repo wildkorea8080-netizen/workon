@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export async function GET(_request: NextRequest) {
@@ -27,12 +28,15 @@ export async function GET(_request: NextRequest) {
     // 예전에는 자기 부서만 조회해, 하위 부서 직원을 볼 수도 옮길 수도 없었다.
     const managedDeptIds = await getManagedDepartmentIds(departmentId);
 
-    const { data: users, error } = await supabaseAdmin
+    // 직원이 1,000명을 넘어도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)
+    const { data: users, error } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, departments(id, name)')
+      .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, departments(id, name)', w ? { count: 'exact' } : undefined)
       .in('department_id', managedDeptIds)
       .is('deleted_at', null) // 삭제(탈퇴)한 계정은 행만 남아 있다 (0047)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(a, b));
 
     if (error) {
       console.error('사용자 목록 조회 오류:', error);

@@ -232,11 +232,13 @@ describe('기관 사용률', () => {
   it('종량제는 이번 달(KST) 대화 토큰, 한도 0이면 null, 집계 실패는 던진다', async () => {
     state.results.contracts = [{ data: null }];
     state.results.organizations = [{ data: { monthly_token_limit: 1000 } }];
-    state.results.usage_logs = [{ data: [{ details: { input_tokens: 600, output_tokens: 300 } }, { details: {} }] }];
+    // 합은 DB 함수(0057) — 기록을 앱으로 읽지 않는다(1,000행 상한에서 덜 셈)
+    state.rpc = [{ data: 900 }];
     const status = await organizationBudgetStatus('org-1');
     expect(status).toMatchObject({ kind: 'monthly_tokens', used: 900, limit: 1000, percent: 90, alertPercent: 80, periodEndsAt: null });
     expect(status?.periodKey).toMatch(/^month:\d{4}-\d{2}$/);
-    expect(state.calls).toContainEqual(['usage_logs', 'eq', 'action', 'chat_message']);
+    expect(state.calls).toContainEqual(['rpc', 'organization_chat_tokens', expect.objectContaining({ p_organization_id: 'org-1' })]);
+    expect(state.calls.some((c) => c[0] === 'usage_logs')).toBe(false);
 
     state.results.contracts = [{ data: null }];
     state.results.organizations = [{ data: { monthly_token_limit: 0 } }];
@@ -244,8 +246,8 @@ describe('기관 사용률', () => {
 
     state.results.contracts = [{ data: null }];
     state.results.organizations = [{ data: { monthly_token_limit: 1000 } }];
-    state.results.usage_logs = [{ error: { message: 'down' } }];
-    await expect(organizationBudgetStatus('org-1')).rejects.toThrow('usage_logs');
+    state.rpc = [{ error: { message: 'down' } }];
+    await expect(organizationBudgetStatus('org-1')).rejects.toThrow('organization_chat_tokens');
   });
 });
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 
 export const dynamic = 'force-dynamic';
@@ -106,8 +107,9 @@ export async function GET() {
 
   // 부서별 인원/비서 수 — 삭제 가능 여부 판단과 화면 표시에 쓴다
   const [{ data: users }, { data: agents }] = await Promise.all([
-    supabaseAdmin.from('users').select('department_id').in('department_id', ids),
-    supabaseAdmin.from('agents').select('department_id').in('department_id', ids),
+    // 표시용 인원·비서 수 — 쪽마다 끝까지(1,000명을 넘는 기관에서 0으로 보이지 않게). 삭제 판단은 [id] 라우트가 정확한 개수로 다시 본다
+    pagedRows<{ department_id: string | null }>((a, b, w) => supabaseAdmin.from('users').select('department_id', w ? { count: 'exact' } : undefined).in('department_id', ids).order('id').range(a, b)),
+    pagedRows<{ department_id: string | null }>((a, b, w) => supabaseAdmin.from('agents').select('department_id', w ? { count: 'exact' } : undefined).in('department_id', ids).order('id').range(a, b)),
   ]);
 
   const count = (rows: { department_id: string | null }[] | null) => {
