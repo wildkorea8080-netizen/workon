@@ -16,7 +16,7 @@ import {
 import type { NodaStatus, RetrievedChunk } from '@/lib/db';
 import { kstToday, notCitableEditionIds } from '@/lib/edition-dates';
 import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-types';
-import type { Capability, PreflightResult } from './types';
+import type { Capability, PreflightResult, TurnContext } from './types';
 import {
   commonSourcesToChunks,
   citableCommonIds,
@@ -642,6 +642,36 @@ export async function searchAgentDocuments(
   const result = await deps.fetchContext(agentId, query);
   const { chunks } = await matchedChunks(deps, { agentId, organizationId }, result, docs);
   return { chunks, dropped: result.dropped };
+}
+
+/**
+ * **대화와 똑같은** 문서 찾기 — 비서 보관함 + 기관 유형의 공통 자료실(S5)을 대화의 preflight → prepare 그대로 태워 근거 조각만 돌려준다.
+ * 예산 나누기(3000·2000)·번호 밀기·섞임·고아·판·시행일 규칙이 모두 대화와 같다. 일괄 평가(`/api/admin/rag-eval`)가 쓴다.
+ * NODA를 못 부르면(대화라면 503으로 거절할 때) null. 대화처럼 고아 사본 지우기·운영 기록은 일어날 수 있다
+ */
+export async function searchLikeChat(
+  input: { agentId: string; organizationId: string; query: string },
+  deps: DocSearchDeps = defaultDeps
+): Promise<RetrievedChunk[] | null> {
+  const cap = createDocSearch(deps);
+  const pre = await cap.preflight!({ organizationId: input.organizationId, agentId: input.agentId, message: input.query, skipDocuments: false });
+  if (!pre.ok) return null;
+  // prepare가 읽는 것은 기관·비서·질문·preflight 결과뿐이다 — 대화·첨부·사용자는 없다
+  const ctx = {
+    organizationId: input.organizationId,
+    departmentId: '',
+    userId: '',
+    agentId: input.agentId,
+    agentVersion: 0,
+    capabilities: { doc_search: {} },
+    message: input.query,
+    conversationId: '',
+    attachments: [],
+    preflight: { doc_search: pre.carry },
+    skipDocuments: false,
+  } as TurnContext;
+  const out = await cap.prepare!(ctx);
+  return out.chunks ?? [];
 }
 
 export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {

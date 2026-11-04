@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import type { ActorScope } from '@/lib/agent-permissions';
 import { loadAgentAccess } from '@/lib/agent-store';
-import { searchAgentDocuments } from '@/lib/capabilities/doc-search';
+import { searchLikeChat } from '@/lib/capabilities/doc-search';
 import { NodaError } from '@/lib/noda';
 import { logSystem } from '@/lib/logger';
 import { parseRagEvalSet, scoreRagEvalRow, summarizeRagEval, type RagEvalResult } from '@/lib/rag-eval';
@@ -15,7 +15,7 @@ export const maxDuration = 300;
 /**
  * 배치 문서 찾기 평가(0054) — 기관 관리자만.
  *
- * - POST `{ agentId, set }`: 세트를 읽어 질문마다 대화와 같은 규칙(`searchAgentDocuments`)으로 찾고, 판정·요약을 저장해 돌려준다.
+ * - POST `{ agentId, set }`: 세트를 읽어 질문마다 **대화와 같은 찾기**(`searchLikeChat` — 비서 보관함 + 기관 유형의 공통 자료실, 2026-11-05)로 찾고, 판정·요약을 저장해 돌려준다.
  *   검색만 — AI 답변을 만들지 않는다. 한 질문의 NODA 실패는 그 질문만 '찾기 실패'로 두고, 모두 실패면 저장하지 않고 503.
  * - GET `?agentId=`: 그 비서의 지난 실행 20개(요약만). `?id=`: 실행 하나(결과 포함).
  * - 비서는 요청자 기관이고, 공식 비서이거나 요청자가 관리하는 부서의 비서여야 한다(아니면 없는 것처럼 404).
@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     const parsed = parseRagEvalSet(typeof body.set === 'string' ? body.set : '');
     if (!parsed.ok) return NextResponse.json({ ok: false, error: { message: parsed.errors[0], details: { errors: parsed.errors } } }, { status: 400 });
 
+    const orgId = actor.organizationId;
     const started = Date.now();
     const results: RagEvalResult[] = new Array(parsed.rows.length);
     let next = 0;
@@ -60,8 +61,10 @@ export async function POST(request: NextRequest) {
         const row = parsed.rows[index];
         if (Date.now() - started > BUDGET_MS) { results[index] = scoreRagEvalRow(row, null); continue; }
         try {
-          const found = await searchAgentDocuments({ agentId: agent.id, query: row.question, organizationId: agent.organization_id ?? null });
-          results[index] = scoreRagEvalRow(row, found.chunks);
+          // 비서는 요청자 기관의 것이다(evaluableAgent) — 기관 유형으로 공통 자료실도 대화처럼 찾는다
+          const chunks = await searchLikeChat({ agentId: agent.id, organizationId: orgId, query: row.question });
+          if (chunks === null) nodaFailures += 1; // 대화라면 503으로 거절할 때(NODA를 못 부름)
+          results[index] = scoreRagEvalRow(row, chunks);
         } catch (error) {
           if (error instanceof NodaError) nodaFailures += 1;
           else console.error('[rag-eval] 찾기 오류', error);
@@ -71,7 +74,7 @@ export async function POST(request: NextRequest) {
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, parsed.rows.length) }, worker));
 
-    const summary = summarizeRagEval(results);
+    const summary = summarizeRagEval(results, 'chat');
     if (summary.errors === results.length) {
       await logSystem({ level: 'warning', category: 'api', message: '문서 찾기 평가 — 모든 질문의 찾기가 실패했습니다', details: { agent_id: agent.id, questions: results.length, noda_failures: nodaFailures }, orgId: actor.organizationId });
       return jsonError('참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 평가해 주세요.', 503);

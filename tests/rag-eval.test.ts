@@ -18,7 +18,7 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/auth', () => ({ getServerAuthSession: async () => ({ user: { id: 'u1' } }), isAdminSession: () => state.admin }));
 vi.mock('@/lib/actor-scope', () => ({ getActorScope: async () => ({ userId: 'u1', departmentId: 'd1', organizationId: 'o1', managedDepartmentIds: ['d1'] }) }));
 vi.mock('@/lib/agent-store', () => ({ loadAgentAccess: async () => state.agent }));
-vi.mock('@/lib/capabilities/doc-search', () => ({ searchAgentDocuments: (...a: unknown[]) => state.search(...a) }));
+vi.mock('@/lib/capabilities/doc-search', () => ({ searchLikeChat: (...a: unknown[]) => state.search(...a) }));
 vi.mock('@/lib/logger', () => ({ logSystem: async (e: unknown) => { state.logs.push(e); } }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {
@@ -94,6 +94,7 @@ describe('판정', () => {
       questions: 6, expected: 3, hits: 2, hitRate: 0.667, withPage: 1, pageHits: 1, pageHitRate: 1, mrr: 0.5,
       offTopic: 2, offTopicRejected: 1, offTopicRejectRate: 0.5, errors: 1,
       counts: { hit: 2, miss: 0, no_evidence: 1, correct_empty: 1, false_evidence: 1, error: 1 },
+      searchScope: 'chat', commonEvidenceQuestions: 0,
     });
     expect(summarizeRagEval([])).toMatchObject({ hitRate: null, mrr: null, offTopicRejectRate: null });
   });
@@ -119,13 +120,14 @@ describe('라우트', () => {
   beforeEach(() => {
     Object.assign(state, { admin: true, agent: { id: AGENT, organization_id: 'o1', department_id: 'd1', tier: 'department', version: 7, deleted_at: null }, inserted: [], filters: [], row: null, logs: [] });
     state.search.mockReset();
-    state.search.mockImplementation(async ({ query }: { query: string }) => ({ chunks: query.includes('점심') ? [] : [chunk('여비 규정.pdf', 12)], dropped: 0 }));
+    state.search.mockImplementation(async ({ query }: { query: string }) => (query.includes('점심') ? [] : [chunk('여비 규정.pdf', 12)]));
   });
   it('질문마다 대화와 같은 찾기로 판정해 기관·비서·판과 함께 저장한다', async () => {
     const out = await json(await post({ agentId: AGENT, set: '출장 일비는?\t여비\t12\n점심 메뉴\t\t' }));
     expect(out.status).toBe(200);
     expect(state.search).toHaveBeenCalledTimes(2);
     expect(state.search).toHaveBeenCalledWith({ agentId: AGENT, query: '출장 일비는?', organizationId: 'o1' });
+    expect(state.inserted[0]).toMatchObject({ summary: { searchScope: 'chat', commonEvidenceQuestions: 0 } });
     expect(state.inserted[0]).toMatchObject({ organization_id: 'o1', agent_id: AGENT, agent_version: 7, created_by: 'u1', question_count: 2, status: 'done', summary: { hits: 1, offTopicRejected: 1 } });
     expect(JSON.stringify(state.inserted[0])).not.toContain('"text"');
   });
@@ -134,7 +136,8 @@ describe('라우트', () => {
     await post({ agentId: AGENT, set: '가\t여비\n나\t여비' });
     expect(state.inserted[0]).toMatchObject({ status: 'partial', summary: { errors: 1 } });
     state.inserted = [];
-    state.search.mockImplementation(async () => { throw new NodaError('HTTP 503', 'http', 503); });
+    // 대화라면 503으로 거절할 때(찾기가 null)도 찾기 실패다
+    state.search.mockImplementation(async () => null);
     expect((await post({ agentId: AGENT, set: '가\t여비\n나\t여비' })).status).toBe(503);
     expect(state.inserted).toEqual([]);
     expect(state.logs).toHaveLength(1);

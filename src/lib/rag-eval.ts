@@ -24,7 +24,12 @@ export interface RagEvalChunk {
   documentTitle?: string;
   page?: number | null;
   similarity: number;
+  /** 공통 자료실 조각(S5)이면 'common' — 상위 문서 이름 앞에 [공통]을 붙인다 */
+  scope?: 'common';
 }
+
+/** 찾은 범위 — 'chat' = 대화와 같은 찾기(비서 보관함 + 공통 자료실, 2026-11-05부터). 그 전 기록은 칸이 없고 비서 보관함만 찾았다 */
+export type RagEvalScope = 'agent' | 'chat';
 
 /**
  * hit = 기대 문서를 찾음 · miss = 근거는 왔지만 기대 문서가 없음 · no_evidence = 기대 문서가 있는데 근거가 하나도 없음 ·
@@ -44,8 +49,10 @@ export interface RagEvalResult {
   pageMatch: boolean | null;
   chunkCount: number;
   topSimilarity: number | null;
-  /** 위에서부터 서로 다른 문서 이름 3개까지(근거 원문은 남기지 않는다) */
+  /** 위에서부터 서로 다른 문서 이름 3개까지(근거 원문은 남기지 않는다). 공통 자료실 문서는 '[공통] 이름' */
   topDocuments: string[];
+  /** 근거에 공통 자료실 조각이 있었나(없으면 칸이 없다 — 옛 기록과 같은 꼴) */
+  commonEvidence?: true;
 }
 
 export interface RagEvalSummary {
@@ -66,6 +73,10 @@ export interface RagEvalSummary {
   offTopicRejectRate: number | null;
   errors: number;
   counts: Record<RagEvalVerdict, number>;
+  /** 찾은 범위 — 없으면 옛 기록(비서 보관함만) */
+  searchScope?: RagEvalScope;
+  /** 근거에 공통 자료실 조각이 있던 질문 수(찾기 실패 제외) */
+  commonEvidenceQuestions?: number;
 }
 
 const clean = (v: unknown) => (typeof v === 'string' ? v.normalize('NFC').replace(/[\u0000-\u001f\u007f\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim() : '');
@@ -122,12 +133,13 @@ export function scoreRagEvalRow(row: RagEvalRow, chunks: RagEvalChunk[] | null):
   if (!chunks) return { ...base, verdict: 'error', rank: null, pageMatch: null, chunkCount: 0, topSimilarity: null, topDocuments: [] };
   const topDocuments: string[] = [];
   for (const c of chunks) {
-    const t = clean(c.documentTitle) || '(이름 없음)';
+    const name = clean(c.documentTitle) || '(이름 없음)';
+    const t = c.scope === 'common' ? `[공통] ${name}` : name;
     if (!topDocuments.includes(t)) topDocuments.push(t);
     if (topDocuments.length >= 3) break;
   }
   const topSimilarity = chunks.length ? Math.max(...chunks.map((c) => (Number.isFinite(c.similarity) ? c.similarity : 0))) : null;
-  const common = { chunkCount: chunks.length, topSimilarity, topDocuments };
+  const common = { chunkCount: chunks.length, topSimilarity, topDocuments, ...(chunks.some((c) => c.scope === 'common') ? { commonEvidence: true as const } : {}) };
   if (!row.expected) {
     return { ...base, ...common, verdict: chunks.length ? 'false_evidence' : 'correct_empty', rank: null, pageMatch: null };
   }
@@ -140,7 +152,7 @@ export function scoreRagEvalRow(row: RagEvalRow, chunks: RagEvalChunk[] | null):
 
 const rate = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 1000 : null);
 
-export function summarizeRagEval(results: RagEvalResult[]): RagEvalSummary {
+export function summarizeRagEval(results: RagEvalResult[], searchScope: RagEvalScope = 'chat'): RagEvalSummary {
   const counts: Record<RagEvalVerdict, number> = { hit: 0, miss: 0, no_evidence: 0, correct_empty: 0, false_evidence: 0, error: 0 };
   for (const r of results) counts[r.verdict] += 1;
   const scored = results.filter((r) => r.verdict !== 'error');
@@ -162,7 +174,29 @@ export function summarizeRagEval(results: RagEvalResult[]): RagEvalSummary {
     offTopicRejectRate: rate(counts.correct_empty, offTopicRows.length),
     errors: counts.error,
     counts,
+    searchScope,
+    commonEvidenceQuestions: scored.filter((r) => r.commonEvidence).length,
   };
+}
+
+/** 두 실행의 찾은 범위가 다르면 비교 옆에 보일 안내 — 공통 자료실을 찾기 시작한 뒤와 전을 같은 규칙으로 오해하지 않게 */
+export function scopeChangeNote(previous: Pick<RagEvalSummary, 'searchScope'>, current: Pick<RagEvalSummary, 'searchScope'>): string | null {
+  const a = previous.searchScope ?? 'agent';
+  const b = current.searchScope ?? 'agent';
+  if (a === b) return null;
+  return a === 'agent'
+    ? '지난 평가는 비서 문서만 찾았고, 지금은 대화처럼 공통 자료실도 찾습니다 — 차이가 공통 자료 때문일 수 있습니다.'
+    : '지난 평가는 공통 자료실도 찾았고, 이 평가는 비서 문서만 찾았습니다 — 차이가 공통 자료 때문일 수 있습니다.';
+}
+
+/**
+ * 지난 실행의 결과에서 세트를 다시 만든다(탭 구분, 머리글 포함) — 같은 질문으로 다시 재기 위한 '세트 불러오기'.
+ * `parseRagEvalSet`으로 다시 읽으면 같은 질문·기대 문서·기대 쪽이 나온다. 세트는 따로 저장하지 않는다(실행 기록이 세트를 품는다)
+ */
+export function ragEvalSetText(results: Array<Pick<RagEvalResult, 'question' | 'expected' | 'page'>>): string {
+  const cell = (v: string) => (/["\t\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const lines = results.map((r) => [cell(r.question), cell(r.expected ?? ''), r.page === null ? '' : String(r.page)].join('\t'));
+  return ['질문\t기대 문서\t기대 쪽', ...lines].join('\n');
 }
 
 /** 맞은 판정인가 — 비교에서 좋아짐·나빠짐을 가른다 */

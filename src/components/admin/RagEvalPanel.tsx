@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Agent } from '@/lib/db';
 import {
-  RAG_EVAL_MAX_QUESTIONS, RAG_EVAL_VERDICT_LABELS, compareRagEvalRuns, parseRagEvalSet, ragEvalCsv,
+  RAG_EVAL_MAX_QUESTIONS, RAG_EVAL_VERDICT_LABELS, compareRagEvalRuns, parseRagEvalSet, ragEvalCsv, ragEvalSetText, scopeChangeNote,
   type RagEvalResult, type RagEvalSummary,
 } from '@/lib/rag-eval';
 
@@ -30,6 +30,8 @@ export function summaryLine(s: RagEvalSummary): string {
   if (s.mrr !== null) parts.push(`평균 순위 점수 ${s.mrr.toFixed(2)}`);
   if (s.offTopic) parts.push(`엉뚱한 질문 걸러짐 ${s.offTopicRejected}/${s.offTopic} (${pct(s.offTopicRejectRate)})`);
   if (s.errors) parts.push(`찾기 실패 ${s.errors}`);
+  if (s.commonEvidenceQuestions) parts.push(`공통 자료 근거 ${s.commonEvidenceQuestions}개 질문`);
+  if (!s.searchScope) parts.push('비서 문서만 찾음');
   return parts.join(' · ');
 }
 
@@ -45,7 +47,7 @@ export default function RagEvalPanel() {
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<RunRow | null>(null);
   const [history, setHistory] = useState<RunRow[]>([]);
-  const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number } | null>(null);
+  const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number; note: string | null } | null>(null);
 
   useEffect(() => {
     void call<Agent[]>('/api/agents?manage=true').then((r) => { if (r.ok) setAgents(r.data.filter((a) => a.agent_type !== 'link' && !a.deleted_at)); });
@@ -72,7 +74,13 @@ export default function RagEvalPanel() {
     if (!run?.results) return;
     const r = await call<RunRow>(`/api/admin/rag-eval?id=${encodeURIComponent(base.id)}`);
     if (!r.ok || !r.data.results) { setError(r.ok ? '비교할 기록을 불러오지 못했습니다.' : r.message); return; }
-    setCompare({ base: r.data, ...compareRagEvalRuns(r.data.results, run.results) });
+    setCompare({ base: r.data, ...compareRagEvalRuns(r.data.results, run.results), note: scopeChangeNote(r.data.summary, run.summary) });
+  }
+  /** 지난 평가의 질문·기대 문서·기대 쪽을 세트 칸에 다시 채운다(문서를 바꾼 뒤 같은 세트로 다시 재기) */
+  async function reuseSet(row: RunRow) {
+    const r = await call<RunRow>(`/api/admin/rag-eval?id=${encodeURIComponent(row.id)}`);
+    if (!r.ok || !r.data.results?.length) { setError(r.ok ? '세트를 불러오지 못했습니다.' : r.message); return; }
+    setSet(ragEvalSetText(r.data.results)); setError(null);
   }
   async function open(row: RunRow) {
     const r = await call<RunRow>(`/api/admin/rag-eval?id=${encodeURIComponent(row.id)}`);
@@ -90,7 +98,7 @@ export default function RagEvalPanel() {
       <div>
         <h2 className="text-lg font-semibold text-slate-900">문서 찾기 일괄 평가</h2>
         <p className="mt-1 text-sm leading-6 text-slate-600">
-          질문마다 기대하는 문서를 적어 두면, 대화와 같은 규칙으로 찾아 맞았는지 한 번에 봅니다. AI 답변은 만들지 않습니다(모델 사용량 없음).
+          질문마다 기대하는 문서를 적어 두면, 대화와 같은 규칙(비서 문서 + 기관 유형의 공통 자료실)으로 찾아 맞았는지 한 번에 봅니다. 공통 자료는 상위 문서에 [공통]으로 보입니다. AI 답변은 만들지 않습니다(모델 사용량 없음).
           한 줄에 <strong>질문 · 기대 문서 이름(일부만 적어도 됨) · 기대 쪽(선택)</strong>을 탭이나 쉼표로 적습니다. 엑셀에서 세 칸을 복사해 붙여도 됩니다.
           기대 문서를 비운 줄은 <strong>근거가 없어야 맞는 질문</strong>(엉뚱한 질문)입니다. 한 번에 {RAG_EVAL_MAX_QUESTIONS}개까지 평가합니다.
         </p>
@@ -132,6 +140,7 @@ export default function RagEvalPanel() {
       {compare && (
         <div className="rounded-lg bg-slate-50 p-3 text-xs leading-6">
           <p className="font-semibold">{kst(compare.base.created_at)}(판 {compare.base.agent_version})과 비교 — 좋아짐 {compare.improved.length} · 나빠짐 {compare.regressed.length}{compare.unmatched ? ` · 그때 없던 질문 ${compare.unmatched}` : ''}</p>
+          {compare.note && <p className="text-amber-700">{compare.note}</p>}
           {compare.regressed.map((r) => <p key={`r${r.line}`} className="text-red-700">나빠짐: {r.question} → {RAG_EVAL_VERDICT_LABELS[r.verdict]}</p>)}
           {compare.improved.map((r) => <p key={`i${r.line}`} className="text-emerald-700">좋아짐: {r.question} → {RAG_EVAL_VERDICT_LABELS[r.verdict]}</p>)}
         </div>
@@ -144,6 +153,7 @@ export default function RagEvalPanel() {
             <li key={h.id} className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={() => void open(h)} className="text-[#003087] underline">{kst(h.created_at)} · 판 {h.agent_version} · 질문 {h.question_count}</button>
               <span className="text-slate-600">{summaryLine(h.summary)}</span>
+              <button type="button" onClick={() => void reuseSet(h)} className="text-slate-500 underline">이 세트 다시 쓰기</button>
               {run?.results && h.id !== run.id && <button type="button" onClick={() => void compareWith(h)} className="text-slate-500 underline">지금 결과와 비교</button>}
             </li>))}</ul>
         </div>
