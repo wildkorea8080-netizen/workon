@@ -16,6 +16,7 @@ import {
   ORG_SUSPENDED_UPLOAD_MESSAGE,
   parseDocumentStoragePath,
 } from '@/lib/document-upload';
+import { parseEffectiveFrom, replaceTargetError } from '@/lib/document-editions';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,8 @@ export async function POST(request: NextRequest) {
       title?: unknown;
       visibility?: unknown;
       agent_ids?: unknown;
+      replaces_id?: unknown;
+      effective_from?: unknown;
     };
     try {
       body = await request.json();
@@ -146,6 +149,24 @@ export async function POST(request: NextRequest) {
     const targets = await checkUploadTargets(body.agent_ids, actor);
     if (!targets.ok) return jsonError(targets.message, targets.status);
 
+    // ── 판(0055): 바꿀 옛 판·시행일. 옛 판은 같은 비서의 현재 판이어야 하고, 새 판이 읽힌 뒤에야 내려간다 ──
+    const effectiveFrom = parseEffectiveFrom(body.effective_from);
+    if (effectiveFrom === undefined) return jsonError('시행일은 2026-01-01처럼 날짜로 입력해 주세요.', 400);
+    let replacesId: string | null = null;
+    if (body.replaces_id !== undefined && body.replaces_id !== null && body.replaces_id !== '') {
+      if (typeof body.replaces_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.replaces_id)) {
+        return jsonError('바꿀 옛 판을 찾을 수 없습니다. 문서 목록을 새로 고쳐 주세요.', 400);
+      }
+      const [{ data: target, error: targetError }, { count, error: countError }] = await Promise.all([
+        supabaseAdmin.from('documents').select('id, agent_id, noda_status, retired_at').eq('id', body.replaces_id).maybeSingle(),
+        supabaseAdmin.from('documents').select('id', { count: 'exact', head: true }).eq('replaces_id', body.replaces_id).in('noda_status', ['reading', 'ready']),
+      ]);
+      if (targetError || countError) return jsonError('잠시 뒤 다시 시도해 주세요.', 500);
+      const replaceError = replaceTargetError({ agentIds: targets.agentIds, target, competing: count ?? 0 });
+      if (replaceError) return jsonError(replaceError, 409);
+      replacesId = body.replaces_id;
+    }
+
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     const ids = targets.agentIds.map(() => randomUUID());
     const rows = buildNewDocumentRows({
@@ -160,7 +181,7 @@ export async function POST(request: NextRequest) {
       title: title || fileName,
       visibility: body.visibility === 'department' ? 'department' : 'organization',
       now: new Date(now),
-    });
+    }).map((row) => ({ ...row, replaces_id: replacesId, effective_from: effectiveFrom }));
 
     const { data: inserted, error: insertError } = await supabaseAdmin.from('documents').insert(rows).select('id');
     if (insertError || !inserted?.length) {

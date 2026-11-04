@@ -9,6 +9,21 @@ import {
 import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 
+/** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
+export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
+  if (agentIds.length !== 1) return [];
+  return docs.filter((d) => d.agent_id === agentIds[0] && !d.retired_at && d.noda_status !== 'retired' && d.noda_status !== 'deleting');
+}
+
+/** 새 판 줄의 안내 — 옛 판을 이미 내렸는지, 읽히면 내릴지 */
+export function editionNote(doc: Document, docs: Document[]): string {
+  const old = docs.find((d) => d.id === doc.replaces_id);
+  const name = old ? old.title || old.file_name : '옛 판';
+  if (old?.noda_status === 'retired') return `← ‘${name}’을(를) 대신합니다(옛 판은 지난 판).`;
+  if (doc.noda_status === 'ready') return `← ‘${name}’을(를) 대신합니다 — 옛 판을 내리는 중입니다(그동안에도 옛 판은 근거로 쓰지 않습니다).`;
+  return `← ‘${name}’을(를) 대신할 새 판 — 다 읽히면 옛 판을 지난 판으로 내립니다.`;
+}
+
 /** 목록 응답은 오래 멈춘 읽는 중 행 하나에 kick: true를 달아 준다(서버는 응답 뒤 일을 이어 가지 못한다) */
 type DocumentRow = Document & { kick?: boolean };
 
@@ -34,6 +49,8 @@ function ReadStatusChip({ doc }: { doc: DocumentRow }) {
       );
     case 'deleting':
       return <span className="text-xs px-2 py-0.5 rounded font-medium bg-amber-100 text-amber-800">삭제 대기</span>;
+    case 'retired':
+      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-slate-200 text-slate-700">지난 판 — 근거로 쓰지 않음</span>;
     default:
       return null;
   }
@@ -50,6 +67,9 @@ export default function DocumentsManager() {
     title:    '',
     // 규정·매뉴얼 대부분은 전 직원 공통이라 기관 전체가 기본
     visibility: 'organization' as 'organization' | 'department',
+    // 판(0055) — 개정본이면 바꿀 옛 판(비서 하나일 때만)·시행일
+    replacesId: '',
+    effectiveFrom: '',
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -212,6 +232,8 @@ export default function DocumentsManager() {
           agentIds: uploadForm.agentIds,
           title: uploadForm.title.trim() || undefined,
           visibility: uploadForm.visibility,
+          replacesId: uploadForm.agentIds.length === 1 ? uploadForm.replacesId || undefined : undefined,
+          effectiveFrom: uploadForm.effectiveFrom || undefined,
         },
         setUploadStage
       );
@@ -223,7 +245,7 @@ export default function DocumentsManager() {
       // 읽기는 기다리지 않고 건다 — 목록이 '읽는 중'을 보여 주고 다 읽으면 바뀐다
       startReading(result.documentIds);
       setStatusMessage('문서를 올렸습니다. 읽는 중입니다 — 다 읽으면 비서가 찾을 수 있습니다.');
-      setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization' });
+      setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization', replacesId: '', effectiveFrom: '' });
       loadData();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
@@ -348,6 +370,33 @@ export default function DocumentsManager() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 판(0055) — 개정본을 올릴 때. 새 판이 읽히면 옛 판은 지난 판이 되어 근거로 쓰지 않는다 */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-medium text-slate-700">바꿀 옛 판 (개정본일 때)
+              <select
+                aria-label="바꿀 옛 판"
+                value={uploadForm.agentIds.length === 1 ? uploadForm.replacesId : ''}
+                disabled={uploadForm.agentIds.length !== 1}
+                onChange={(e) => setUploadForm((prev) => ({ ...prev, replacesId: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-normal disabled:bg-slate-50"
+              >
+                <option value="">없음(새 문서)</option>
+                {replaceCandidates(documents, uploadForm.agentIds).map((d) => <option key={d.id} value={d.id}>{d.title || d.file_name}</option>)}
+              </select>
+              <span className="mt-1 block text-xs font-normal text-slate-500">{uploadForm.agentIds.length === 1 ? '새 판이 읽힌 뒤에 옛 판을 지난 판으로 내립니다(읽기에 실패하면 옛 판을 계속 씁니다).' : '비서를 하나만 고르면 고를 수 있습니다.'}</span>
+            </label>
+            <label className="block text-sm font-medium text-slate-700">시행일 (선택)
+              <input
+                type="date"
+                aria-label="시행일"
+                value={uploadForm.effectiveFrom}
+                onChange={(e) => setUploadForm((prev) => ({ ...prev, effectiveFrom: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-normal"
+              />
+              <span className="mt-1 block text-xs font-normal text-slate-500">목록에 표시만 합니다(시행일에 맞춰 자동으로 바꾸지는 않습니다).</span>
+            </label>
           </div>
 
           <div>
@@ -514,7 +563,9 @@ export default function DocumentsManager() {
                           : '미연결'}
                       </span>
                       <ReadStatusChip doc={doc} />
+                      {doc.effective_from && <span className="text-xs text-slate-500">시행 {doc.effective_from}</span>}
                     </div>
+                    {doc.replaces_id && <p className="mt-1 text-xs text-slate-500">{editionNote(doc, documents)}</p>}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-4 flex-shrink-0">

@@ -13,6 +13,7 @@ import {
   type NodaListing,
 } from '@/lib/noda';
 import type { NodaStatus } from '@/lib/db';
+import { retireReplacedDocument } from '@/lib/document-editions';
 
 /**
  * 참고 문서의 NODA 읽기 상태 전이 (S4-a, 설계 4절).
@@ -179,6 +180,10 @@ export function defaultReadingDeps(): ReadingDeps {
     now: () => Date.now(),
     log: logSystem,
     tenantOf: (row) => (row.agent_id ? nodaTenant(row.agent_id) : null),
+    // 새 판이 읽히면 옛 판을 내린다(0055) — 읽기 라우트·목록 맞추기·웹훅 세 곳이 이 의존을 쓴다
+    afterReady: async (id) => {
+      await retireReplacedDocument(id);
+    },
   };
 }
 

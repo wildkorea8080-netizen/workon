@@ -8,8 +8,10 @@ import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
 import { noda, nodaTenant } from '@/lib/noda';
 import { reconcileReading } from '@/lib/document-reading';
+import { pendingRetirements, retireReplacedDocument } from '@/lib/document-editions';
 import { replayNodaEvents } from '@/lib/noda-events';
 import { logSystem } from '@/lib/logger';
+import type { NodaStatus } from '@/lib/db';
 
 const NODA_DELETE_FAILED_MESSAGE = '문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.';
 
@@ -42,7 +44,7 @@ export async function GET(_request: NextRequest) {
       .from('documents')
       .select(
         'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
-          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at'
+          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from'
       )
       .or(visibleFilter)
       .order('created_at', { ascending: false });
@@ -66,6 +68,22 @@ export async function GET(_request: NextRequest) {
         message: '문서 읽기 상태 맞추기 실패 — 맞추기 전 목록을 그대로 보냄',
         details: { error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError) },
       });
+    }
+
+    // 판 바꾸기(0055)가 남은 새 판 — 갈고리가 던졌으면 여기서 다시 건다(여러 번 불러도 안전). 바뀐 옛 판은 다시 읽어 싣는다
+    const pending = pendingRetirements(rows as unknown as Parameters<typeof pendingRetirements>[0]);
+    if (pending.length) {
+      for (const id of pending.slice(0, 5)) {
+        try {
+          await retireReplacedDocument(id);
+        } catch (retireError) {
+          await logSystem({ level: 'warning', category: 'api', message: '문서 판 바꾸기 다시 걸기 실패', details: { document_id: id, error: retireError instanceof Error ? retireError.message : String(retireError) } });
+        }
+      }
+      const olds = rows.filter((r) => pending.includes(String(r.id))).map((r) => String(r.replaces_id));
+      const { data: fresh } = await supabaseAdmin.from('documents').select('id, noda_status, retired_at').in('id', olds);
+      const byId = new Map(((fresh ?? []) as Array<{ id: string; noda_status: NodaStatus; retired_at: string | null }>).map((f) => [f.id, f]));
+      rows = rows.map((r) => (byId.has(String(r.id)) ? { ...r, ...byId.get(String(r.id)) } : r));
     }
 
     // 보관함 파일 이름(`{id}__…`)은 서버 안에서만 쓴다 — 화면에는 내보내지 않는다.
@@ -128,7 +146,7 @@ export async function DELETE(request: NextRequest) {
     // 그 조각이 근거로 오는 턴은 근거 없이 답하게 된다(문서 찾기가 고아를 알아보고 버린 뒤 지운다 — 판정 H).
     // 그래서 NODA가 먼저 성공해야 행을 지운다.
     // NODA에 간 적 없는 옛 행(noda_status NULL)은 건너뛴다. 이미 없는 사본(404)은 지운 것과 같다.
-    if (doc.agent_id && doc.noda_filename && doc.noda_status) {
+    if (doc.agent_id && doc.noda_filename && doc.noda_status && doc.noda_status !== 'retired') {
       let nodaFailed = false;
       let nodaError: unknown = null;
       try {

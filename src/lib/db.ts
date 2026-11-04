@@ -103,6 +103,10 @@ export type Document = {
   noda_read_started_at: string | null;
   noda_last_attempt_at: string | null;
   noda_read_at: string | null;
+  /** 판(0055) — 이 문서가 대신하는 옛 판·지난 판이 된 때·시행일(표시용) */
+  replaces_id?: string | null;
+  retired_at?: string | null;
+  effective_from?: string | null;
 };
 
 /** 공통 자료실 문서(S5) — 기관 유형 단위 자료. 기관·부서 칸이 없다 */

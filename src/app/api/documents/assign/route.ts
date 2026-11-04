@@ -54,6 +54,9 @@ export async function POST(request: NextRequest) {
     if (!src || !canReadDocument(src, actor)) {
       return NextResponse.json({ ok: false, error: { message: '원본 문서를 찾을 수 없습니다.' } }, { status: 404 });
     }
+    if (src.noda_status === 'retired') {
+      return NextResponse.json({ ok: false, error: { message: '지난 판은 다른 비서에 붙일 수 없습니다. 현재 판을 고르세요.' } }, { status: 409 });
+    }
 
     // 고른 비서 전부를 검사한다. 첫 번째만 보면 뒤에 붙인 남의 비서에 문서가 붙는다.
     const targets = new Map<string, AgentAccessInfo>();

@@ -51,7 +51,7 @@ export function checkReferenceFile(file: { name: string; size: number }): string
 
 export async function uploadReferenceDocument(
   file: File,
-  meta: { agentIds: string[]; title?: string; visibility?: 'organization' | 'department' },
+  meta: { agentIds: string[]; title?: string; visibility?: 'organization' | 'department'; replacesId?: string; effectiveFrom?: string },
   onStage?: (stage: DocumentUploadStage) => void
 ): Promise<DocumentUploadResult> {
   const local = checkReferenceFile(file);
@@ -95,6 +95,9 @@ export async function uploadReferenceDocument(
     };
     if (meta.title) body.title = meta.title;
     if (meta.visibility) body.visibility = meta.visibility;
+    // 판(0055) — 바꿀 옛 판·시행일. 검사는 서버가 한다
+    if (meta.replacesId) body.replaces_id = meta.replacesId;
+    if (meta.effectiveFrom) body.effective_from = meta.effectiveFrom;
     const res = await postJson('/api/documents/confirm', body);
     if (!res.ok) return { ok: false, message: errorMessage(res.json, '문서를 등록하지 못했습니다.') };
     return { ok: true, documentIds: res.json.data.documentIds as string[] };

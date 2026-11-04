@@ -52,6 +52,8 @@ export interface AgentDocument {
   title: string | null;
   file_name: string;
   noda_status: NodaStatus | null;
+  /** 이 문서가 대신하는 옛 판(0055). `ready`인 새 판이 가리키는 옛 판은 근거로 치지 않는다 */
+  replaces_id?: string | null;
 }
 
 export interface DocSearchDeps {
@@ -80,7 +82,7 @@ const defaultDeps: DocSearchDeps = {
   async documentsOf(agentId) {
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, title, file_name, noda_status')
+      .select('id, title, file_name, noda_status, replaces_id')
       .eq('agent_id', agentId);
     if (error) throw new Error(error.message);
     return (data ?? []) as AgentDocument[];
@@ -196,6 +198,8 @@ export interface SourceMatch {
   unparsable: string[];
   /** 형식이 깨진 원소 수(객체가 아니거나 `filename`이 글이 아님) */
   malformed: number;
+  /** `ready` 새 판이 대신하는 옛 판의 조각 수(0055) — 판 바꾸기가 아직 안 끝난 사이. 근거에도 프롬프트에도 싣지 않는다 */
+  superseded?: number;
 }
 
 /** 맞지 않은 근거가 하나도 없으면 true */
@@ -216,7 +220,11 @@ export function sourcesToChunks(
   passages: Map<number, string> = new Map()
 ): SourceMatch {
   const byId = new Map(docs.map((d) => [d.id.toLowerCase(), d]));
-  const match: SourceMatch = { chunks: [], unknown: [], unparsable: [], malformed: 0 };
+  // 새 판이 읽힌(`ready`) 옛 판 — 판 바꾸기(사본 지우기)가 끝나기 전에도 근거가 아니다(공통 자료실의 citableCommonIds와 같은 규칙)
+  const replaced = new Set(
+    docs.filter((d) => d.noda_status === 'ready' && typeof d.replaces_id === 'string' && d.replaces_id).map((d) => (d.replaces_id as string).toLowerCase())
+  );
+  const match: SourceMatch = { chunks: [], unknown: [], unparsable: [], malformed: 0, superseded: 0 };
   const chunks = match.chunks;
   for (const source of sources) {
     if (!source || typeof source !== 'object' || typeof source.filename !== 'string') {
@@ -234,6 +242,10 @@ export function sourcesToChunks(
       continue;
     }
     if (!CITABLE.has(doc.noda_status)) continue;
+    if (replaced.has(doc.id.toLowerCase())) {
+      match.superseded = (match.superseded ?? 0) + 1;
+      continue;
+    }
 
     chunks.push(
       chunkFromSource(source, {
@@ -395,10 +407,10 @@ async function matchedChunks(
   input: MatchInput,
   result: NodaContextResult,
   docs: AgentDocument[]
-): Promise<{ chunks: RetrievedChunk[]; mixed: boolean }> {
+): Promise<{ chunks: RetrievedChunk[]; mixed: boolean; superseded?: number }> {
   const log = deps.log ?? logSystem;
   const match = sourcesToChunks(result.sources, docs, contextPassages(result.context));
-  if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false };
+  if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false, superseded: match.superseded ?? 0 };
 
   const base = { agent_id: input.agentId, source_count: result.sources.length };
 
@@ -776,7 +788,14 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         verifySources,
         ...(verifyTenant ? { verifyTenant } : {}),
         systemAddendum: docSearchAddendum({
-          context: carry.result ? stripNodaPrefixes(carry.result.context) : null,
+          // 비서 묶음은 S4 그대로 통째로 싣되, 대신된 옛 판 조각이 있었으면 받아들인 조각의 블록만(옛 규정 글이 모델에게 가지 않게)
+          context: carry.result
+            ? stripNodaPrefixes(
+                agentMatch.superseded
+                  ? keepContextBlocks(carry.result.context, new Set(agentChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number')))
+                  : carry.result.context
+              )
+            : null,
           chunks,
           hasDocuments: true,
           skipped: false,

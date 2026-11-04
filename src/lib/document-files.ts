@@ -8,7 +8,7 @@ import { startReadingFields } from '@/lib/document-reading';
 /** "다른 비서에도 연결"이 원본에서 읽는 칸. AssignSourceDocument와 함께 고친다. */
 export const ASSIGN_SOURCE_COLUMNS =
   'id, department_id, organization_id, visibility, uploaded_by, storage_path, ' +
-  'file_name, file_type, title';
+  'file_name, file_type, title, noda_status';
 
 export interface AssignSourceDocument {
   id: string;
@@ -20,6 +20,8 @@ export interface AssignSourceDocument {
   file_name: string;
   file_type: string | null;
   title: string | null;
+  /** 지난 판(`retired`, 0055)은 다른 비서에 붙이지 않는다 — 옛 규정이 다시 근거가 된다 */
+  noda_status?: string | null;
 }
 
 /**
