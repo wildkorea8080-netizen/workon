@@ -5,7 +5,7 @@
  * 새 커넥터를 추가하려면 CONNECTORS 배열에 넣기만 하면 됩니다.
  */
 
-import { lawConnector } from './law';
+import { lawConnector, readFirstLawHit } from './law';
 import { kosisConnector } from './kosis';
 import { g2bConnector } from './g2b';
 import { dartConnector } from './dart';
@@ -72,6 +72,28 @@ export async function executeTool(
 
   try {
     return await connector.execute(toolName, input);
+  } catch (err: any) {
+    console.error(`[connectors] ${toolName} 실행 오류:`, err?.message);
+    return toolError(`도구 실행 중 오류가 발생했습니다: ${err?.message ?? '알 수 없는 오류'}`);
+  }
+}
+
+/**
+ * Input-form app lookup steps (src/lib/apps/pipeline.ts). The ordinary tools go through executeTool;
+ * the app-only "read the first hit's text" tools are not in any connector's model-facing tool list,
+ * so the chat tool loop can never call them. Never throws, like executeTool.
+ */
+const APP_ONLY_TOOLS: Record<string, { connector: Connector; run: (input: Record<string, unknown>) => Promise<ToolResult> }> = {
+  law_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '법령', article: typeof input.article === 'string' ? input.article : undefined }) },
+  ordinance_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '자치법규', article: typeof input.article === 'string' ? input.article : undefined }) },
+};
+
+export async function executeAppLookup(toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
+  const appOnly = Object.prototype.hasOwnProperty.call(APP_ONLY_TOOLS, toolName) ? APP_ONLY_TOOLS[toolName] : undefined;
+  if (!appOnly) return executeTool(toolName, input);
+  if (!appOnly.connector.isConfigured()) return toolError(`사용할 수 없는 도구입니다: ${toolName}`);
+  try {
+    return await appOnly.run(input);
   } catch (err: any) {
     console.error(`[connectors] ${toolName} 실행 오류:`, err?.message);
     return toolError(`도구 실행 중 오류가 발생했습니다: ${err?.message ?? '알 수 없는 오류'}`);

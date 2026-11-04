@@ -206,17 +206,14 @@ const tools: ToolDefinition[] = [
 
 // ── 검색 ─────────────────────────────────────────────────────
 
-async function search(input: Record<string, unknown>): Promise<ToolResult> {
-  const query = String(input.query ?? '').trim();
-  if (!query) return toolError('검색어가 필요합니다.');
+type SearchRow = Record<string, string | undefined>;
 
-  const typeKey = String(input.type ?? '법령').trim();
+/** 검색 한 번 — 목록 행과 전체 건수. 실패는 ToolResult(isError)로 돌려준다 */
+async function searchRows(query: string, typeKey: string, limit: number): Promise<{ spec: ResourceSpec; rows: SearchRow[]; total: unknown } | ToolResult> {
   const spec = RESOURCES[typeKey];
   if (!spec) {
     return toolError(`type은 ${RESOURCE_KEYS.join(', ')} 중 하나여야 합니다. (받은 값: ${typeKey})`);
   }
-
-  const limit = Math.min(Math.max(Number(input.limit) || 5, 1), MAX_SEARCH_RESULTS);
 
   const url =
     `${SEARCH_URL}?OC=${encodeURIComponent(LAW_API_OC)}&target=${spec.target}&type=JSON` +
@@ -233,8 +230,19 @@ async function search(input: Record<string, unknown>): Promise<ToolResult> {
   if (!body) {
     return toolError(`${typeKey} 검색 응답을 해석할 수 없습니다.`);
   }
+  return { spec, rows: toArray<SearchRow>(body[spec.listKey]), total: body.totalCnt };
+}
 
-  const rows = toArray<Record<string, string | undefined>>(body[spec.listKey]);
+async function search(input: Record<string, unknown>): Promise<ToolResult> {
+  const query = String(input.query ?? '').trim();
+  if (!query) return toolError('검색어가 필요합니다.');
+
+  const typeKey = String(input.type ?? '법령').trim();
+  const limit = Math.min(Math.max(Number(input.limit) || 5, 1), MAX_SEARCH_RESULTS);
+  const found = await searchRows(query, typeKey, limit);
+  if ('content' in found) return found;
+  const { spec, rows } = found;
+  const body = { totalCnt: found.total };
   if (rows.length === 0) {
     return { content: `"${query}"에 해당하는 ${typeKey}을(를) 찾지 못했습니다.`, sources: [] };
   }
@@ -497,6 +505,38 @@ async function getContent(input: Record<string, unknown>): Promise<ToolResult> {
     .trim();
 
   return { content: `${title}\n\n${content}`, sources: [{ ...source, title }] };
+}
+
+// ── 앱 단계 전용: 검색 → 본문 ────────────────────────────────
+
+/** 이름 비교용 — 공백·가운뎃점 차이를 무시한다 */
+const sameName = (a: string, b: string) => a.replace(/[\s·ㆍ]/g, '') === b.replace(/[\s·ㆍ]/g, '');
+
+/**
+ * 입력형 앱의 '본문 가져오기' 단계(2026-11-04) — 검색해 **이름이 같은 결과**(없으면 첫 결과)의 본문을 읽는다.
+ * 모델이 고르는 도구가 아니라 `tools`에 넣지 않는다(대화 도구 목록은 그대로). 어느 결과를 골랐는지와 다른 결과를 글 머리·끝에 적어
+ * 엉뚱한 법령을 집었을 때 사람이 알아보게 한다. 조문 번호를 주면 그 조만
+ */
+export async function readFirstLawHit(input: { query: string; type: '법령' | '자치법규'; article?: string }): Promise<ToolResult> {
+  const query = input.query.trim();
+  if (!query) return toolError('검색어가 필요합니다.');
+  const found = await searchRows(query, input.type, 5);
+  if ('content' in found) return found;
+  const { spec, rows } = found;
+  const withId = rows.filter((row) => row[spec.idField]);
+  if (withId.length === 0) return toolError(`"${query}"에 해당하는 ${input.type}을(를) 찾지 못했습니다.`);
+  const exact = withId.find((row) => sameName(row[spec.titleField] ?? '', query));
+  const chosen = exact ?? withId[0];
+  const content = await getContent({ id: chosen[spec.idField], type: input.type, ...(input.article ? { article: input.article } : {}) });
+  if (content.isError) return content;
+  const others = withId.filter((row) => row !== chosen).map((row) => row[spec.titleField]).filter(Boolean);
+  return {
+    content:
+      `[${input.type} 본문 — 검색어 "${query}" · ${exact ? '이름이 같은 결과' : '첫 검색 결과(이름이 같은 결과 없음 — 맞는 자료인지 확인)'}]\n` +
+      content.content +
+      (others.length ? `\n\n[다른 검색 결과: ${others.join(', ')}]` : ''),
+    sources: content.sources,
+  };
 }
 
 export const lawConnector: Connector = {

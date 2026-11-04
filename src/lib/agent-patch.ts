@@ -1,7 +1,7 @@
 // src/lib/agent-patch.ts
 import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabilities/settings';
-import { validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
+import { appLookupConnectors, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
 
 /**
  * 비서 수정 요청을 두 갈래로 나눈다.
@@ -98,6 +98,15 @@ export function splitAgentBody(
     const normalized = normalizeCapabilities(body.capabilities, { knownConnectorIds: opts.knownConnectorIds });
     if (!normalized.ok) return fail(normalized.message);
     result.settings.capabilities = normalized.value;
+  }
+
+  // 앱의 공공 데이터 조회 단계는 그 커넥터가 앱 능력에 켜져 있어야 돈다 — 빌더처럼 둘을 함께 보내면 여기서 맞춰 본다
+  // (한쪽만 보내는 수정은 실행기가 실행 때 다시 본다)
+  if (result.settings.app_definition && result.settings.capabilities) {
+    const enabled = result.settings.capabilities.public_data?.connectors ?? [];
+    if (appLookupConnectors(result.settings.app_definition).some((id) => !enabled.includes(id))) {
+      return fail('공공 데이터 조회 단계에 쓰는 도구를 앱 능력(공공 데이터)에서 켜 주세요.');
+    }
   }
 
   if (body.visibility !== undefined) {

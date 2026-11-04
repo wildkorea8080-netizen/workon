@@ -17,7 +17,47 @@ export const makeCondition = (mode: AppConditionMode, rules: AppRule[]): AppStep
  * 갈래는 **위에서부터 처음 맞는 하나**만 고르고, 맞는 갈래가 없으면 기본 지시다. 갈래에는 조건이 반드시 있다
  */
 export type AppBranch = { name: string; when: AppStepCondition; instruction: string };
-export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[] };
+/**
+ * 공공 데이터 조회 단계(2026-11-04) — 모델을 부르지 않고 승인된 커넥터의 검색 도구 **하나를 정해 둔 조회어로** 부른다
+ * (알리웍스 연동 노드의 '툴 하나 고정 호출' 꼴). 조회어의 `{{항목 키}}`는 입력값으로 바뀐다. 결과 글은 다음 단계의 자료가 된다.
+ * 도구는 이 표의 것뿐이고, 쓸 수 있는지는 앱의 `public_data` 능력(직원 범위 검사 포함)이 정한다.
+ * `appOnly` 도구(법령·자치법규 본문)는 대화 도구 목록에 없는 앱 전용 — 검색해 이름이 같은(없으면 첫) 결과의 본문을 읽는다(`connectors/index.ts` `executeAppLookup`).
+ * `article`은 그 둘만 — 조문 번호(입력 항목을 넣을 수 있음), 비우면 앞 조문부터
+ */
+export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids';
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string };
+/** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
+export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b'; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true }> = {
+  law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
+  law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
+  ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
+  kosis_search_tables: { connector: 'kosis', label: '통계표 검색(국가통계포털)', param: 'query' },
+  g2b_search_bids: { connector: 'g2b', label: '입찰공고 검색(나라장터)', param: 'keyword' },
+};
+export const APP_LOOKUP_ARTICLE_MAX = 40;
+/** 입력값이 들어간 조문 칸 → 조 번호(숫자 1~4자리). '제15조'·'15조'·'15'를 받고, 비면 ''(앞 조문부터), 그 밖은 null(멈춤) */
+export function lookupArticleNumber(rendered: string): string | null {
+  if (!rendered) return '';
+  const m = /^제?\s*(\d{1,4})\s*조?$/.exec(rendered);
+  return m ? String(Number(m[1])) : null;
+}
+export const APP_LOOKUP_QUERY_MAX = 200;
+export const APP_LOOKUP_OUTPUT_MAX = 6000;
+export const isLookupTool = (v: unknown): v is AppLookupTool => typeof v === 'string' && Object.prototype.hasOwnProperty.call(APP_LOOKUP_TOOLS, v);
+const PLACEHOLDER = /\{\{([a-z][a-z0-9_]{0,31})\}\}/g;
+/** 조회어의 `{{키}}`를 입력값으로 — 줄바꿈·연속 공백은 하나로, 200자에서 자른다. 입력이 비면 그 자리는 빈 글 */
+export function renderLookupQuery(template: string, inputs: Record<string, string> | undefined): string {
+  return template.replace(PLACEHOLDER, (_, key: string) => inputs?.[key] ?? '').replace(/\s+/g, ' ').trim().slice(0, APP_LOOKUP_QUERY_MAX);
+}
+/** 화면 보기용 — `{{키}}`를 `{{항목 이름}}`으로 */
+export function describeLookupQuery(template: string, fields: AppField[]): string {
+  return template.replace(PLACEHOLDER, (whole, key: string) => { const f = fields.find(x => x.key === key); return f ? `{{${f.label}}}` : whole; });
+}
+/** 정의가 조회 단계에 쓰는 커넥터 — 빌더가 앱 능력(public_data)에 넣고, 저장 검사가 능력과 맞춰 본다 */
+export function appLookupConnectors(def: AppDefinition | null | undefined): string[] {
+  return [...new Set((def?.steps ?? []).flatMap(step => step.lookup ? [APP_LOOKUP_TOOLS[step.lookup.tool].connector] : []))];
+}
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup };
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean } };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
@@ -141,8 +181,27 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
   if (raw.steps !== undefined) {
     if (!Array.isArray(raw.steps) || raw.steps.length < 1 || raw.steps.length > 3) return { ok: false, message: '처리 단계는 1~3개로 구성해 주세요.' };
     for (const step of raw.steps) {
-      if (!object(step) || typeof step.name !== 'string' || !step.name.trim() || step.name.length > 40 || /[\r\n]/.test(step.name) || typeof step.instruction !== 'string' || !step.instruction.trim() || step.instruction.length > 2000) return { ok: false, message: '각 단계의 이름(40자 이내)과 처리 지시(2,000자 이내)를 입력해 주세요.' };
+      const isLookup = object(step) && step.lookup !== undefined;
+      if (!object(step) || typeof step.name !== 'string' || !step.name.trim() || step.name.length > 40 || /[\r\n]/.test(step.name) || typeof step.instruction !== 'string' || (!isLookup && !step.instruction.trim()) || step.instruction.length > 2000) return { ok: false, message: '각 단계의 이름(40자 이내)과 처리 지시(2,000자 이내)를 입력해 주세요.' };
       const normalized: AppStep = { name: step.name.trim(), instruction: step.instruction.trim() };
+      if (isLookup) {
+        // 조회 단계 — 지시는 쓰지 않는다(비워도 됨). 조회어의 {{키}}는 지금 입력 항목만, 남은 중괄호는 거절
+        const lookup = step.lookup;
+        if (!object(lookup) || !isLookupTool(lookup.tool)) return { ok: false, message: '공공 데이터 조회 단계의 도구를 확인해 주세요.' };
+        if (typeof lookup.query !== 'string' || !lookup.query.trim() || lookup.query.length > APP_LOOKUP_QUERY_MAX || /[\r\n]/.test(lookup.query)) return { ok: false, message: `조회어는 ${APP_LOOKUP_QUERY_MAX}자 이내 한 줄로 입력해 주세요.` };
+        const keys = [...lookup.query.matchAll(PLACEHOLDER)].map(m => m[1]);
+        if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목만 넣을 수 있습니다.' };
+        if (step.branches !== undefined) return { ok: false, message: '공공 데이터 조회 단계에는 갈래를 둘 수 없습니다.' };
+        normalized.lookup = { tool: lookup.tool, query: lookup.query.trim() };
+        if (lookup.article !== undefined && lookup.article !== '') {
+          // 조문 칸 — 본문 도구만, 한 줄·40자, {{키}}는 지금 항목만. 고정 값이면 지금 조 번호 꼴이어야 한다
+          if (!APP_LOOKUP_TOOLS[lookup.tool].article || typeof lookup.article !== 'string' || lookup.article.length > APP_LOOKUP_ARTICLE_MAX || /[\r\n]/.test(lookup.article)) return { ok: false, message: '조문 번호는 법령·자치법규 본문 조회에만, 한 줄로 입력해 주세요.' };
+          const articleKeys = [...lookup.article.matchAll(PLACEHOLDER)].map(m => m[1]);
+          if (articleKeys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.article.replace(PLACEHOLDER, ''))) return { ok: false, message: '조문 번호에는 현재 입력 항목만 넣을 수 있습니다.' };
+          if (!articleKeys.length && lookupArticleNumber(lookup.article.trim()) === null) return { ok: false, message: '조문 번호는 15 또는 제15조처럼 숫자로 입력해 주세요.' };
+          if (lookup.article.trim()) normalized.lookup.article = lookup.article.trim();
+        }
+      }
       if (step.when !== undefined) {
         const when = step.when;
         if (object(when) && when.all === undefined && when.any === undefined) {
@@ -175,6 +234,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
       steps.push(normalized);
     }
     if (steps[steps.length - 1].when) return { ok: false, message: '마지막 결과 작성 단계는 항상 실행해야 합니다. 조건을 해제해 주세요.' };
+    if (steps[steps.length - 1].lookup) return { ok: false, message: '마지막 결과 작성 단계는 AI 처리여야 합니다. 공공 데이터 조회는 앞 단계에 두세요.' };
   }
   return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean } } : {}) } };
 }

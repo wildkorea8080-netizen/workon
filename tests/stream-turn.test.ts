@@ -43,7 +43,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
 import { setLlmAdapterForTests } from '@/lib/llm';
 import { LlmApiError, LLM_MESSAGES } from '@/lib/llm/errors';
 import type { LlmAdapter, LlmStreamEvent } from '@/lib/llm/types';
-import { streamTurn, type VerifyFn } from '@/lib/assistant/stream';
+import { streamTurn, type StreamTurnDeps, type VerifyFn } from '@/lib/assistant/stream';
 import { NodaError, nodaTenant, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { storedUserContent, buildUserContent } from '@/lib/assistant/prompt';
 import type { PreparedTurn, TurnEvent } from '@/lib/assistant/types';
@@ -95,7 +95,7 @@ const inserted = (table: string) =>
 const details = (row: Record<string, unknown>) => row.details as Record<string, unknown>;
 const keySet = (row: Record<string, unknown>) => Object.keys(row).sort().join(',');
 
-async function run(t: PreparedTurn, send?: (e: TurnEvent) => void, deps?: { verify?: VerifyFn }) {
+async function run(t: PreparedTurn, send?: (e: TurnEvent) => void, deps?: StreamTurnDeps) {
   const events: TurnEvent[] = [];
   await streamTurn(t, send ?? ((e) => events.push(e)), deps);
   return events;
@@ -625,6 +625,38 @@ describe('단계형 앱의 저장과 과금', () => {
     expect(records[0].output).toBe('여비 문의');
     expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 3, output_tokens: 2, aborted: true });
     expect(events.at(-1)?.event).toBe('error'); expect(events.some(e => e.event === 'done')).toBe(false);
+  });
+});
+
+
+describe('앱의 공공 데이터 조회 단계(2026-11-04)', () => {
+  const steps = [{ name: '법령 찾기', instruction: '', lookup: { tool: 'law_search' as const, query: '{{law}} 시행령' } }, { name: '작성', instruction: '작성하세요.' }];
+  const found = { content: '공무원 여비 규정 제5조 — 일비 1,250,000원', sources: [{ title: '공무원 여비 규정', url: 'https://www.law.go.kr/x' }] };
+  it('켜진 커넥터면 조회하고 결과·출처를 저장하며 조회 숫자는 확인된 숫자로 본다(조회는 사용량 없음)', async () => {
+    setLlmAdapterForTests(adapter({ stream: async function* () {
+      yield { type: 'text', text: '일비는 1,250,000원입니다.' };
+      yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 10, output_tokens: 5 } };
+    } }));
+    const executeTool = vi.fn(async () => found);
+    const base = turn();
+    const events = await run(turn({ ctx: { ...base.ctx, capabilities: { public_data: { connectors: ['law'] } } }, appSteps: steps, appStepInputs: { law: '여비' }, isNewConversation: false }), undefined, { executeTool });
+    expect(executeTool).toHaveBeenCalledWith('law_search', { query: '여비 시행령' });
+    const refs = inserted('messages')[1].source_references as Record<string, unknown>;
+    expect((refs.app_steps as Array<Record<string, unknown>>)[0]).toMatchObject({ status: 'completed', kind: 'lookup', query: '여비 시행령', output: found.content, sources: found.sources });
+    expect(refs.links).toEqual(found.sources);
+    expect(refs).not.toHaveProperty('number_check');
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 10, output_tokens: 5 });
+    expect(events.at(-1)?.event).toBe('done');
+  });
+  it('앱 능력에 꺼진 커넥터면 부르지 않고 직원이 읽을 안내로 멈춘다', async () => {
+    setLlmAdapterForTests(adapter());
+    const executeTool = vi.fn(async () => found);
+    const events = await run(turn({ appSteps: steps, appStepInputs: { law: '여비' }, isNewConversation: false }), undefined, { executeTool });
+    expect(executeTool).not.toHaveBeenCalled();
+    const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
+    expect(records.map(s => s.status)).toEqual(['failed', 'not_run']);
+    const last = events.at(-1) as { event: string; data: { message: string } };
+    expect(last.event).toBe('error'); expect(last.data.message).toContain('이 앱에 켜진 공공 데이터가 아닙니다');
   });
 });
 

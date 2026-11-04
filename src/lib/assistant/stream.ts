@@ -11,7 +11,8 @@ import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors'
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
-import { runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
+import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
+import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
 import { isInputOnlyRun } from '@/lib/apps/resume';
 import { checkTokenLimit } from '@/lib/usage-limit';
@@ -28,6 +29,8 @@ export type VerifyFn = (input: {
 
 export interface StreamTurnDeps {
   verify?: VerifyFn;
+  /** 앱의 공공 데이터 조회 단계가 부르는 커넥터 — 시험이 바꿔 끼운다 */
+  executeTool?: (toolName: string, input: Record<string, unknown>) => Promise<ToolResult>;
 }
 
 const defaultVerify: VerifyFn = (input) => noda.verifyAnswer(input);
@@ -336,7 +339,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       steps: turn.appSteps, records: appRecords, model: turn.modelId, system: turn.systemPrompt,
       inputs: turn.appStepInputs,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
-      guard,
+      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup),
     }) : null;
     result = await runToolLoop(
       {
@@ -397,7 +400,9 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   // 없는 숫자만 '확인되지 않음'. 답변 글은 고치지 않는다
   let numberCheck: { unverified: string[] } | null = null;
   if (result.attachmentToolSucceeded || turn.chunks.length > 0 || appRecords.length > 0) {
-    const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message));
+    // 앱의 공공 데이터 조회 결과도 AI가 본 자료다(모델이 쓴 중간 결과는 아니다 — 그 숫자를 옮기면 확인되지 않음으로 남긴다)
+    const looked = appRecords.flatMap(step => step.kind === 'lookup' && step.status === 'completed' && step.output ? numbersIn(step.output) : []);
+    const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message), looked);
     const unverified = checkNumbers(result.text, shown);
     if (unverified.length > 0) numberCheck = { unverified };
   }
@@ -412,7 +417,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       userContent: turn.storedUserContent,
       assistantText: result.text,
       chunks: turn.chunks,
-      links: result.links,
+      // 조회 단계의 원문 링크도 답변 출처로 — 답이 '출처를 밝히라'는 지시를 따랐는지 사람이 원문으로 확인한다
+      links: dedupeLinks([...result.links, ...appRecords.flatMap(step => step.kind === 'lookup' && step.status === 'completed' ? step.sources ?? [] : [])]),
       files: result.files,
       attachments: turn.ctx.attachments.filter((a) => a.isNew).map((a) => ({ id: a.id, file_name: a.fileName })),
       agentVersion: turn.ctx.agentVersion,
