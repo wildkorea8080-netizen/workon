@@ -2,6 +2,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import StatsDashboard from '@/components/admin/StatsDashboard';
 import UsageSummary from '@/components/admin/UsageSummary';
 import AppRunOverview from '@/components/admin/AppRunOverview';
+import AdoptionReport from '@/components/admin/AdoptionReport';
 
 export default async function AdminStatsPage() {
   const session = await getServerAuthSession();
@@ -22,6 +23,8 @@ export default async function AdminStatsPage() {
         <h1 className="text-2xl font-semibold text-slate-900">통계</h1>
         <p className="text-slate-600 mt-2">부서의 사용량과 성능 통계를 확인합니다.</p>
       </div>
+
+      <AdoptionReport />
 
       <StatsDashboard />
 
