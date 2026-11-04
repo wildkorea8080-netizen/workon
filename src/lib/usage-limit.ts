@@ -487,3 +487,36 @@ export async function departmentBudgetStatuses(
   }
   return { statuses, failed };
 }
+
+/** Personal monthly limit (0024) usage, for the budget alert mail. Same rule as `checkMonthlyBudget`'s personal part. */
+export interface UserBudgetStatus {
+  userId: string;
+  periodKey: string;
+  used: number;
+  limit: number;
+  percent: number;
+}
+
+/**
+ * This month's (KST) usage of every active employee in the organization who has a personal limit, in one DB call
+ * (0052 `organization_user_budget_usage`). Throws if it cannot read — the caller then sends nothing (no false alarms).
+ */
+export async function userBudgetStatuses(organizationId: string): Promise<UserBudgetStatus[]> {
+  const from = monthStartISO();
+  const to = new Date().toISOString();
+  const { data, error } = await supabaseAdmin.rpc('organization_user_budget_usage', {
+    p_organization_id: organizationId,
+    p_from: from,
+    p_to: to,
+  });
+  if (error) throw new Error(`organization_user_budget_usage: ${error.message}`);
+  const periodKey = monthPeriodKey(from);
+  const statuses: UserBudgetStatus[] = [];
+  for (const row of (data ?? []) as Array<{ user_id: string; limit_krw: number | string | null; spent_krw: number | string | null }>) {
+    const limit = Number(row.limit_krw ?? 0);
+    const used = Number(row.spent_krw ?? 0);
+    if (!(limit > 0) || !Number.isFinite(used) || typeof row.user_id !== 'string') continue;
+    statuses.push({ userId: row.user_id, periodKey, used, limit, percent: Math.floor((used / limit) * 100) });
+  }
+  return statuses;
+}

@@ -178,6 +178,54 @@ export function budgetAlertMail(params: {
   };
 }
 
+/**
+ * 개인 월 한도 알림(0052) — 직원 본인에게. 기관·부서 알림과 달리 받는 사람이 한도를 바꿀 수 없으니 할 일은 '관리자에게 요청'이다.
+ * 금액·기준·시각만 싣는다(무엇을 물었는지 같은 사용 내용은 싣지 않는다)
+ */
+export function personalBudgetAlertMail(params: {
+  organizationName: string;
+  userName: string | null;
+  threshold: number;
+  used: number;
+  limit: number;
+  percent: number;
+  statsUrl: string;
+  checkedAt: Date;
+}): { subject: string; html: string } {
+  const { organizationName, userName, threshold, used, limit, percent, statsUrl, checkedAt } = params;
+  const exhausted = threshold >= 100;
+  const who = userName?.trim() ? `${userName.trim()}님` : '회원님';
+  const heading = exhausted
+    ? `${who}의 이번 달 개인 AI 사용 한도를 모두 사용했습니다`
+    : `${who}의 이번 달 개인 AI 사용이 한도의 ${threshold}%에 이르렀습니다`;
+  const subject = exhausted
+    ? `[${APP_NAME}] 이번 달 개인 AI 사용 한도 모두 사용 — 다음 달 1일까지 이용이 멈췄습니다`
+    : `[${APP_NAME}] 이번 달 개인 AI 사용 한도 ${threshold}% 도달`;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+  const rows: Array<[string, string]> = [
+    ['기관', organizationName],
+    ['사용', `${won(used)} / ${won(limit)} (${percent}%)`],
+    ['확인 시각', `${kst(checkedAt)} (한국 시간)`],
+  ];
+  const next = exhausted
+    ? '다음 달 1일(한국 시간)까지 AI 대화와 업무 문서 만들기를 쓸 수 없습니다. 이번 달에 더 써야 하면 기관 관리자에게 개인 한도 조정을 요청해 주세요.'
+    : '100%가 되면 다음 달 1일(한국 시간)까지 AI 대화와 업무 문서 만들기가 멈춥니다. 남은 업무를 확인해 주세요.';
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  return {
+    subject,
+    html: layout(
+      heading,
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:15px;line-height:1.7">${escapeHtml(next)}</p>
+       ${button(statsUrl, '내 사용현황 보기')}
+       <p style="font-size:13px;color:#64748b">같은 달에는 기준마다 한 번만 보냅니다.</p>`
+    ),
+  };
+}
+
 /** 예산 알림 한 통 — 받는 사람마다 따로 보낸다(서로의 주소가 보이지 않게) */
 export function sendBudgetAlertEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
   return sendMail(to, mail.subject, mail.html);

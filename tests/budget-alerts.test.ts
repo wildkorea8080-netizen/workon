@@ -20,11 +20,11 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 }));
 
 import {
-  budgetAlertDeps, budgetThresholds, cleanRecipients, retakeable, runBudgetAlerts, thresholdToSend,
+  budgetAlertDeps, budgetThresholds, cleanRecipients, retakeable, runBudgetAlerts, thresholdToSend, userSubject,
   type BudgetAlertDeps, type BudgetAlertClaim,
 } from '@/lib/budget-alerts';
-import { budgetAlertMail } from '@/lib/mailer';
-import { departmentBudgetStatuses, organizationBudgetStatus, type OrganizationBudgetStatus } from '@/lib/usage-limit';
+import { budgetAlertMail, personalBudgetAlertMail } from '@/lib/mailer';
+import { departmentBudgetStatuses, organizationBudgetStatus, userBudgetStatuses, type OrganizationBudgetStatus } from '@/lib/usage-limit';
 
 beforeEach(() => { state.results = {}; state.rpc = []; state.calls = []; });
 
@@ -73,7 +73,9 @@ function fakeDeps(overrides: Partial<BudgetAlertDeps> = {}) {
     organizations: async () => [{ id: 'org-1', name: '시험기관' }],
     status: async () => annual,
     departmentStatuses: async () => ({ statuses: [], failed: 0 }),
+    userStatuses: async () => [],
     recipients: async () => ['a@org.kr', 'b@org.kr'],
+    person: async () => null,
     claim: async (c) => { claims.push(c); return true; },
     finish: async (c, r) => { finished.push([c, r]); },
     send: async (to, mail) => { sent.push({ to, subject: mail.subject }); return { sent: true }; },
@@ -304,5 +306,84 @@ describe('예약 작업', () => {
     const sql = readFileSync('supabase/migrations/0045_budget_alerts.sql', 'utf8');
     expect(sql).toContain('UNIQUE (organization_id, subject, period_key, threshold)');
     expect(sql).toContain('ENABLE ROW LEVEL SECURITY');
+  });
+});
+
+describe('개인 월 한도 알림(0052)', () => {
+  const user = (id: string, percent: number) => ({ userId: id, periodKey: 'month:2026-11', used: percent * 100, limit: 10_000, percent });
+  const U1 = '44444444-4444-4444-8444-444444444444';
+  const U2 = '55555555-5555-4555-8555-555555555555';
+  it('넘은 가장 높은 기준을 그 직원 본인에게만 한 통 — 관리자 받는 사람 목록은 부르지 않는다', async () => {
+    const recipients = vi.fn(async () => ['admin@org.kr']);
+    const f = fakeDeps({
+      status: async () => null,
+      userStatuses: async () => [user(U1, 93), user(U2, 50)],
+      recipients,
+      person: async (_org, id) => (id === U1 ? { email: 'Kim@Org.kr', name: '김주무관' } : null),
+    });
+    const run = await runBudgetAlerts(f.deps);
+    expect(run.sent).toBe(1);
+    expect(f.claims).toEqual([{ organizationId: 'org-1', subject: `user:${U1}`, periodKey: 'month:2026-11', threshold: 90, kind: 'user_monthly', percent: 93 }]);
+    expect(f.sent).toEqual([{ to: 'kim@org.kr', subject: expect.stringContaining('개인 AI 사용 한도 90% 도달') }]);
+    expect(recipients).not.toHaveBeenCalled();
+    expect(f.finished[0][1]).toEqual({ status: 'sent', recipients: 1 });
+    expect(JSON.stringify(f.logs)).not.toContain('@org.kr');
+  });
+  it('그 사이 비활성·탈퇴·다른 기관이면 받을 사람 없음으로 닫고, 보내기 실패는 failed(다음 실행에 다시)', async () => {
+    const gone = fakeDeps({ status: async () => null, userStatuses: async () => [user(U1, 100)], person: async () => null });
+    expect((await runBudgetAlerts(gone.deps)).sent).toBe(0);
+    expect(gone.finished[0][1]).toEqual({ status: 'no_recipients', recipients: 0 });
+    expect(gone.sent).toEqual([]);
+    const bounced = fakeDeps({ status: async () => null, userStatuses: async () => [user(U1, 100)], person: async () => ({ email: 'k@org.kr', name: null }), send: async () => ({ sent: false }) });
+    expect((await runBudgetAlerts(bounced.deps)).failed).toBe(1);
+    expect(bounced.finished[0][1]).toEqual({ status: 'failed', recipients: 0 });
+  });
+  it('개인 사용률을 못 읽어도 기관·부서 알림은 그대로 보낸다', async () => {
+    const f = fakeDeps({ userStatuses: async () => { throw new Error('function does not exist'); } });
+    const run = await runBudgetAlerts(f.deps);
+    expect(run).toMatchObject({ sent: 1, failed: 1 });
+    expect(f.logs.map((l) => l[1])).toContain('개인 한도 사용률을 확인하지 못했습니다');
+  });
+  it('메일은 금액·기준·내 사용현황 주소만, 이름은 이스케이프하고 제목에는 넣지 않는다', () => {
+    const mail = personalBudgetAlertMail({ organizationName: '시험기관', userName: '<b>김</b>', threshold: 100, used: 10_500, limit: 10_000, percent: 105, statsUrl: 'https://x.kr/my/stats', checkedAt: new Date('2026-11-01T00:00:00Z') });
+    expect(mail.subject).toContain('다음 달 1일까지 이용이 멈췄습니다');
+    expect(mail.subject).not.toContain('김');
+    expect(mail.html).toContain('&lt;b&gt;김&lt;/b&gt;님');
+    expect(mail.html).toContain('10,500원 / 10,000원 (105%)');
+    expect(mail.html).toContain('https://x.kr/my/stats');
+    expect(mail.html).toContain('기관 관리자에게 개인 한도 조정을 요청');
+    expect(userSubject(user(U1, 80))).toMatchObject({ subject: `user:${U1}`, kind: 'user_monthly', alertPercent: 80, departmentName: null });
+  });
+  it('집계는 DB 함수 한 번 — 한도가 0 이하이거나 사용액이 숫자가 아닌 행은 뺀다', async () => {
+    state.rpc = [{ data: [
+      { user_id: U1, limit_krw: '10000.00', spent_krw: '8123.5' },
+      { user_id: U2, limit_krw: 0, spent_krw: 10 },
+      { user_id: 'x', limit_krw: 100, spent_krw: 'NaN' },
+    ] }];
+    const statuses = await userBudgetStatuses('org-1');
+    expect(statuses).toEqual([{ userId: U1, periodKey: expect.stringMatching(/^month:\d{4}-\d{2}$/), used: 8123.5, limit: 10000, percent: 81 }]);
+    expect(state.calls.filter((c) => c[0] === 'rpc')).toEqual([['rpc', 'organization_user_budget_usage', expect.objectContaining({ p_organization_id: 'org-1' })]]);
+    state.rpc = [{ error: { message: 'function does not exist' } }];
+    await expect(userBudgetStatuses('org-1')).rejects.toThrow('organization_user_budget_usage');
+  });
+  it('받는 사람 확인은 같은 기관·활성·탈퇴 아님일 때만', async () => {
+    const row = (over: Record<string, unknown> = {}) => ({ data: { email: 'k@org.kr', full_name: '김', is_active: true, deleted_at: null, department: { organization_id: 'org-1' }, ...over } });
+    state.results.users = [row(), row({ department: { organization_id: 'org-2' } }), row({ is_active: false }), row({ deleted_at: '2026-11-01T00:00:00Z' }), row({ department: [{ organization_id: 'org-1' }] })];
+    const deps = budgetAlertDeps();
+    expect(await deps.person('org-1', U1)).toEqual({ email: 'k@org.kr', name: '김' });
+    expect(await deps.person('org-1', U1)).toBeNull();
+    expect(await deps.person('org-1', U1)).toBeNull();
+    expect(await deps.person('org-1', U1)).toBeNull();
+    expect(await deps.person('org-1', U1)).toEqual({ email: 'k@org.kr', name: '김' });
+  });
+  it('마이그레이션은 대상·종류 CHECK를 넓히고 함수 실행 권한은 service_role만', () => {
+    const sql = readFileSync('supabase/migrations/0052_user_budget_alerts.sql', 'utf8');
+    expect(sql).toContain("user:[0-9a-f-]{36}");
+    expect(sql).toContain("'user_monthly'");
+    expect(sql).toMatch(/REVOKE ALL ON FUNCTION public\.organization_user_budget_usage\(uuid, timestamptz, timestamptz\) FROM PUBLIC, anon, authenticated/);
+    expect(sql).toContain('TO service_role');
+    // 판정 규칙이 usage-limit.ts와 같다 — 개인 값 우선, 없으면 부서 기본값, 비용 키가 있는 로그만
+    expect(sql).toContain('COALESCE(u.monthly_budget_krw, d.user_monthly_budget_krw)');
+    expect(sql).toContain("ul.details ? 'cost_krw'");
   });
 });

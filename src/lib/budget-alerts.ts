@@ -1,10 +1,10 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
-import { budgetAlertMail, isMailConfigured, sendBudgetAlertEmail, type MailResult } from '@/lib/mailer';
+import { budgetAlertMail, isMailConfigured, personalBudgetAlertMail, sendBudgetAlertEmail, type MailResult } from '@/lib/mailer';
 import {
-  departmentBudgetStatuses, organizationBudgetStatus,
-  type DepartmentBudgetStatus, type OrganizationBudgetStatus,
+  departmentBudgetStatuses, organizationBudgetStatus, userBudgetStatuses,
+  type DepartmentBudgetStatus, type OrganizationBudgetStatus, type UserBudgetStatus,
 } from '@/lib/usage-limit';
 
 /**
@@ -24,7 +24,9 @@ import {
  * - 메일이 설정되지 않았으면 아무것도 차지하지 않는다(설정한 뒤 첫 실행에서 보낸다).
  * - 사용률을 모르면(집계 실패) 보내지 않는다 — 거짓 경보보다 하루 늦은 경보가 낫다. 한 대상의 실패가 다른 대상을 막지 않는다.
  * - 운영 기록에는 받는 사람 주소를 남기지 않는다(수만).
- * - 개인 월 한도 알림은 없다(직원 수만큼 집계해야 해서 — 필요해지면 따로).
+ * - **개인 월 한도(0024, 0052)**: 기준 80·90·100. 받는 사람은 **그 직원 본인**뿐(활성·탈퇴 아님·같은 기관). 기관 안 한도가 있는
+ *   직원의 한도·사용액은 DB 함수 하나(`organization_user_budget_usage`)로 한 번에 읽는다. 대상 키 `user:{id}`, 기간은 KST 달.
+ *   관리자에게는 보내지 않는다(관리자는 이용 현황 화면에서 본다 — 직원 한 사람 한 사람의 사용률을 메일로 돌리지 않는다).
  */
 
 export const MAX_ALERT_ATTEMPTS = 3;
@@ -62,11 +64,11 @@ export function retakeable(row: { status: string; attempts: number; updated_at: 
   return row.status === 'sending' && now - new Date(row.updated_at).getTime() > STALE_SENDING_MS;
 }
 
-/** 알림 대상 하나의 사용률 — 기관(`org`) 또는 부서(`dept:{id}`) */
+/** 알림 대상 하나의 사용률 — 기관(`org`), 부서(`dept:{id}`) 또는 직원(`user:{id}`) */
 export interface BudgetSubjectStatus {
   subject: string;
   departmentName: string | null;
-  kind: 'annual_budget' | 'monthly_tokens' | 'department_monthly';
+  kind: 'annual_budget' | 'monthly_tokens' | 'department_monthly' | 'user_monthly';
   periodKey: string;
   used: number;
   limit: number;
@@ -93,6 +95,20 @@ export function departmentSubject(status: DepartmentBudgetStatus): BudgetSubject
   };
 }
 
+export function userSubject(status: UserBudgetStatus): BudgetSubjectStatus {
+  return {
+    subject: `user:${status.userId}`,
+    departmentName: null,
+    kind: 'user_monthly',
+    periodKey: status.periodKey,
+    used: status.used,
+    limit: status.limit,
+    percent: status.percent,
+    alertPercent: 80,
+    periodEndsAt: null,
+  };
+}
+
 export interface BudgetAlertClaim {
   organizationId: string;
   subject: string;
@@ -107,7 +123,11 @@ export interface BudgetAlertDeps {
   organizations(): Promise<Array<{ id: string; name: string }>>;
   status(organizationId: string): Promise<OrganizationBudgetStatus | null>;
   departmentStatuses(organizationId: string): Promise<{ statuses: DepartmentBudgetStatus[]; failed: number }>;
+  /** 개인 월 한도가 있는 직원들의 사용률 — 못 읽으면 던진다 */
+  userStatuses(organizationId: string): Promise<UserBudgetStatus[]>;
   recipients(organizationId: string, subject: string): Promise<string[]>;
+  /** 개인 알림의 받는 사람 — 같은 기관의 활성(탈퇴 아님) 직원 본인. 아니면 null */
+  person(organizationId: string, userId: string): Promise<{ email: string; name: string | null } | null>;
   /** 이 알림을 보낼 차례면 true — 새로 넣었거나, 실패·멈춘 차지를 조건부로 다시 잡았다 */
   claim(claim: BudgetAlertClaim): Promise<boolean>;
   finish(claim: BudgetAlertClaim, result: { status: 'sent' | 'failed' | 'no_recipients'; recipients: number }): Promise<void>;
@@ -138,6 +158,23 @@ async function alertSubject(deps: BudgetAlertDeps, org: { id: string; name: stri
   };
   if (!(await deps.claim(claim))) return 'none';
   const facts = { subject: status.subject, threshold, percent: status.percent, kind: status.kind };
+  if (status.kind === 'user_monthly') {
+    // 직원 본인에게만. 주소가 없거나(꼴이 틀림) 그 사이 비활성·탈퇴했으면 받을 사람 없음으로 닫는다
+    const person = await deps.person(org.id, status.subject.slice('user:'.length));
+    const email = person ? cleanRecipients([person.email])[0] : undefined;
+    if (!email) {
+      await deps.finish(claim, { status: 'no_recipients', recipients: 0 });
+      return 'none';
+    }
+    const mail = personalBudgetAlertMail({
+      organizationName: org.name, userName: person!.name, threshold, used: status.used, limit: status.limit, percent: status.percent,
+      statsUrl: `${APP_URL.replace(/\/+$/, '')}/my/stats`, checkedAt: new Date(deps.now()),
+    });
+    const delivered = (await deps.send(email, mail)).sent ? 1 : 0;
+    await deps.finish(claim, { status: delivered ? 'sent' : 'failed', recipients: delivered });
+    if (!delivered) await deps.log('warning', '개인 한도 알림 메일을 보내지 못했습니다', facts, org.id);
+    return delivered ? 'sent' : 'failed';
+  }
   const recipients = await deps.recipients(org.id, status.subject);
   if (!recipients.length) {
     await deps.finish(claim, { status: 'no_recipients', recipients: 0 });
@@ -196,6 +233,12 @@ export async function runBudgetAlerts(deps: BudgetAlertDeps, budgetMs = 50_000):
       run.failed += 1;
       await deps.log('warning', '부서 예산 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
     }
+    try {
+      subjects.push(...(await deps.userStatuses(org.id)).map(userSubject));
+    } catch (error) {
+      run.failed += 1;
+      await deps.log('warning', '개인 한도 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
+    }
     for (const status of subjects) {
       try {
         const result = await alertSubject(deps, org, status);
@@ -233,6 +276,20 @@ export function budgetAlertDeps(): BudgetAlertDeps {
     },
     status: organizationBudgetStatus,
     departmentStatuses: departmentBudgetStatuses,
+    userStatuses: userBudgetStatuses,
+    async person(organizationId, userId) {
+      // 기관은 부서로 확인한다(사람 행에는 기관 칸이 없다) — 다른 기관 직원에게 보내지 않게
+      const { data, error } = await supabaseAdmin
+        .from('users')
+        .select('email, full_name, is_active, deleted_at, department:departments!inner(organization_id)')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw new Error(`users: ${error.message}`);
+      const row = data as { email: string | null; full_name: string | null; is_active: boolean | null; deleted_at: string | null; department: { organization_id: string } | { organization_id: string }[] | null } | null;
+      const dept = Array.isArray(row?.department) ? row?.department[0] : row?.department;
+      if (!row || row.is_active !== true || row.deleted_at || dept?.organization_id !== organizationId || !row.email) return null;
+      return { email: row.email, name: row.full_name };
+    },
     async recipients(organizationId, subject) {
       if (subject.startsWith('dept:')) {
         const departmentId = subject.slice('dept:'.length);
