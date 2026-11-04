@@ -1,6 +1,7 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import DocumentsManager from '@/components/admin/DocumentsManager';
 import RAGSearchTester from '@/components/admin/RAGSearchTester';
+import RagEvalPanel from '@/components/admin/RagEvalPanel';
 
 export default async function AdminDocumentsPage() {
   const session = await getServerAuthSession();
@@ -25,6 +26,8 @@ export default async function AdminDocumentsPage() {
       <DocumentsManager />
 
       <RAGSearchTester />
+
+      <RagEvalPanel />
     </section>
   );
 }
