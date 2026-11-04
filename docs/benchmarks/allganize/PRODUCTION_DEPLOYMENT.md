@@ -5,6 +5,30 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-04(밤): 앱 공공 데이터 조회 단계·법령 본문·개인 월 한도 알림(0052)
+
+- 2026-11-04 21:30 KST쯤 배포 `dpl_ExPiSLnpY5PgnBfiGqVfpcPf4HJW`(커밋 `f0db3e4`, `main` fast-forward — GitHub 연동). 사용자 선택("운영에 올려줘"). 되돌릴 때는 직전 `dpl_HbUow4tgdQ8sS45SrEP8K4CnhL6d`(dfb8c95)로 promote한다 — **0052는 되돌리지 않는다**(CHECK를 넓히고 함수를 더했을 뿐, 옛 코드는 둘을 쓰지 않는다).
+- 들어간 커밋
+  - `60e8f43`: 직전 배포 기록
+  - `9c2337d`: 입력형 앱 중간 단계의 공공 데이터 조회 — 법령·통계표·입찰공고 검색, 앱 전용 법령·자치법규 본문([조회 단계](APP_LOOKUP_STEPS.md))
+  - `f0db3e4`: 개인 월 한도 알림 메일(0052, [예산 알림](BUDGET_ALERTS.md))
+- **배포 전**: 운영 DB에 0052 적용(`db:migrate -- 0052`). 읽기 전용으로 확인했다.
+  - `budget_alerts_subject_check`·`budget_alerts_kind_check`가 `user:{id}`·`user_monthly`를 받는다.
+  - `organization_user_budget_usage`는 하나뿐이고, 실행 권한은 anon·authenticated 거짓, service_role 참이다.
+  - 함수를 두 기관 모두에 불러 보니 돈다. **개인 한도가 있는 직원은 지금 0명**이라 다음 예산 알림(11-05 09:00 KST)에 개인 메일은 가지 않는다.
+- 가지 Preview(`f0db3e4`, `workon-e7egqjhb1`) Ready를 먼저 확인했다. Vercel 빌드가 `next build`다. 로컬 `next build`는 이번에 돌리지 않았다.
+- 그 전에 확인한 것
+  - 전체 시험 2,393개 통과, tsc 0.
+  - 첫 커밋 `9c2337d`만 따로 둔 임시 작업 폴더에서 tsc 0, 관련 시험 105개 통과.
+- 배포 뒤 확인
+  - `/apps`·`/apps/builder`·`/my/stats` 200.
+  - 로그인 없는 `/api/connectors` 401, `/api/cron/budget-alerts`·`/api/cron/app-schedules` 비밀값 없이 401.
+  - 운영 실행기 도장 12:35:00Z, `net._http_response` 최근 4번 모두 200.
+- **확인하지 못한 것**
+  - 로그인한 빌더 화면에서 처리 방식·조회어·조문 칸 고르기와 실제 조회 실행. 앱 능력 범위는 그 기관이 공식 비서에서 쓰는 공공 데이터에 달려 있다.
+  - 개인 한도 메일의 실제 발송. 한도가 있는 직원이 없다.
+  - 법제처 호출은 로컬에서 읽기 전용 3건만 확인했다.
+
 ## 2026-11-04: 앱 예약 실행기 멈춤 감지·단계 조건 또는(OR)
 
 - 2026-11-04 17:00 KST쯤 배포 `dpl_HbUow4tgdQ8sS45SrEP8K4CnhL6d`(커밋 `dfb8c95`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(3deae59)로 promote한다. **마이그레이션 없음**.
