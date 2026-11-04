@@ -14,6 +14,7 @@
 - `npx tsc --noEmit --incremental false` 오류 0. 전체 Vitest는 `NODE_OPTIONS=--max-old-space-size=4096`로 2,144개 통과(시험 DB 없이, 8파일 건너뜀), 시험 DB를 띄우면 124파일 2,212개 통과.
 - 운영은 이 내용과 같은 작업 트리에서 배포한 `dpl_6XBqcsTTXeNDsh5LCfTLtYYouCY2`(2026-10-31 20:12 KST)다. (그때는 `main`에 합치거나 원격에 올리지 않았다 — 2026-11-02에 `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋(`bdc93b3`)으로 fast-forward해 푸시했다. 이제 `main` = 이 가지 = 운영 코드.)
 - (2026-11-02) 그 뒤 커밋 `2df4e75`·`6707326`·`784cb02`·`559a433`·`b936502`·`9604b88`을 `dpl_8NSnzYddrnAAJGwcHehPqiofdG4T`로 운영 배포했다(0045·0046 운영 적용, `CRON_SECRET`·`RESEND_API_KEY`·`MAIL_FROM` 운영 환경 변수 추가). 같은 날 옆 가지 둘을 합친 `3eea05a`(표 엔진 사람 열)·`59e349d`(사용자 탈퇴 처리, 0047)를 `dpl_82VPrkePcwcQYgyMULyhDguAu2Yz`로 배포했다(0047 운영 적용). 기록은 `PRODUCTION_DEPLOYMENT.md` 맨 위.
+- (2026-11-04) 앱 예약 실행기 멈춤 감지·단계 조건 또는(OR)을 `dpl_HbUow4tgdQ8sS45SrEP8K4CnhL6d`(`dfb8c95`)로 배포했다(마이그레이션 없음).
 - (2026-11-03 밤) 앱 외부 연동(0049)·관리자 통제(0050)·연동 재시도 중복 막기(0051)를 운영 적용하고 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(`3deae59`)로 배포했다.
 - (2026-11-03) 단계 갈래·긴 첨부 나눠 읽기·앱 예약 실행(0048 운영 적용)을 `dpl_BHdvNEhXreRn9BvUmqN1Ah65YeHy`(`ef2bcbe`)로 운영 배포했다. 첫 빌드는 route·page 파일이 허용 밖 값을 내보내 실패했다 — `tests/route-exports.test.ts`가 이제 그 규칙을 본다(`tsc`는 못 봄). 새 라우트·화면이 든 묶음은 가지 Preview Ready를 먼저 보고 `main`에 올린다.
 - 자세한 완료 범위·위험·우선순위·검증 순서는 인수인계 문서를 따른다.

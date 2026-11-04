@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-04: 앱 예약 실행기 멈춤 감지·단계 조건 또는(OR)
+
+- 2026-11-04 17:00 KST쯤 배포 `dpl_HbUow4tgdQ8sS45SrEP8K4CnhL6d`(커밋 `dfb8c95`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(3deae59)로 promote한다. **마이그레이션 없음**.
+- 들어간 커밋: `0fefb79`·`8cc6824`(배포·실측 기록), `42e0410` 실행기 멈춤 감지(실행기 도장 + 하루 한 번 Vercel 점검·운영 기록 critical·슈퍼관리자 메일, 관리자 화면 실행기 상태·지연), `dfb8c95` 단계·갈래 조건 `{ any }`.
+- 가지 Preview(`dfb8c95`) Ready를 먼저 확인했고, 그 전에 로컬 `next build`·전체 시험(141파일 2,440개)·tsc 0.
+- 배포 뒤 확인: `/apps/builder`·`/apps/schedules` 200, `/admin/app-automations` 로그인 없이 307, 로그인 없는 `GET /api/admin/app-automations` 401, `/api/cron/app-schedules`·`/api/cron/budget-alerts` 비밀값 없이 401. **운영 DB에 실행기 도장 `app_schedules_runner_heartbeat` = 2026-11-04T08:00:01Z**(배포 뒤 첫 pg_cron 호출이 찍음), `net._http_response` 최근 3번 200. 켜진 예약 0개라 첫 하루 점검(11-05 09:00 KST)은 문제 없음으로 끝나야 한다.
+- **확인하지 못한 것**: 점검이 실제로 문제를 찾아 메일을 보내는 경로(운영에서 일부러 멈추지 않음 — 시험으로만), 빌더의 '또는' 고르기 화면.
+
 ## 2026-11-03(밤): 앱 예약·연동 관리자 통제(0050)·연동 재시도 중복 막기(0051)
 
 - 2026-11-03 21:15 KST쯤 배포 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(커밋 `3deae59`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_GENQ1nia9PBCFKebMwjmefj8a8Ub`(5717be2)로 promote한다 — **0050·0051은 되돌리지 않는다**(칸·표 추가, 차지 함수는 옛 4인자 호출도 받는다).
