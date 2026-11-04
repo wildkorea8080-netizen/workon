@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-04(밤 4): 비서 문서의 판(개정본) 관리(0055)
+
+- 2026-11-04 23:40 KST쯤 배포 `dpl_FpeEx9eUqFb1nUcesfE9hFe9Jt6P`(커밋 `b8e72a9`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_2MnuNeVvVmYpf7BaApBLm9pjLo1h`(6307a5c)로 promote한다 — **0055는 되돌리지 않는다**(칸·CHECK 추가, 옛 코드는 새 칸을 읽지 않고 `retired` 행도 없다).
+- 들어간 커밋: `ce6e7a2`(직전 배포 기록), `b8e72a9` 비서 문서의 판 관리([문서 판](DOCUMENT_EDITIONS.md)).
+- **배포 전**: 운영 DB에 0055 적용(`db:migrate -- 0055`). 읽기 전용 확인: 칸 셋(`replaces_id` uuid·`retired_at`·`effective_from` date), CHECK 셋(`documents_noda_status_check`에 `retired`·`documents_replaces_not_self`·`documents_retired_pair`), 기존 문서 3개(모두 ready) 그대로, 문서 찾기·목록과 같은 칸 묶음 select 됨. **칸이 없으면 문서 있는 비서의 대화가 막히므로 코드보다 먼저 넣었다.** 가지 Preview(`b8e72a9`, `workon-bi7q5083w`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,433개·tsc 0).
+- 배포 뒤 확인: `/admin/documents` 로그인 없이 307, `/apps` 200, 로그인 없는 `GET /api/documents`·`POST /api/documents/confirm` 401·`POST /api/documents/assign` 403(관리자 검사 — 전과 같음), 예약 실행기 pg_cron 배포 뒤에도 200.
+- **확인하지 못한 것**: 로그인한 문서 화면에서 개정본을 '바꿀 옛 판'으로 올려 실제 NODA 읽기 → 옛 판 지난 판 → 대화가 새 판만 근거로 쓰는지(사용자 몫).
+
 ## 2026-11-04(밤 3): 문서 찾기 일괄 평가(0054)
 
 - 2026-11-04 22:50 KST쯤 배포 `dpl_2MnuNeVvVmYpf7BaApBLm9pjLo1h`(커밋 `6307a5c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_3xfVqFGsFbZAj7HyZz8gyoP1vt1X`(6659a95)로 promote한다 — **0054는 되돌리지 않는다**(표 추가뿐, 옛 코드는 쓰지 않음).
