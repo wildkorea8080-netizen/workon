@@ -185,3 +185,60 @@ describe('step branches — first matching branch top to bottom, else the base i
     expect(args.complete).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('step conditions — OR (any) rules (2026-11-04)', () => {
+  const fields = [
+    { key: 'kind', label: '종류', type: 'select', required: true, options: ['안내', '공지', '보도'] },
+    { key: 'memo', label: '메모', type: 'textarea', required: false },
+    { key: 'count', label: '인원', type: 'number', required: false },
+  ];
+  const def = (when: unknown) => validateAppDefinition({ schemaVersion: 1, fields, output: 'bullets', steps: [{ name: '검토', instruction: '검토하세요.', when }, { name: '작성', instruction: '작성하세요.' }] });
+
+  it('accepts and normalizes an any-list of one to three rules, and keeps it any', () => {
+    expect(def({ any: [{ field: 'kind', op: 'equals', value: ' 공지 ' }, { field: 'count', op: 'gte', value: '30' }] }))
+      .toMatchObject({ ok: true, value: { steps: [{ when: { any: [{ field: 'kind', op: 'equals', value: '공지' }, { field: 'count', op: 'gte', value: '30' }] } }, {}] } });
+  });
+  it.each([
+    ['both all and any', { all: [{ field: 'memo', op: 'filled' }], any: [{ field: 'memo', op: 'filled' }] }],
+    ['empty any', { any: [] }],
+    ['four any rules', { any: Array.from({ length: 4 }, () => ({ field: 'memo', op: 'filled' })) }],
+    ['any that is not a list', { any: { field: 'memo', op: 'filled' } }],
+    ['bad rule inside any', { any: [{ field: 'kind', op: 'equals', value: '없는 값' }] }],
+  ])('rejects %s', (_, when) => { expect(def(when).ok).toBe(false); });
+  it('holds when any one rule holds, not when none do — empty inputs still only match “empty”', () => {
+    const rules = [{ field: 'kind', op: 'equals' as const, value: '공지' }, { field: 'count', op: 'gte' as const, value: '30' }];
+    const when: AppStepCondition = { any: rules };
+    expect(conditionHolds(when, { kind: '공지', count: '' })).toBe(true);
+    expect(conditionHolds(when, { kind: '안내', count: '40' })).toBe(true);
+    expect(conditionHolds(when, { kind: '안내', count: '10' })).toBe(false);
+    expect(conditionHolds(when, { kind: '안내' })).toBe(false);
+    expect(conditionHolds({ any: [{ field: 'memo', op: 'not_contains', value: '예산' }] }, { memo: '' })).toBe(false);
+    expect(conditionHolds({ any: [{ field: 'memo', op: 'not_contains', value: '예산' }, { field: 'memo', op: 'empty' }] }, { memo: '' })).toBe(true);
+    // 같은 규칙이라도 all은 모두 맞아야 한다
+    expect(conditionHolds({ all: rules }, { kind: '공지', count: '10' })).toBe(false);
+  });
+  it('branches pick the first branch whose any-rules hold', () => {
+    const step: AppStep = { name: '초안', instruction: '기본', branches: [
+      { name: '언론', when: { any: [{ field: 'kind', op: 'equals', value: '보도' }, { field: 'memo', op: 'contains', value: '기자' }] }, instruction: '언론 대응' },
+      { name: '대규모', when: { all: [{ field: 'count', op: 'gte', value: '30' }] }, instruction: '단체' },
+    ] };
+    expect(chooseBranch(step, { kind: '안내', memo: '기자 문의 있음', count: '50' })?.name).toBe('언론');
+    expect(chooseBranch(step, { kind: '안내', memo: '', count: '50' })?.name).toBe('대규모');
+    expect(chooseBranch(step, { kind: '안내', memo: '', count: '5' })).toBeNull();
+    expect(validateAppDefinition({ schemaVersion: 1, fields, output: 'bullets', steps: [step, { name: '작성', instruction: '작성' }] })).toMatchObject({ ok: true });
+  });
+  it('the old-form upgrade leaves any-conditions alone, and the final step still cannot take one', () => {
+    const d: AppDefinition = { schemaVersion: 1, fields: fields as AppDefinition['fields'], output: 'bullets', steps: [{ name: '검토', instruction: '검토', when: { any: [{ field: 'memo', op: 'filled' }] } }, { name: '작성', instruction: '작성' }] };
+    expect(upgradeAppConditions(d)).toEqual(d);
+    expect(validateAppDefinition({ ...d, steps: [d.steps![1], d.steps![0]] })).toMatchObject({ ok: false, message: expect.stringContaining('마지막 결과 작성 단계는 항상 실행') });
+  });
+  it('the runner skips a step whose any-rules all fail and runs it when one holds', async () => {
+    const either: AppStepCondition = { any: [{ field: 'review', op: 'equals', value: '예' }, { field: 'count', op: 'gte', value: '30' }] };
+    for (const [inputs, calls, first] of [[{ review: '아니오', count: '5' }, 1, 'skipped'], [{ review: '아니오', count: '30' }, 2, 'completed']] as const) {
+      const args = setup(); const conditional = [{ ...steps[0], when: either }, ...steps.slice(1)];
+      await runAppIntermediateSteps({ ...args, steps: conditional, inputs: { ...inputs } });
+      expect(args.complete).toHaveBeenCalledTimes(calls);
+      expect(args.records[0].status).toBe(first);
+    }
+  });
+});

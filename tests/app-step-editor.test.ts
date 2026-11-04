@@ -45,7 +45,8 @@ describe('step condition editor', () => {
   it('keeps the final step unconditional and offers no conditions on an unconditional step', () => {
     const page = html(base());
     expect(page).not.toContain('조건 1 항목');
-    expect(page).toMatch(/<option value="when" disabled="">아래 조건이 모두 맞을 때만 실행<\/option>/);
+    expect(page).toMatch(/<option value="all" disabled="">아래 조건이 모두 맞을 때만 실행<\/option>/);
+    expect(page).toMatch(/<option value="any" disabled="">아래 조건 중 하나라도 맞을 때 실행<\/option>/);
   });
 });
 
@@ -79,5 +80,27 @@ describe('step branch editor', () => {
     expect(validateAppDefinition({ ...base(), steps: [{ name: '검토', instruction: '검토하세요.', branches: [defaultBranch(fields, 1)] }, { name: '작성', instruction: '작성하세요.' }] }).ok).toBe(false);
     expect(validateAppDefinition({ ...base(), steps: [{ name: '검토', instruction: '검토하세요.', branches: [{ ...defaultBranch(fields, 1), instruction: '안내 기준' }] }, { name: '작성', instruction: '작성하세요.' }] }).ok).toBe(true);
     expect(validateAppDefinition(branchDef)).toMatchObject({ ok: true });
+  });
+});
+
+describe('OR conditions in the editor (2026-11-04)', () => {
+  it('a step with any-rules selects “하나라도” and adds rules with “또는”; all-rules still say “그리고”', () => {
+    const any = html(base({ any: [{ field: 'kind', op: 'equals', value: '공지' }, { field: 'memo', op: 'contains', value: '예산' }] }));
+    expect(any).toMatch(/<option value="any" selected="">아래 조건 중 하나라도 맞을 때 실행<\/option>/);
+    expect(any).toContain('+ 조건 추가 (또는)');
+    expect(any).not.toContain('+ 조건 추가 (그리고)');
+    expect(any).toContain('aria-label="단계 1 조건 2 값"');
+    const all = html(base({ all: [{ field: 'kind', op: 'equals', value: '공지' }] }));
+    expect(all).toMatch(/<option value="all" selected="">아래 조건이 모두 맞을 때만 실행<\/option>/);
+    expect(all).toContain('+ 조건 추가 (그리고)');
+  });
+  it('a branch shows its grouping and its add button follows it', () => {
+    const page = html({ ...base(), steps: [
+      { name: '검토', instruction: '검토하세요.', branches: [{ name: '급함', when: { any: [{ field: 'kind', op: 'equals', value: '공지' }, { field: 'due', op: 'before', value: '2026-03-01' }] }, instruction: '서둘러 검토하세요.' }] },
+      { name: '작성', instruction: '작성하세요.' },
+    ] });
+    expect(page).toContain('aria-label="단계 1 갈래 1 조건 묶음"');
+    expect(page).toMatch(/<option value="any" selected="">하나라도 맞을 때\(또는\)<\/option>/);
+    expect(page).toContain('+ 조건 추가 (또는)');
   });
 });

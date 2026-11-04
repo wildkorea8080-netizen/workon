@@ -2,8 +2,16 @@ export type AppField = { key: string; label: string; type: 'text' | 'textarea' |
 export type AppConditionOp = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'before' | 'after' | 'filled' | 'empty';
 /** 입력 항목 하나에 대한 비교. filled·empty는 값이 없다 */
 export type AppRule = { field: string; op: AppConditionOp; value?: string };
-/** 단계 실행 조건 — 규칙이 **모두** 맞을 때만 실행(AND). 옛 `{ field, equals }`는 검사가 이 꼴로 바꾼다 */
-export type AppStepCondition = { all: AppRule[] };
+/**
+ * 단계 실행 조건 — `all`은 규칙이 **모두** 맞을 때(그리고), `any`는 **하나라도** 맞을 때(또는, 2026-11-04). 둘 중 하나만 둔다.
+ * 옛 `{ field, equals }`는 검사가 `all` 꼴로 바꾼다
+ */
+export type AppStepCondition = { all: AppRule[] } | { any: AppRule[] };
+export type AppConditionMode = 'all' | 'any';
+/** 조건의 규칙 목록과 묶는 방식 — 화면·실행기가 꼴을 직접 들여다보지 않게 */
+export const conditionRules = (c: AppStepCondition): AppRule[] => ('any' in c ? c.any : c.all);
+export const conditionMode = (c: AppStepCondition): AppConditionMode => ('any' in c ? 'any' : 'all');
+export const makeCondition = (mode: AppConditionMode, rules: AppRule[]): AppStepCondition => (mode === 'any' ? { any: rules } : { all: rules });
 /**
  * 단계의 갈래 하나 — 조건이 맞으면 단계의 기본 지시 대신 이 지시로 실행한다(알리웍스 조건 노드의 '옵션' 꼴).
  * 갈래는 **위에서부터 처음 맞는 하나**만 고르고, 맞는 갈래가 없으면 기본 지시다. 갈래에는 조건이 반드시 있다
@@ -40,7 +48,7 @@ export function upgradeAppConditions(def: AppDefinition): AppDefinition {
   if (!def.steps) return def;
   return { ...def, steps: def.steps.map(step => {
     const when = step.when as unknown;
-    if (!object(when) || when.all !== undefined || typeof when.field !== 'string') return step;
+    if (!object(when) || when.all !== undefined || when.any !== undefined || typeof when.field !== 'string') return step;
     return { ...step, when: { all: [{ field: when.field, op: 'equals', value: typeof when.equals === 'string' ? when.equals : '' }] } };
   }) };
 }
@@ -66,7 +74,12 @@ function normalizeRule(raw: unknown, fields: AppField[]): AppRule | null {
  * 비운 입력은 '비어 있음'에만 맞는다(같지 않음·포함하지 않음도 아니다 — 입력하지 않은 값을 판단 근거로 쓰지 않는다).
  */
 export function conditionHolds(condition: AppStepCondition, inputs: Record<string, string> | undefined): boolean {
-  return condition.all.every(rule => {
+  const holds = (rule: AppRule) => ruleHolds(rule, inputs);
+  return 'any' in condition ? condition.any.some(holds) : condition.all.every(holds);
+}
+
+function ruleHolds(rule: AppRule, inputs: Record<string, string> | undefined): boolean {
+  {
     const actual = (inputs?.[rule.field] ?? '').trim();
     if (rule.op === 'empty') return !actual;
     if (!actual) return false;
@@ -89,7 +102,7 @@ export function conditionHolds(condition: AppStepCondition, inputs: Record<strin
       case 'lte': return numeric && a <= b;
     }
     return false;
-  });
+  }
 }
 
 /**
@@ -100,11 +113,14 @@ export function chooseBranch(step: AppStep, inputs: Record<string, string> | und
   return step.branches?.find(branch => conditionHolds(branch.when, inputs)) ?? null;
 }
 
-/** 조건 꼴 `{ all: [...] }` 하나를 검사·정규화한다. 맞지 않으면 null */
+/** 조건 꼴 `{ all: [...] }`·`{ any: [...] }` 하나를 검사·정규화한다(둘 다 있거나 둘 다 없으면 거절). 맞지 않으면 null */
 function normalizeCondition(raw: unknown, fields: AppField[]): AppStepCondition | null {
-  if (!object(raw) || !Array.isArray(raw.all) || raw.all.length < 1 || raw.all.length > APP_MAX_RULES) return null;
-  const rules = raw.all.map(rule => normalizeRule(rule, fields));
-  return rules.some(rule => !rule) ? null : { all: rules as AppRule[] };
+  if (!object(raw) || (raw.all !== undefined) === (raw.any !== undefined)) return null;
+  const mode: AppConditionMode = raw.any !== undefined ? 'any' : 'all';
+  const list = raw[mode];
+  if (!Array.isArray(list) || list.length < 1 || list.length > APP_MAX_RULES) return null;
+  const rules = list.map(rule => normalizeRule(rule, fields));
+  return rules.some(rule => !rule) ? null : makeCondition(mode, rules as AppRule[]);
 }
 
 export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefinition | null } | { ok: false; message: string } {
@@ -129,14 +145,15 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
       const normalized: AppStep = { name: step.name.trim(), instruction: step.instruction.trim() };
       if (step.when !== undefined) {
         const when = step.when;
-        if (object(when) && when.all === undefined) {
+        if (object(when) && when.all === undefined && when.any === undefined) {
           // 옛 꼴 { field, equals } — 목록 선택 항목의 선택값 하나
           if (typeof when.field !== 'string' || typeof when.equals !== 'string') return { ok: false, message: '단계 실행 조건을 확인해 주세요.' };
           const field = fields.find(f => f.key === when.field);
           if (!field || field.type !== 'select' || !field.options?.includes(when.equals.trim())) return { ok: false, message: '단계 조건은 현재 목록 선택 항목과 그 선택값만 사용할 수 있습니다.' };
           normalized.when = { all: [{ field: field.key, op: 'equals', value: when.equals.trim() }] };
         } else {
-          if (!object(when) || !Array.isArray(when.all) || when.all.length < 1 || when.all.length > APP_MAX_RULES) return { ok: false, message: `단계 실행 조건은 1~${APP_MAX_RULES}개로 정해 주세요.` };
+          const list = object(when) ? (when.any !== undefined ? when.any : when.all) : undefined;
+          if (!Array.isArray(list) || list.length < 1 || list.length > APP_MAX_RULES) return { ok: false, message: `단계 실행 조건은 1~${APP_MAX_RULES}개로 정해 주세요.` };
           const condition = normalizeCondition(when, fields);
           if (!condition) return { ok: false, message: '단계 조건은 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
           normalized.when = condition;

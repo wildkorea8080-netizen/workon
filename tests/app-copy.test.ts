@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Agent } from '@/lib/db';
 import { appCopyDraft } from '@/lib/apps/copy';
+import { conditionRules } from '@/lib/apps/definition';
 import { splitAgentBody } from '@/lib/agent-patch';
 
 const source = (patch: Partial<Agent> = {}): Agent => ({
@@ -25,10 +26,10 @@ describe('app copy draft', () => {
   it('creates independent fields, options, conditions and attachment settings', () => {
     const original = source(); const draft = appCopyDraft(original);
     draft.definition.fields[0].options![0] = '변경';
-    draft.definition.steps![0].when!.all[0].value = '변경';
+    conditionRules(draft.definition.steps![0].when!)[0].value = '변경';
     draft.definition.attachments!.required = false;
     expect(original.app_definition!.fields[0].options![0]).toBe('안내');
-    expect(original.app_definition!.steps![0].when!.all[0].value).toBe('안내');
+    expect(conditionRules(original.app_definition!.steps![0].when!)[0].value).toBe('안내');
     expect(original.app_definition!.attachments!.required).toBe(true);
   });
   it.each([{ is_active: false }, { deleted_at: '2026-10-31' }, { agent_type: 'link' as const }, { app_definition: null }, { system_prompt: '' }, { system_prompt: 'x'.repeat(12001) }])('rejects unavailable or uneditable source %j', patch => {
