@@ -110,3 +110,9 @@ export function sourceOriginalHref(c: { documentId: string; scope?: 'common'; pa
   const base = `/api/${c.scope === 'common' ? 'common-documents' : 'documents'}/${c.documentId.toLowerCase()}/original`;
   return typeof c.page === 'number' && Number.isInteger(c.page) && c.page > 0 ? `${base}?page=${c.page}` : base;
 }
+
+/** 근거 창 '원문에서 보기'의 주소(2026-11-06) — 원본을 글로 읽는 `…/text`. 문서 id가 uuid가 아니면 null */
+export function sourceTextHref(c: { documentId: string; scope?: 'common' }): string | null {
+  if (!DOC_ID.test(c.documentId)) return null;
+  return `/api/${c.scope === 'common' ? 'common-documents' : 'documents'}/${c.documentId.toLowerCase()}/text`;
+}

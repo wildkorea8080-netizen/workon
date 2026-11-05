@@ -79,3 +79,54 @@ export async function signOriginal(storagePath: string): Promise<string | null> 
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 }
+
+// ── 원문 보기(2026-11-06) — 원본을 다시 읽어 글로 돌려준다(근거 위치 강조는 화면이 한다) ──
+
+/** 원문 보기로 읽을 원본 크기 상한 — 문서 올리기 상한과 같다 */
+export const ORIGINAL_TEXT_MAX_BYTES = 20 * 1024 * 1024;
+
+class ScanSkipped extends Error {}
+
+/**
+ * 저장소 원본을 첨부 읽기와 같은 읽개로 글로 읽는다(한글·워드·엑셀·CSV·PDF·파워포인트·TXT). **스캔 PDF는 NODA로 보내지 않는다** —
+ * 보기 한 번에 NODA를 부르지 않게(그 문서는 '원본 열기'로 본다). 본문은 첨부 읽기 상한(20만 자)까지
+ */
+export async function readOriginalText(storagePath: string, fileName: string): Promise<{ ok: true; text: string; truncated: boolean } | { ok: false; status: number; message: string }> {
+  const { data: blob, error } = await supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET).download(storagePath);
+  if (error || !blob) return { ok: false, status: 503, message: '원본을 지금 불러올 수 없습니다. 잠시 뒤 다시 시도해 주세요.' };
+  if (blob.size > ORIGINAL_TEXT_MAX_BYTES) return { ok: false, status: 413, message: '원본이 커서 글로 보여 드릴 수 없습니다. \'원본 열기\'로 보세요.' };
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  const { readAttachment, AttachmentReadError } = await import('@/lib/attachments/reader');
+  try {
+    const extract = await readAttachment(bytes, fileName, { parseScanned: async () => { throw new ScanSkipped(); } });
+    const truncated = extract.warnings.some((w) => w.startsWith('본문이'));
+    return { ok: true, text: extract.text, truncated };
+  } catch (e) {
+    if (e instanceof AttachmentReadError) {
+      if (e.cause instanceof ScanSkipped) return { ok: false, status: 422, message: '글자 층이 없는 PDF(스캔본)라 글로 보여 드릴 수 없습니다. \'원본 열기\'로 보세요.' };
+      return { ok: false, status: 422, message: e.message };
+    }
+    return { ok: false, status: 500, message: '원본을 읽지 못했습니다.' };
+  }
+}
+
+/** 비서 문서 원본 찾기 — 기관 안에서, 열 수 있을 때만(원본 열기와 같은 판정). 못 읽으면 'error' */
+export async function findAgentOriginal(id: string, actor: ActorScope, loadAgent: (agentId: string) => Promise<AgentAccessInfo | null>): Promise<AgentOriginalDoc | null | 'error'> {
+  if (!actor.organizationId) return null;
+  const { data, error } = await supabaseAdmin.from('documents').select(AGENT_ORIGINAL_COLUMNS).eq('id', id.toLowerCase()).eq('organization_id', actor.organizationId).maybeSingle();
+  if (error) return 'error';
+  const doc = (data ?? null) as AgentOriginalDoc | null;
+  const agent = doc?.agent_id ? await loadAgent(doc.agent_id) : null;
+  return doc && canOpenAgentOriginal(doc, agent, actor) ? doc : null;
+}
+
+/** 공통 문서 원본 찾기 — 요청자 기관 유형과 같을 때만. 못 읽으면 'error' */
+export async function findCommonOriginal(id: string, organizationId: string): Promise<CommonOriginalDoc | null | 'error'> {
+  const [org, doc] = await Promise.all([
+    supabaseAdmin.from('organizations').select('type').eq('id', organizationId).maybeSingle(),
+    supabaseAdmin.from('common_documents').select(COMMON_ORIGINAL_COLUMNS).eq('id', id.toLowerCase()).maybeSingle(),
+  ]);
+  if (org.error || doc.error) return 'error';
+  const row = (doc.data ?? null) as CommonOriginalDoc | null;
+  return row && canOpenCommonOriginal(row, (org.data as { type?: unknown } | null)?.type) ? row : null;
+}

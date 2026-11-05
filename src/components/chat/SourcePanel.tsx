@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import SourceTextViewer from './SourceTextViewer';
 import type { RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel, sourceTitleLabel, sourceNumber, sourceOriginalHref } from './source-label';
+import { sourceLocationLabel, sourceTitleLabel, sourceNumber, sourceOriginalHref, sourceTextHref } from './source-label';
 
 interface SourcePanelProps {
   /** 연 근거. null이면 닫혀 있다 */
@@ -30,6 +31,10 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
   const title = source ? sourceTitleLabel(source) : '';
   const text = source?.text?.trim() ?? '';
   const originalHref = source ? sourceOriginalHref(source) : null;
+  const textHref = source ? sourceTextHref(source) : null;
+  const [viewing, setViewing] = useState(false);
+  // 다른 근거를 열거나 창을 닫으면 원문 보기도 닫는다
+  useEffect(() => { setViewing(false); }, [source]);
   const hasPage = typeof source?.page === 'number' && source.page > 0;
 
   return (
@@ -98,6 +103,15 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
             </div>
 
             <div className="px-5 py-3 border-t border-slate-100 space-y-2">
+              {textHref && text && (
+                <button
+                  type="button"
+                  onClick={() => setViewing(true)}
+                  className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-[#003087]/30 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-[#003087]/5"
+                >
+                  원문에서 보기
+                </button>
+              )}
               {originalHref && (
                 <a
                   href={originalHref}
@@ -116,6 +130,9 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
           </>
         )}
       </aside>
+      {viewing && source && textHref && (
+        <SourceTextViewer href={textHref} title={title} passage={text} onClose={() => setViewing(false)} />
+      )}
     </>
   );
 }
