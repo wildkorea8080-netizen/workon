@@ -3,6 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { deleteConversationFiles } from '@/lib/generated-files';
 import { deleteConversationAttachments } from '@/lib/attachments/store';
+import { loadConversationFeedback } from '@/lib/message-feedback';
 
 export async function GET(
   request: NextRequest,
@@ -51,7 +52,9 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ ok: true, data: conversation });
+    // 내가 남긴 답변 평가(0064) — 못 읽으면 빈 값(대화는 그대로 연다)
+    const feedback = await loadConversationFeedback(session.user.id, conversationId);
+    return NextResponse.json({ ok: true, data: { ...conversation, feedback } });
   } catch (error) {
     console.error('대화 상세 조회 중 오류:', error);
     return NextResponse.json(

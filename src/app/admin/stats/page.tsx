@@ -3,6 +3,7 @@ import StatsDashboard from '@/components/admin/StatsDashboard';
 import UsageSummary from '@/components/admin/UsageSummary';
 import AppRunOverview from '@/components/admin/AppRunOverview';
 import AdoptionReport from '@/components/admin/AdoptionReport';
+import FeedbackSummary from '@/components/admin/FeedbackSummary';
 
 export default async function AdminStatsPage() {
   const session = await getServerAuthSession();
@@ -34,6 +35,14 @@ export default async function AdminStatsPage() {
           비서별·직원별·부서별 사용량입니다. 조회 범위는 내 부서와 하위 부서입니다.
         </p>
         <UsageSummary />
+      </div>
+
+      <div className="pt-2">
+        <h2 className="text-lg font-semibold text-slate-900">답변 평가</h2>
+        <p className="text-sm text-slate-500 mt-0.5 mb-4">
+          직원이 AI 답변에 남긴 &lsquo;도움됨 / 아쉬움&rsquo;과 아쉬운 이유를 비서별로 셉니다. 내 부서와 하위 부서 직원의 평가이고, 질문·답변·누가 남겼는지는 보이지 않으며 나만의 비서는 이름 없이 묶습니다.
+        </p>
+        <FeedbackSummary />
       </div>
 
       <div className="pt-2">

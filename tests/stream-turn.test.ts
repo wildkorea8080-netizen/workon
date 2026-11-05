@@ -194,8 +194,12 @@ describe('streamTurn — 성공', () => {
     expect(writes.find((w) => w.table === 'conversations' && w.op === 'update')?.rows[0]).toEqual({ title: '여비 문의' });
     expect(events.at(-1)).toEqual({
       event: 'done',
-      data: { usage: { model: MODEL, input_tokens: 10, output_tokens: 5 }, title: '여비 문의', number_check: null },
+      data: { usage: { model: MODEL, input_tokens: 10, output_tokens: 5 }, title: '여비 문의', number_check: null, message_id: expect.any(String) },
     });
+    // done의 답변 id는 저장한 답변 행의 id다(화면이 이 id로 답변을 평가한다). 두 행 모두 id가 있어 키 집합이 같다
+    const rows = inserted('messages');
+    expect(rows.find((r) => r.role === 'assistant')?.id).toBe((events.at(-1) as { data: { message_id?: string } }).data.message_id);
+    expect(Object.keys(rows[0]).sort()).toEqual(Object.keys(rows[1]).sort());
   });
 
   it('이어지는 대화면 제목을 만들지 않는다', async () => {

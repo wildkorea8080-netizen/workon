@@ -33,6 +33,8 @@ export interface MessageRowInput {
   documentsSkipped: boolean;
   /** NODA 답변 검증 결과(감사 기록, 판정 R1). 검증을 부르고 결과를 받은 턴만 답변 행에 `verify`로 싣는다 */
   verify?: NodaVerifyResult | null;
+  /** 두 행의 id를 미리 정한다(2026-11-05) — 화면이 방금 받은 답변을 평가할 수 있게 `done`에 답변 id를 싣는다. 주면 두 행 모두에 넣는다(키 집합 같음) */
+  messageIds?: { user: string; assistant: string };
 }
 
 /** 답변 숫자 중 이번 턴에 도구가 보여 준 값에서 못 찾은 것(설계 5.4) */
@@ -55,6 +57,7 @@ export function dedupeLinks(links: ToolSource[]): ToolSource[] {
 export function buildMessageRows(input: MessageRowInput): Record<string, unknown>[] {
   return [
     {
+      ...(input.messageIds ? { id: input.messageIds.user } : {}),
       conversation_id: input.conversationId,
       user_id: input.userId,
       role: 'user',
@@ -66,6 +69,7 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
       agent_version: input.agentVersion,
     },
     {
+      ...(input.messageIds ? { id: input.messageIds.assistant } : {}),
       conversation_id: input.conversationId,
       user_id: null,
       role: 'assistant',

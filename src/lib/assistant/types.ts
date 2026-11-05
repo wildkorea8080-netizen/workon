@@ -24,7 +24,7 @@ export type TurnEvent =
   | { event: 'tool_end'; data: { name: string; ok: boolean; sources: ToolSource[]; files: GeneratedFileRef[] } }
   | { event: 'tool_limit'; data: { rounds: number } }
   | { event: 'error'; data: { message: string } }
-  | { event: 'done'; data: { usage: LlmUsage; title: string | null; number_check: { unverified: string[] } | null } };
+  | { event: 'done'; data: { usage: LlmUsage; title: string | null; number_check: { unverified: string[] } | null; message_id?: string } };
 
 export type SendEvent = (event: TurnEvent) => void;
 

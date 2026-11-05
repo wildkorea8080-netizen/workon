@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 // src/lib/assistant/stream.ts
 import { streamChat, complete } from '@/lib/llm';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -412,8 +413,11 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   // NODA 답변 검증 — 저장 전에 불러 결과를 함께 저장한다(감사 기록). 화면 목록에는 더하지 않는다(판정 R1)
   const verify = await verifyTurn(turn, result.text, deps.verify ?? defaultVerify);
 
+  // 답변 id를 미리 정해 `done`에 싣는다 — 화면이 방금 받은 답변을 평가할 수 있게(2026-11-05)
+  const messageIds = { user: randomUUID(), assistant: randomUUID() };
   const saveError = await saveMessages(
     buildMessageRows({
+      messageIds,
       conversationId: turn.conversationId,
       userId: turn.ctx.userId,
       userContent: turn.storedUserContent,
@@ -479,5 +483,5 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
     }
   }
 
-  send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck } });
+  send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck, ...(saveError ? {} : { message_id: messageIds.assistant }) } });
 }

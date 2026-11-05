@@ -8,6 +8,8 @@ import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
 import ReusableFilePicker from './ReusableFilePicker';
+import AnswerFeedback from './AnswerFeedback';
+import type { MessageFeedback } from '@/lib/message-feedback-spec';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 import AppStepResults from '@/components/apps/AppStepResults';
 import AppResultExport from '@/components/apps/AppResultExport';
@@ -52,6 +54,10 @@ interface Message {
   /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
   refusal?: boolean;
   error?: string;
+  /** 저장된 답변의 DB id — 평가할 수 있다(불러온 답변은 id, 방금 받은 답변은 done의 message_id) */
+  savedId?: string;
+  /** 내가 남긴 평가(0064) */
+  feedback?: MessageFeedback | null;
 }
 
 /** 보낸 요청 그대로 — 거절 뒤 '다시 묻기'가 똑같이 다시 보낸다 */
@@ -209,6 +215,8 @@ export default function ChatInterface({
               };
             }) => ({
               id: m.id,
+              savedId: m.role === 'assistant' ? m.id : undefined,
+              feedback: m.role === 'assistant' ? (result.data.feedback?.[m.id] ?? null) : undefined,
               role: m.role,
               // 이름 칩으로 보이므로 저장된 '[첨부 파일: ...]' 표시 줄은 뺀다
               content: m.role === 'user' && m.source_references?.attachments?.length
@@ -501,6 +509,8 @@ export default function ChatInterface({
           } else if (name === 'done') {
             // 숫자 확인은 저장 뒤에 정해져 done에만 실린다. 대조할 답이 없으면 말풍선도 없다
             const unverified: unknown = payload.number_check?.unverified;
+            // 저장된 답변 id — 이 답변을 바로 평가할 수 있다(저장에 실패했으면 오지 않는다)
+            if (bubbleShown && typeof payload.message_id === 'string') patchAssistant({ savedId: payload.message_id, feedback: null });
             if (bubbleShown && Array.isArray(unverified) && unverified.length > 0) {
               patchAssistant({ numberCheck: unverified.map(String) });
             }
@@ -679,6 +689,7 @@ export default function ChatInterface({
               onOpenSource={setOpenSource}
               error={msg.error}
             />
+            {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && <AnswerFeedback messageId={msg.savedId} initial={msg.feedback ?? null} />}
             {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
             {conversationId && msg.role === 'assistant' && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
             {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} />}
