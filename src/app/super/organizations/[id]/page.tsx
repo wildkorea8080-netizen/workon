@@ -6,6 +6,7 @@ import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
+import { kstDay } from '@/lib/kst-time';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -660,7 +661,7 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm]           = useState({ plan: 'basic', startDate: new Date().toISOString().slice(0,10), endDate: '', fee: 99000, notes: '' });
+  const [form, setForm]           = useState({ plan: 'basic', startDate: kstDay(), endDate: '', fee: 99000, notes: '' });
   const [saving, setSaving]       = useState(false);
 
   const load = useCallback(async () => {

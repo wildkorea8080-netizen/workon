@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { kstDay } from '@/lib/kst-time';
 
 interface AuditRow {
   일시: string;
@@ -29,7 +30,8 @@ type Kind = 'usage' | 'security';
 function defaultRange() {
   const to = new Date();
   const from = new Date(to.getTime() - 30 * 86400000);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  // 한국 날짜로 — 예전 UTC 날짜는 오전 9시 전에 '어제'가 되어 기본 조회에서 오늘 기록이 빠졌다(2026-11-06)
+  const fmt = (d: Date) => kstDay(d);
   return { from: fmt(from), to: fmt(to) };
 }
 

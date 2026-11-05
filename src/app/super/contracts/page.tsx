@@ -6,6 +6,7 @@ import {
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { PLANS } from '@/lib/plans';
+import { kstDay } from '@/lib/kst-time';
 
 type Tab = 'list' | 'expiring' | 'revenue' | 'plans';
 
@@ -239,7 +240,7 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
     budgetAlertPercent: number;
   }>({
     orgId: '', plan: 'basic',
-    startDate: new Date().toISOString().slice(0, 10), endDate: '', notes: '',
+    startDate: kstDay(), endDate: '', notes: '',
     monthlyFee: PLANS.basic.monthlyFee,
     // 공공기관은 확정 금액으로 예산을 편성한다. 기본은 기존 종량제 유지.
     billingType: 'pay_as_you_go',

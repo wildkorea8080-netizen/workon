@@ -5,6 +5,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
 import { estimateCostUsd } from '@/lib/models';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
     .from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active');
 
   // 이번달 시스템 키 사용 토큰 (org_id가 없는 usage_logs)
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const monthStart = kstMonthStart().toISOString();
   const { data: usage } = await pagedRows<{ details: any }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
     .select('details', w ? { count: 'exact' } : undefined)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     // 통계
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const monthStart = kstMonthStart(now, 0).toISOString();
     const { count: newThisMonth } = await supabaseAdmin
       .from('users')
       .select('id', { count: 'exact', head: true })

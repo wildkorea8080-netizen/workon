@@ -3,23 +3,31 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
+import { addKstDays, kstDay, kstDayList, kstDayStart, kstHour, kstMonthStart } from '@/lib/kst-time';
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * 기간 — 한국 날짜 기준(2026-11-06). 서버는 UTC라 예전에는 '오늘'이 09:00 KST에 시작했고,
+ * 직접 고른 끝 날('2026-11-05')을 그날 UTC 0시로 읽어 끝 날 하루가 거의 다 빠졌다. 이제 끝 날은 그날 한국 23:59:59.999까지
+ */
 function getPeriodRange(period: string, startDate?: string, endDate?: string) {
   const now = new Date();
+  const today = kstDay(now);
   switch (period) {
     case 'today':
-      return { start: new Date(now.getFullYear(), now.getMonth(), now.getDate()), end: now };
+      return { start: kstDayStart(today), end: now };
     case 'week':
-      return { start: new Date(now.getTime() - 6 * 86400000), end: now };
-    case 'custom':
-      return {
-        start: startDate ? new Date(startDate) : new Date(now.getTime() - 30 * 86400000),
-        end:   endDate   ? new Date(endDate)   : now,
-      };
+      return { start: kstDayStart(addKstDays(today, -6)), end: now };
+    case 'custom': {
+      const from = startDate && DAY.test(startDate) ? startDate : addKstDays(today, -30);
+      const to = endDate && DAY.test(endDate) ? endDate : today;
+      return { start: kstDayStart(from), end: new Date(kstDayStart(addKstDays(to, 1)).getTime() - 1) };
+    }
     default: // month
-      return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: now };
+      return { start: kstMonthStart(now, 0), end: now };
   }
 }
 
@@ -86,10 +94,10 @@ export async function GET(request: NextRequest) {
       if (row.user_id) activeUsers.add(row.user_id);
 
       // 시간 키
-      const d = new Date(row.created_at);
+      // 시·날짜는 한국 시간으로(예전 getHours()는 UTC 시라 시간별 표가 9시간 밀렸다)
       const key = period === 'today'
-        ? String(d.getHours()).padStart(2, '0') + ':00'
-        : d.toISOString().slice(0, 10);
+        ? String(kstHour(row.created_at)).padStart(2, '0') + ':00'
+        : kstDay(row.created_at);
 
       const t = timeMap.get(key) ?? { conversations: 0, inputTokens: 0, outputTokens: 0, users: new Set() };
       t.conversations++; t.inputTokens += inp; t.outputTokens += out;
@@ -113,12 +121,9 @@ export async function GET(request: NextRequest) {
         timeStats.push({ hour: k, conversations: t?.conversations ?? 0, inputTokens: t?.inputTokens ?? 0, outputTokens: t?.outputTokens ?? 0, activeUsers: t?.users.size ?? 0 });
       }
     } else {
-      const cursor = new Date(start);
-      while (cursor <= end) {
-        const k = cursor.toISOString().slice(0, 10);
+      for (const k of kstDayList(kstDay(start), kstDay(end))) {
         const t = timeMap.get(k);
         timeStats.push({ date: k, conversations: t?.conversations ?? 0, inputTokens: t?.inputTokens ?? 0, outputTokens: t?.outputTokens ?? 0, activeUsers: t?.users.size ?? 0 });
-        cursor.setDate(cursor.getDate() + 1);
       }
     }
 

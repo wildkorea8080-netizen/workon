@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
 function getPeriodStart(period: string, startDate?: string): Date {
   const now = new Date();
-  if (period === 'custom' && startDate) return new Date(startDate);
+  // 고른 날짜는 한국 날짜 — 그날 한국 00:00부터(2026-11-06)
+  if (period === 'custom' && startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) return kstDayStart(startDate);
   switch (period) {
-    case 'today': return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case 'today': return kstDayStart(kstDay(now));
     case 'week':  return new Date(now.getTime() - 6 * 86400000);
-    default:      return new Date(now.getFullYear(), now.getMonth(), 1);
+    default:      return kstMonthStart(now, 0);
   }
 }
 
@@ -29,7 +31,8 @@ export async function GET(request: NextRequest) {
   const limit     = Math.min(200, parseInt(sp.get('limit') ?? '50'));
 
   const start = getPeriodStart(period, startDate);
-  const end   = endDate ? new Date(endDate) : new Date();
+  // 끝 날은 그날 한국 23:59:59.999까지 — 예전에는 그날 UTC 0시로 읽어 끝 날 하루가 거의 다 빠졌다
+  const end   = endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? new Date(kstDayStart(addKstDays(endDate, 1)).getTime() - 1) : new Date();
 
   try {
     let query = supabaseAdmin

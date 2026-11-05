@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,7 +109,7 @@ export async function GET(
       .select('details', w ? { count: 'exact' } : undefined)
       .eq('organization_id', params.id)
       .eq('action', 'chat_message')
-      .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
+      .gte('created_at', kstMonthStart().toISOString())
       .order('id').range(a, b));
 
     const tokensThisMonth = (usageLogs ?? []).reduce((sum: number, l: any) => {

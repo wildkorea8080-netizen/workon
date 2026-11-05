@@ -17,6 +17,7 @@
 
 import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { G2B_API_KEY } from '@/lib/config';
+import { kstDay } from '@/lib/kst-time';
 import {
   fetchJson,
   toArray,
@@ -69,7 +70,8 @@ interface G2BResponse {
 
 /** 나라장터는 YYYYMMDDHHmm 형식을 쓴다 */
 function toDateTime(date: Date, endOfDay = false) {
-  const ymd = date.toISOString().slice(0, 10).replace(/-/g, '');
+  // 한국 날짜로(서버는 UTC — 오전 9시 전에는 어제가 되어 오늘 공고가 검색 범위에서 빠졌다, 2026-11-06)
+  const ymd = kstDay(date).replace(/-/g, '');
   return `${ymd}${endOfDay ? '2359' : '0000'}`;
 }
 

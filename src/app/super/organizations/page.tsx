@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ORG_TYPES } from '@/lib/org-types';
+import { kstDay } from '@/lib/kst-time';
 
 const PLAN_PRESETS: Record<string, { maxUsers: number; maxAgents: number; maxTokens: number; price: number }> = {
   trial:      { maxUsers: 5,   maxAgents: 3,   maxTokens: 500000,   price: 0       },
@@ -291,7 +292,7 @@ export default function OrganizationsPage() {
 function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
     name: '', slug: '', type: '공공기관', plan: 'basic',
-    contractStart: new Date().toISOString().slice(0, 10),
+    contractStart: kstDay(),
     contractEnd: '', maxUsers: 20, maxAgents: 10, maxTokens: 2000000,
     adminEmail: '', adminName: '', monthlyFee: 99000, notes: '',
   });

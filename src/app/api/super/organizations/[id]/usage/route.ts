@@ -3,16 +3,18 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
+import { kstDay, kstDayList, kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
 function getPeriodStart(period: string): Date {
   const now = new Date();
   switch (period) {
-    case 'last_month': return new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    case '3months':    return new Date(now.getFullYear(), now.getMonth() - 2, 1);
-    case '6months':    return new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    default:           return new Date(now.getFullYear(), now.getMonth(), 1); // this month
+    // 한국 달의 1일 00:00부터(서버는 UTC — 2026-11-06)
+    case 'last_month': return kstMonthStart(now, -1);
+    case '3months':    return kstMonthStart(now, -2);
+    case '6months':    return kstMonthStart(now, -5);
+    default:           return kstMonthStart(now, 0); // this month
   }
 }
 
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     let totalOutputTokens = 0;
 
     for (const row of rows) {
-      const date = row.created_at.slice(0, 10);
+      const date = kstDay(row.created_at);
       const inp  = (row.details?.input_tokens  as number) ?? 0;
       const out  = (row.details?.output_tokens as number) ?? 0;
       totalInputTokens  += inp;
@@ -67,13 +69,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     // 일별 배열 (빈 날도 포함)
     const dailyChart: { date: string; conversations: number; inputTokens: number; outputTokens: number }[] = [];
-    const cursor = new Date(start);
-    const today  = new Date();
-    while (cursor <= today) {
-      const d = cursor.toISOString().slice(0, 10);
+    for (const d of kstDayList(kstDay(start), kstDay(new Date()))) {
       const entry = dailyMap.get(d) ?? { conversations: 0, inputTokens: 0, outputTokens: 0 };
       dailyChart.push({ date: d, ...entry });
-      cursor.setDate(cursor.getDate() + 1);
     }
 
     // Top 5 사용자 (user_id → name 조회)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ export async function GET(request: NextRequest) {
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const monthStart = kstMonthStart().toISOString();
 
   const [{ data: orgs }, { data: logs }] = await Promise.all([
     supabaseAdmin.from('organizations')

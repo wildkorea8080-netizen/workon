@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,9 +17,9 @@ export async function GET(request: NextRequest) {
   const limit    = Math.min(200, parseInt(sp.get('limit') ?? '50'));
 
   const now = new Date();
-  const start = period === 'today' ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const start = period === 'today' ? kstDayStart(kstDay(now))
     : period === 'week' ? new Date(now.getTime() - 6 * 86400000)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
+    : kstMonthStart(now, 0);
 
   try {
     let query = supabaseAdmin
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
     if (error) throw error;
 
     // 에러 요약 (오늘 + 이번주)
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const todayStart = kstDayStart(kstDay(now)).toISOString();
     const weekStart  = new Date(now.getTime() - 6 * 86400000).toISOString();
 
     const [todayCount, weekCount, prevWeekCount] = await Promise.all([

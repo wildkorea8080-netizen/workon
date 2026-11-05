@@ -2,36 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { addKstDays, kstDay, kstDayList, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
 type Period = 'week' | 'month' | 'last_month' | '3months';
 
+/** 기간 — 한국 날짜 기준(서버는 UTC라 예전에는 '이번 달'이 1일 09:00 KST에 시작했다, 2026-11-06) */
 function getPeriodRange(period: Period): { start: Date; end: Date } {
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
+  const today = kstDay(now);
   switch (period) {
     case 'week':
-      return {
-        start: new Date(todayStart.getTime() - 6 * 24 * 60 * 60 * 1000),
-        end: now,
-      };
-    case 'last_month': {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { start, end };
-    }
+      return { start: kstDayStart(addKstDays(today, -6)), end: now };
+    case 'last_month':
+      return { start: kstMonthStart(now, -1), end: kstMonthStart(now, 0) };
     case '3months':
-      return {
-        start: new Date(todayStart.getTime() - 89 * 24 * 60 * 60 * 1000),
-        end: now,
-      };
+      return { start: kstDayStart(addKstDays(today, -89)), end: now };
     default: // month
-      return {
-        start: new Date(now.getFullYear(), now.getMonth(), 1),
-        end: now,
-      };
+      return { start: kstMonthStart(now, 0), end: now };
   }
 }
 
@@ -83,7 +72,7 @@ export async function GET(request: NextRequest) {
 
     // 3) 이번달 전체 대화 수 + 토큰 (summary 카드용 — 기간 필터와 무관)
     const now = new Date();
-    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thisMonthStart = kstMonthStart(now, 0);
     const { data: thisMonthConvs } = await pagedRows<{ id: string }>((a, b, w) => supabaseAdmin
       .from('conversations')
       .select('id', w ? { count: 'exact' } : undefined)
@@ -120,14 +109,12 @@ export async function GET(request: NextRequest) {
 
     const dateSet = new Set<string>();
     for (const c of allConvDates ?? []) {
-      dateSet.add(c.created_at.slice(0, 10));
+      dateSet.add(kstDay(c.created_at));
     }
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = kstDay(now);
     let streakDays = 0;
     for (let i = 0; i < 365; i++) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      const ds = d.toISOString().slice(0, 10);
+      const ds = addKstDays(todayStr, -i);
       if (dateSet.has(ds)) {
         streakDays++;
       } else if (ds === todayStr) {
@@ -152,16 +139,11 @@ export async function GET(request: NextRequest) {
     // 일별 차트 (기간 내 모든 날짜 포함)
     const dailyMap = new Map<string, number>();
     for (const c of convs) {
-      const d = c.created_at.slice(0, 10);
+      const d = kstDay(c.created_at);
       dailyMap.set(d, (dailyMap.get(d) ?? 0) + 1);
     }
-    const dailyChart: { date: string; count: number }[] = [];
-    const cursor = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate());
-    while (cursor <= periodEnd) {
-      const ds = cursor.toISOString().slice(0, 10);
-      dailyChart.push({ date: ds, count: dailyMap.get(ds) ?? 0 });
-      cursor.setDate(cursor.getDate() + 1);
-    }
+    // 한국 날짜로 빈 날도 채운다 — 끝은 기간 끝 바로 앞 순간의 날(지난달이면 그 달 말일)
+    const dailyChart = kstDayList(kstDay(periodStart), kstDay(periodEnd.getTime() - 1)).map((date) => ({ date, count: dailyMap.get(date) ?? 0 }));
 
     // 비서별 통계
     const agentMap = new Map<

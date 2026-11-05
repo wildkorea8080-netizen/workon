@@ -15,6 +15,7 @@
 
 import { CONNECTOR_LABELS } from '@/lib/connector-labels';
 import { DART_API_KEY } from '@/lib/config';
+import { kstDay } from '@/lib/kst-time';
 import {
   fetchJson,
   toArray,
@@ -61,7 +62,8 @@ function formatDate(value?: string) {
 }
 
 function toYmd(date: Date) {
-  return date.toISOString().slice(0, 10).replace(/-/g, '');
+  // 한국 날짜로(서버는 UTC — 오전 9시 전에는 어제가 되어 오늘 공시가 검색 범위에서 빠졌다, 2026-11-06)
+  return kstDay(date).replace(/-/g, '');
 }
 
 function viewerUrl(receiptNo: string) {

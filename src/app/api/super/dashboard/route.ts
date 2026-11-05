@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
+import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,9 +12,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   const now        = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+  // 오늘·이번 달·지난달은 한국 날짜로(서버는 UTC — 예전에는 하루가 09:00 KST에 시작했다, 2026-11-06)
+  const todayStart = kstDayStart(kstDay(now)).toISOString();
+  const monthStart = kstMonthStart(now, 0).toISOString();
+  const lastMonthStart = kstMonthStart(now, -1).toISOString();
   const in30 = new Date(now.getTime() + 30 * 86400000).toISOString();
 
   try {
@@ -89,17 +91,17 @@ export async function GET(request: NextRequest) {
     // ── 최근 30일 일별 대화수 ──────────────────────────
     const { data: dailyLogs } = await pagedRows<{ created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs').select('created_at', w ? { count: 'exact' } : undefined).eq('action', 'chat_message')
-      .gte('created_at', new Date(now.getTime() - 29 * 86400000).toISOString())
+      .gte('created_at', kstDayStart(addKstDays(kstDay(now), -29)).toISOString())
       .order('id').range(a, b));
 
     const dailyMap = new Map<string, number>();
     for (const l of dailyLogs ?? []) {
-      const d = l.created_at.slice(0, 10);
+      const d = kstDay(l.created_at);
       dailyMap.set(d, (dailyMap.get(d) ?? 0) + 1);
     }
     const dailyChart: { date: string; count: number }[] = [];
     for (let i = 29; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10);
+      const d = addKstDays(kstDay(now), -i);
       dailyChart.push({ date: d, count: dailyMap.get(d) ?? 0 });
     }
 

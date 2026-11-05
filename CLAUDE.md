@@ -1336,6 +1336,7 @@ MAIL_FROM=
 - 환경변수 직접 접근 금지 → `src/lib/config.ts` 경유
 - 관리자 전용 API: **모든 핸들러마다** `isAdminSession(session)` 확인 필수
 - 외부 API는 SDK 대신 `fetch`로 직접 호출 (기존 관례)
+- **날짜·시각은 한국 시간으로 `src/lib/kst-time.ts`를 쓴다**(`kstDay`·`kstHour`·`kstDayStart`·`kstMonthStart`·`addKstDays`·`kstDayList`, 잎 파일이라 화면도 씀). 서버(Vercel)는 UTC라 `toISOString().slice(0, 10)`·`created_at.slice(0, 10)`·`getHours()`·`new Date(y, m, 1)`은 한국 00:00~09:00의 일을 전날로, '이번 달'을 1일 09:00부터로, 시간별 표를 9시간 밀어 센다 — 2026-11-06에 내 사용현황·슈퍼관리자 대시보드·사용량·기관 사용량·로그·알림, 감사·이용통계 화면의 기본 기간('오늘'이 오전 9시 전엔 어제), DART·나라장터 검색 끝 날, 고른 끝 날을 그날 UTC 0시로 읽던 것(끝 날 하루가 빠짐)을 고쳤다. 고른 끝 날은 그날 한국 23:59:59.999까지. `tests/kst-time.test.ts`가 API 라우트의 로컬 달·날 시작·`getHours()` 재등장을 막는다
 - `next.config.mjs`의 `ignoreBuildErrors`는 제거된 상태입니다.
   **타입 에러가 있으면 빌드가 실패합니다.** 다시 켜지 마세요.
   Supabase 행이 `any`로 추론되는 콜백은 인라인 타입을 명시하세요:

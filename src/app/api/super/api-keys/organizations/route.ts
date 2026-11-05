@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { maskApiKey } from '@/lib/crypto';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true),
   ]);
 
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+  const monthStart = kstMonthStart().toISOString();
   const { data: usageLogs } = await pagedRows<{ organization_id: string }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
     .select('organization_id', w ? { count: 'exact' } : undefined)
