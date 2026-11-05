@@ -13,11 +13,13 @@ const EXAMPLE = '질문\t기대 문서\t기대 쪽\n출장 일비는 하루 얼�
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
 const kst = (iso: string) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
 
-async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+type SetRow = { id: string; name: string; question_count: number; created_by: string | null; updated_at: string; set_text?: string };
+
+async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; data: T } | { ok: false; message: string; code?: string }> {
   try {
     const res = await fetch(url, init);
     const body = await res.json().catch(() => null);
-    return body?.ok ? { ok: true, data: body.data as T } : { ok: false, message: body?.error?.message ?? '요청을 처리하지 못했습니다.' };
+    return body?.ok ? { ok: true, data: body.data as T } : { ok: false, message: body?.error?.message ?? '요청을 처리하지 못했습니다.', code: body?.error?.code };
   } catch {
     return { ok: false, message: '네트워크 오류가 발생했습니다.' };
   }
@@ -47,8 +49,16 @@ export default function RagEvalPanel() {
   const [error, setError] = useState<string | null>(null);
   const [run, setRun] = useState<RunRow | null>(null);
   const [history, setHistory] = useState<RunRow[]>([]);
+  // 이름 붙인 세트(0059) — 기관 단위라 비서를 바꿔도 같은 세트를 쓴다
+  const [sets, setSets] = useState<SetRow[]>([]);
+  const [setId, setSetId] = useState('');
+  const [setName, setSetName] = useState('');
+  const [setNotice, setSetNotice] = useState<string | null>(null);
   const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number; note: string | null } | null>(null);
 
+  useEffect(() => {
+    void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { if (r.ok) setSets(r.data); });
+  }, []);
   useEffect(() => {
     void call<Agent[]>('/api/agents?manage=true').then((r) => { if (r.ok) setAgents(r.data.filter((a) => a.agent_type !== 'link' && !a.deleted_at)); });
   }, []);
@@ -69,6 +79,34 @@ export default function RagEvalPanel() {
     if (r.ok) { setRun(r.data); setHistory((h) => [{ ...r.data, results: undefined }, ...h].slice(0, 20)); }
     else setError(r.message);
     setRunning(false);
+  }
+  /** 세트 칸의 글을 이름 붙여 저장 — 같은 이름이 있으면 덮어쓸지 묻는다 */
+  async function saveSet(overwrite = false) {
+    if (!setName.trim() || !preview?.ok) return;
+    setSetNotice(null); setError(null);
+    const r = await call<SetRow>('/api/admin/rag-eval/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: setName, set, overwrite }) });
+    if (!r.ok) {
+      if (r.code === 'exists' && !overwrite && window.confirm(r.message)) return saveSet(true);
+      setError(r.message);
+      return;
+    }
+    setSets((list) => [r.data, ...list.filter((x) => x.id !== r.data.id)]);
+    setSetId(r.data.id);
+    setSetNotice(`'${r.data.name}' 세트를 저장했습니다(질문 ${r.data.question_count}개).`);
+  }
+  async function loadSet(id: string) {
+    setSetId(id); setSetNotice(null);
+    if (!id) return;
+    const r = await call<SetRow>(`/api/admin/rag-eval/sets?id=${encodeURIComponent(id)}`);
+    if (!r.ok || !r.data.set_text) { setError(r.ok ? '세트를 불러오지 못했습니다.' : r.message); return; }
+    setSet(r.data.set_text); setSetName(r.data.name); setError(null);
+  }
+  async function deleteSet() {
+    const row = sets.find((x) => x.id === setId);
+    if (!row || !window.confirm(`'${row.name}' 세트를 지울까요? 지난 평가 기록은 그대로 남습니다.`)) return;
+    const r = await call<{ id: string }>(`/api/admin/rag-eval/sets?id=${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+    if (!r.ok) { setError(r.message); return; }
+    setSets((list) => list.filter((x) => x.id !== row.id)); setSetId(''); setSetNotice(`'${row.name}' 세트를 지웠습니다.`);
   }
   async function compareWith(base: RunRow) {
     if (!run?.results) return;
@@ -108,6 +146,16 @@ export default function RagEvalPanel() {
         {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
       <textarea aria-label="평가 세트" value={set} onChange={(e) => setSet(e.target.value)} rows={7} placeholder={EXAMPLE} className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs" />
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <select aria-label="저장한 세트" value={setId} onChange={(e) => void loadSet(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5">
+          <option value="">저장한 세트 불러오기{sets.length ? ` (${sets.length})` : ''}</option>
+          {sets.map((s) => <option key={s.id} value={s.id}>{s.name} · 질문 {s.question_count}</option>)}
+        </select>
+        {setId && <button type="button" onClick={() => void deleteSet()} className="text-slate-500 underline">이 세트 지우기</button>}
+        <input aria-label="세트 이름" value={setName} maxLength={60} onChange={(e) => setSetName(e.target.value)} placeholder="세트 이름(예: 여비 규정 기본 질문)" className="min-w-[14rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5" />
+        <button type="button" disabled={!setName.trim() || !preview?.ok} onClick={() => void saveSet()} className="rounded-lg border border-[#003087] px-3 py-1.5 font-semibold text-[#003087] disabled:opacity-40">세트 저장</button>
+      </div>
+      {setNotice && <p role="status" className="text-xs text-emerald-700">{setNotice}</p>}
       {preview && (preview.ok
         ? <p className="text-xs text-slate-600">질문 {preview.rows.length}개 — 기대 문서 있음 {preview.rows.filter((r) => r.expected).length} · 엉뚱한 질문 {preview.rows.filter((r) => !r.expected).length}</p>
         : <ul role="alert" className="list-disc pl-5 text-xs text-red-700">{preview.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
