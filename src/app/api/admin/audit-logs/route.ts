@@ -71,6 +71,7 @@ const ACTION_LABEL: Record<string, string> = {
   work_generate: '업무 파일 만들기(AI)',
   work_revise: '업무 문서 AI 수정',
   prompt_enhance: '프롬프트 다듬기',
+  document_tag_suggest: '문서 태그 초안(AI)',
   create_agent: '비서 생성',
   add_forbidden_word: '금지어 추가',
   delete_forbidden_word: '금지어 삭제',

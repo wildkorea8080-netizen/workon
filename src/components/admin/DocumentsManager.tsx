@@ -10,7 +10,8 @@ import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
-import { filterDocuments, normalizeDocumentTags, tagCounts, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
+import { filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
+import { mergeSuggestedTags } from '@/lib/document-tag-suggest';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -97,7 +98,7 @@ export default function DocumentsManager() {
   const [compareId, setCompareId] = useState<string | null>(null);
   // 목록 찾기·거르기와 태그 고치기(0060)
   const [filter, setFilter] = useState<DocumentFilter>({});
-  const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean } | null>(null);
+  const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean; suggesting?: boolean; note?: string | null } | null>(null);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -230,6 +231,26 @@ export default function DocumentsManager() {
       setTagEdit(null);
     } catch {
       setTagEdit((t) => (t ? { ...t, saving: false, error: '태그를 저장하지 못했습니다.' } : t));
+    }
+  };
+
+  /** AI 태그 초안 — 제안을 편집 칸의 지금 태그 뒤에 잇는다(저장은 사람이 '저장'으로) */
+  const suggestTags = async (documentId: string) => {
+    if (!tagEdit || tagEdit.id !== documentId) return;
+    setTagEdit({ ...tagEdit, suggesting: true, error: null, note: null });
+    try {
+      const res = await fetch(`/api/documents/${documentId}/tag-suggest`, { method: 'POST' });
+      const result = await res.json().catch(() => null);
+      setTagEdit((t) => {
+        if (!t || t.id !== documentId) return t;
+        if (!result?.ok) return { ...t, suggesting: false, error: result?.error?.message ?? '태그 초안을 만들지 못했습니다.' };
+        const current = normalizeDocumentTags(t.text);
+        const merged = mergeSuggestedTags(current.ok ? current.tags : [], result.data.suggestions as string[], MAX_DOCUMENT_TAGS);
+        const fresh = (result.data.suggestions as string[]).length;
+        return { ...t, suggesting: false, text: merged.join(', '), note: fresh ? 'AI가 제안한 태그를 더했습니다. 확인하고 고친 뒤 저장하세요.' : 'AI가 제안할 태그를 찾지 못했습니다.' };
+      });
+    } catch {
+      setTagEdit((t) => (t ? { ...t, suggesting: false, error: '태그 초안을 만들지 못했습니다.' } : t));
     }
   };
 
@@ -649,7 +670,9 @@ export default function DocumentsManager() {
                           className="min-w-[14rem] flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
                         />
                         <button type="button" disabled={tagEdit.saving} onClick={() => void saveTags(doc.id)} className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40">저장</button>
+                        <button type="button" disabled={tagEdit.saving || tagEdit.suggesting} onClick={() => void suggestTags(doc.id)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-40" title="AI가 문서 앞부분을 읽고 태그를 제안합니다(저장은 직접) — AI 사용량이 기록됩니다">{tagEdit.suggesting ? '초안 만드는 중…' : 'AI 초안'}</button>
                         <button type="button" onClick={() => setTagEdit(null)} className="text-xs text-slate-500 underline">취소</button>
+                        {tagEdit.note && <p role="status" className="w-full text-xs text-slate-500">{tagEdit.note}</p>}
                         {tagEdit.error && <p role="alert" className="w-full text-xs text-red-600">{tagEdit.error}</p>}
                       </div>
                     )}

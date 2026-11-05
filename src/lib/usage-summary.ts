@@ -55,6 +55,7 @@ export const USAGE_ACTION_LABELS: Record<string, string> = {
   work_generate: '업무 파일 만들기(AI)',
   work_revise: '업무 문서 AI 수정',
   prompt_enhance: '프롬프트 다듬기',
+  document_tag_suggest: '문서 태그 초안(AI)',
 };
 
 const num = (v: unknown) => {

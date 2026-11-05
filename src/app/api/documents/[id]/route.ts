@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { canEditAgent } from '@/lib/agent-permissions';
-import { loadAgentAccess } from '@/lib/agent-store';
-import { canReadDocument } from '@/lib/document-files';
+import { documentTagAccess } from '@/lib/document-tag-access';
 import { normalizeDocumentTags } from '@/lib/document-tags';
 
 export const dynamic = 'force-dynamic';
@@ -39,20 +37,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       .eq('organization_id', actor.organizationId)
       .maybeSingle();
     if (error) return jsonError('문서를 불러오지 못했습니다.', 500);
-    if (!doc || !canReadDocument(doc, actor)) return jsonError('문서를 찾을 수 없습니다.', 404);
-
-    const managesDepartment = actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id);
-    let allowed = managesDepartment;
-    if (!allowed && doc.agent_id) {
-      const agent = await loadAgentAccess(doc.agent_id);
-      allowed = Boolean(agent && !agent.deleted_at && canEditAgent(agent, actor));
-    }
-    if (!allowed) return jsonError('이 문서의 태그를 고칠 권한이 없습니다.', 403);
+    const access = doc ? await documentTagAccess(doc, actor) : 'hidden';
+    if (access === 'hidden') return jsonError('문서를 찾을 수 없습니다.', 404);
+    if (access === 'forbidden') return jsonError('이 문서의 태그를 고칠 권한이 없습니다.', 403);
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('documents')
       .update({ tags: normalized.tags })
-      .eq('id', doc.id)
+      .eq('id', doc!.id)
       .eq('organization_id', actor.organizationId)
       .select('id, tags')
       .single();

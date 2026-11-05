@@ -60,9 +60,11 @@ describe('연결 (원본)', () => {
   it('태그 고치기 — 로그인·기관 한정·볼 수 있는 문서·비서를 고칠 수 있거나 부서를 관리하는 사람만', () => {
     expect(route).toContain('getServerAuthSession');
     expect(route).toContain(".eq('organization_id', actor.organizationId)");
-    expect(route).toContain('canReadDocument(doc, actor)');
-    expect(route).toContain('actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id)');
-    expect(route).toContain('canEditAgent(agent, actor)');
+    expect(route).toContain('await documentTagAccess(doc, actor)');
+    const access = readFileSync('src/lib/document-tag-access.ts', 'utf8');
+    expect(access).toContain('canReadDocument(doc, actor)');
+    expect(access).toContain('actor.isAdmin && actor.managedDepartmentIds.includes(doc.department_id)');
+    expect(access).toContain('canEditAgent(agent, actor)');
     expect(route).toContain('normalizeDocumentTags(body.tags)');
   });
   it('목록이 태그를 읽고, 다른 비서에 붙일 때 태그를 옮긴다', () => {
