@@ -18,6 +18,11 @@ export interface RegulationScope {
   departmentId: string;
   /** 기관 문서를 이 공식 비서 하나로 제한한다. 공통 기준·법령에는 영향 없음. */
   agentId?: string;
+  /**
+   * 적용 기준일(YYYY-MM-DD). 기관 문서의 판(0055)을 이 날로 고른다 — 미래면 그날 시행될 판(`editionDayFor`).
+   * 없으면 오늘. 공통 자료실(시행일 칸 없음)·법령에는 영향 없음
+   */
+  basisDate?: string;
 }
 
 export interface RegulationProviders {

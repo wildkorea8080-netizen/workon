@@ -14,6 +14,22 @@ export function isInForce(effectiveFrom: string | null | undefined, today: strin
 }
 
 /**
+ * 판을 고를 날 — 업무 '규정 확인'처럼 적용 기준일이 있는 길에서 쓴다(2026-11-05).
+ * 기준일이 **오늘(KST) 뒤**면 그날 시행될 판을 고른다(시행일을 예약한 새 판이 근거, 옛 판은 아님).
+ * 기준일이 오늘이거나 그 전이면 오늘을 쓴다 — 시행일이 지나 내린 옛 판은 NODA 사본을 지워 다시 찾을 수 없다.
+ * 그런 근거(기준일 뒤에 시행된 새 판)는 적용 판정이 '기준일 뒤'로 따로 알린다. 날짜를 읽지 못하면 오늘
+ */
+export function editionDayFor(basisDate: string | null | undefined, today: string = kstToday()): string {
+  if (typeof basisDate !== 'string') return today;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(basisDate.trim());
+  if (!m) return today;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < 1948 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return today;
+  const day = basisDate.trim();
+  return day > today ? day : today;
+}
+
+/**
  * 근거로 치지 않을 문서 id(소문자) — 판(0055)과 시행일로 가른다. 옛 판을 가리키는 `ready` 새 판마다:
  * - 시행 중이면 **옛 판**이 근거가 아니다(판 바꾸기가 끝나기 전에도)
  * - 시행일 전이면 **새 판**이 근거가 아니다(옛 판이 아직 시행 중인 규정) — 옛 판은 그대로 근거다

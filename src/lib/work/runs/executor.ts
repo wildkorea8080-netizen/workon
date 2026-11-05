@@ -17,7 +17,7 @@ import { aggregateCollection, parseDecisions, type CollectionResult } from '../w
 import type { ComposeSource } from '../generation/compose';
 import type { NewReviewItem } from '../store/types';
 import { gatherEvidence } from '../workflows/regulations/gather';
-import { numberEvidence, isUsable, type RegulationEvidence } from '../workflows/regulations/evidence';
+import { numberEvidence, isUsable, normalizeDate, type RegulationEvidence } from '../workflows/regulations/evidence';
 import { settleFindings, memoFieldValues, kstDate, type RegulationDraft, type RegulationOutcome } from '../workflows/regulations/memo';
 import type { RegulationPlan } from '../workflows/regulations/model';
 import { verifyItems, verifyMeta, type ExtractedItem, type VerifySource } from '../workflows/items/verify';
@@ -331,7 +331,8 @@ async function opGenerateRegulations(ctx: WorkContext, run: WorkRunRow, task: Wo
   });
   const plan = planned.plan as RegulationPlan;
   const gathered = await step('gather', async () => {
-    const g = await gatherEvidence(providers, { organizationId: task.organization_id, organizationName, departmentId: task.department_id, ...(task.app_snapshot?.documentScope === 'selected-agent' ? { agentId: task.app_snapshot.agentId } : {}) }, plan, p.sources);
+    const basis = normalizeDate(basisDate);
+    const g = await gatherEvidence(providers, { organizationId: task.organization_id, organizationName, departmentId: task.department_id, ...(task.app_snapshot?.documentScope === 'selected-agent' ? { agentId: task.app_snapshot.agentId } : {}), ...(basis ? { basisDate: basis } : {}) }, plan, p.sources);
     return { evidence: numberEvidence(g.raw, { basisDate, organizationName }), unavailable: g.unavailable } as unknown as Record<string, unknown>;
   });
   const evidence = gathered.evidence as RegulationEvidence[];

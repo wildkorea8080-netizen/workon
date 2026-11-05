@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isInForce, kstToday, notCitableEditionIds } from '@/lib/edition-dates';
+import { editionDayFor, isInForce, kstToday, notCitableEditionIds } from '@/lib/edition-dates';
 import {
   DUE_LOOKBACK_DAYS, MAX_DUE_RETIREMENTS, pendingRetirements, retireDueEditions, retireReplacedDocument,
   type DueEditionDeps, type EditionDeps, type EditionRow,
@@ -42,6 +42,23 @@ describe('시행일 규칙(edition-dates)', () => {
     expect(notCitableEditionIds([{ ...base, noda_status: 'reading', effective_from: '2027-01-01' }], '2026-11-05').size).toBe(0);
     expect(notCitableEditionIds([{ ...base, replaces_id: null, effective_from: '2027-01-01' }], '2026-11-05').size).toBe(0);
   });
+  it('판을 고를 날 — 적용 기준일이 오늘 뒤면 그날, 아니면 오늘(지난 판은 다시 찾을 수 없다)', () => {
+    expect(editionDayFor('2027-03-01', '2026-11-05')).toBe('2027-03-01');
+    expect(editionDayFor('2026-11-05', '2026-11-05')).toBe('2026-11-05');
+    expect(editionDayFor('2025-01-01', '2026-11-05')).toBe('2026-11-05');
+    for (const bad of [undefined, null, '', '2027-3-1', '2027-13-01', '내년', ' 2027-03-01x']) {
+      expect(editionDayFor(bad as string | null | undefined, '2026-11-05')).toBe('2026-11-05');
+    }
+    // 앞뒤 공백은 떼고 읽는다
+    expect(editionDayFor(' 2027-03-01 ', '2026-11-05')).toBe('2027-03-01');
+  });
+
+  it('업무 규정 확인·현행화 인용 대조가 적용 기준일을 판 고르기에 넘긴다', () => {
+    expect(readFileSync('src/lib/work/workflows/regulations/providers.ts', 'utf8')).toContain('sourcesToChunks(res.sources, vaults[i].docs, contextPassages(res.context), editionDay)');
+    expect(readFileSync('src/lib/work/runs/executor.ts', 'utf8')).toContain('...(basis ? { basisDate: basis } : {})');
+    expect(readFileSync('src/lib/work/workflows/currentize/citations.ts', 'utf8')).toContain('gatherEvidence(providers, gatherScope, plan, [])');
+  });
+
   it('잎 파일이다 — 화면(문서 화면)이 읽으므로 아무것도 import하지 않고, 화면은 서버 모듈을 가져오지 않는다', () => {
     expect(readFileSync('src/lib/edition-dates.ts', 'utf8')).not.toMatch(/^import /m);
     const ui = readFileSync('src/components/admin/DocumentsManager.tsx', 'utf8');

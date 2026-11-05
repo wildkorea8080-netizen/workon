@@ -12,7 +12,7 @@ import { mockGenerator } from '@/lib/work/generation/compose';
 import type { WorkContext } from '@/lib/work/context';
 import type { WorkStore } from '@/lib/work/store/types';
 import type { WorkActor } from '@/lib/work/types';
-import type { RegulationProviders } from '@/lib/work/workflows/regulations/gather';
+import type { RegulationProviders, RegulationScope } from '@/lib/work/workflows/regulations/gather';
 import type { RegulationModel } from '@/lib/work/workflows/regulations/model';
 import type { RawEvidence } from '@/lib/work/workflows/regulations/evidence';
 import * as svc from '@/lib/work/services';
@@ -33,7 +33,10 @@ const ev = (over: Partial<RawEvidence>): RawEvidence => ({
 
 class FakeProviders implements RegulationProviders {
   failLaws = 0;
-  async orgDocuments() {
+  /** 기관 문서 제공자가 받은 범위 — 적용 기준일이 판 고르기로 넘어가는지 본다(2026-11-05) */
+  orgScopes: RegulationScope[] = [];
+  async orgDocuments(scope: RegulationScope) {
+    this.orgScopes.push(scope);
     return { status: 'ok' as const, items: [ev({ kind: 'org_doc', title: '가상기관 여비 지침', location: 'p.3 · 제2장 › 숙박', effectiveDate: null, url: null, text: '출장 숙박은 사전에 부서장 승인을 받는다.' })] };
   }
   async common() {
@@ -170,6 +173,8 @@ describe.skipIf(!url)('규정·지침 확인 흐름(실제 Postgres·실제 메�
     expect(field('작성부서').value).toBe('총무과');
     expect(field('작성일').value).toBe('2026. 10. 27.');
     expect(field('적용 기준').value).toBe('적용 기준일 2026-10-27 · 범위: 국내 출장 여비');
+    // 적용 기준일이 기관 문서의 판 고르기로 넘어간다(미래면 그날 시행될 판 — editionDayFor)
+    expect(providers.orgScopes[0]?.basisDate).toBe('2026-10-27');
     expect(d.review.map((i) => i.code)).toEqual(expect.arrayContaining(['RESERVED', 'EFFECTIVE_DATE_UNKNOWN', 'EVIDENCE_EXCLUDED']));
     expect(d.review.some((i) => i.severity === 'blocking')).toBe(false);
 

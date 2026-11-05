@@ -10,6 +10,7 @@ import { commonTenant, isOrgType } from '@/lib/org-types';
 import { getAccessScope } from '@/lib/department-scope';
 import { lawConnector } from '@/lib/connectors/law';
 import { logSystem } from '@/lib/logger';
+import { editionDayFor } from '@/lib/edition-dates';
 import type { RetrievedChunk } from '@/lib/db';
 import { sameLocalGovernment, type RawEvidence } from './evidence';
 import { parseLawSearch, pickArticles, splitArticles, type ProviderResult, type RegulationProviders } from './gather';
@@ -48,7 +49,7 @@ function chunkEvidence(c: RetrievedChunk, kind: 'org_doc' | 'common', editionYea
   };
 }
 
-async function orgDocuments(scope: { organizationId: string; departmentId: string; agentId?: string }, query: string): Promise<ProviderResult> {
+async function orgDocuments(scope: { organizationId: string; departmentId: string; agentId?: string; basisDate?: string }, query: string): Promise<ProviderResult> {
   if (!NODA_API_KEY) {
     if (scope.agentId) throw new Error('Selected document search is not configured');
     return { status: 'unavailable', reason: '문서 검색(NODA) 키가 설정되지 않았습니다' };
@@ -90,8 +91,10 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
   if (scope.agentId && !vaults.length) throw new Error('Selected document vault has no ready documents');
   const items: RawEvidence[] = [];
   const results = await Promise.all(vaults.map((v) => noda.getContext({ tenant: nodaTenant(v.id), query, budget: CONTEXT_BUDGET_AGENT_SHARED })));
+  // 판은 적용 기준일로 고른다 — 미래 기준일이면 그날 시행될 새 판이 근거(대화는 언제나 오늘)
+  const editionDay = editionDayFor(scope.basisDate);
   results.forEach((res, i) => {
-    const match = sourcesToChunks(res.sources, vaults[i].docs, contextPassages(res.context));
+    const match = sourcesToChunks(res.sources, vaults[i].docs, contextPassages(res.context), editionDay);
     if (!isCleanMatch(match)) {
       if (scope.agentId) throw new Error('Selected document vault evidence mismatch');
       void logSystem({ level: 'warning', category: 'security', message: '업무 규정 확인: 비서 보관함 근거가 문서 행과 맞지 않아 버림', details: { agent_id: vaults[i].id, unknown: match.unknown.length, unparsable: match.unparsable.length, malformed: match.malformed } });

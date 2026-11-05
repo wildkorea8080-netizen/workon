@@ -1,5 +1,5 @@
 // src/lib/work/workflows/currentize/citations.ts
-import { EVIDENCE_TEXT_MAX, assessEvidence, isUsable, type EvidenceKind, type RawEvidence } from '../regulations/evidence';
+import { EVIDENCE_TEXT_MAX, assessEvidence, isUsable, normalizeDate, type EvidenceKind, type RawEvidence } from '../regulations/evidence';
 import { gatherEvidence, splitArticles, type RegulationProviders, type RegulationScope } from '../regulations/gather';
 import type { RegulationPlan } from '../regulations/model';
 import type { Finding } from './classify';
@@ -157,11 +157,14 @@ export async function compareCitations(
     groups.set(name, [...(groups.get(name) ?? []), f]);
   }
   const evidenceByName = new Map<string, RawEvidence[]>();
+  // 기관 문서의 판은 올해 기준일로 고른다 — 기준일에 시행될 새 판의 조문과 대조(규정 확인과 같은 규칙)
+  const basis = normalizeDate(basisDate);
+  const gatherScope: RegulationScope = basis ? { ...scope, basisDate: basis } : scope;
   for (const [name, group] of groups) {
     const articles = [...new Set(group.map((g) => g.finding.detail?.article).filter((a): a is string => !!a))];
     const plan = planFor(name, articles, group.map(citedWindow));
     // 제공자가 던지면 SOURCE_UNAVAILABLE이 그대로 올라간다(실행기가 다시 시도). 'unavailable'은 근거가 없는 것과 같다
-    const { raw } = await gatherEvidence(providers, scope, plan, []);
+    const { raw } = await gatherEvidence(providers, gatherScope, plan, []);
     const usable = raw.filter((e) => isUsable(assessEvidence(e, { basisDate, organizationName: scope.organizationName }).applicability));
     evidenceByName.set(name, usable);
   }
