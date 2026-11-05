@@ -62,7 +62,7 @@ function decimalPlaces(v: number): number {
   return frac.replace(/0+$/, '').length;
 }
 
-function kstStamp(d: Date): string {
+export function kstStamp(d: Date): string {
   const k = new Date(d.getTime() + 9 * 3600 * 1000);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${k.getUTCFullYear()}-${p(k.getUTCMonth() + 1)}-${p(k.getUTCDate())} ${p(k.getUTCHours())}:${p(k.getUTCMinutes())}`;

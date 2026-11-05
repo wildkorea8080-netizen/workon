@@ -161,14 +161,15 @@ describe('화면', () => {
   });
 
   it('바뀐 곳 요약', async () => {
-    const { compareSummary } = await import('@/components/admin/EditionCompareModal');
+    const { compareSummary } = await import('@/lib/edition-compare');
     expect(compareSummary({ same: 3, changed: 2, removed: 0, added: 1 })).toBe('고친 문단 2개 · 새 문단 1개');
     expect(compareSummary({ same: 3, changed: 0, removed: 0, added: 0 })).toBe('바뀐 문단이 없습니다');
   });
 
   it('비교 창은 서버 설정을 가져오지 않고 대조 결과의 타입만 쓴다', () => {
     const ui = readFileSync('src/components/admin/EditionCompareModal.tsx', 'utf8');
-    expect(ui).toContain("import type { CompareRow, EditionComparison, InlinePart } from '@/lib/edition-compare'");
+    expect(ui).toContain("from '@/lib/edition-compare'");
+    expect(ui).not.toContain('document-edition-compare');
     expect(ui).not.toContain('@/lib/config');
   });
 });

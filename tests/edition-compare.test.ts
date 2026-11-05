@@ -5,6 +5,7 @@ import {
   paragraphSimilarity,
   inlineDiff,
   articleHeading,
+  sectionHeading,
   EditionCompareError,
   MAX_COMPARE_PARAGRAPHS,
 } from '@/lib/edition-compare';
@@ -34,6 +35,8 @@ const NEW = [
   '이 규정은 2026년 1월 1일부터 시행한다.',
 ].join('\n');
 
+const NL = String.fromCharCode(10);
+
 describe('문단 나누기', () => {
   it('빈 줄을 버리고 공백을 하나로, 보이지 않는 글자를 뺀다', () => {
     expect(splitParagraphs('  가  나\n\n​다\r\n').paragraphs).toEqual(['가 나', '다']);
@@ -53,6 +56,16 @@ describe('조문 제목', () => {
     expect(articleHeading('제 3 조의 2 (특례) 다만')).toBe('제3조의2(특례)');
     expect(articleHeading('제7조 삭제')).toBe('제7조');
     expect(articleHeading('이 규정 제3조에 따라')).toBeNull();
+  });
+
+  it('조문이 없는 문서는 짧은 번호 제목을 위치로 쓴다(글머리·긴 문장은 아님)', () => {
+    expect(sectionHeading('Ⅱ. 추진 경과')).toBe('Ⅱ. 추진 경과');
+    expect(sectionHeading('1. 개요')).toBe('1. 개요');
+    expect(sectionHeading('제2조(일비) 일비는 1일 20,000원으로 한다.')).toBe('제2조(일비)');
+    expect(sectionHeading('○ 숙박비는 실비')).toBeNull();
+    expect(sectionHeading('1. ' + '긴 번호 문장 '.repeat(10))).toBeNull();
+    const r = compareEditions('Ⅰ. 개요' + NL + '○ 일비 20,000원', 'Ⅰ. 개요' + NL + '○ 일비 25,000원');
+    expect(r.rows.find((x) => x.kind === 'changed')).toMatchObject({ location: 'Ⅰ. 개요' });
   });
 });
 

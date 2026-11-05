@@ -8,6 +8,7 @@ import {
   COMPARE_DOCUMENT_COLUMNS,
   type CompareDocumentRow,
 } from '@/lib/document-edition-compare';
+import { buildEditionCompareWorkbook, compareFileName } from '@/lib/edition-compare-xlsx';
 
 export const dynamic = 'force-dynamic';
 // 글자 층이 없는 PDF는 NODA /parse로 읽는다(한 번 60초) — 두 판을 함께 읽어도 넉넉하게
@@ -22,8 +23,9 @@ function jsonError(message: string, status: number) {
 /**
  * 새 판과 그 판이 바꾼 옛 판의 신구 대비(문단 단위, 모델 없음).
  * 두 판 모두 요청자가 문서 목록에서 볼 수 있는 문서여야 한다. 운영 기록에는 파일 이름을 남기지 않는다.
+ * `?format=xlsx`면 같은 대조를 신구대비표 엑셀로 돌려준다(바뀐 문단만 — 수백 KB라 서명 주소 없이 바로 보낸다).
  */
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) return jsonError('로그인이 필요합니다.', 401);
@@ -51,6 +53,20 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       },
     });
     if (!outcome.ok) return jsonError(outcome.message, outcome.status);
+
+    if (request.nextUrl.searchParams.get('format') === 'xlsx') {
+      const bytes = await buildEditionCompareWorkbook({ ...outcome.data, createdAt: new Date() });
+      const name = compareFileName(outcome.data.new.name);
+      return new NextResponse(new Uint8Array(bytes), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          // 한글 이름은 filename*로 한 번만 인코딩한다. 옛 프로그램은 ASCII 이름을 본다
+          'Content-Disposition': `attachment; filename="edition-compare.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
     return NextResponse.json({ ok: true, data: outcome.data });
   } catch (error) {
     console.error('[documents compare]', params.id, error instanceof Error ? error.message : error);

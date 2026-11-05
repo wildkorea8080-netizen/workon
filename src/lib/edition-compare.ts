@@ -7,6 +7,8 @@
 // - 띄어쓰기만 다른 문단은 같은 문단으로 본다('제 3 조'와 '제3조'). 글자가 하나라도 다르면 바뀐 문단이다.
 // - 너무 크면 짐작하지 않고 멈춘다 — 대조표가 틀리면 바뀐 조문을 못 보고 지나간다.
 
+import { numberedHeadingLevel } from '@/lib/doc-fill/slots';
+
 /** 판 하나에서 대조하는 문단 수 상한. 넘으면 앞의 것만 맞대고 truncated */
 export const MAX_COMPARE_PARAGRAPHS = 6_000;
 /** 같은 앞·뒤를 뗀 가운데 부분의 맞대기 칸 수(옛 문단 × 새 문단) 상한 — 메모리 약 24MB */
@@ -41,6 +43,15 @@ export interface EditionComparison {
   stats: { same: number; changed: number; removed: number; added: number };
   /** 문단이 상한을 넘어 앞의 것만 맞댔다 */
   truncated: boolean;
+}
+
+/** 바뀐 곳 요약 한 줄 — 비교 창 머리와 엑셀 안내 시트가 함께 쓴다 */
+export function compareSummary(stats: EditionComparison['stats']): string {
+  const parts: string[] = [];
+  if (stats.changed) parts.push(`고친 문단 ${stats.changed.toLocaleString('ko-KR')}개`);
+  if (stats.removed) parts.push(`지운 문단 ${stats.removed.toLocaleString('ko-KR')}개`);
+  if (stats.added) parts.push(`새 문단 ${stats.added.toLocaleString('ko-KR')}개`);
+  return parts.length ? parts.join(' · ') : '바뀐 문단이 없습니다';
 }
 
 /** 화면에 보이는 꼴 — NFC, 보이지 않는 서식 글자 제거, 공백 하나로 */
@@ -190,10 +201,24 @@ export function articleHeading(paragraph: string): string | null {
   return m[1].replace(/\s+/g, '') + (m[2] ?? '');
 }
 
+/** 위치 제목으로 쓰는 번호 제목(Ⅰ.·1.·가.…)의 최대 길이 — 길면 번호 매긴 본문 문장이다 */
+const MAX_SECTION_HEADING_CHARS = 40;
+
+/**
+ * 위치 제목 — 조문 제목('제12조(여비)')이 먼저, 아니면 짧은 번호 제목('Ⅱ. 추진 경과').
+ * 개조식 글머리(○·-)는 제목이 아니다(doc-fill의 numberedHeadingLevel과 같은 판정).
+ */
+export function sectionHeading(paragraph: string): string | null {
+  const article = articleHeading(paragraph);
+  if (article) return article;
+  if (paragraph.length <= MAX_SECTION_HEADING_CHARS && numberedHeadingLevel(paragraph) !== null) return paragraph;
+  return null;
+}
+
 /**
  * 옛 판 글과 새 판 글을 문단 단위로 맞댄다.
  * 바뀐 곳마다 앞뒤 같은 문단 CONTEXT_PARAGRAPHS개를 남기고 나머지는 'skip'으로 접는다.
- * 행의 location은 그 문단이 든 조문(새 판 쪽 기준, 지운 문단은 옛 판 쪽).
+ * 행의 location은 그 문단이 든 조문·번호 제목(새 판 쪽 기준, 지운 문단은 옛 판 쪽).
  */
 export function compareEditions(oldText: string, newText: string): EditionComparison {
   const A = splitParagraphs(oldText);
@@ -210,11 +235,11 @@ export function compareEditions(oldText: string, newText: string): EditionCompar
   let oldHeading: string | null = null;
   let newHeading: string | null = null;
   const seeOld = (i: number) => {
-    oldHeading = articleHeading(a[i]) ?? oldHeading;
+    oldHeading = sectionHeading(a[i]) ?? oldHeading;
     return oldHeading;
   };
   const seeNew = (j: number) => {
-    newHeading = articleHeading(b[j]) ?? newHeading;
+    newHeading = sectionHeading(b[j]) ?? newHeading;
     return newHeading;
   };
 

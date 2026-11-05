@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { CompareRow, EditionComparison, InlinePart } from '@/lib/edition-compare';
+import { compareSummary, type CompareRow, type EditionComparison, type InlinePart } from '@/lib/edition-compare';
 
 interface EditionSide {
   id: string;
@@ -16,15 +16,6 @@ interface CompareData {
   new: EditionSide;
   warnings: string[];
   comparison: EditionComparison;
-}
-
-/** 바뀐 곳 요약 한 줄 — 화면 머리와 시험이 함께 쓴다 */
-export function compareSummary(stats: EditionComparison['stats']): string {
-  const parts: string[] = [];
-  if (stats.changed) parts.push(`고친 문단 ${stats.changed}개`);
-  if (stats.removed) parts.push(`지운 문단 ${stats.removed}개`);
-  if (stats.added) parts.push(`새 문단 ${stats.added}개`);
-  return parts.length ? parts.join(' · ') : '바뀐 문단이 없습니다';
 }
 
 function sideLabel(s: EditionSide): string {
@@ -157,9 +148,21 @@ export default function EditionCompareModal({ documentId, onClose }: { documentI
               문서의 글을 문단 단위로 맞댄 결과입니다. 표 배치·서식·그림의 차이는 보이지 않으니 원본으로 확인하세요.
             </p>
           </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700" aria-label="닫기">
-            ✕
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {data && !data.comparison.identical && (
+              <a
+                href={`/api/documents/${documentId}/compare?format=xlsx`}
+                download
+                className="px-3 py-1.5 text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 rounded-md"
+                title="바뀐 문단만 담은 신구대비표(엑셀)를 내려받습니다"
+              >
+                신구대비표 엑셀
+              </a>
+            )}
+            <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700" aria-label="닫기">
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto px-6 py-4 space-y-3">
