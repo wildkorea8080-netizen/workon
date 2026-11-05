@@ -73,3 +73,23 @@ describe('개인정보 — 긴 숫자', () => {
     expect(sanitizeText('예산 150000000원, 계좌 1002123456789')).toBe('예산 150000000원, 계좌 [개인정보 마스킹]');
   });
 });
+
+describe('개인정보 — 전화·이메일(2026-11-06 사용자 결정)', () => {
+  it('사무실·기관 대표 번호와 업무 메일은 통과', async () => {
+    for (const text of ['담당 02-1234-5678', '문의 031-123-4567로 연락', '인터넷전화 070-1234-5678', '대표 1588-1234', '담당자 hong@korea.kr 로 회신', '공문 회신은 admin@city.go.kr']) {
+      const r = await filterUserInput('dept', text);
+      expect(r.isValid, text).toBe(true);
+    }
+  });
+
+  it('휴대전화 번호는 막는다(하이픈 있든 없든)', async () => {
+    for (const text of ['연락처 010-1234-5678', '휴대폰 010 1234 5678', '01012345678로', '011-123-4567로', '번호 016-1234-5678']) {
+      const r = await filterUserInput('dept', text);
+      expect(r.isValid, text).toBe(false);
+    }
+  });
+
+  it('가리기도 같은 규칙 — 사무실 번호·메일은 그대로, 휴대전화는 가림', () => {
+    expect(sanitizeText('담당 02-1234-5678, hong@korea.kr, 휴대 010-9876-5432')).toBe('담당 02-1234-5678, hong@korea.kr, 휴대 [개인정보 마스킹]');
+  });
+});
