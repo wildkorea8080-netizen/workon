@@ -58,7 +58,8 @@ export function appLookupConnectors(def: AppDefinition | null | undefined): stri
   return [...new Set((def?.steps ?? []).flatMap(step => step.lookup ? [APP_LOOKUP_TOOLS[step.lookup.tool].connector] : []))];
 }
 export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup };
-export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean } };
+/** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
+export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean } };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
 export const APP_MAX_BRANCHES = 3;
@@ -166,7 +167,7 @@ function normalizeCondition(raw: unknown, fields: AppField[]): AppStepCondition 
 export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefinition | null } | { ok: false; message: string } {
   if (raw === null) return { ok: true, value: null };
   if (!object(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.fields) || raw.fields.length < 1 || raw.fields.length > 8 || !['paragraphs', 'bullets', 'checklist'].includes(String(raw.output))) return { ok: false, message: '입력 항목은 1~8개이며 지원하는 응답 형식을 선택해야 합니다.' };
-  if (raw.attachments !== undefined && (!object(raw.attachments) || typeof raw.attachments.required !== 'boolean')) return { ok: false, message: '파일 첨부 설정을 확인해 주세요.' };
+  if (raw.attachments !== undefined && (!object(raw.attachments) || typeof raw.attachments.required !== 'boolean' || (raw.attachments.library !== undefined && typeof raw.attachments.library !== 'boolean'))) return { ok: false, message: '파일 첨부 설정을 확인해 주세요.' };
   const fields: AppField[] = [];
   for (const f of raw.fields) {
     if (!object(f) || typeof f.key !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(f.key) || fields.some(x => x.key === f.key) || typeof f.label !== 'string' || !f.label.trim() || fields.some(x => x.label === (f.label as string).trim()) || f.label.length > 60 || /[\r\n]/.test(f.label) || !['text', 'textarea', 'number', 'date', 'select'].includes(String(f.type)) || typeof f.required !== 'boolean') return { ok: false, message: '입력 항목의 이름·종류·필수 여부를 확인해 주세요.' };
@@ -236,7 +237,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
     if (steps[steps.length - 1].when) return { ok: false, message: '마지막 결과 작성 단계는 항상 실행해야 합니다. 조건을 해제해 주세요.' };
     if (steps[steps.length - 1].lookup) return { ok: false, message: '마지막 결과 작성 단계는 AI 처리여야 합니다. 공공 데이터 조회는 앞 단계에 두세요.' };
   }
-  return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean } } : {}) } };
+  return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}) } };
 }
 
 export function renderAppInput(def: AppDefinition, raw: unknown): { ok: true; message: string; inputs: Record<string, string> } | { ok: false; message: string } {

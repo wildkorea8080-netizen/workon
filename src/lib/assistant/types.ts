@@ -33,6 +33,8 @@ export interface PreparedTurn {
   appStepInputs?: Record<string, string>;
   /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
   appMaterialPieces?: { pieces: string[]; chars: number };
+  /** 문서함에서 고른 문서(2026-11-05) — 답변 행 `source_references.app_documents`(id·이름만). 이어 실행 대상에서 뺀다 */
+  appDocuments?: { id: string; title: string }[];
   appResumeRecords?: import('@/lib/apps/pipeline').AppStepRecord[];
   appResumeFrom?: string;
   /** 시험 판으로 실행한 턴(0053) — 그 시험 판의 저장 시각. 답변 행·사용 기록에 남긴다 */

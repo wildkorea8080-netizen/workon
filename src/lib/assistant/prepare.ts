@@ -26,6 +26,9 @@ import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt
 import { loadHistory } from './history';
 import { validateAppDefinition, renderAppInput, appOutputInstruction, APP_MAX_FILES } from '@/lib/apps/definition';
 import { appAttachmentMaterial } from '@/lib/apps/attachment-context';
+import type { AttachmentExtract } from '@/lib/attachments/types';
+import { LIBRARY_DOCUMENT_COLUMNS, loadLibraryDocuments, parseLibraryIds, type LibraryDocumentRow } from '@/lib/apps/library-documents';
+import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { loadTurnExtract } from '@/lib/capabilities/attachment-access';
 import { restoreAppSteps, isInputOnlyRun } from '@/lib/apps/resume';
 import type { AppStepRecord } from '@/lib/apps/pipeline';
@@ -128,9 +131,13 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     message = input.message;
     appStepInputs = input.inputs;
   }
+  // 문서함에서 고른 문서(2026-11-05) — 새 앱 실행에서만, 앱이 허용할 때만. 읽기는 대화를 만들기 전에(아래)
+  const libraryIds = parseLibraryIds(body.app_document_ids);
+  if (libraryIds === null) return reject('고른 문서를 확인해 주세요.', 400);
+  if (libraryIds.length && (!appStepInputs || !definition.value?.attachments?.library || conversation_id)) return reject('이 앱은 문서함에서 문서를 고를 수 없습니다.', 400);
   if (body.resume_message_id !== undefined) {
     if (typeof body.resume_message_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.resume_message_id) || !appStepInputs || !definition.value?.steps?.length || conversation_id) return reject('입력형 앱의 중단 기록을 선택해 새 실행으로 이어 주세요.', 400);
-    if (!isInputOnlyRun(Object.keys(agent.capabilities ?? {}), Array.isArray(attachment_ids) ? attachment_ids.length : 0) || attachedImages.length) return reject('자료·도구가 연결된 앱은 근거가 바뀔 수 있으므로 새로 실행해 주세요.', 409);
+    if (!isInputOnlyRun(Object.keys(agent.capabilities ?? {}), (Array.isArray(attachment_ids) ? attachment_ids.length : 0) + libraryIds.length) || attachedImages.length) return reject('자료·도구가 연결된 앱은 근거가 바뀔 수 있으므로 새로 실행해 주세요.', 409);
     const { data: saved, error: resumeError } = await supabaseAdmin.from('messages').select('id,agent_version,source_references,conversation:conversations!inner(user_id,agent_id)').eq('id', body.resume_message_id).eq('role', 'assistant').eq('conversation.user_id', actor.userId).eq('conversation.agent_id', agent_id).maybeSingle();
     if (resumeError) return reject('중단 기록을 확인하지 못했습니다.', 503);
     const owner = Array.isArray(saved?.conversation) ? saved.conversation[0] : saved?.conversation;
@@ -158,8 +165,8 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const sentIds: string[] = Array.isArray(attachment_ids) ? (attachment_ids as string[]) : [];
   if (appStepInputs) {
     if (sentIds.length && !definition.value?.attachments) return reject('이 앱은 파일 입력을 받지 않습니다.', 400);
-    if (sentIds.length > APP_MAX_FILES) return reject('앱에는 파일을 최대 3개 첨부할 수 있습니다.', 400);
-    if (definition.value?.attachments?.required && !sentIds.length) return reject('이 앱은 파일 첨부가 필요합니다.', 400);
+    if (sentIds.length + libraryIds.length > APP_MAX_FILES) return reject(libraryIds.length ? '앱에는 올린 파일과 고른 문서를 합쳐 최대 3개까지 넣을 수 있습니다.' : '앱에는 파일을 최대 3개 첨부할 수 있습니다.', 400);
+    if (definition.value?.attachments?.required && !sentIds.length && !libraryIds.length) return reject(definition.value.attachments.library ? '이 앱은 파일을 첨부하거나 문서함에서 문서를 골라야 합니다.' : '이 앱은 파일 첨부가 필요합니다.', 400);
   }
 
   const filterResult = await filterUserInput(actor.departmentId, message);
@@ -168,6 +175,32 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       blockedWords: filterResult.blockedWords,
       blockedPatterns: filterResult.blockedPatterns,
     });
+  }
+
+  // 고른 문서를 대화를 만들기 전에 읽는다 — 거절될 요청으로 빈 대화가 쌓이지 않게. 그 앱 비서의 근거 판만(library-documents.ts)
+  let libraryFiles: { name: string; extract: AttachmentExtract }[] = [];
+  let libraryRefs: { id: string; title: string }[] = [];
+  if (libraryIds.length) {
+    const loaded = await loadLibraryDocuments(libraryIds, agent_id, actor, {
+      async documentsOf(agentId, organizationId) {
+        const { data: rows, error } = await supabaseAdmin
+          .from('documents')
+          .select(LIBRARY_DOCUMENT_COLUMNS)
+          .eq('agent_id', agentId)
+          .eq('organization_id', organizationId)
+          .limit(1000);
+        if (error) throw new Error(`문서 목록 조회 실패: ${error.message}`);
+        return (rows ?? []) as unknown as LibraryDocumentRow[];
+      },
+      async download(path) {
+        const { data: blob, error } = await supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET).download(path);
+        if (error || !blob) return null;
+        return new Uint8Array(await blob.arrayBuffer());
+      },
+    });
+    if (!loaded.ok) return reject(loaded.message, loaded.status);
+    libraryFiles = loaded.files;
+    libraryRefs = loaded.refs;
   }
 
   // ── 능력 preflight ── 대화를 만들기 전에(판정 R4). 참고 문서를 불러오지 못하면 여기서 거절해
@@ -273,11 +306,15 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
 
   let fileContext = '';
   let appMaterialPieces: PreparedTurn['appMaterialPieces'];
-  if (appStepInputs && sentIds.length) {
+  if (appStepInputs && (sentIds.length || libraryFiles.length)) {
     try {
       const selected = attachments.filter(a => sentIds.includes(a.id));
       if (selected.length !== new Set(sentIds).size) throw new Error('첨부 목록을 확인하지 못했습니다. 다시 첨부해 주세요.');
-      const material = appAttachmentMaterial(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) }))));
+      // 올린 파일 다음에 문서함에서 고른 문서 — 같은 원자료 자리에 같은 규칙(읽기 경고·잘림 거절, 긴 자료는 나눠 추림)으로
+      const material = appAttachmentMaterial([
+        ...(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) })))),
+        ...libraryFiles,
+      ]);
       // 긴 첨부는 조각으로 넘긴다 — 실행기(stream.ts)가 조각마다 추린 글을 사용자 메시지에 덧붙인다(모델 호출이라 여기서는 못 한다)
       if (material.context !== undefined) fileContext = material.context;
       else appMaterialPieces = { pieces: material.pieces, chars: material.chars };
@@ -305,6 +342,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       appStepInputs,
       appMaterialPieces,
+      ...(libraryRefs.length ? { appDocuments: libraryRefs } : {}),
       appResumeRecords,
       appResumeFrom,
       ...(appDraftSavedAt ? { appDraftSavedAt } : {}),
@@ -325,7 +363,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       storedUserContent: storedUserContent(
         message,
         attachedImages.length,
-        attachments.filter((a) => a.isNew).map((a) => a.fileName)
+        [...attachments.filter((a) => a.isNew).map((a) => a.fileName), ...libraryRefs.map((r) => `${r.title}(문서함)`)]
       ),
     },
   };

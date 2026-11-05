@@ -15,6 +15,8 @@ export interface MessageRowInput {
   appDraftSavedAt?: string;
   /** 긴 첨부를 나눠 읽은 턴 — 조각 수와 원문 글자 수(추린 글·원문은 남기지 않는다) */
   appMaterial?: { pieces: number; chars: number };
+  /** 문서함에서 고른 문서 — id·이름만(원문·경로 없음). 답변 행에만 */
+  appDocuments?: { id: string; title: string }[];
   conversationId: string;
   userId: string;
   userContent: string;
@@ -74,6 +76,7 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
         ...(input.appResumeFrom ? { app_resume_from: input.appResumeFrom } : {}),
         ...(input.appDraftSavedAt ? { app_draft: { saved_at: input.appDraftSavedAt } } : {}),
         ...(input.appMaterial ? { app_material: input.appMaterial } : {}),
+        ...(input.appDocuments?.length ? { app_documents: input.appDocuments } : {}),
         chunks: input.chunks.map((c) => ({
           documentId: c.documentId,
           documentTitle: c.documentTitle,

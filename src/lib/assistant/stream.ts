@@ -317,7 +317,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   };
   let result: LoopResult;
   const appRecords: AppStepRecord[] = turn.appResumeRecords?.map(record => ({ ...record })) ?? (turn.appSteps ?? []).map(step => ({ name: step.name, status: 'pending' }));
-  const savedInputs = isInputOnlyRun(Object.keys(turn.ctx.capabilities), turn.ctx.attachments.length) ? turn.appStepInputs : undefined;
+  // 고른 문서도 원자료다 — 이어 실행은 원자료가 바뀌지 않는 입력만 실행에서(문서가 바뀌면 같은 결과가 아니다)
+  const savedInputs = isInputOnlyRun(Object.keys(turn.ctx.capabilities), turn.ctx.attachments.length + (turn.appDocuments?.length ?? 0)) ? turn.appStepInputs : undefined;
   const updateStep = (index: number) => send({ event: 'app_step', data: { index, total: appRecords.length, step: { ...appRecords[index] } } });
   // 모델을 한 번 더 부르기 전마다 기관 한도·모델 정책을 다시 본다 — 긴 첨부 추리기와 중간 단계가 같은 검사를 쓴다
   const guard = async () => {
@@ -374,7 +375,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
         await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
           userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',
           chunks: turn.chunks, links: [], files: [], attachments: [], agentVersion: turn.ctx.agentVersion,
-          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appDraftSavedAt: turn.appDraftSavedAt, appMaterial }));
+          documentsSkipped: turn.documentsSkipped, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appDraftSavedAt: turn.appDraftSavedAt, appMaterial, appDocuments: turn.appDocuments }));
       } catch { /* A failed persistence call must not suppress the SSE error or usage log. */ }
     }
     // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
@@ -428,6 +429,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       appResumeFrom: turn.appResumeFrom,
       appDraftSavedAt: turn.appDraftSavedAt,
       appMaterial,
+      appDocuments: turn.appDocuments,
       numberCheck,
       documentsSkipped: turn.documentsSkipped,
       verify,
