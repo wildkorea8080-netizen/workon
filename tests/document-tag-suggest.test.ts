@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   calls: [] as Record<string, unknown>[],
   actor: null as unknown,
   bytes: Buffer.from('제2조(일비) 일비는 1일 20,000원으로 한다.'),
+  vocab: null as Record<string, unknown> | null,
+  vocabError: false,
 }));
 
 vi.mock('@/lib/auth', () => ({ getServerAuthSession: async () => ({ user: { id: 'u1' } }), isAdminSession: () => true }));
@@ -37,7 +39,10 @@ vi.mock('@/lib/supabaseAdmin', () => ({
       const chain = () => q;
       Object.assign(q, {
         select: chain, eq: chain, neq: chain, limit: () => Promise.resolve({ data: state.tagged, error: null }),
-        maybeSingle: () => Promise.resolve({ data: table === 'documents' ? state.doc : null, error: null }),
+        maybeSingle: () =>
+          table === 'document_tag_vocabularies'
+            ? Promise.resolve(state.vocabError ? { data: null, error: { code: 'XX000' } } : { data: state.vocab, error: null })
+            : Promise.resolve({ data: table === 'documents' ? state.doc : null, error: null }),
       });
       return q;
     },
@@ -64,6 +69,7 @@ beforeEach(() => {
     { file_name: 'b', noda_status: 'ready', tags: ['비밀 감사'], department_id: 'secret', organization_id: 'org', visibility: 'department' },
   ];
   state.limitAllowed = true; state.modelText = '["여비", "복무"]'; state.usage = []; state.calls = [];
+  state.vocab = null; state.vocabError = false;
 });
 
 describe('초안 라우트', () => {
@@ -95,6 +101,28 @@ describe('초안 라우트', () => {
     state.limitAllowed = false;
     const r = await call();
     expect(r.status).toBe(429);
+    expect(state.calls).toHaveLength(0);
+    expect(state.usage).toHaveLength(0);
+  });
+
+  it('기관 분류표(0061)를 먼저 주고, 분류표의 태그만이면 그 안에서만 — 밖의 답은 버린다', async () => {
+    state.vocab = { tags: ['출장여비', '복무'], restricted: true, updated_at: '2026-11-05T00:00:00Z' };
+    state.modelText = '["출장여비", "여비", "복무"]';
+    const r = await call();
+    expect(r.body.data.suggestions).toEqual(['출장여비', '복무']);
+    const content = String(((state.calls[0].messages as { content: string }[])[0]).content);
+    expect(content).toContain('기관 분류표(이 목록에서만 고르세요 — 맞는 것이 없으면 빈 배열): 출장여비, 복무');
+    expect(content).not.toContain('계약'); // 분류표만이면 쓰는 태그를 더하지 않는다
+
+    state.vocab = { tags: ['출장여비'], restricted: false, updated_at: '2026-11-05T00:00:00Z' };
+    state.calls = [];
+    await call();
+    expect(String(((state.calls[0].messages as { content: string }[])[0]).content)).toContain('기관이 이미 쓰는 태그: 출장여비, 계약, 여비');
+  });
+
+  it('분류표를 못 읽으면 모델을 부르지 않는다', async () => {
+    state.vocabError = true;
+    expect((await call()).status).toBe(500);
     expect(state.calls).toHaveLength(0);
     expect(state.usage).toHaveLength(0);
   });

@@ -10,7 +10,9 @@ import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
-import { filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
+import { applyVocabulary, filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
+import TagVocabularyPanel, { type VocabularyState } from '@/components/admin/TagVocabularyPanel';
+import TagBatchDraft from '@/components/admin/TagBatchDraft';
 import { mergeSuggestedTags } from '@/lib/document-tag-suggest';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
@@ -99,6 +101,8 @@ export default function DocumentsManager() {
   // 목록 찾기·거르기와 태그 고치기(0060)
   const [filter, setFilter] = useState<DocumentFilter>({});
   const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean; suggesting?: boolean; note?: string | null } | null>(null);
+  // 기관 태그 분류표(0061) — 못 불러오면 null(태그 저장은 서버가 분류표를 다시 본다)
+  const [vocab, setVocab] = useState<VocabularyState | null>(null);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -131,6 +135,18 @@ export default function DocumentsManager() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const loadVocabulary = useCallback(async () => {
+    try {
+      const result = await (await fetch('/api/documents/tag-vocabulary')).json();
+      if (result.ok) setVocab(result.data as VocabularyState);
+    } catch {
+      // 분류표 없이도 태그는 붙인다 — 저장 때 서버가 다시 본다
+    }
+  }, []);
+  useEffect(() => {
+    void loadVocabulary();
+  }, [loadVocabulary]);
 
   // 읽는 중인 문서가 있는 동안만 목록을 다시 부른다. 없으면 멈추고, 화면을 떠나도 멈춘다.
   // 앞 응답을 받은 뒤에 다음을 예약한다(setInterval이면 NODA가 느릴 때 요청이 겹쳐 쌓인다)
@@ -222,9 +238,12 @@ export default function DocumentsManager() {
     if (!tagEdit || tagEdit.id !== documentId) return;
     const checked = normalizeDocumentTags(tagEdit.text);
     if (!checked.ok) { setTagEdit({ ...tagEdit, error: checked.message }); return; }
+    // 분류표에 맞춰 먼저 본다(표기 맞추기·'분류표의 태그만') — 서버가 다시 본다
+    const fitted = vocab ? applyVocabulary(checked.tags, vocab) : { ok: true as const, tags: checked.tags };
+    if (!fitted.ok) { setTagEdit({ ...tagEdit, error: fitted.message }); return; }
     setTagEdit({ ...tagEdit, saving: true, error: null });
     try {
-      const res = await fetch(`/api/documents/${documentId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: checked.tags }) });
+      const res = await fetch(`/api/documents/${documentId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: fitted.tags }) });
       const result = await res.json().catch(() => null);
       if (!result?.ok) { setTagEdit((t) => (t ? { ...t, saving: false, error: result?.error?.message ?? '태그를 저장하지 못했습니다.' } : t)); return; }
       setDocuments((prev) => prev.map((d) => (d.id === documentId ? { ...d, tags: result.data.tags as string[] } : d)));
@@ -593,6 +612,7 @@ export default function DocumentsManager() {
       {/* Documents List */}
       <div>
         <h2 className="text-xl font-semibold mb-4">업로드된 문서</h2>
+        {vocab && <TagVocabularyPanel vocabulary={vocab} documents={documents} onSaved={setVocab} onReload={() => void loadVocabulary()} />}
         {documents.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm" aria-label="문서 찾기">
             <input
@@ -621,6 +641,11 @@ export default function DocumentsManager() {
               <button type="button" onClick={() => setFilter({})} className="text-xs text-slate-500 underline">조건 지우기</button>
             )}
             <span className="text-xs text-slate-500">{filterDocuments(documents, filter).length}/{documents.length}개</span>
+            <TagBatchDraft
+              documents={filterDocuments(documents, filter)}
+              vocabulary={vocab}
+              onSaved={(id, tags) => setDocuments((prev) => prev.map((d) => (d.id === id ? { ...d, tags } : d)))}
+            />
           </div>
         )}
         <div className="space-y-3">
@@ -672,6 +697,30 @@ export default function DocumentsManager() {
                         <button type="button" disabled={tagEdit.saving} onClick={() => void saveTags(doc.id)} className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40">저장</button>
                         <button type="button" disabled={tagEdit.saving || tagEdit.suggesting} onClick={() => void suggestTags(doc.id)} className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 disabled:opacity-40" title="AI가 문서 앞부분을 읽고 태그를 제안합니다(저장은 직접) — AI 사용량이 기록됩니다">{tagEdit.suggesting ? '초안 만드는 중…' : 'AI 초안'}</button>
                         <button type="button" onClick={() => setTagEdit(null)} className="text-xs text-slate-500 underline">취소</button>
+                        {vocab && vocab.tags.length > 0 && (
+                          <div className="flex w-full flex-wrap items-center gap-1" aria-label="분류표에서 더하기">
+                            <span className="text-xs text-slate-500">분류표{vocab.restricted ? '(이 안에서만)' : ''}:</span>
+                            {vocab.tags
+                              .filter((t) => {
+                                const cur = normalizeDocumentTags(tagEdit.text);
+                                return !(cur.ok ? cur.tags : []).some((c) => c.toLocaleLowerCase('ko') === t.toLocaleLowerCase('ko'));
+                              })
+                              .map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => setTagEdit((cur) => {
+                                    if (!cur) return cur;
+                                    const now = normalizeDocumentTags(cur.text);
+                                    return { ...cur, text: [...(now.ok ? now.tags : []), t].join(', '), error: null };
+                                  })}
+                                  className="rounded bg-white px-1.5 py-0.5 text-xs text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                                >
+                                  +{t}
+                                </button>
+                              ))}
+                          </div>
+                        )}
                         {tagEdit.note && <p role="status" className="w-full text-xs text-slate-500">{tagEdit.note}</p>}
                         {tagEdit.error && <p role="alert" className="w-full text-xs text-red-600">{tagEdit.error}</p>}
                       </div>

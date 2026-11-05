@@ -13,8 +13,9 @@ import { canReadDocument } from '@/lib/document-files';
 import { MAX_UPLOAD_BYTES } from '@/lib/file-types';
 import { AttachmentReadError, readAttachment } from '@/lib/attachments/reader';
 import {
-  buildTagSuggestMessage, parseTagSuggestions, TAG_SUGGEST_MAX_TOKENS, TAG_SUGGEST_SYSTEM, TAG_SUGGEST_VOCABULARY,
+  buildTagSuggestMessage, parseTagSuggestions, suggestVocabulary, TAG_SUGGEST_MAX_TOKENS, TAG_SUGGEST_SYSTEM,
 } from '@/lib/document-tag-suggest';
+import { loadTagVocabulary } from '@/lib/document-tag-vocabulary';
 
 export const dynamic = 'force-dynamic';
 // 글자 층이 없는 PDF는 NODA /parse로 읽는다(한 번 60초)
@@ -29,6 +30,7 @@ function jsonError(message: string, status: number) {
 /**
  * AI 태그 초안(2026-11-05) — `POST`. 문서 앞부분과 기관이 이미 쓰는 태그를 보고 태그를 5개까지 제안한다. **저장하지 않는다**
  * (사람이 고쳐 PATCH /api/documents/[id]로 저장). 태그를 고칠 수 있는 사람만(documentTagAccess), 기관 한도 안에서만.
+ * 기관 분류표(0061)를 먼저 주고, '분류표의 태그만'이면 분류표 안에서만 고르게 하고 밖의 답은 버린다.
  * 모델 호출은 사용 기록(`document_tag_suggest` — 모델·토큰·원가)을 남긴다. 운영 기록에 문서 이름을 남기지 않는다.
  */
 export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
@@ -77,13 +79,20 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       .limit(1000);
     type TaggedRow = { file_name: string; noda_status: string | null; tags: string[]; department_id: string; organization_id: string | null; visibility: string | null };
     const visible = ((tagged ?? []) as TaggedRow[]).filter((r) => canReadDocument(r, actor));
-    const vocabulary = tagCounts(visible).map((t) => t.tag).slice(0, TAG_SUGGEST_VOCABULARY);
+    // 기관 분류표(0061)가 먼저다 — 못 읽으면 AI를 부르지 않는다('분류표의 태그만'인데 밖의 태그를 제안하지 않게)
+    let classification;
+    try {
+      classification = await loadTagVocabulary(actor.organizationId);
+    } catch {
+      return jsonError('태그 분류표를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
+    }
+    const vocabulary = suggestVocabulary(classification.tags, tagCounts(visible).map((t) => t.tag), classification.restricted);
 
     const result = await complete({
       model: await resolveModelForDepartment(actor.departmentId),
       system: TAG_SUGGEST_SYSTEM,
       maxTokens: TAG_SUGGEST_MAX_TOKENS,
-      messages: [{ role: 'user', content: buildTagSuggestMessage({ title: doc!.title?.trim() || doc!.file_name, fileName: doc!.file_name, vocabulary, text }) }],
+      messages: [{ role: 'user', content: buildTagSuggestMessage({ title: doc!.title?.trim() || doc!.file_name, fileName: doc!.file_name, vocabulary, text, restricted: classification.restricted }) }],
     });
     // 답을 못 읽어도 쓴 토큰은 기록한다(과금 규약)
     await writeUsageLog({
@@ -94,7 +103,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       resourceId: doc!.id,
       details: buildUsageDetails(result.usage, { agent_id: doc!.agent_id }),
     });
-    const suggestions = parseTagSuggestions(result.text, vocabulary);
+    const suggestions = parseTagSuggestions(result.text, vocabulary, classification.restricted);
     if (!suggestions) return jsonError('태그 초안을 만들지 못했습니다. 다시 시도해 주세요.', 502);
     return NextResponse.json({ ok: true, data: { suggestions, fromVocabulary: suggestions.filter((s) => vocabulary.includes(s)) } });
   } catch (error) {
