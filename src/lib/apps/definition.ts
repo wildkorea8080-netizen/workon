@@ -63,12 +63,22 @@ export function appLookupConnectors(def: AppDefinition | null | undefined): stri
  * 선택지 밖의 답은 받지 않고 단계를 멈춘다(지어낸 분류로 가지 않게)
  */
 export type AppClassify = { options: string[] };
-export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify };
+/**
+ * 반복(2026-11-06) — 중간 AI 단계를 긴 글 입력 항목의 **줄마다** 한 번씩 돌린다(빈 줄 빼고 최대 8줄). 결과는 줄 순서대로 이어 붙인다.
+ * 질의 목록·사업 목록처럼 같은 처리를 여러 항목에 하는 앱. 줄마다 모델 호출 하나(사용량도 줄 수만큼)
+ */
+export type AppRepeat = { field: string };
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify; repeat?: AppRepeat };
 /** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean } };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
 export const APP_MAX_BRANCHES = 3;
+export const APP_REPEAT_MAX = 8;
+/** 반복할 항목 — 긴 글 입력값의 줄(앞뒤 공백 떼고 빈 줄 빼고). 항목 하나는 300자에서 자른다 */
+export function repeatItems(value: string | undefined): string[] {
+  return (value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => line.slice(0, 300));
+}
 export const APP_CLASSIFY_MIN = 2;
 export const APP_CLASSIFY_MAX = 6;
 export const APP_CLASSIFY_LABEL_MAX = 30;
@@ -279,6 +289,15 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         }
         normalized.branches = branches;
       }
+      if (step.repeat !== undefined) {
+        // 반복 — AI 처리 중간 단계만(조회·분류 아님), 긴 글 입력 항목 하나를 줄마다
+        if (isLookup || step.classify !== undefined) return { ok: false, message: '반복은 AI 처리 단계에만 둘 수 있습니다.' };
+        const repeat = step.repeat;
+        const key = object(repeat) && typeof repeat.field === 'string' ? repeat.field : null;
+        const field = key ? fields.find((f) => f.key === key) : undefined;
+        if (!field || field.type !== 'textarea') return { ok: false, message: '반복할 항목은 긴 글 입력 항목이어야 합니다(줄마다 한 번씩 처리).' };
+        normalized.repeat = { field: field.key };
+      }
       if (step.classify !== undefined) {
         // 분류 단계 — AI 처리 중간 단계만, 갈래 없이. 선택지는 한 줄·30자·서로 다른 2~6개
         if (isLookup) return { ok: false, message: '공공 데이터 조회 단계는 분류 단계로 둘 수 없습니다.' };
@@ -291,6 +310,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
     }
     if (steps[steps.length - 1].when) return { ok: false, message: '마지막 결과 작성 단계는 항상 실행해야 합니다. 조건을 해제해 주세요.' };
     if (steps[steps.length - 1].lookup) return { ok: false, message: '마지막 결과 작성 단계는 AI 처리여야 합니다. 공공 데이터 조회는 앞 단계에 두세요.' };
+    if (steps[steps.length - 1].repeat) return { ok: false, message: '마지막 결과 작성 단계는 반복할 수 없습니다. 반복은 앞 단계에 두세요.' };
     if (steps[steps.length - 1].classify) return { ok: false, message: '마지막 결과 작성 단계는 분류 단계로 둘 수 없습니다. 분류는 앞 단계에 두세요.' };
   }
   return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}) } };

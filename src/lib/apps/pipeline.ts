@@ -1,4 +1,4 @@
-import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
+import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_REPEAT_MAX, repeatItems, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
 import { AppInputError } from './long-input';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
 
@@ -7,8 +7,9 @@ export type AppStepSource = { title: string; url: string };
  * `branch` = 이 실행에서 고른 갈래 이름(기본 지시로 돌았으면 없음). 재개 검사가 지금 입력으로 고를 갈래와 맞춰 본다.
  * `kind: 'lookup'` = 공공 데이터 조회 단계 — `query`는 실제로 보낸 조회어, `sources`는 도구가 준 원문 링크(10개까지)
  * `kind: 'classify'` = 분류 단계 — `output`은 고른 선택지 하나(뒤 단계 조건의 `@N` 값)
+ * `repeated` = 반복 단계가 처리한 줄 수(2026-11-06)
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; query?: string; article?: string; sources?: AppStepSource[] };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; query?: string; article?: string; sources?: AppStepSource[] };
 /** 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호 */
 export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
@@ -120,6 +121,26 @@ export async function runAppIntermediateSteps(args: {
     const branch = chooseBranch(args.steps[index], judged);
     if (branch) args.records[index].branch = branch.name; else delete args.records[index].branch;
     args.records[index].status = 'running'; args.update(index);
+    const repeat = args.steps[index].repeat;
+    if (repeat) {
+      // 반복 — 긴 글 입력의 줄마다 모델을 한 번씩(같은 지시·같은 이전 결과), 결과는 줄 순서대로. 줄마다 쓴 토큰은 실패해도 센다
+      const items = repeatItems(args.inputs?.[repeat.field]);
+      if (!items.length) throw new AppInputError(`${args.steps[index].name}: 반복할 줄이 없습니다. 입력 항목에 한 줄에 하나씩 적거나 단계 실행 조건을 두세요.`);
+      if (items.length > APP_REPEAT_MAX) throw new AppInputError(`${args.steps[index].name}: 반복은 ${APP_REPEAT_MAX}줄까지입니다(지금 ${items.length}줄). 줄을 줄이거나 나눠 실행해 주세요.`);
+      const parts: string[] = [];
+      for (const [i, item] of items.entries()) {
+        await args.guard();
+        const system = `${stageSystem(args.system, args.steps[index], false, branch)}\n\n이번 항목(${i + 1}/${items.length}): ${item}\n이 항목에 대한 결과만 작성하세요. 다른 항목은 다루지 마세요.`;
+        const response = await args.complete({ model: args.model, system, messages: stageMessages(args.messages, args.records), maxTokens: APP_INTERMEDIATE_TOKENS });
+        args.usage.input_tokens += response.usage.input_tokens; args.usage.output_tokens += response.usage.output_tokens;
+        if (!response.text.trim() || response.usage.output_tokens >= APP_INTERMEDIATE_TOKENS) throw new Error(`단계 결과가 비었거나 처리 길이 상한을 초과했습니다(${i + 1}번째 항목).`);
+        parts.push(`### ${i + 1}. ${item.slice(0, 80)}\n${response.text.trim()}`);
+      }
+      const output = parts.join('\n\n');
+      if (output.length > 12000) throw new Error('반복 결과가 처리 길이 상한을 넘었습니다. 줄 수를 줄여 다시 실행해 주세요.');
+      args.records[index].output = output; args.records[index].repeated = items.length; args.records[index].status = 'completed'; args.update(index);
+      continue;
+    }
     await args.guard();
     const response = await args.complete({ model: args.model, system: stageSystem(args.system, args.steps[index], false, branch), messages: stageMessages(args.messages, args.records), maxTokens: APP_INTERMEDIATE_TOKENS });
     // Record billed usage even if the result is rejected or a later stage fails.

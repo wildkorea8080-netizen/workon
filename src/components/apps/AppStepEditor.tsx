@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep } from '@/lib/apps/definition';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
 
 /** 항목을 고르거나 바꿀 때의 첫 규칙 — 비교는 그 종류의 첫 비교, 값은 목록이면 첫 선택값 */
@@ -65,7 +65,7 @@ export function switchStepKind(step: AppStep, kind: '' | AppLookupTool, fields: 
     const { lookup: _lookup, ...rest } = step;
     return { ...rest, instruction: step.instruction.trim() ? step.instruction : '앞 단계의 조회 결과와 원래 입력을 바탕으로 정리하세요.' };
   }
-  const { branches: _branches, classify: _classify, ...rest } = step;
+  const { branches: _branches, classify: _classify, repeat: _repeat, ...rest } = step;
   // 조문 칸은 본문 도구끼리만 이어 간다(검색 도구에는 둘 수 없다)
   const article = APP_LOOKUP_TOOLS[kind].article && step.lookup?.article ? { article: step.lookup.article } : {};
   return { ...rest, lookup: { tool: kind, query: step.lookup?.query ?? (fields[0] ? `{{${fields[0].key}}}` : ''), ...article } };
@@ -108,7 +108,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         </div>
         : <textarea className={input} aria-label={`단계 ${index + 1} 처리 지시`} maxLength={2000} rows={3} placeholder={step.classify ? '분류 기준 — 예: 요청이 처리해 달라는 것이면 민원, 묻는 것이면 질의' : undefined} value={step.instruction} onChange={e => changeStep(index, { instruction: e.target.value })} />}
         {!step.lookup && <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 분류 단계`} disabled={last} checked={Boolean(step.classify)} onChange={e => changeStep(index, e.target.checked ? { classify: { options: ['예', '아니오'] }, branches: undefined } : { classify: undefined })} />분류 단계로 쓰기 — AI가 아래 선택지 중 하나만 고르고, 뒤 단계의 조건·갈래가 그 결과로 가릅니다{last ? ' (마지막 단계는 안 됨)' : ''}</label>
+          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 분류 단계`} disabled={last} checked={Boolean(step.classify)} onChange={e => changeStep(index, e.target.checked ? { classify: { options: ['예', '아니오'] }, branches: undefined, repeat: undefined } : { classify: undefined })} />분류 단계로 쓰기 — AI가 아래 선택지 중 하나만 고르고, 뒤 단계의 조건·갈래가 그 결과로 가릅니다{last ? ' (마지막 단계는 안 됨)' : ''}</label>
           {step.classify && <>
             <input className={input} aria-label={`단계 ${index + 1} 분류 선택지`} value={step.classify.options.join(',')} placeholder="선택지를 쉼표로 — 예: 민원,질의,제안" onChange={e => changeStep(index, { classify: { options: e.target.value.split(',').slice(0, APP_CLASSIFY_MAX) } })} />
             <p className="text-xs leading-5 text-slate-500">선택지는 {APP_CLASSIFY_MAX}개까지, 하나에 {APP_CLASSIFY_LABEL_MAX}자까지. AI가 선택지 밖의 답을 내면 단계가 멈춥니다(지어낸 분류로 가지 않음). 뒤 단계의 조건 항목에 ‘{index + 1}단계 분류 결과’가 생깁니다.</p>
@@ -120,6 +120,15 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={visible} label={`단계 ${index + 1} 조건 ${r + 1}`} disabled={last} onChange={next => changeRules(index, rules.map((x, i) => i === r ? next : x), mode)} onRemove={() => changeRules(index, rules.filter((_, i) => i !== r), mode)} />)}
         {!last && rules.length > 0 && rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-[#087581]" onClick={() => changeRules(index, [...rules, defaultRule(fields[0])], mode)}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
         {last && step.when && <p role="alert" className="text-xs text-red-700">마지막 단계는 조건을 ‘항상 실행’으로 바꿔 주세요.</p>}
+        {!step.lookup && !step.classify && (() => {
+          const lists = fields.filter(f => f.type === 'textarea');
+          return <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 반복`} disabled={last || !lists.length} checked={Boolean(step.repeat)} onChange={e => changeStep(index, { repeat: e.target.checked && lists[0] ? { field: lists[0].key } : undefined })} />목록의 줄마다 반복 — 긴 글 입력의 한 줄마다 이 단계를 한 번씩 처리하고 결과를 이어 붙입니다(최대 {APP_REPEAT_MAX}줄, 줄마다 AI 사용량){last ? ' (마지막 단계는 안 됨)' : !lists.length ? ' (긴 글 입력 항목이 있어야 함)' : ''}</label>
+            {step.repeat && <select aria-label={`단계 ${index + 1} 반복할 항목`} className={input} value={step.repeat.field} onChange={e => changeStep(index, { repeat: { field: e.target.value } })}>
+              {!lists.some(f => f.key === step.repeat!.field) && <option value={step.repeat.field} disabled>삭제된 항목</option>}{lists.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>}
+          </div>;
+        })()}
         {!step.lookup && !step.classify && <div className="space-y-2 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600">갈래 (선택) — 위에서부터 처음 맞는 갈래의 지시로 처리하고, 맞는 갈래가 없으면 위의 기본 지시로 처리합니다</div>
           {(step.branches ?? []).map((branch, b) => <BranchEditor key={b} branch={branch} fields={visible} label={`단계 ${index + 1} 갈래 ${b + 1}`} onChange={next => changeBranches(index, (step.branches ?? []).map((x, i) => i === b ? next : x))} onRemove={() => changeBranches(index, (step.branches ?? []).filter((_, i) => i !== b))} />)}
