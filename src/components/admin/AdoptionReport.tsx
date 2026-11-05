@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { adoptionCsv, formatAdoptionChange, formatAdoptionValue, recentMonths, type AdoptionRow } from '@/lib/adoption-report';
+import DepartmentAdoption from './DepartmentAdoption';
 
 type Report = { month: string; previous: string; departments: number; partial: boolean; rows: AdoptionRow[] };
 
@@ -76,6 +77,7 @@ export default function AdoptionReport() {
               </tbody>
             </table>
           </div>
+          <DepartmentAdoption month={report.month} />
         </>
       )}
     </section>
