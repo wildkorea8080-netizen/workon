@@ -28,7 +28,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!canRequestOfficial(agent, actor)) return jsonError('이 비서를 신청할 권한이 없습니다.', 403);
 
     const body = await request.json().catch(() => ({}));
-    const note: string | null = typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null;
+    // 메모는 관리자 승인 화면에 그대로 보인다 — 500자에서 자른다
+    const note: string | null = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : null;
 
     const { error } = await supabaseAdmin
       .from('agents')

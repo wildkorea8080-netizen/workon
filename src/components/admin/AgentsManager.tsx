@@ -1014,6 +1014,15 @@ export default function AgentsManager() {
   );
 }
 
+/** 승인 카드의 입력형 앱 요약 — 입력 항목·처리 단계 수(앱이 아니면 null). 관리자가 앱인지 알고 검토하게 */
+export function appSummary(definition: unknown): string | null {
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return null;
+  const d = definition as { fields?: unknown; steps?: unknown };
+  const fields = Array.isArray(d.fields) ? d.fields.length : 0;
+  const steps = Array.isArray(d.steps) ? d.steps.length : 0;
+  return `입력 항목 ${fields}개${steps ? ` · 처리 단계 ${steps}개` : ''}`;
+}
+
 function ApprovalCard({
   agent,
   expanded,
@@ -1039,6 +1048,9 @@ function ApprovalCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm font-semibold text-slate-900">{agent.name}</p>
+              {appSummary(agent.app_definition) && (
+                <span className="text-xs text-teal-800 bg-teal-50 px-2 py-0.5 rounded-full">입력형 앱 · {appSummary(agent.app_definition)}</span>
+              )}
               {rejected && agent.approval_note && (
                 <span className="text-xs text-red-500 bg-red-50 px-2 py-0.5 rounded-full">반려: {agent.approval_note}</span>
               )}
