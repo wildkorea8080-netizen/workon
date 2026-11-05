@@ -117,8 +117,10 @@ describe('사용 기록을 읽는 곳(원본 확인)', () => {
     expect(sql).toContain("action = 'chat_message'");
     expect(sql).toContain('idx_usage_logs_org_action_created');
   });
-  it('이용통계는 잘렸을 때 화면에 알린다', () => {
-    expect(readFileSync('src/app/api/admin/usage-summary/route.ts', 'utf8')).toContain('truncated,');
-    expect(readFileSync('src/components/admin/UsageSummary.tsx', 'utf8')).toContain('{meta.truncated &&');
+  it('이용통계는 DB가 묶는다(0058) — 기록을 앱으로 읽지 않아 50,000행 상한도 없다', () => {
+    const route = readFileSync('src/app/api/admin/usage-summary/route.ts', 'utf8');
+    expect(route).toContain("supabaseAdmin.rpc('usage_summary'");
+    expect(route).not.toContain("from('usage_logs')");
+    expect(readFileSync('src/components/admin/UsageSummary.tsx', 'utf8')).not.toContain('50,000건');
   });
 });

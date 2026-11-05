@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
-import { getModel, LEGACY_PRICING_MODEL_ID } from '@/lib/models';
+import { LEGACY_PRICING_MODEL_ID } from '@/lib/models';
 import { pagedRows } from '@/lib/paged-select';
+import { parseUsageGroups, usageRowsFromGroups, type UsageAxis } from '@/lib/usage-summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,65 +21,7 @@ export const dynamic = 'force-dynamic';
  * 사용 내역 조회를 쓴다. 집계에까지 원문을 흘리면 열람 범위만 넓어진다.
  */
 
-type Axis = 'agent' | 'user' | 'department';
-
-/** 한 행 안에서 모델·활동별로 다시 나눈 내역 */
-interface Breakdown {
-  key: string;
-  label: string;
-  count: number;
-  inputTokens: number;
-  outputTokens: number;
-  costKrw: number;
-}
-
-interface SummaryRow {
-  key: string;
-  name: string;
-  sub: string;
-  count: number;
-  inputTokens: number;
-  outputTokens: number;
-  costKrw: number;
-  /**
-   * 어떤 모델을 얼마나 썼는지 (0021 이후 모델이 넷).
-   *
-   * 합계만 보면 "이 부서가 비싸다"까지는 알아도 **왜 비싼지**를 모른다.
-   * Opus를 쓰고 있는 것과 Haiku를 많이 쓰는 것은 대응이 다르다.
-   * 기록은 usage_logs.details.model에 이미 들어 있었고 화면에 내지 않았을
-   * 뿐이다.
-   */
-  models: Breakdown[];
-  /** 어떤 종류의 활동인지 (대화·문서 판독·Q&A·보고서) */
-  actions: Breakdown[];
-}
-
-/** usage_logs.action을 담당자가 읽을 말로. 감사 화면과 같은 어휘를 쓴다. */
-const ACTION_LABELS: Record<string, string> = {
-  chat_message: 'AI 대화',
-  qna_search: '문서 질의',
-  generate_report: '보고서 생성',
-  document_ocr: '스캔 문서 판독',
-  conversation_title: '대화 제목 생성',
-  document_generated: '문서 파일 생성',
-  file_attached: '파일 첨부',
-  table_merged: '표 합치기',
-  work_generate: '업무 파일 만들기(AI)',
-  work_revise: '업무 문서 AI 수정',
-  prompt_enhance: '프롬프트 다듬기',
-};
-
-function bump(list: Breakdown[], key: string, label: string, d: any) {
-  let row = list.find((r) => r.key === key);
-  if (!row) {
-    row = { key, label, count: 0, inputTokens: 0, outputTokens: 0, costKrw: 0 };
-    list.push(row);
-  }
-  row.count += 1;
-  row.inputTokens += Number(d.input_tokens ?? 0);
-  row.outputTokens += Number(d.output_tokens ?? 0);
-  row.costKrw += Number(d.cost_krw ?? 0);
-}
+type Axis = UsageAxis;
 
 function csvCell(value: unknown): string {
   const text = value == null ? '' : String(value);
@@ -130,17 +73,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 쪽마다 끝까지 읽는다 — API는 한 번에 1,000행까지만 돌려줘, 그대로 읽으면 기록이 많은 기간을 조용히 덜 셈다(2026-11-05)
-  const { data: logs, error, truncated } = await pagedRows<{ user_id: string | null; department_id: string | null; action: string; details: any; created_at: string }>((a, b, withCount) =>
-    supabaseAdmin
-      .from('usage_logs')
-      .select('user_id, department_id, action, details, created_at', withCount ? { count: 'exact' } : undefined)
-      .in('department_id', managedDeptIds)
-      .gte('created_at', from.toISOString())
-      .lte('created_at', to.toISOString())
-      .order('id')
-      .range(a, b)
-  );
+  // (묶음 · 활동 · 모델)마다 DB가 센다(0058 usage_summary) — 예전에는 기록을 앱으로 읽어 묶어 50,000행에서 멈췄다(2026-11-05).
+  // 2026-08 이전 기록에는 details.model이 없다 — 그때 돌던 모델(LEGACY)로 묶는다(sumCostUsd의 폴백과 같은 판단)
+  const { data: grouped, error } = await supabaseAdmin.rpc('usage_summary', {
+    p_department_ids: managedDeptIds,
+    p_from: from.toISOString(),
+    p_to: to.toISOString(),
+    p_axis: axis,
+    p_legacy_model: LEGACY_PRICING_MODEL_ID,
+  });
 
   if (error) {
     console.error('[usage-summary]', error);
@@ -151,86 +92,20 @@ export async function GET(request: NextRequest) {
   }
 
   // ── 이름 사전 ──
-  // 로그에는 id만 있다. 집계 후 이름을 붙이려면 미리 모아 둬야 한다.
-  const [{ data: members }, { data: agents }, { data: depts }] = await Promise.all([
-    pagedRows<any>((a, b, w) => supabaseAdmin.from('users').select('id, full_name, email', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b)),
-    pagedRows<any>((a, b, w) => supabaseAdmin.from('agents').select('id, name, icon', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b)),
-    supabaseAdmin.from('departments').select('id, name').in('id', managedDeptIds),
-  ]);
-
-  interface Named { name: string; sub: string }
-  const memberMap = new Map<string, Named>(
-    (members ?? []).map((m: any): [string, Named] => [
-      m.id,
-      { name: m.full_name ?? '(이름 없음)', sub: m.email ?? '' },
-    ])
-  );
-  const agentMap = new Map<string, Named>(
-    (agents ?? []).map((a: any): [string, Named] => [
-      a.id,
-      { name: a.name, sub: a.icon ?? '' },
-    ])
-  );
-  const deptMap = new Map<string, Named>(
-    (depts ?? []).map((d: any): [string, Named] => [d.id, { name: d.name, sub: '' }])
-  );
-
-  // ── 집계 ──
-  const buckets = new Map<string, SummaryRow>();
-
-  for (const log of (logs ?? []) as any[]) {
-    const details = log.details ?? {};
-
-    let key: string;
-    let named: Named | undefined;
-
-    if (axis === 'agent') {
-      // 비서를 쓰지 않는 활동(문서 업로드·판독 등)은 비서별 집계 대상이 아니다.
-      if (!details.agent_id) continue;
-      key = details.agent_id;
-      named = agentMap.get(key);
-    } else if (axis === 'user') {
-      key = log.user_id ?? '(알 수 없음)';
-      named = memberMap.get(key);
-    } else {
-      key = log.department_id ?? '(알 수 없음)';
-      named = deptMap.get(key);
-    }
-
-    const row = buckets.get(key) ?? {
-      key,
-      name: named?.name ?? '(삭제됨)',
-      sub: named?.sub ?? '',
-      count: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      costKrw: 0,
-      models: [],
-      actions: [],
-    };
-
-    row.count += 1;
-    row.inputTokens += Number(details.input_tokens ?? 0);
-    row.outputTokens += Number(details.output_tokens ?? 0);
-    row.costKrw += Number(details.cost_krw ?? 0);
-
-    // 2026-08 이전 로그에는 details.model이 없다. 그때 실제로 돌던 모델은
-    // 하나뿐이었으므로 그 값으로 묶는다 — sumCostUsd의 폴백과 같은 판단이고,
-    // 기본 모델을 바꿔도 과거 집계가 흔들리지 않도록 LEGACY 상수를 쓴다.
-    if (Number(details.input_tokens ?? 0) > 0 || Number(details.output_tokens ?? 0) > 0) {
-      const modelId = String(details.model ?? LEGACY_PRICING_MODEL_ID);
-      bump(row.models, modelId, getModel(modelId).label, details);
-    }
-    bump(row.actions, log.action, ACTION_LABELS[log.action] ?? log.action, details);
-
-    buckets.set(key, row);
+  // 기록에는 id만 있다. 묶은 뒤 이름을 붙인다(직원이 1,000명을 넘는 기관도 잘리지 않게 쪽 읽기). 보는 축의 사전만 읽는다
+  const names = new Map<string, { name: string; sub: string }>();
+  if (axis === 'user') {
+    const { data: members } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('users').select('id, full_name, email', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    for (const m of members ?? []) names.set(m.id, { name: m.full_name ?? '(이름 없음)', sub: m.email ?? '' });
+  } else if (axis === 'agent') {
+    const { data: agents } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('agents').select('id, name, icon', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    for (const a of agents ?? []) names.set(a.id, { name: a.name, sub: a.icon ?? '' });
+  } else {
+    const { data: depts } = await supabaseAdmin.from('departments').select('id, name').in('id', managedDeptIds);
+    for (const d of (depts ?? []) as Array<{ id: string; name: string }>) names.set(d.id, { name: d.name, sub: '' });
   }
 
-  const rows = [...buckets.values()].sort((a, b) => b.costKrw - a.costKrw || b.count - a.count);
-  for (const row of rows) {
-    row.models.sort((a, b) => b.costKrw - a.costKrw || b.count - a.count);
-    row.actions.sort((a, b) => b.count - a.count);
-  }
+  const rows = usageRowsFromGroups(parseUsageGroups(grouped), names);
 
   if (isExport) {
     const axisLabel = axis === 'agent' ? '비서별' : axis === 'user' ? '직원별' : '부서별';
@@ -287,8 +162,6 @@ export async function GET(request: NextRequest) {
       to: to.toISOString(),
       totalCount: rows.reduce((sum, r) => sum + r.count, 0),
       totalCostKrw: rows.reduce((sum, r) => sum + r.costKrw, 0),
-      // 상한(50,000행)에 닿아 앞부분만 셈 — 화면이 '일부만' 표시를 한다. 기간을 줄여 다시 보세요
-      truncated,
     },
   });
 }

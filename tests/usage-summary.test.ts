@@ -12,27 +12,31 @@ import { execSync } from 'child_process';
 
 const ROUTE = 'src/app/api/admin/usage-summary/route.ts';
 const src = readFileSync(ROUTE, 'utf8');
+// 2026-11-05부터 묶음은 DB 함수(0058)가 세고, 화면 행 만들기·활동 이름표는 lib이 한다
+const LIB = 'src/lib/usage-summary.ts';
+const lib = readFileSync(LIB, 'utf8');
+const sql = readFileSync('supabase/migrations/0058_usage_summary.sql', 'utf8');
 
 describe('집계', () => {
   it('모델별·활동별로 나눈다', () => {
-    expect(src).toContain('models: Breakdown[]');
-    expect(src).toContain('actions: Breakdown[]');
+    expect(lib).toContain('models: UsageBreakdown[]');
+    expect(lib).toContain('actions: UsageBreakdown[]');
   });
 
   it('옛 로그의 모델을 기본 모델로 추정하지 않는다', () => {
     // details.model이 없는 2026-08 이전 로그는 LEGACY 상수로 묶는다.
     // 기본 모델(DEFAULT_MODEL_ID)로 묶으면 기본 모델을 바꾸는 순간
     // 과거 집계가 소급해서 달라진다.
-    expect(src).toContain('LEGACY_PRICING_MODEL_ID');
+    expect(src).toContain('p_legacy_model: LEGACY_PRICING_MODEL_ID');
     expect(src).not.toContain('DEFAULT_MODEL_ID');
+    expect(sql).toContain('COALESCE(model_raw, p_legacy_model)');
   });
 
   it('토큰을 쓰지 않은 활동은 모델별에 넣지 않는다', () => {
     // 비서 생성·로그인 같은 기록에 모델을 붙이면 없는 사용량이 생긴다
-    const at = src.indexOf('bump(row.models');
-    expect(at).toBeGreaterThan(-1);
-    const before = src.slice(Math.max(0, at - 400), at);
-    expect(before).toContain('input_tokens');
+    // 토큰을 쓴 기록만 모델이 붙고(DB), 모델 없는 묶음은 모델별에 넣지 않는다(lib)
+    expect(sql).toContain('CASE WHEN inp > 0 OR outp > 0 THEN COALESCE(model_raw, p_legacy_model) END AS model');
+    expect(lib).toContain('if (g.model) bump(row.models');
   });
 });
 
@@ -98,7 +102,7 @@ describe('활동 이름표', () => {
     // 이름표에 없으면 화면에 'conversation_title' 같은 코드가 그대로 나간다
     const codes = tokenActionCodes();
     expect(codes).toContain('conversation_title');
-    for (const file of [ROUTE, 'src/app/api/admin/audit-logs/route.ts']) {
+    for (const file of [LIB, 'src/app/api/admin/audit-logs/route.ts']) {
       const text = readFileSync(file, 'utf8');
       for (const code of codes) expect(text, `${file}: ${code}`).toMatch(new RegExp(`(^|\\s)${code}: '`, 'm'));
     }
