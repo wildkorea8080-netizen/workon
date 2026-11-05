@@ -7,6 +7,7 @@ import { isNearBottom } from './scroll-follow';
 import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
+import ReusableFilePicker from './ReusableFilePicker';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 import AppStepResults from '@/components/apps/AppStepResults';
 import AppResultExport from '@/components/apps/AppResultExport';
@@ -807,6 +808,7 @@ export default function ChatInterface({
               )}
             </button>
           )}
+          {canAttachFiles && <ReusableFilePicker disabled={isLoading} onPick={fileAttach.addReused} />}
           <textarea
             ref={textareaRef}
             value={inputMessage}

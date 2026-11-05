@@ -115,6 +115,38 @@ export function useFileAttachments(enabled: boolean, maxFiles = MAX_ATTACHMENTS_
     [enabled, pump, maxFiles]
   );
 
+  /**
+   * 지난 파일을 다시 붙인다(2026-11-05) — 서버가 원본을 새 첨부로 복사해 읽는다. 상한은 올리기와 같이 센다.
+   * 화면 목록은 표시일 뿐이고 서버가 원본이 내 것인지 다시 본다
+   */
+  const addReused = useCallback(
+    (file: { kind: 'attachment' | 'generated'; id: string; file_name: string; size_bytes: number }) => {
+      setNotice(null);
+      if (!enabled) return;
+      const active = chipsRef.current.filter((c) => c.stage !== 'failed').length;
+      if (active >= maxFiles) {
+        setNotice(`파일은 한 번에 ${maxFiles}개까지 보낼 수 있습니다.`);
+        return;
+      }
+      const key = `f${++chipSeq}`;
+      chipsRef.current = [...chipsRef.current, { key, name: file.file_name, size: file.size_bytes, stage: 'reading' }];
+      setChips(chipsRef.current);
+      void fetch('/api/attachments/reuse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: file.kind, id: file.id }) })
+        .then(async (res) => {
+          const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: AttachmentRow; error?: { message?: string } } | null;
+          if (!chipsRef.current.some((c) => c.key === key)) {
+            if (body?.ok && body.data?.status === 'ready') deleteById(body.data.id);
+            return;
+          }
+          if (!res.ok || !body?.ok || !body.data) patchChip(key, { stage: 'failed', error: body?.error?.message ?? '파일을 다시 붙이지 못했습니다.' });
+          else if (body.data.status === 'ready') patchChip(key, { stage: 'ready', attachment: body.data });
+          else patchChip(key, { stage: 'failed', error: body.data.error ?? '파일을 읽지 못했습니다.' });
+        })
+        .catch(() => patchChip(key, { stage: 'failed', error: '파일을 다시 붙이지 못했습니다.' }));
+    },
+    [enabled, maxFiles, patchChip]
+  );
+
   const remove = useCallback((key: string) => {
     setNotice(null);
     const chip = chipsRef.current.find((c) => c.key === key);
@@ -157,5 +189,5 @@ export function useFileAttachments(enabled: boolean, maxFiles = MAX_ATTACHMENTS_
     .filter((c) => c.stage === 'ready' && c.attachment)
     .map((c) => c.attachment!.id);
 
-  return { chips, notice, busy, readyIds, addFiles, remove, clear, restore };
+  return { chips, notice, busy, readyIds, addFiles, addReused, remove, clear, restore };
 }

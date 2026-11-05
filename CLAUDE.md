@@ -656,6 +656,8 @@ POST /api/attachments/upload-url  (pending 행 + 서명 주소 발급)
 - 격리는 전부 `store.ts`의 조건에 달려 있습니다(RLS 없음). **모든 조회·변경에 `user_id = 요청자`** — 관리자도 남의 첨부를 보지 못합니다.
   화면으로 나가는 행은 `toClientRow`로 저장소 경로를 뗍니다
 
+**지난 파일 다시 붙이기**(2026-11-05, `src/lib/attachments/reuse.ts`, 마이그레이션 없음) — 입력창의 '지난 파일'이 최근 90일 안에 내가 대화에 보낸 읽힌 첨부와 비서가 나에게 만들어 준 파일(`generated_files`)을 보이고(`GET /api/attachments/reusable` — 첨부할 수 있는 형식·10MB 안만, 같은 이름·크기는 새것 하나, 20개), 고르면 `POST /api/attachments/reuse { kind, id }`가 **원본을 새 첨부로 복사**한다. 길은 직접 올리기와 같다 — `createUpload`(보내지 않은 첨부 상한·정리·경로) → 서버가 바이트를 그 경로에 올림 → `confirmUpload`(크기·읽기·스캔 PDF·사용 기록 `file_attached`). 원본은 **요청자의 것만**(`user_id = 요청자`, 관리자도 남의 것 못 가져옴), 첨부는 `ready`만. 새 첨부는 원본과 따로 살아 옛 대화를 지워도 남는다. 올리기 실패면 묘비(`deleteAttachment`). 화면 꼴은 잎 파일 `reuse-types.ts`(화면이 서버 모듈을 가져오지 않게).
+
 **대화에 묶기** — 첨부는 처음엔 대화에 안 묶입니다(`conversation_id` NULL). 보낼 때 `attachment_ids`로 묶습니다.
 
 - `attachment_ids`가 오면 **`file_read`가 켜진 비서인지 먼저 봅니다**(`attachmentRequestError`, 400). 화면에서 버튼을 숨겨도 표시일 뿐입니다
