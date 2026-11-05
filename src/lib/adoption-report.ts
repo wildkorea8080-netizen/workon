@@ -20,6 +20,8 @@ export interface AdoptionStats {
   edit_versions: number;
   revision_requests: number;
   completed_versions: number;
+  /** (0066) 그 달에 완료한 작업의 만들기~검토 완료 시간 중앙값(시간). 완료 작업이 없거나 DB에 0066이 없으면 null('—') */
+  completed_median_hours: number | null;
 }
 
 const KEYS: (keyof AdoptionStats)[] = [
@@ -35,6 +37,10 @@ export function readAdoptionStats(raw: unknown): AdoptionStats {
     const n = Number(o[k]);
     out[k] = Number.isFinite(n) && n >= 0 ? n : 0;
   }
+  // 없으면 0이 아니라 모름 — 0시간으로 보이면 틀린 숫자다
+  const hours = o.completed_median_hours;
+  const h = hours === null || hours === undefined || hours === '' ? NaN : Number(hours);
+  out.completed_median_hours = Number.isFinite(h) && h >= 0 ? h : null;
   return out;
 }
 
@@ -72,7 +78,7 @@ export function recentMonths(nowMs: number, count = 12): string[] {
 
 const ratio = (a: number, b: number) => (b > 0 ? a / b : null);
 
-export type AdoptionUnit = 'people' | 'count' | 'krw' | 'percent' | 'average';
+export type AdoptionUnit = 'people' | 'count' | 'krw' | 'percent' | 'average' | 'hours';
 
 export interface AdoptionRow {
   key: string;
@@ -104,6 +110,7 @@ export function adoptionRows(current: AdoptionStats, previous: AdoptionStats): A
     { key: 'edit_versions', group: '업무 작업', label: '사람이 고친 판', unit: 'count', ...both((s) => s.edit_versions), note: '직접 수정과 AI 수정 적용으로 만든 새 판 — 재작업의 크기입니다.' },
     { key: 'revision_requests', group: '업무 작업', label: 'AI 수정 요청', unit: 'count', ...both((s) => s.revision_requests), note: '작업실에서 AI에게 고쳐 달라고 한 횟수.' },
     { key: 'versions_per_completed', group: '업무 작업', label: '완료 작업당 판 수', unit: 'average', ...both((s) => ratio(s.completed_versions, s.tasks_completed)), note: '완료까지 만든 판의 평균(만들기 포함). 1에 가까울수록 처음 만든 그대로 완료했습니다.' },
+    { key: 'completed_median_hours', group: '업무 작업', label: '완료까지 걸린 시간(중앙값)', unit: 'hours', ...both((s) => s.completed_median_hours), note: '그 달에 검토 완료한 작업의 만들기~검토 완료 사이 시간의 중앙값. 사람이 일한 시간이 아니라 기다린 시간도 들어 있습니다(추정치 아님).' },
     { key: 'cost_krw', group: '비용', label: 'AI 사용 금액', unit: 'krw', ...both((s) => s.cost_krw), note: '기록 시점 단가로 확정한 금액(옛 기록 중 금액 없는 것은 빠짐).' },
     { key: 'cost_per_active', group: '비용', label: '쓴 직원 1인당 금액', unit: 'krw', ...both((s) => ratio(s.cost_krw, s.active_users)), note: 'AI 사용 금액 ÷ AI를 쓴 직원.' },
   ];
@@ -114,6 +121,7 @@ export function formatAdoptionValue(unit: AdoptionUnit, v: number | null): strin
   if (v === null) return '—';
   if (unit === 'percent') return `${(v * 100).toFixed(1)}%`;
   if (unit === 'average') return v.toFixed(2);
+  if (unit === 'hours') return `${v.toFixed(1)}시간`;
   if (unit === 'krw') return `${Math.round(v).toLocaleString('ko-KR')}원`;
   return `${Math.round(v).toLocaleString('ko-KR')}${unit === 'people' ? '명' : '건'}`;
 }
@@ -128,6 +136,8 @@ export function formatAdoptionChange(row: AdoptionRow): string {
   const sign = (x: number) => (x < 0 ? '△' : '');
   if (row.unit === 'percent') { const p = Math.round(d * 1000) / 10; return p === 0 ? '0%p' : `${sign(p)}${Math.abs(p).toFixed(1)}%p`; }
   if (row.unit === 'average') { const a = Math.round(d * 100) / 100; return a === 0 ? '0' : `${sign(a)}${Math.abs(a).toFixed(2)}`; }
+  // 시간은 크기로 반올림한다 — 줄어든 값(-6.25)도 화면 숫자의 차(26.3 → 20.0)와 맞게 △6.3
+  if (row.unit === 'hours') { const h = (Math.sign(d) * Math.round(Math.abs(d) * 10)) / 10; return h === 0 ? '0시간' : `${sign(h)}${Math.abs(h).toFixed(1)}시간`; }
   const n = Math.round(d);
   if (n === 0) return '0';
   return `${sign(n)}${Math.abs(n).toLocaleString('ko-KR')}${row.unit === 'krw' ? '원' : ''}`;
