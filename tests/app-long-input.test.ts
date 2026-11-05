@@ -1,6 +1,7 @@
+import { readFileSync } from 'fs';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_FILE_CONTEXT_CHARS, APP_FILE_PIECE_CHARS, APP_MAX_PIECES, appAttachmentContext, appAttachmentMaterial } from '@/lib/apps/attachment-context';
-import { APP_DIGEST_TOKENS, appendToLastUserMessage, digestPieces, digestSystem } from '@/lib/apps/long-input';
+import { APP_DIGEST_CONCURRENCY, APP_DIGEST_TOKENS, APP_REDUCE_GROUP_CHARS, appendToLastUserMessage, digestPieces, digestSystem, groupDigests } from '@/lib/apps/long-input';
 import type { AttachmentExtract } from '@/lib/attachments/types';
 import type { LlmCompletion, LlmRequest } from '@/lib/llm/types';
 
@@ -8,6 +9,8 @@ import type { LlmCompletion, LlmRequest } from '@/lib/llm/types';
 const extract = (patch: Partial<AttachmentExtract> = {}): AttachmentExtract => ({ kind: 'text', text: '새빛 행사 참석 30명', tables: [], warnings: [], ...patch });
 const paragraphs = (n: number, size: number) => Array.from({ length: n }, (_, i) => `문단 ${i + 1} ${'가'.repeat(size)}`).join('\n\n');
 const table = (rows: number) => ({ id: 't1', title: '예산', columns: ['항목', '금액'], cells: [['항목', '금액'], ...Array.from({ length: rows }, (_, i) => [`사업 ${i + 1}`, 1000 + i])], merges: [], header: { from: 0, to: 0 } });
+
+const NL = String.fromCharCode(10);
 
 describe('appAttachmentMaterial — 조각 나누기', () => {
   it('상한 안이면 그대로 원자료 글, 넘으면 조각 — 조각마다 JSON 배열이고 각각 조각 상한 안', () => {
@@ -63,7 +66,7 @@ describe('digestPieces — 조각마다 모델 한 번', () => {
   it('순서대로 부르고 조각 글을 사용자 메시지로, 지시는 시스템에 넣으며 사용량을 더한다', async () => {
     const args = setup();
     const digest = await digestPieces(args);
-    expect(args.complete).toHaveBeenCalledTimes(3); expect(args.guard).toHaveBeenCalledTimes(3);
+    expect(args.complete).toHaveBeenCalledTimes(3); expect(args.guard).toHaveBeenCalledTimes(4); // 시작 전 한 번 + 조각마다
     expect(args.update.mock.calls.map(c => c[0])).toEqual([0, 1, 2]);
     const first = args.complete.mock.calls[0][0];
     expect(first.system).toContain('자료 추리기 (1/3)'); expect(first.system).toContain('없는 내용을 만들지');
@@ -77,15 +80,66 @@ describe('digestPieces — 조각마다 모델 한 번', () => {
   it('빈 결과·상한에 닿은 결과면 멈추되 쓴 토큰은 남긴다, 정책 거절이면 부르지 않는다', async () => {
     const empty = setup(i => (i === 1 ? '' : '글'));
     await expect(digestPieces(empty)).rejects.toThrow('자료 추리기(2/3)');
-    expect(empty.complete).toHaveBeenCalledTimes(2); expect(empty.usage.input_tokens).toBe(200);
+    // 셋씩 나란히 부르므로 이미 시작한 조각도 끝까지 기다려 쓴 토큰을 남긴다(2026-11-05)
+    expect(empty.complete).toHaveBeenCalledTimes(3); expect(empty.usage.input_tokens).toBe(300);
     const capped = setup(); capped.complete.mockResolvedValueOnce({ text: '잘림', usage: { model: 'model', input_tokens: 10, output_tokens: APP_DIGEST_TOKENS } });
     await expect(digestPieces(capped)).rejects.toThrow('상한');
     const refused = setup(); refused.guard.mockRejectedValueOnce(new Error('정지'));
     await expect(digestPieces(refused)).rejects.toThrow('정지'); expect(refused.complete).not.toHaveBeenCalled();
   });
-  it('추린 글의 합이 20,000자를 넘으면 실패한다 — 조용히 자르지 않는다', async () => {
-    const big = setup(() => 'x'.repeat(7500));
-    await expect(digestPieces(big)).rejects.toThrow('20,000');
+  it('추린 글의 합이 20,000자를 넘으면 묶어 한 번 더 추린다(리듀스) — 숫자를 고치지 말라고 지시하고 사용량을 더한다', async () => {
+    let calls = 0;
+    const big = { ...setup(), complete: vi.fn(async (req: LlmRequest): Promise<LlmCompletion> => {
+      calls++;
+      const reduce = req.system!.includes('추린 자료 합치기');
+      return { text: reduce ? `합친 글 ${calls}: 30명` : 'x'.repeat(7500), usage: { model: 'model', input_tokens: 100, output_tokens: 20 } };
+    }) };
+    const digest = await digestPieces(big);
+    // 맵 3번(7,500자씩 = 22,500자 > 20,000자) → 묶음 둘([1,2]·[3])로 리듀스 2번
+    expect(big.complete).toHaveBeenCalledTimes(5);
+    const reduceCalls = big.complete.mock.calls.map(c => c[0]).filter(r => r.system!.includes('추린 자료 합치기'));
+    expect(reduceCalls).toHaveLength(2);
+    expect(reduceCalls[0].system).toContain('숫자를 더하거나 고치지 말고');
+    expect(String(reduceCalls[0].messages[0].content)).toContain('[추린 글 2]');
+    expect(big.usage).toMatchObject({ input_tokens: 500, output_tokens: 100 });
+    expect(digest).toContain('3조각으로 나눠 추린 뒤 한 번 더 합쳐 추린 내용');
+    // 진행 알림 — 합치기는 phase 'reduce'로 화면이 '추린 자료를 합치는 중'을 보인다
+    expect(big.update.mock.calls.filter(c => c[2] === 'reduce').map(c => [c[0], c[1]])).toEqual([[0, 2], [1, 2]]);
+    expect(readFileSync('src/app/apps/run/page.tsx', 'utf8')).toContain("data.phase === 'reduce' ? `추린 자료를 합치는 중…");
+    expect(digest).toContain('[조각 2/2]');
+    expect(digest).not.toContain('xxxx');
+    expect(digest.length).toBeLessThanOrEqual(APP_FILE_CONTEXT_CHARS);
+  });
+  it('합쳐 추린 결과가 비면 멈춘다 — 잘린 추림을 원자료로 쓰지 않는다', async () => {
+    const big = { ...setup(), complete: vi.fn(async (req: LlmRequest): Promise<LlmCompletion> => ({
+      text: req.system!.includes('추린 자료 합치기') ? '' : 'x'.repeat(7500), usage: { model: 'model', input_tokens: 1, output_tokens: 1 },
+    })) };
+    await expect(digestPieces(big)).rejects.toThrow('추린 자료 합치기(1회차');
+  });
+  it(`조각은 ${APP_DIGEST_CONCURRENCY}개까지 나란히 추리고, 결과는 조각 순서대로 잇는다`, async () => {
+    let active = 0;
+    let peak = 0;
+    const six = Array.from({ length: 6 }, (_, i) => `[{"file":"a","text":"조각 ${i + 1}"}]`);
+    const args = { ...setup(), pieces: six, complete: vi.fn(async (req: LlmRequest): Promise<LlmCompletion> => {
+      active++; peak = Math.max(peak, active);
+      const n = Number(String(req.messages[0].content).match(/조각 (\d+)"/)![1]);
+      // 뒤 조각이 먼저 끝나도 순서는 조각 번호대로
+      await new Promise(r => setTimeout(r, (7 - n) * 3));
+      active--;
+      return { text: `추린 ${n}`, usage: { model: 'model', input_tokens: 1, output_tokens: 1 } };
+    }) };
+    const digest = await digestPieces(args);
+    expect(peak).toBe(APP_DIGEST_CONCURRENCY);
+    expect(args.guard).toHaveBeenCalledTimes(7);
+    for (let i = 1; i <= 6; i++) expect(digest).toContain(`[조각 ${i}/6]${NL}추린 ${i}`);
+    expect(digest.indexOf('추린 1')).toBeLessThan(digest.indexOf('추린 6'));
+  });
+  it('묶음은 순서를 지키고 상한 안 — 추린 글 하나는 언제나 들어간다', () => {
+    const d = ['a'.repeat(9000), 'b'.repeat(9000), 'c'.repeat(9000), 'd'.repeat(100)];
+    const g = groupDigests(d);
+    expect(g.map(x => x.map(y => y[0]).join(''))).toEqual(['ab', 'cd']);
+    for (const group of g) expect(group.join(NL + NL).length).toBeLessThanOrEqual(APP_REDUCE_GROUP_CHARS);
+    expect(groupDigests(['x'.repeat(30000)])).toHaveLength(1);
   });
 });
 

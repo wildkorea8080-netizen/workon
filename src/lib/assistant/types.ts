@@ -17,7 +17,7 @@ export const MAX_OUTPUT_TOKENS = 4096;
 export type TurnEvent =
   | { event: 'app_step'; data: { index: number; total: number; step: import('@/lib/apps/pipeline').AppStepRecord } }
   /** 긴 첨부 나눠 읽기 — 조각 index를 추리는 중 */
-  | { event: 'app_material'; data: { index: number; total: number } }
+  | { event: 'app_material'; data: { index: number; total: number; phase?: 'reduce' } }
   | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'tool_start'; data: { name: string; input: Record<string, unknown> } }

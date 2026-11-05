@@ -331,7 +331,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
     if (turn.appMaterialPieces) {
       const digest = await digestPieces({
         ...turn.appMaterialPieces, model: turn.modelId, system: turn.systemPrompt, usage: progress.usage, complete, guard,
-        update: (index, total) => send({ event: 'app_material', data: { index, total } }),
+        update: (index, total, phase) => send({ event: 'app_material', data: { index, total, ...(phase ? { phase } : {}) } }),
       });
       turn.messages = appendToLastUserMessage(turn.messages, digest);
       turn.ctx.message += digest;

@@ -92,7 +92,7 @@ function Runner() {
           setSteps(previous => previous.map((old, index) => index === data.index ? step : old));
           setStatus(`${step.name}: ${step.status === 'running' ? '처리 중…' : step.status === 'completed' ? '완료' : step.status === 'skipped' ? '조건에 따라 건너뜀' : '중단'}`);
         }
-        if (name === 'app_material' && typeof data.index === 'number' && typeof data.total === 'number') setStatus(`긴 첨부를 나눠 추리는 중… (${data.index + 1}/${data.total})`);
+        if (name === 'app_material' && typeof data.index === 'number' && typeof data.total === 'number') setStatus(data.phase === 'reduce' ? `추린 자료를 합치는 중… (${data.index + 1}/${data.total})` : `긴 첨부를 나눠 추리는 중… (${data.index + 1}/${data.total})`);
         if (name === 'done' && data.number_check) setNumberWarning((data.number_check as { unverified?: string[] }).unverified ?? []);
         if (name === 'meta' && typeof data.conversation_id === 'string') { files.clear(); runConversation = data.conversation_id; setConversation(data.conversation_id); }
         if (name === 'delta' && typeof data.text === 'string') { setResult(text => text + data.text); setStatus('초안을 작성하고 있습니다…'); }
