@@ -12,11 +12,23 @@ import { openHwpx, readEntry, scanParagraphs, writeHwpx, textXml, applyEdits, ty
 import { paragraphPrefix } from './xml-scan';
 
 export type HwpxColumnAlign = 'left' | 'center' | 'right' | null;
+/** 칸 안 글 조각 — 'ins'는 밑줄(새로 넣은 글), 'del'은 취소선(지운 글). 신구대비표가 쓴다(2026-11-05) */
+export interface HwpxRun {
+  text: string;
+  mark: 'ins' | 'del' | null;
+}
 export interface HwpxTable {
   header: string[];
   rows: string[][];
   /** 열 정렬(머리 행·본문 행 모두). 없거나 null이면 표지 문단의 정렬 그대로 */
   align?: HwpxColumnAlign[];
+  /**
+   * 본문 칸의 글 조각(rows와 같은 자리). 있으면 그 칸은 rows 글 대신 조각을 한 문단에 잇고, 표시한 조각은
+   * 칸 글자 서식에 밑줄·취소선만 더한 사본으로 쓴다. 표지 문단에 글자 서식이 없으면 표시 없이 글만 잇는다
+   */
+  runs?: (HwpxRun[] | null | undefined)[][];
+  /** 열 폭 비율(열 수와 같을 때만). 없으면 칸 글 길이로 정한다 */
+  widths?: number[];
 }
 const HORIZONTAL = { left: 'LEFT', center: 'CENTER', right: 'RIGHT' } as const;
 
@@ -56,6 +68,13 @@ function displayWidth(s: string): number {
  */
 export function columnWidths(t: HwpxTable, total: number): number[] {
   const cols = tableColumnCount(t);
+  // 부르는 쪽이 정한 비율이 있으면 그대로(열 수와 같고 모두 양수일 때만)
+  if (t.widths && t.widths.length === cols && t.widths.every((w) => Number.isFinite(w) && w > 0)) {
+    const sum = t.widths.reduce((a, b) => a + b, 0);
+    const fixed = t.widths.map((w) => Math.floor((total * w) / sum));
+    fixed[cols - 1] += total - fixed.reduce((a, b) => a + b, 0);
+    return fixed;
+  }
   const weights = Array.from({ length: cols }, (_, c) => {
     const longest = Math.max(4, ...[t.header, ...t.rows].flatMap((r) => (r[c] ?? '').split(/<br\s*\/?>/i)).map((l) => displayWidth(l.trim())));
     return IN_MARGIN_X * 2 + 200 + Math.min(40, longest) * 500;
@@ -123,6 +142,20 @@ function boldCharPr(header: string, hh: string, charPr: string): { xml: string; 
   return { xml: added.xml, id: String(added.firstId) };
 }
 
+/**
+ * 칸 글자 서식에 밑줄(ins)·취소선(del)만 더한 사본 — 한글이 쓰는 꼴(`underline type="BOTTOM"`·`strikeout shape="SOLID"`).
+ * 그 자리를 못 찾으면 그대로(표시 없이 글만)
+ */
+function markedCharPr(header: string, hh: string, charPr: string, mark: 'ins' | 'del'): { xml: string; id: string } {
+  const m = header.match(new RegExp(`<${hh}:charPr\\s[^>]*\\bid="${charPr}"[\\s\\S]*?</${hh}:charPr>`));
+  if (!m) return { xml: header, id: charPr };
+  const tag = mark === 'ins' ? m[0].match(new RegExp(`<${hh}:underline\\b[^>]*/>`)) : m[0].match(new RegExp(`<${hh}:strikeout\\b[^>]*/>`));
+  if (!tag) return { xml: header, id: charPr };
+  const changed = mark === 'ins' ? tag[0].replace(/\btype="[^"]*"/, 'type="BOTTOM"') : tag[0].replace(/\bshape="[^"]*"/, 'shape="SOLID"');
+  const added = appendItems(header, hh, 'charProperties', 'charPr', (id) => m[0].replace(/\bid="\d+"/, `id="${id}"`).replace(tag[0], changed));
+  return { xml: added.xml, id: String(added.firstId) };
+}
+
 /** 문단 서식의 정렬만 바꾼 사본 — 이미 그 정렬이면 그대로, 정렬 자리를 모르면 그대로(정렬 없는 칸) */
 function alignedParaPr(header: string, hh: string, paraPr: string, horizontal: string): { xml: string; id: string } {
   const m = header.match(new RegExp(`<${hh}:paraPr\\s[^>]*\\bid="${paraPr}"[\\s\\S]*?</${hh}:paraPr>`));
@@ -140,15 +173,31 @@ interface Style {
   colParaPr: string[];
   charPr: string | null;
   headCharPr: string | null;
+  /** 밑줄·취소선 사본 — 표지 문단에 글자 서식이 없으면 null(표시 없이) */
+  insCharPr?: string | null;
+  delCharPr?: string | null;
   border: number;
   headBorder: number;
 }
 
-function cellXml(hp: string, text: string, isHead: boolean, row: number, col: number, width: number, style: Style): string {
+function runsParagraph(hp: string, runs: HwpxRun[], paraPr: string, style: Style): string {
+  const open = (cp: string | null | undefined) => (cp === null || cp === undefined ? `<${hp}:run>` : `<${hp}:run charPrIDRef="${cp}">`);
+  const body = runs
+    .filter((r) => r.text)
+    .map((r) => {
+      const cp = r.mark === 'ins' ? style.insCharPr ?? style.charPr : r.mark === 'del' ? style.delCharPr ?? style.charPr : style.charPr;
+      return `${open(cp)}<${hp}:t>${textXml(r.text)}</${hp}:t></${hp}:run>`;
+    })
+    .join('');
+  const empty = style.charPr === null ? `<${hp}:run/>` : `<${hp}:run charPrIDRef="${style.charPr}"/>`;
+  return `<${hp}:p id="0" paraPrIDRef="${paraPr}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${body || empty}</${hp}:p>`;
+}
+
+function cellXml(hp: string, text: string, isHead: boolean, row: number, col: number, width: number, style: Style, runs?: HwpxRun[] | null): string {
   const cp = isHead ? style.headCharPr : style.charPr;
   const paraPr = style.colParaPr[col] ?? style.paraPr;
   const run = cp === null ? `<${hp}:run` : `<${hp}:run charPrIDRef="${cp}"`;
-  const paras = text.split(/<br\s*\/?>/i).map((line) =>
+  const paras = !isHead && runs && runs.length ? [runsParagraph(hp, runs, paraPr, style)] : text.split(/<br\s*\/?>/i).map((line) =>
     `<${hp}:p id="0" paraPrIDRef="${paraPr}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">` +
     (line.trim() ? `${run}><${hp}:t>${textXml(line.trim())}</${hp}:t></${hp}:run>` : `${run}/>`) +
     `</${hp}:p>`
@@ -167,7 +216,7 @@ export function tableXml(hp: string, t: HwpxTable, style: Style, id: number, zOr
   const widths = columnWidths(t, total);
   const all = [t.header, ...t.rows];
   const rows = all.map((cells, r) =>
-    `<${hp}:tr>${Array.from({ length: cols }, (_, c) => cellXml(hp, cells[c] ?? '', r === 0, r, c, widths[c], style)).join('')}</${hp}:tr>`
+    `<${hp}:tr>${Array.from({ length: cols }, (_, c) => cellXml(hp, cells[c] ?? '', r === 0, r, c, widths[c], style, r === 0 ? null : t.runs?.[r - 1]?.[c])).join('')}</${hp}:tr>`
   );
   return (
     `<${hp}:tbl id="${id}" zOrder="${zOrder}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${all.length}" colCnt="${cols}" cellSpacing="0" borderFillIDRef="${style.border}" noAdjust="0">` +
@@ -211,6 +260,7 @@ export async function insertHwpxTables(bytes: Buffer, tables: HwpxTable[]): Prom
   const fills = appendItems(header, hh, 'borderFills', 'borderFill', (id) => borderFill(hh, hc, id, null) + borderFill(hh, hc, id + 1, HEAD_FILL));
   header = fills.xml;
   const bold = new Map<string, string>();
+  const marked = new Map<string, string>();
   const aligned = new Map<string, string>();
   const edits = new Map<string, Edit[]>();
   for (const [index, at] of [...found.entries()].sort((a, b) => a[0] - b[0])) {
@@ -222,6 +272,21 @@ export async function insertHwpxTables(bytes: Buffer, tables: HwpxTable[]): Prom
         bold.set(at.charPr, made.id);
       }
       headCharPr = bold.get(at.charPr)!;
+    }
+    // 밑줄·취소선 사본은 표에 조각이 있을 때만 만든다(다른 표는 header.xml을 늘리지 않는다)
+    let insCharPr: string | null = null;
+    let delCharPr: string | null = null;
+    if (at.charPr !== null && tables[index].runs?.some((row) => row?.some((cell) => cell?.some((r) => r.mark)))) {
+      for (const mark of ['ins', 'del'] as const) {
+        const key = `${at.charPr}:${mark}`;
+        if (!marked.has(key)) {
+          const made = markedCharPr(header, hh, at.charPr, mark);
+          header = made.xml;
+          marked.set(key, made.id);
+        }
+      }
+      insCharPr = marked.get(`${at.charPr}:ins`)!;
+      delCharPr = marked.get(`${at.charPr}:del`)!;
     }
     const hp = paragraphPrefix(sections.get(at.section)!);
     const paraPr = attr(at.openTag, 'paraPrIDRef') ?? '0';
@@ -236,7 +301,7 @@ export async function insertHwpxTables(bytes: Buffer, tables: HwpxTable[]): Prom
       }
       return aligned.get(key)!;
     });
-    const style: Style = { paraPr, colParaPr, charPr: at.charPr, headCharPr, border: fills.firstId, headBorder: fills.firstId + 1 };
+    const style: Style = { paraPr, colParaPr, charPr: at.charPr, headCharPr, insCharPr, delCharPr, border: fills.firstId, headBorder: fills.firstId + 1 };
     // 쪽·단 나눔은 표지 문단의 것을 넘기지 않는다
     const open = at.openTag.replace(/(\s(?:pageBreak|columnBreak)\s*=\s*)(?:"[^"]*"|'[^']*')/g, '$1"0"');
     const run = at.charPr === null ? `<${hp}:run>` : `<${hp}:run charPrIDRef="${at.charPr}">`;

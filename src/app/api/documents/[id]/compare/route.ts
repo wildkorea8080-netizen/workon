@@ -9,6 +9,7 @@ import {
   type CompareDocumentRow,
 } from '@/lib/document-edition-compare';
 import { buildEditionCompareWorkbook, compareXlsxHeaders } from '@/lib/edition-compare-xlsx';
+import { compareHwpxHeaders, editionCompareHwpxFile } from '@/lib/edition-compare-hwpx';
 
 export const dynamic = 'force-dynamic';
 // 글자 층이 없는 PDF는 NODA /parse로 읽는다(한 번 60초) — 두 판을 함께 읽어도 넉넉하게
@@ -54,6 +55,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     });
     if (!outcome.ok) return jsonError(outcome.message, outcome.status);
 
+    if (request.nextUrl.searchParams.get('format') === 'hwpx') {
+      const file = await editionCompareHwpxFile({ ...outcome.data, createdAt: new Date() });
+      if (!file.ok) return jsonError(file.message, file.status);
+      return new NextResponse(new Uint8Array(file.bytes), { status: 200, headers: compareHwpxHeaders(outcome.data.new.name) });
+    }
     if (request.nextUrl.searchParams.get('format') === 'xlsx') {
       const bytes = await buildEditionCompareWorkbook({ ...outcome.data, createdAt: new Date() });
       return new NextResponse(new Uint8Array(bytes), { status: 200, headers: compareXlsxHeaders(outcome.data.new.name) });
