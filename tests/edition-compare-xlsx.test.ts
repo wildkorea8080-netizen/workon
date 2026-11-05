@@ -112,11 +112,11 @@ describe('내려받기', () => {
     const at = route.indexOf("get('format') === 'xlsx'");
     expect(at).toBeGreaterThan(route.indexOf('compareDocumentEditions('));
     expect(at).toBeGreaterThan(route.indexOf('if (!outcome.ok)'));
-    expect(route).toContain("filename*=UTF-8''${encodeURIComponent(name)}");
+    expect(route).toContain('compareXlsxHeaders(outcome.data.new.name)');
   });
 
   it('비교 창에 바뀐 곳이 있을 때만 내려받기 단추가 있다', () => {
-    expect(ui).toContain('compare?format=xlsx');
+    expect(ui).toContain('${endpoint}?format=xlsx');
     expect(ui).toContain('!data.comparison.identical &&');
   });
 });

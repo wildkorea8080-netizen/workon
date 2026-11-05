@@ -115,9 +115,11 @@ describe('라우트 원본', () => {
     uploadUrl: `${dir}/upload-url/route.ts`,
     del: `${dir}/[id]/route.ts`,
     read: `${dir}/[id]/read/route.ts`,
+    // 두 판 비교(2026-11-05)
+    compare: `${dir}/[id]/compare/route.ts`,
   };
 
-  it('다섯 핸들러 모두 첫 줄에서 getSuperAdminFromRequest로 막는다', () => {
+  it('여섯 핸들러 모두 첫 줄에서 getSuperAdminFromRequest로 막는다', () => {
     let handlers = 0;
     for (const f of Object.values(files)) {
       const src = read(f);
@@ -129,7 +131,7 @@ describe('라우트 원본', () => {
         expect(body, `${f} ${m}`).toContain('getSuperAdminFromRequest(request)');
       }
     }
-    expect(handlers).toBe(5);
+    expect(handlers).toBe(6);
     expect(read(files.list)).toMatch(/export async function GET/);
     expect(read(files.list)).toMatch(/export async function POST/);
   });

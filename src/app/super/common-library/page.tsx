@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { ORG_TYPES, type OrgType } from '@/lib/org-types';
 import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL, MAX_UPLOAD_SIZE_LABEL } from '@/lib/file-types';
 import { uploadCommonDocument, startCommonReading, type CommonUploadStage } from '@/lib/common-upload-client';
+import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
 
 /** 목록 행(`GET /api/super/common-documents`). 저장소 경로·NODA 파일 이름은 서버가 떼고 보낸다 */
 interface CommonRow {
@@ -17,6 +18,8 @@ interface CommonRow {
   noda_status: 'reading' | 'ready' | 'failed' | 'unreadable' | 'deleting' | 'retired' | null;
   noda_reason: string | null;
   retired_at: string | null;
+  /** 이 판이 바꾼 옛 판(목록에 있으면 '옛 판과 비교') */
+  replaces_id?: string | null;
   created_at: string;
   /** 오래 멈춘 읽는 중 행 하나에 서버가 달아 준다 — 화면이 그 id로 읽기를 다시 건다 */
   kick?: boolean;
@@ -76,6 +79,8 @@ export default function CommonLibraryPage() {
   const [rows, setRows] = useState<CommonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showRetired, setShowRetired] = useState(false);
+  // 두 판 비교(신구 대비) — 새 판 id
+  const [compareId, setCompareId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [fileKey, setFileKey] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -299,6 +304,15 @@ export default function CommonLibraryPage() {
                   <td className="px-3 py-3 text-slate-400 whitespace-nowrap">{formatDate(row.created_at)}</td>
                   <td className="px-3 py-3 text-slate-400 whitespace-nowrap">{formatSize(row.size_bytes)}</td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
+                    {row.replaces_id && rows.some((r) => r.id === row.replaces_id) && (
+                      <button
+                        onClick={() => setCompareId(row.id)}
+                        className="text-xs text-slate-300 hover:text-white mr-3"
+                        title="바꾼 옛 판과 글을 맞대어 바뀐 곳을 봅니다"
+                      >
+                        옛 판과 비교
+                      </button>
+                    )}
                     {row.noda_status === 'failed' && (
                       <button onClick={() => handleRetry(row.id)} className="text-xs text-blue-400 hover:text-blue-300 mr-3">
                         다시 시도
@@ -443,6 +457,8 @@ export default function CommonLibraryPage() {
           </button>
         </form>
       </section>
+
+      {compareId && <EditionCompareModal endpoint={compareEndpoint('common', compareId)} onClose={() => setCompareId(null)} />}
     </div>
   );
 }

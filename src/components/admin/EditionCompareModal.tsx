@@ -95,7 +95,12 @@ function Row({ row }: { row: CompareRow }) {
  * 새 판과 그 판이 바꾼 옛 판의 신구 대비(문단 단위). 모델을 쓰지 않고 글자를 맞댄 결과라,
  * 표·그림 배치나 서식 차이는 보이지 않는다 — 머리에 그렇게 적는다.
  */
-export default function EditionCompareModal({ documentId, onClose }: { documentId: string; onClose: () => void }) {
+/** 비교 주소 — 비서 문서와 공통 자료실(슈퍼관리자)이 같은 창을 쓴다 */
+export function compareEndpoint(scope: 'documents' | 'common', id: string): string {
+  return scope === 'common' ? `/api/super/common-documents/${id}/compare` : `/api/documents/${id}/compare`;
+}
+
+export default function EditionCompareModal({ endpoint, onClose }: { endpoint: string; onClose: () => void }) {
   const [data, setData] = useState<CompareData | null>(null);
   const [error, setError] = useState('');
 
@@ -105,7 +110,7 @@ export default function EditionCompareModal({ documentId, onClose }: { documentI
     setError('');
     (async () => {
       try {
-        const res = await fetch(`/api/documents/${documentId}/compare`);
+        const res = await fetch(endpoint);
         const json = await res.json();
         if (!alive) return;
         if (json.ok) setData(json.data);
@@ -117,7 +122,7 @@ export default function EditionCompareModal({ documentId, onClose }: { documentI
     return () => {
       alive = false;
     };
-  }, [documentId]);
+  }, [endpoint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -151,7 +156,7 @@ export default function EditionCompareModal({ documentId, onClose }: { documentI
           <div className="flex items-center gap-2 flex-shrink-0">
             {data && !data.comparison.identical && (
               <a
-                href={`/api/documents/${documentId}/compare?format=xlsx`}
+                href={`${endpoint}?format=xlsx`}
                 download
                 className="px-3 py-1.5 text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 rounded-md"
                 title="바뀐 문단만 담은 신구대비표(엑셀)를 내려받습니다"

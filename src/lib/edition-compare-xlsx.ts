@@ -73,6 +73,15 @@ export function compareFileName(newName: string): string {
   return `신구대비_${base || '문서'}.xlsx`;
 }
 
+/** 내려받기 응답 머리글 — 한글 이름은 filename*로 한 번만 인코딩한다. 옛 프로그램은 ASCII 이름을 본다 */
+export function compareXlsxHeaders(newName: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="edition-compare.xlsx"; filename*=UTF-8''${encodeURIComponent(compareFileName(newName))}`,
+    'Cache-Control': 'no-store',
+  };
+}
+
 export async function buildEditionCompareWorkbook(input: EditionCompareWorkbookInput): Promise<Buffer> {
   // exceljs는 무겁다. 파일을 만들 때만 불러온다.
   const ExcelJS = (await import('exceljs')).default;

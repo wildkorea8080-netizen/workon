@@ -69,7 +69,6 @@ function side(row: CompareDocumentRow): EditionSide {
  */
 export async function compareDocumentEditions(newId: string, actor: ActorScope, deps: CompareDeps): Promise<CompareOutcome> {
   if (!actor.organizationId) return fail(403, '소속 기관을 확인할 수 없습니다.');
-  const read = deps.read ?? readAttachment;
 
   const next = await deps.loadRow(newId, actor.organizationId);
   if (!next || !canReadDocument(next, actor)) return fail(404, '문서를 찾을 수 없습니다.');
@@ -78,18 +77,42 @@ export async function compareDocumentEditions(newId: string, actor: ActorScope, 
   const prev = await deps.loadRow(next.replaces_id, actor.organizationId);
   if (!prev || !canReadDocument(prev, actor)) return fail(404, '옛 판을 찾을 수 없습니다.');
   if (!next.agent_id || prev.agent_id !== next.agent_id) return fail(409, '같은 비서의 두 판만 비교할 수 있습니다.');
-  if (!prev.storage_path || !next.storage_path) return fail(404, '원본 파일이 없어 비교할 수 없습니다.');
+  return compareEditionFiles(
+    { side: side(prev), fileName: prev.file_name, storagePath: prev.storage_path },
+    { side: side(next), fileName: next.file_name, storagePath: next.storage_path },
+    deps
+  );
+}
 
-  const [prevBytes, nextBytes] = await Promise.all([deps.download(prev.storage_path), deps.download(next.storage_path)]);
+/** 권한·행 확인을 마친 판 하나 — 비서 문서와 공통 자료실이 함께 쓴다 */
+export interface EditionFile {
+  side: EditionSide;
+  fileName: string;
+  storagePath: string | null;
+}
+
+/**
+ * 이미 권한을 확인한 두 판의 원본을 받아 읽고 맞댄다.
+ * 원본이 없으면 404, 20MB를 넘으면 413, 읽지 못하면 어느 판인지와 이유 422, 차이가 너무 크면 422.
+ */
+export async function compareEditionFiles(
+  prev: EditionFile,
+  next: EditionFile,
+  deps: Pick<CompareDeps, 'download' | 'read'>
+): Promise<CompareOutcome> {
+  const read = deps.read ?? readAttachment;
+  if (!prev.storagePath || !next.storagePath) return fail(404, '원본 파일이 없어 비교할 수 없습니다.');
+
+  const [prevBytes, nextBytes] = await Promise.all([deps.download(prev.storagePath), deps.download(next.storagePath)]);
   if (!prevBytes) return fail(404, '옛 판의 원본 파일을 찾을 수 없습니다.');
   if (!nextBytes) return fail(404, '새 판의 원본 파일을 찾을 수 없습니다.');
   if (prevBytes.byteLength > MAX_UPLOAD_BYTES || nextBytes.byteLength > MAX_UPLOAD_BYTES) {
     return fail(413, '원본 파일이 너무 커서 비교할 수 없습니다.');
   }
 
-  const extract = async (bytes: Uint8Array, row: CompareDocumentRow, label: string) => {
+  const extract = async (bytes: Uint8Array, file: EditionFile, label: string) => {
     try {
-      return { ok: true as const, value: await read(Buffer.from(bytes), row.file_name) };
+      return { ok: true as const, value: await read(Buffer.from(bytes), file.fileName) };
     } catch (err) {
       if (err instanceof AttachmentReadError) return { ok: false as const, message: `${label}을 읽지 못했습니다: ${err.message}` };
       throw err;
@@ -112,5 +135,5 @@ export async function compareDocumentEditions(newId: string, actor: ActorScope, 
     ...b.value.warnings.map((w) => `새 판: ${w}`),
   ];
   if (comparison.truncated) warnings.unshift('문단이 많아 앞부분만 맞댔습니다 — 뒷부분은 원본에서 확인하세요');
-  return { ok: true, data: { old: side(prev), new: side(next), warnings, comparison } };
+  return { ok: true, data: { old: prev.side, new: next.side, warnings, comparison } };
 }

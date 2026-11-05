@@ -9,7 +9,7 @@ import {
 import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
-import EditionCompareModal from '@/components/admin/EditionCompareModal';
+import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -635,7 +635,7 @@ export default function DocumentsManager() {
         </div>
       </div>
 
-      {compareId && <EditionCompareModal documentId={compareId} onClose={() => setCompareId(null)} />}
+      {compareId && <EditionCompareModal endpoint={compareEndpoint('documents', compareId)} onClose={() => setCompareId(null)} />}
 
       {/* 비서 추가 모달 */}
       {assignModal && (
