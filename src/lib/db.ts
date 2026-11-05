@@ -107,6 +107,8 @@ export type Document = {
   replaces_id?: string | null;
   retired_at?: string | null;
   effective_from?: string | null;
+  /** 태그(0060) — 사람이 붙이는 분류, 검색·거르기용 */
+  tags?: string[];
 };
 
 /** 공통 자료실 문서(S5) — 기관 유형 단위 자료. 기관·부서 칸이 없다 */

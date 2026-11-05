@@ -10,6 +10,7 @@ import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
+import { filterDocuments, normalizeDocumentTags, tagCounts, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -94,6 +95,9 @@ export default function DocumentsManager() {
   const [assigning, setAssigning] = useState(false);
   // 두 판 비교(신구 대비) — 새 판 id
   const [compareId, setCompareId] = useState<string | null>(null);
+  // 목록 찾기·거르기와 태그 고치기(0060)
+  const [filter, setFilter] = useState<DocumentFilter>({});
+  const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean } | null>(null);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -209,6 +213,23 @@ export default function DocumentsManager() {
       setErrorMessage(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
       // 보관소에서 못 지운 경우(502) 행이 '삭제 대기'로 바뀌었다 — 목록을 다시 불러 보인다
       refreshDocuments();
+    }
+  };
+
+  /** 태그 저장 — 화면에서 먼저 다듬어 보고(서버가 다시 본다), 저장된 값으로 목록을 고친다 */
+  const saveTags = async (documentId: string) => {
+    if (!tagEdit || tagEdit.id !== documentId) return;
+    const checked = normalizeDocumentTags(tagEdit.text);
+    if (!checked.ok) { setTagEdit({ ...tagEdit, error: checked.message }); return; }
+    setTagEdit({ ...tagEdit, saving: true, error: null });
+    try {
+      const res = await fetch(`/api/documents/${documentId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: checked.tags }) });
+      const result = await res.json().catch(() => null);
+      if (!result?.ok) { setTagEdit((t) => (t ? { ...t, saving: false, error: result?.error?.message ?? '태그를 저장하지 못했습니다.' } : t)); return; }
+      setDocuments((prev) => prev.map((d) => (d.id === documentId ? { ...d, tags: result.data.tags as string[] } : d)));
+      setTagEdit(null);
+    } catch {
+      setTagEdit((t) => (t ? { ...t, saving: false, error: '태그를 저장하지 못했습니다.' } : t));
     }
   };
 
@@ -551,8 +572,38 @@ export default function DocumentsManager() {
       {/* Documents List */}
       <div>
         <h2 className="text-xl font-semibold mb-4">업로드된 문서</h2>
+        {documents.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-sm" aria-label="문서 찾기">
+            <input
+              aria-label="문서 이름·태그 찾기"
+              value={filter.q ?? ''}
+              onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))}
+              placeholder="이름·태그로 찾기"
+              className="min-w-[12rem] flex-1 rounded-md border border-slate-300 px-3 py-1.5"
+            />
+            <select aria-label="비서로 거르기" value={filter.agentId ?? ''} onChange={(e) => setFilter((f) => ({ ...f, agentId: e.target.value || undefined }))} className="rounded-md border border-slate-300 px-2 py-1.5">
+              <option value="">모든 비서</option>
+              {agents.filter((a) => documents.some((d) => d.agent_id === a.id)).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <select aria-label="상태로 거르기" value={filter.status ?? ''} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value as DocumentStatusFilter }))} className="rounded-md border border-slate-300 px-2 py-1.5">
+              <option value="">모든 상태</option>
+              <option value="ready">읽음(현재 판)</option>
+              <option value="reading">읽는 중</option>
+              <option value="problem">실패·못 읽음·삭제 대기</option>
+              <option value="retired">지난 판</option>
+            </select>
+            <select aria-label="태그로 거르기" value={filter.tag ?? ''} onChange={(e) => setFilter((f) => ({ ...f, tag: e.target.value || undefined }))} className="rounded-md border border-slate-300 px-2 py-1.5">
+              <option value="">모든 태그</option>
+              {tagCounts(documents).map((t) => <option key={t.tag} value={t.tag}>{t.tag} ({t.count})</option>)}
+            </select>
+            {(filter.q || filter.agentId || filter.status || filter.tag) && (
+              <button type="button" onClick={() => setFilter({})} className="text-xs text-slate-500 underline">조건 지우기</button>
+            )}
+            <span className="text-xs text-slate-500">{filterDocuments(documents, filter).length}/{documents.length}개</span>
+          </div>
+        )}
         <div className="space-y-3">
-          {documents.map((doc) => (
+          {filterDocuments(documents, filter).map((doc) => (
             <div key={doc.id} className="p-4 border rounded-lg bg-white hover:shadow-sm transition-shadow">
               <div className="flex justify-between items-start">
                 <div className="flex items-start space-x-4 flex-1">
@@ -581,6 +632,27 @@ export default function DocumentsManager() {
                       {doc.effective_from && <span className="text-xs text-slate-500">시행 {doc.effective_from}</span>}
                     </div>
                     {doc.replaces_id && <p className="mt-1 text-xs text-slate-500">{editionNote(doc, documents)}</p>}
+                    {(doc.tags?.length ?? 0) > 0 && tagEdit?.id !== doc.id && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {doc.tags!.map((t) => (
+                          <button key={t} type="button" onClick={() => setFilter((f) => ({ ...f, tag: t }))} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 hover:bg-slate-200" title="이 태그로 거르기">#{t}</button>
+                        ))}
+                      </div>
+                    )}
+                    {tagEdit?.id === doc.id && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input
+                          aria-label="태그(쉼표로 구분)"
+                          value={tagEdit.text}
+                          onChange={(e) => setTagEdit({ ...tagEdit, text: e.target.value, error: null })}
+                          placeholder="예: 여비, 복무, 2026 개정"
+                          className="min-w-[14rem] flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                        />
+                        <button type="button" disabled={tagEdit.saving} onClick={() => void saveTags(doc.id)} className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40">저장</button>
+                        <button type="button" onClick={() => setTagEdit(null)} className="text-xs text-slate-500 underline">취소</button>
+                        {tagEdit.error && <p role="alert" className="w-full text-xs text-red-600">{tagEdit.error}</p>}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-4 flex-shrink-0">
@@ -603,6 +675,13 @@ export default function DocumentsManager() {
                     </button>
                   )}
                   <button
+                    onClick={() => setTagEdit({ id: doc.id, text: (doc.tags ?? []).join(', '), error: null, saving: false })}
+                    className="px-2.5 py-1.5 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+                    title="검색·거르기에 쓸 태그를 붙입니다"
+                  >
+                    태그
+                  </button>
+                  <button
                     onClick={() => openAssignModal(doc)}
                     className="px-2.5 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
                     title="다른 비서에 추가 연결"
@@ -623,6 +702,9 @@ export default function DocumentsManager() {
             </div>
           ))}
 
+          {documents.length > 0 && filterDocuments(documents, filter).length === 0 && (
+            <p className="py-6 text-center text-sm text-slate-500">조건에 맞는 문서가 없습니다.</p>
+          )}
           {documents.length === 0 && (
             <div className="text-center py-12 text-slate-500 border rounded-lg bg-slate-50">
               <svg className="w-12 h-12 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">

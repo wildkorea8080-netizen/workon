@@ -46,7 +46,7 @@ export async function GET(_request: NextRequest) {
       .from('documents')
       .select(
         'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
-          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from',
+          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from, tags',
         w ? { count: 'exact' } : undefined
       )
       .or(visibleFilter)
