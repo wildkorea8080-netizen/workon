@@ -5,7 +5,6 @@ import {
   docSearchAddendum,
   sourcesToChunks,
   isCleanMatch,
-  searchAgentDocuments,
   ORPHAN_DELETE_WAIT_MS,
   contextPassages,
   PASSAGE_MAX_CHARS,
@@ -876,26 +875,6 @@ describe('doc_search — 공통 자료실(S5)', () => {
     // 공통 보관함을 찾지 않은 턴은 지금 문구 그대로
     const agentSearchOnly = docSearchAddendum({ context: '', chunks: [], hasDocuments: true, skipped: false })!;
     expect(agentSearchOnly).toContain('이 비서에 연결된 문서에서 이번 질문과 관련된 내용을 찾지 못했습니다.');
-  });
-});
-
-describe('searchAgentDocuments (rag-test)', () => {
-  it('조각과 뺀 수를 돌려준다', async () => {
-    const { d } = deps();
-    expect(await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org' }, d)).toMatchObject({ chunks: [{ documentId: id }], dropped: 2 });
-  });
-
-  it('ready 문서가 없으면 NODA를 부르지 않는다', async () => {
-    const { d, fetchContext } = deps({ documentsOf: async () => [] });
-    expect(await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org' }, d)).toEqual({ chunks: [], dropped: 0 });
-    expect(fetchContext).not.toHaveBeenCalled();
-  });
-
-  it('섞인 근거는 빈 조각 — critical 기록에 기관 id가 실린다', async () => {
-    const { d, log, findDocuments } = deps({ fetchContext: async () => ({ context: 'x', sources: [src({ filename: `${id2}__남.hwp` })], dropped: 0 }) });
-    findDocuments.mockResolvedValue([{ id: id2, agent_id: 'other-agent' }]);
-    expect((await searchAgentDocuments({ agentId: AGENT, query: 'q', organizationId: 'org-1' }, d)).chunks).toEqual([]);
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ level: 'critical', category: 'security', orgId: 'org-1' }));
   });
 });
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Agent, RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel } from '@/components/chat/source-label';
+import { sourceLocationLabel, sourceTitleLabel } from '@/components/chat/source-label';
 
 interface RAGTestProps {
   agents?: Agent[];
@@ -16,6 +16,8 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingAgents, setLoadingAgents] = useState(!initialAgents);
+  // 검색을 한 번이라도 마쳤는가 — 결과 0개를 '아직 안 함'과 가른다
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     if (!initialAgents) {
@@ -42,6 +44,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
     setLoading(true);
     setError('');
     setResults([]);
+    setSearched(false);
 
     try {
       // 실제로는 /api/chat 호출 시 반환되는 chunks를 테스트할 수 있는 API 필요
@@ -62,6 +65,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
       }
 
       setResults(result.data.chunks || []);
+      setSearched(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류');
     } finally {
@@ -73,7 +77,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
     <div className="p-6 bg-white border rounded-lg shadow-sm">
       <h3 className="text-lg font-semibold mb-4">🔍 RAG 검색 테스트</h3>
       <p className="text-sm text-slate-600 mb-4">
-        업로드된 문서가 AI 검색에서 올바르게 검색되는지 테스트합니다.
+        대화와 똑같이 찾습니다 — 이 비서의 문서와, 기관 유형에 공통 기준 자료가 있으면 그것까지 함께 찾습니다.
       </p>
 
       <form onSubmit={handleTestSearch} className="space-y-4">
@@ -144,7 +148,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
               <div className="flex items-start justify-between mb-2">
                 <div>
                   <div className="font-medium text-slate-900">
-                    📄 {chunk.documentTitle || '문서'}
+                    📄 {sourceTitleLabel(chunk)}
                   </div>
                   {/* 대화 화면 출처와 같은 위치 줄(쪽·칸 주소·절) */}
                   <div className="text-xs text-slate-500 mt-1">
@@ -172,7 +176,13 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
         </div>
       )}
 
-      {!error && results.length === 0 && !loading && (
+      {!error && results.length === 0 && !loading && searched && (
+        <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-md text-center text-amber-800 text-sm">
+          근거를 찾지 못했습니다 — 대화라면 &lsquo;문서에서 찾지 못했습니다&rsquo;라고 답합니다(유사도 하한 0.80에 모두 걸렸거나 읽힌 문서가 없음).
+        </div>
+      )}
+
+      {!error && results.length === 0 && !loading && !searched && (
         <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-md text-center text-slate-600 text-sm">
           검색을 실행하여 결과를 확인하세요
         </div>

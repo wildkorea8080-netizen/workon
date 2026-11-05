@@ -64,6 +64,18 @@ describe('searchLikeChat — 대화와 같은 찾기', () => {
     expect(route).not.toContain('searchAgentDocuments');
     expect(route).toContain("summarizeRagEval(results, 'chat')");
   });
+  it('단건 검색 시험도 같은 찾기 — 못 부르면 대화처럼 503, 공통 근거는 [공통]으로 보인다(2026-11-05)', () => {
+    const route = readFileSync('src/app/api/rag-test/route.ts', 'utf8');
+    expect(route).toContain('await searchLikeChat({ agentId: agent.id, organizationId: actor.organizationId, query })');
+    expect(route).not.toContain('searchAgentDocuments');
+    expect(route).toMatch(/if \(chunks === null\)[\s\S]{0,200}DOCUMENTS_UNAVAILABLE_MESSAGE[\s\S]{0,40}status: 503/);
+    // 옛 함수는 지웠다 — 공통 자료실을 모르는 찾기가 다시 생기지 않게
+    expect(readFileSync('src/lib/capabilities/doc-search.ts', 'utf8')).not.toContain('export async function searchAgentDocuments');
+    const ui = readFileSync('src/components/admin/RAGSearchTester.tsx', 'utf8');
+    expect(ui).toContain('sourceTitleLabel(chunk)');
+    // 결과 0개는 '아직 안 함'과 다르게 — 대화라면 근거 없음으로 답한다고 알린다
+    expect(ui).toContain('근거를 찾지 못했습니다');
+  });
 });
 
 const row = (over: Partial<RagEvalRow> = {}): RagEvalRow => ({ line: 1, question: '편성 원칙은?', expected: '예산편성기준', page: null, ...over });

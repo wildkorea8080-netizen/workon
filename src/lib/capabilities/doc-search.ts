@@ -631,23 +631,11 @@ export function verifySourcesOf(sources: NodaSource[]): { doc_id: string; chunk_
   return out;
 }
 
-/** 관리자 검색 시험(rag-test)용 — 대화와 같은 규칙으로 찾는다. NODA 실패는 던진다 */
-export async function searchAgentDocuments(
-  input: { agentId: string; query: string; organizationId: string | null },
-  deps: DocSearchDeps = defaultDeps
-): Promise<{ chunks: RetrievedChunk[]; dropped: number }> {
-  const { agentId, query, organizationId } = input;
-  const docs = await deps.documentsOf(agentId);
-  if (!hasReady(docs)) return { chunks: [], dropped: 0 };
-  const result = await deps.fetchContext(agentId, query);
-  const { chunks } = await matchedChunks(deps, { agentId, organizationId }, result, docs);
-  return { chunks, dropped: result.dropped };
-}
-
 /**
  * **대화와 똑같은** 문서 찾기 — 비서 보관함 + 기관 유형의 공통 자료실(S5)을 대화의 preflight → prepare 그대로 태워 근거 조각만 돌려준다.
  * 예산 나누기(3000·2000)·번호 밀기·섞임·고아·판·시행일 규칙이 모두 대화와 같다. 일괄 평가(`/api/admin/rag-eval`)가 쓴다.
- * NODA를 못 부르면(대화라면 503으로 거절할 때) null. 대화처럼 고아 사본 지우기·운영 기록은 일어날 수 있다
+ * NODA를 못 부르면(대화라면 503으로 거절할 때) null. 대화처럼 고아 사본 지우기·운영 기록은 일어날 수 있다.
+ * 관리자 단건 검색 시험(`/api/rag-test`)도 이것을 쓴다(2026-11-05 — 예전 searchAgentDocuments는 공통 자료실을 몰랐다)
  */
 export async function searchLikeChat(
   input: { agentId: string; organizationId: string; query: string },
