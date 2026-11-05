@@ -9,6 +9,7 @@ import {
 import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
+import EditionCompareModal from '@/components/admin/EditionCompareModal';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -29,6 +30,11 @@ export function editionNote(doc: Document, docs: Document[], today: string = kst
   }
   if (doc.noda_status === 'ready') return `← ‘${name}’을(를) 대신합니다 — 옛 판을 내리는 중입니다(그동안에도 옛 판은 근거로 쓰지 않습니다).`;
   return `← ‘${name}’을(를) 대신할 새 판 — 다 읽히면 옛 판을 지난 판으로 내립니다.`;
+}
+
+/** 옛 판과 비교할 수 있는 새 판인가 — 바꾼 옛 판이 목록에 있어야 한다(옛 판 행을 지웠으면 replaces_id가 NULL) */
+export function canCompareWithPrevious(doc: Document, docs: Document[]): boolean {
+  return Boolean(doc.replaces_id) && docs.some((d) => d.id === doc.replaces_id);
 }
 
 /** 목록 응답은 오래 멈춘 읽는 중 행 하나에 kick: true를 달아 준다(서버는 응답 뒤 일을 이어 가지 못한다) */
@@ -86,6 +92,8 @@ export default function DocumentsManager() {
   const [assignModal, setAssignModal] = useState<Document | null>(null);
   const [assignIds, setAssignIds] = useState<string[]>([]);
   const [assigning, setAssigning] = useState(false);
+  // 두 판 비교(신구 대비) — 새 판 id
+  const [compareId, setCompareId] = useState<string | null>(null);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -585,6 +593,15 @@ export default function DocumentsManager() {
                       다시 시도
                     </button>
                   )}
+                  {canCompareWithPrevious(doc, documents) && (
+                    <button
+                      onClick={() => setCompareId(doc.id)}
+                      className="px-2.5 py-1.5 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md transition-colors"
+                      title="바꾼 옛 판과 글을 맞대어 바뀐 곳을 봅니다"
+                    >
+                      옛 판과 비교
+                    </button>
+                  )}
                   <button
                     onClick={() => openAssignModal(doc)}
                     className="px-2.5 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
@@ -617,6 +634,8 @@ export default function DocumentsManager() {
           )}
         </div>
       </div>
+
+      {compareId && <EditionCompareModal documentId={compareId} onClose={() => setCompareId(null)} />}
 
       {/* 비서 추가 모달 */}
       {assignModal && (
