@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-05(오후): 사용 기록 행 상한(0057·0058)·문서 판 시행일·두 판 비교·적용 기준일 판 고르기
+
+- 2026-11-05 오후 배포 `dpl_B1S3CmtpuV4mgHVDc5Z8NkmbyveK`(커밋 `911f69a`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_C31cvHGWgodnnCvNiWWjmTLjGN7m`(ccc5a6f)로 promote한다 — **0057·0058은 되돌리지 않는다**(함수·색인 추가뿐, 옛 코드는 부르지 않는다).
+- 들어간 커밋(10개): `b356f60`(직전 배포 기록), `1f518eb` API 1,000행 상한 — 한도 판정 DB 함수·쪽 읽기(0057, [1,000행 상한](USAGE_ROW_CAP.md)), `8ea3241` 비서 문서 새 판의 시행일 예약, `e40fbc6` 일괄 평가가 대화와 똑같이 찾기·세트 다시 쓰기, `0b29eaa` 이용통계를 DB에서 묶기(0058), `221c0d5` 두 판 신구 대비, `4767c78` 신구대비표 엑셀·번호 제목 위치, `71369a4` 공통 자료실 두 판 비교, `5ebe33b` 규정 확인의 적용 기준일 판 고르기, `911f69a` 단건 검색 시험도 대화와 같은 찾기([문서 판](DOCUMENT_EDITIONS.md)·[일괄 평가](RAG_EVAL.md)).
+- **배포 전**: 0057은 사용자가 오전에, 0058은 낮에 운영 DB에 적용해 두었다. 배포 직전 읽기 전용으로 다시 확인: `organization_chat_tokens`·`usage_summary` 함수 각 하나, `documents.replaces_id`·`effective_from`, `common_documents.replaces_id`·`storage_path` 칸 있음. 가지 Preview(`911f69a`, `workon-l0cyxzo3u`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,530개·tsc 0, 업무 흐름 시험은 시험 DB로 41개).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/api/system/maintenance` 200, 새 라우트 `GET /api/documents/[id]/compare`(`?format=xlsx` 포함)·`GET /api/super/common-documents/[id]/compare` 401, `GET /api/admin/usage-summary`·`POST /api/rag-test`·`GET /api/admin/rag-eval` 403.
+- **확인하지 못한 것**(사용자 몫): 로그인한 관리자 화면에서 이용통계 세 축·문서 화면 '옛 판과 비교'·신구대비표 엑셀 내려받기·검색 시험의 [공통] 표시, 슈퍼관리자 공통 자료실 '옛 판과 비교', 시행일을 예약한 새 판으로 대화·규정 확인. 운영에는 바꾼 옛 판이 있는 문서가 아직 없을 수 있다.
+
 ## 2026-11-05(새벽): 월별 도입 현황 보고서(0056)
 
 - 2026-11-05 00:00 KST쯤 배포 `dpl_C31cvHGWgodnnCvNiWWjmTLjGN7m`(커밋 `ccc5a6f`, `main` fast-forward — GitHub 연동). 사용자 선택("0056 반영해줘"). 되돌릴 때는 직전 `dpl_FpeEx9eUqFb1nUcesfE9hFe9Jt6P`(b8e72a9)로 promote한다 — **0056은 되돌리지 않는다**(함수 추가뿐).
