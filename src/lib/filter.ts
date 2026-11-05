@@ -37,6 +37,29 @@ export async function logSecurityEvent(
   }
 }
 
+/** 금액·수량 단위 — 이 단위가 바로 뒤에 붙은 긴 숫자는 개인정보(계좌번호)가 아니라 값으로 본다 */
+const AMOUNT_UNITS = '(?:천원|만원|백만원|천만원|억원|조원|원|억|조|만|천|명|건|개|톤|㎡|평|%|퍼센트|회|대|가구|kg|km)';
+const LONG_NUMBER = new RegExp(`(?<![\\w,.])\\d{9,15}(?![\\w,.])(?!\\s*${AMOUNT_UNITS})`, 'g');
+
+/** 정규식에 넣을 글자 그대로 — 금지어에 `+`·`(` 같은 글자가 있어도 깨지지 않게 */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 금지어가 글에 있는가(2026-11-06). 예전 `\b금지어\b`는 `\b`가 영문·숫자 경계만 알아 **한글 금지어를 한 번도 잡지 못했고**,
+ * 금지어의 특수 글자(`c++`)가 정규식을 깨 대화가 멈췄다.
+ * - 영문·숫자·공백만인 금지어: 영문·숫자에 붙지 않은 자리만(대소문자 무시) — 'ass'가 'class'에 걸리지 않게
+ * - 그 밖(한글이 든 금지어): 들어 있으면 — 한국어는 조사가 붙어('비밀을') 낱말 경계로 가를 수 없다
+ */
+export function containsForbiddenWord(text: string, word: string): boolean {
+  const w = word.normalize('NFC').trim();
+  if (!w) return false;
+  const t = text.normalize('NFC');
+  if (/^[A-Za-z0-9_\s]+$/.test(w)) return new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(w)}(?![A-Za-z0-9_])`, 'i').test(t);
+  return t.toLocaleLowerCase('ko-KR').includes(w.toLocaleLowerCase('ko-KR'));
+}
+
 // 개인정보 패턴 (한국어 포함)
 const PERSONAL_INFO_PATTERNS = [
   /\b\d{6}-\d{7}\b/g, // 주민등록번호
@@ -44,7 +67,9 @@ const PERSONAL_INFO_PATTERNS = [
   /\b\d{2,3}-\d{3,4}-\d{4}\b/g, // 전화번호 (다른 형식)
   /\b\d{4}-\d{4}-\d{4}-\d{4}\b/g, // 신용카드 번호
   /\b\d{3}-\d{2}-\d{4}\b/g, // SSN (미국)
-  /\b\d{10,15}\b/g, // 계좌번호 등 긴 숫자
+  // 계좌번호 등 긴 숫자(9~15자리) — 뒤에 금액·수량 단위가 붙은 숫자(예산 150000000원)와 쉼표·소수점에 붙은 숫자는 빼고 본다(2026-11-06).
+  // 예전에는 단위가 붙은 큰 금액도 막혀 예산 질문이 거절됐다. 9자리(미국 EIN)도 이 규칙으로 합쳤다
+  LONG_NUMBER,
   /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, // 이메일
   /\b\d{3}-\d{3}-\d{4}\b/g, // 미국 전화번호
   /\b\d{2}\.\d{2}\.\d{2}-\d{3}\.\d{3}\b/g, // 사업자등록번호
@@ -53,7 +78,6 @@ const PERSONAL_INFO_PATTERNS = [
   /\b\d{4}년\s*\d{1,2}월\s*\d{1,2}일\b/g, // 생년월일 (숫자)
   /\b[가-힣]+시\s*[가-힣]+구\s*[가-힣]+동\s*\d+(-\d+)?\b/g, // 주소 패턴
   /\b\d{3}-\d{2}-\d{5}\b/g, // 미국 ITIN
-  /\b\d{9}\b/g, // 미국 EIN
 ];
 
 export interface FilterResult {
@@ -93,8 +117,7 @@ export async function filterUserInput(departmentId: string, text: string, userId
 
   if (forbiddenWords) {
     for (const fw of forbiddenWords) {
-      const regex = new RegExp(`\\b${fw.word}\\b`, 'gi');
-      if (regex.test(text)) {
+      if (typeof fw.word === 'string' && containsForbiddenWord(text, fw.word)) {
         result.isValid = false;
         result.blockedWords.push(fw.word);
         result.securityEvents.push({
