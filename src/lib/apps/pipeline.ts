@@ -1,4 +1,4 @@
-import { APP_LOOKUP_OUTPUT_MAX, APP_LOOKUP_TOOLS, chooseBranch, conditionHolds, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
+import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
 import { AppInputError } from './long-input';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
 
@@ -6,8 +6,9 @@ export type AppStepSource = { title: string; url: string };
 /**
  * `branch` = 이 실행에서 고른 갈래 이름(기본 지시로 돌았으면 없음). 재개 검사가 지금 입력으로 고를 갈래와 맞춰 본다.
  * `kind: 'lookup'` = 공공 데이터 조회 단계 — `query`는 실제로 보낸 조회어, `sources`는 도구가 준 원문 링크(10개까지)
+ * `kind: 'classify'` = 분류 단계 — `output`은 고른 선택지 하나(뒤 단계 조건의 `@N` 값)
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup'; query?: string; article?: string; sources?: AppStepSource[] };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; query?: string; article?: string; sources?: AppStepSource[] };
 /** 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호 */
 export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
@@ -50,6 +51,12 @@ export function stageMessages(original: LlmMessage[], results: AppStepRecord[]):
   return [...original, { role: 'assistant', content: '이전 단계 작업 결과를 확인했습니다.' }, { role: 'user', content: parts.join('\n\n') }];
 }
 
+/** 분류 단계의 지시 — 기준(단계 지시)으로 선택지 하나만 답하게 한다. 이유·설명은 쓰지 않는다 */
+export function classifySystem(system: string, step: AppStep): string {
+  const options = step.classify?.options ?? [];
+  return `${system}\n\n현재 처리 단계: ${step.name} (분류)\n${step.instruction}\n위 기준으로 원래 입력을 아래 선택지 중 **하나로만** 분류하세요. 답은 선택지 글자 그대로 한 줄만 쓰고, 이유·설명·다른 글은 쓰지 마세요.\n선택지: ${options.join(' / ')}`;
+}
+
 /** 갈래가 골라졌으면 그 갈래의 지시, 아니면 단계의 기본 지시 */
 export function stageSystem(system: string, step: AppStep, final: boolean, branch: AppBranch | null = null): string {
   return `${system}\n\n현재 처리 단계: ${step.name}${branch ? ` — ${branch.name}` : ''}\n${branch ? branch.instruction : step.instruction}\n이번 단계의 작업 결과만 작성하세요. 내부 추론이나 다음에 할 일에 대한 예고는 쓰지 마세요. 외부 조회·파일 생성·시스템 변경은 할 수 없습니다.${final ? ' 최종 응답 형식에 맞춰 완성된 초안을 작성하세요.' : ' 결과는 3,000자 이내로 간결하게 작성하세요.'}`;
@@ -65,10 +72,13 @@ export async function runAppIntermediateSteps(args: {
   if (args.steps.length < 1 || args.steps.length > 3) throw new Error('지원하지 않는 단계 수입니다.');
   if (args.steps[args.steps.length - 1].when) throw new Error('마지막 단계는 항상 실행해야 합니다.');
   if (args.steps[args.steps.length - 1].lookup) throw new Error('마지막 단계는 AI 처리여야 합니다.');
+  if (args.steps[args.steps.length - 1].classify) throw new Error('마지막 단계는 분류 단계일 수 없습니다.');
+  // 조건 판정 값 — 입력값 + 끝난 분류 단계의 결과(@N). 재개 때 재사용한 분류 결과도 여기서 들어간다
+  const judged = evaluationInputs(args.inputs, args.steps, args.records);
   for (let index = 0; index < args.steps.length - 1; index++) {
     if (args.records[index].status === 'completed' && args.records[index].reused) { args.update(index); continue; }
     const condition = args.steps[index].when;
-    if (condition && !conditionHolds(condition, args.inputs)) {
+    if (condition && !conditionHolds(condition, judged)) {
       args.records[index].status = 'skipped'; args.update(index); continue;
     }
     const lookup = args.steps[index].lookup;
@@ -91,8 +101,23 @@ export async function runAppIntermediateSteps(args: {
       record.status = 'completed'; args.update(index);
       continue;
     }
+    const classify = args.steps[index].classify;
+    if (classify) {
+      // 분류 — 선택지 하나만. 밖의 답이면 멈춘다(지어낸 분류로 다음 단계를 가르지 않는다). 쓴 토큰은 실패해도 센다
+      const record = args.records[index];
+      delete record.branch;
+      record.kind = 'classify'; record.status = 'running'; args.update(index);
+      await args.guard();
+      const response = await args.complete({ model: args.model, system: classifySystem(args.system, args.steps[index]), messages: stageMessages(args.messages, args.records), maxTokens: APP_CLASSIFY_TOKENS });
+      args.usage.input_tokens += response.usage.input_tokens; args.usage.output_tokens += response.usage.output_tokens;
+      const label = classifyAnswer(response.text, classify.options);
+      if (!label) throw new Error(`${args.steps[index].name}: 분류 결과가 선택지(${classify.options.join(' / ')})에 없습니다.`);
+      record.output = label; record.status = 'completed'; args.update(index);
+      judged[classifyKey(index)] = label;
+      continue;
+    }
     // 갈래 — 위에서부터 처음 맞는 하나. 기록에 이름을 남겨 재개 때 같은 갈래인지 맞춰 본다
-    const branch = chooseBranch(args.steps[index], args.inputs);
+    const branch = chooseBranch(args.steps[index], judged);
     if (branch) args.records[index].branch = branch.name; else delete args.records[index].branch;
     args.records[index].status = 'running'; args.update(index);
     await args.guard();
@@ -103,7 +128,7 @@ export async function runAppIntermediateSteps(args: {
     args.records[index].output = response.text.trim(); args.records[index].status = 'completed'; args.update(index);
   }
   const last = args.steps.length - 1;
-  const lastBranch = chooseBranch(args.steps[last], args.inputs);
+  const lastBranch = chooseBranch(args.steps[last], judged);
   if (lastBranch) args.records[last].branch = lastBranch.name; else delete args.records[last].branch;
   args.records[last].status = 'running'; args.update(last);
   await args.guard();

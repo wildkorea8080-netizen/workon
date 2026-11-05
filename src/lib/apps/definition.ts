@@ -57,12 +57,57 @@ export function describeLookupQuery(template: string, fields: AppField[]): strin
 export function appLookupConnectors(def: AppDefinition | null | undefined): string[] {
   return [...new Set((def?.steps ?? []).flatMap(step => step.lookup ? [APP_LOOKUP_TOOLS[step.lookup.tool].connector] : []))];
 }
-export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup };
+/**
+ * 분류 단계(2026-11-05) — 중간 단계의 AI가 정해 둔 선택지 **하나만** 고른다(지시 = 고르는 기준). 고른 값은 기록에 남고,
+ * 뒤 단계의 실행 조건·갈래가 `@N`(N번째 단계의 분류 결과) 항목으로 '같음·같지 않음'을 본다 — 입력값이 아닌 앞 단계 판단으로 가르는 길.
+ * 선택지 밖의 답은 받지 않고 단계를 멈춘다(지어낸 분류로 가지 않게)
+ */
+export type AppClassify = { options: string[] };
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify };
 /** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean } };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
 export const APP_MAX_BRANCHES = 3;
+export const APP_CLASSIFY_MIN = 2;
+export const APP_CLASSIFY_MAX = 6;
+export const APP_CLASSIFY_LABEL_MAX = 30;
+/** 분류 단계 한 번의 출력 상한 — 선택지 하나만 쓰면 넉넉하다 */
+export const APP_CLASSIFY_TOKENS = 60;
+/** N번째(1부터) 단계의 분류 결과를 가리키는 조건 항목 키. 입력 항목 키(영문 소문자로 시작)와 겹치지 않는다 */
+export const classifyKey = (stepIndex: number) => `@${stepIndex + 1}`;
+const isClassifyKey = (key: string) => /^@[1-3]$/.test(key);
+/**
+ * 단계 `stepIndex`의 조건·갈래가 볼 수 있는 항목 — 입력 항목 + 그보다 앞선 분류 단계의 결과(목록 선택처럼, 비교는 같음·같지 않음).
+ * 화면의 항목 고르기와 저장 검사가 같은 목록을 본다
+ */
+export function conditionFields(fields: AppField[], steps: AppStep[] | undefined, stepIndex: number): AppField[] {
+  const classified = (steps ?? []).slice(0, Math.max(0, stepIndex)).flatMap((step, i) => step.classify ? [{ key: classifyKey(i), label: `${i + 1}단계 분류 결과(${step.name})`, type: 'select' as const, required: false, options: step.classify.options }] : []);
+  return [...fields, ...classified];
+}
+/** 항목에 쓸 수 있는 비교 — 분류 결과는 '같음·같지 않음'만(분류 단계가 돌았으면 값은 늘 있다) */
+export function conditionOpsFor(field: AppField): AppConditionOp[] {
+  return isClassifyKey(field.key) ? ['equals', 'not_equals'] : APP_CONDITION_OPS[field.type];
+}
+/**
+ * 분류 단계의 답 → 선택지 하나. 앞뒤 따옴표·괄호·별표·마침표를 떼고 선택지와 같으면 그것, 아니면 답 안에 **선택지가 정확히 하나만** 들어 있을 때 그것.
+ * 둘 이상이 들었거나 하나도 없으면 null(단계를 멈춘다)
+ */
+export function classifyAnswer(output: string, options: string[]): string | null {
+  const cleaned = output.normalize('NFC').trim().replace(/^[\s"'“”‘’「」『』\[\](){}*`]+|[\s"'“”‘’「」『』\[\](){}*`.。!]+$/g, '').trim();
+  const exact = options.find(option => option.normalize('NFC') === cleaned);
+  if (exact) return exact;
+  const inside = options.filter(option => cleaned.includes(option.normalize('NFC')));
+  // 짧은 선택지가 긴 선택지 안에 들어 있는 경우('민원' ⊂ '민원 이송') — 다른 선택지에 포함된 것은 빼고 센다
+  const distinct = inside.filter(option => !inside.some(other => other !== option && other.includes(option)));
+  return distinct.length === 1 ? distinct[0] : null;
+}
+/** 조건 판정에 쓸 값 — 서버가 검사한 입력값 + 이번 실행에서 끝난 분류 단계의 결과(`@N`) */
+export function evaluationInputs(inputs: Record<string, string> | undefined, steps: AppStep[], records: { status: string; output?: string }[]): Record<string, string> {
+  const out: Record<string, string> = { ...(inputs ?? {}) };
+  steps.forEach((step, i) => { const r = records[i]; if (step.classify && r?.status === 'completed' && typeof r.output === 'string') out[classifyKey(i)] = r.output; });
+  return out;
+}
 const object = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
 /** 항목 종류마다 쓸 수 있는 비교 — 화면 선택지와 서버 검사가 같은 표를 본다 */
@@ -99,7 +144,7 @@ function normalizeRule(raw: unknown, fields: AppField[]): AppRule | null {
   if (!object(raw) || typeof raw.field !== 'string' || typeof raw.op !== 'string') return null;
   const field = fields.find(f => f.key === raw.field);
   const op = raw.op as AppConditionOp;
-  if (!field || !APP_CONDITION_OPS[field.type].includes(op)) return null;
+  if (!field || !conditionOpsFor(field).includes(op)) return null;
   if (op === 'filled' || op === 'empty') return raw.value === undefined || raw.value === '' ? { field: field.key, op } : null;
   if (typeof raw.value !== 'string') return null;
   const value = raw.value.trim();
@@ -182,6 +227,8 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
   if (raw.steps !== undefined) {
     if (!Array.isArray(raw.steps) || raw.steps.length < 1 || raw.steps.length > 3) return { ok: false, message: '처리 단계는 1~3개로 구성해 주세요.' };
     for (const step of raw.steps) {
+      // 이 단계의 조건·갈래가 볼 수 있는 항목 — 입력 항목 + 앞선 분류 단계의 결과
+      const visible = conditionFields(fields, steps, steps.length);
       const isLookup = object(step) && step.lookup !== undefined;
       if (!object(step) || typeof step.name !== 'string' || !step.name.trim() || step.name.length > 40 || /[\r\n]/.test(step.name) || typeof step.instruction !== 'string' || (!isLookup && !step.instruction.trim()) || step.instruction.length > 2000) return { ok: false, message: '각 단계의 이름(40자 이내)과 처리 지시(2,000자 이내)를 입력해 주세요.' };
       const normalized: AppStep = { name: step.name.trim(), instruction: step.instruction.trim() };
@@ -214,8 +261,8 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         } else {
           const list = object(when) ? (when.any !== undefined ? when.any : when.all) : undefined;
           if (!Array.isArray(list) || list.length < 1 || list.length > APP_MAX_RULES) return { ok: false, message: `단계 실행 조건은 1~${APP_MAX_RULES}개로 정해 주세요.` };
-          const condition = normalizeCondition(when, fields);
-          if (!condition) return { ok: false, message: '단계 조건은 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
+          const condition = normalizeCondition(when, visible);
+          if (!condition) return { ok: false, message: '단계 조건은 현재 입력 항목(또는 앞 분류 단계의 결과)과 그 종류에 맞는 비교·값만 사용할 수 있습니다.' };
           normalized.when = condition;
         }
       }
@@ -226,16 +273,25 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           if (!object(branch) || typeof branch.name !== 'string' || !branch.name.trim() || branch.name.length > 40 || /[\r\n]/.test(branch.name) || typeof branch.instruction !== 'string' || !branch.instruction.trim() || branch.instruction.length > 2000) return { ok: false, message: '각 갈래의 이름(40자 이내)과 처리 지시(2,000자 이내)를 입력해 주세요.' };
           const name = branch.name.trim();
           if (branches.some(b => b.name === name)) return { ok: false, message: '한 단계 안의 갈래 이름은 서로 달라야 합니다.' };
-          const when = normalizeCondition(branch.when, fields);
-          if (!when) return { ok: false, message: `갈래마다 조건을 1~${APP_MAX_RULES}개 두고, 현재 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.` };
+          const when = normalizeCondition(branch.when, visible);
+          if (!when) return { ok: false, message: `갈래마다 조건을 1~${APP_MAX_RULES}개 두고, 현재 입력 항목(또는 앞 분류 단계의 결과)과 그 종류에 맞는 비교·값만 사용할 수 있습니다.` };
           branches.push({ name, when, instruction: branch.instruction.trim() });
         }
         normalized.branches = branches;
+      }
+      if (step.classify !== undefined) {
+        // 분류 단계 — AI 처리 중간 단계만, 갈래 없이. 선택지는 한 줄·30자·서로 다른 2~6개
+        if (isLookup) return { ok: false, message: '공공 데이터 조회 단계는 분류 단계로 둘 수 없습니다.' };
+        if (normalized.branches) return { ok: false, message: '분류 단계에는 갈래를 둘 수 없습니다 — 다음 단계에서 분류 결과로 가르세요.' };
+        const options = object(step.classify) ? step.classify.options : undefined;
+        if (!Array.isArray(options) || options.length < APP_CLASSIFY_MIN || options.length > APP_CLASSIFY_MAX || options.some(o => typeof o !== 'string' || !o.trim() || o.trim().length > APP_CLASSIFY_LABEL_MAX || /[\r\n]/.test(o)) || new Set(options.map(o => (o as string).trim())).size !== options.length) return { ok: false, message: `분류 선택지는 서로 다른 ${APP_CLASSIFY_MIN}~${APP_CLASSIFY_MAX}개(각 ${APP_CLASSIFY_LABEL_MAX}자 이내 한 줄)로 입력해 주세요.` };
+        normalized.classify = { options: options.map(o => (o as string).trim()) };
       }
       steps.push(normalized);
     }
     if (steps[steps.length - 1].when) return { ok: false, message: '마지막 결과 작성 단계는 항상 실행해야 합니다. 조건을 해제해 주세요.' };
     if (steps[steps.length - 1].lookup) return { ok: false, message: '마지막 결과 작성 단계는 AI 처리여야 합니다. 공공 데이터 조회는 앞 단계에 두세요.' };
+    if (steps[steps.length - 1].classify) return { ok: false, message: '마지막 결과 작성 단계는 분류 단계로 둘 수 없습니다. 분류는 앞 단계에 두세요.' };
   }
   return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}) } };
 }
