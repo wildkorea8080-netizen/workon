@@ -98,3 +98,15 @@ export function sourceLocationLabel(c: SourceLocationInput): string {
   }
   return `청크 ${c.chunkIndex + 1} • 유사도: ${(similarity * 100).toFixed(1)}%`;
 }
+
+const DOC_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 근거 창 '원본 열기'의 주소(2026-11-05) — 비서 문서는 `/api/documents/{id}/original`, 공통 자료실은 `/api/common-documents/{id}/original`.
+ * 쪽이 있으면 `?page=N`(서버가 PDF만 그 쪽으로 연다). 문서 id가 uuid가 아니면 null(단추를 숨김). 권한은 서버가 본다
+ */
+export function sourceOriginalHref(c: { documentId: string; scope?: 'common'; page?: number | null }): string | null {
+  if (!DOC_ID.test(c.documentId)) return null;
+  const base = `/api/${c.scope === 'common' ? 'common-documents' : 'documents'}/${c.documentId.toLowerCase()}/original`;
+  return typeof c.page === 'number' && Number.isInteger(c.page) && c.page > 0 ? `${base}?page=${c.page}` : base;
+}

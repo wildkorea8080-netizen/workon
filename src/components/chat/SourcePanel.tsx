@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import type { RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel, sourceTitleLabel, sourceNumber } from './source-label';
+import { sourceLocationLabel, sourceTitleLabel, sourceNumber, sourceOriginalHref } from './source-label';
 
 interface SourcePanelProps {
   /** 연 근거. null이면 닫혀 있다 */
@@ -29,6 +29,8 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
 
   const title = source ? sourceTitleLabel(source) : '';
   const text = source?.text?.trim() ?? '';
+  const originalHref = source ? sourceOriginalHref(source) : null;
+  const hasPage = typeof source?.page === 'number' && source.page > 0;
 
   return (
     <>
@@ -95,8 +97,21 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
               )}
             </div>
 
-            <div className="px-5 py-3 border-t border-slate-100 text-[11px] text-slate-400">
-              AI가 이 근거를 보고 답했습니다. 중요한 내용은 원문 문서에서 다시 확인하세요.
+            <div className="px-5 py-3 border-t border-slate-100 space-y-2">
+              {originalHref && (
+                <a
+                  href={originalHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#003087]/30 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-[#003087]/5"
+                >
+                  {hasPage ? `원본에서 p.${source.page} 열기` : '원본 열기'}
+                </a>
+              )}
+              <p className="text-[11px] text-slate-400">
+                AI가 이 근거를 보고 답했습니다. 중요한 내용은 원문 문서에서 다시 확인하세요.
+                {originalHref ? ' PDF는 그 쪽으로 열리고, 다른 형식은 원본 파일을 내려받습니다.' : ''}
+              </p>
             </div>
           </>
         )}
