@@ -55,16 +55,20 @@ export function bearerWebhookToken(header: string | null): string | null {
 }
 
 /** 직원 화면이 읽는 칸(토큰 해시·사용자·부서 없음) — 목록·만들기·회수 라우트가 함께 쓴다 */
-export const WEBHOOK_COLUMNS = 'id, agent_id, app_version, name, token_prefix, status, expires_at, revoked_at, revoked_reason, last_used_at, use_count, last_status, last_error, last_conversation_id, created_at';
+export const WEBHOOK_COLUMNS = 'id, agent_id, app_version, document_ids, name, token_prefix, status, expires_at, revoked_at, revoked_reason, last_used_at, use_count, last_status, last_error, last_conversation_id, created_at';
 
 export type AppWebhookRowLike = {
   id: string; agent_id: string; app_version: number; name: string; token_prefix: string; status: string;
+  /** 문서함에서 고른 문서(0063) — 호출마다 새 판을 따라간다 */
+  document_ids?: string[] | null;
   expires_at: string; revoked_at: string | null; revoked_reason?: string | null; last_used_at: string | null; use_count: number;
   last_status: string | null; last_error: string | null; last_conversation_id: string | null; created_at: string;
 };
 
 export type AppWebhookView = {
   id: string; agentId: string; appName: string; appVersion: number; name: string; tokenPrefix: string;
+  /** 문서함에서 고른 문서 수(0063) */
+  documentCount: number;
   state: 'active' | 'revoked' | 'expired'; expiresAt: string; revokedAt: string | null;
   /** 관리자 회수·계정 탈퇴일 때의 까닭(0050). 직원이 스스로 회수했으면 null */
   revokedReason: string | null; lastUsedAt: string | null; useCount: number;
@@ -76,6 +80,7 @@ export function webhookView(row: AppWebhookRowLike, appName: string | null, nowM
   const state = row.status === 'revoked' ? 'revoked' : Date.parse(row.expires_at) <= nowMs ? 'expired' : 'active';
   return {
     id: row.id, agentId: row.agent_id, appName: appName ?? '삭제된 앱', appVersion: row.app_version, name: row.name, tokenPrefix: row.token_prefix,
+    documentCount: row.document_ids?.length ?? 0,
     state, expiresAt: row.expires_at, revokedAt: row.revoked_at, revokedReason: row.revoked_reason ?? null, lastUsedAt: row.last_used_at, useCount: row.use_count,
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,
     lastError: row.last_error, lastConversationId: row.last_conversation_id, createdAt: row.created_at,

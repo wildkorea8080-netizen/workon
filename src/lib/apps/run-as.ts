@@ -8,7 +8,7 @@ import { prepareTurn } from '@/lib/assistant/prepare';
 import { streamTurn } from '@/lib/assistant/stream';
 import type { PrepareOutcome, PreparedTurn, SendEvent } from '@/lib/assistant/types';
 
-export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string> };
+export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string>; /** 문서함에서 고른 문서(예약 0062) */ documentIds?: string[] };
 export type RunAsUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
 
 export type RunAsOutcome =
@@ -40,7 +40,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
     user: { id: user.id, email: user.email ?? undefined, role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: user.department_id },
     expires: new Date(Date.now() + 5 * 60_000).toISOString(),
   } as Session;
-  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion });
+  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}) });
   if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message };
   let conversationId: string | null = null; let error: string | null = null; let done = false;
   try {

@@ -87,11 +87,13 @@ export function describeSchedule(spec: AppScheduleSpec): string {
 }
 
 /** 직원 화면이 읽는 칸 — 목록·만들기·멈추기 라우트가 함께 쓴다 */
-export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at';
+export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at';
 
 /** DB 행 중 화면이 보는 칸. 실행 조건·사용자 id·부서는 내보내지 않는다 */
 export type AppScheduleRowLike = {
   id: string; agent_id: string; app_version: number; inputs: Record<string, string>;
+  /** 문서함에서 고른 문서(0062) — 실행 때 새 판을 따라간다 */
+  document_ids?: string[] | null;
   frequency: string; weekday: number | null; month_day: number | null; run_hour: number; run_minute: number;
   status: string; paused_reason: string | null; admin_paused_at?: string | null; next_run_at: string; last_run_at: string | null;
   last_status: string | null; last_error: string | null; last_conversation_id: string | null;
@@ -100,6 +102,8 @@ export type AppScheduleRowLike = {
 
 export type AppScheduleView = {
   id: string; agentId: string; appName: string; appVersion: number; inputs: Record<string, string>;
+  /** 문서함에서 고른 문서 수(0062) — 이름은 실행 결과의 근거 문서에서 본다 */
+  documentCount: number;
   spec: AppScheduleSpec; description: string; status: 'active' | 'paused'; pausedReason: string | null;
   /** 관리자가 멈춘 예약(0050) — 직원이 다시 켜지 못한다 */
   adminPaused: boolean;
@@ -118,6 +122,7 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
   const status = row.status === 'paused' ? 'paused' : 'active';
   return {
     id: row.id, agentId: row.agent_id, appName: appName ?? '삭제된 앱', appVersion: row.app_version, inputs: row.inputs ?? {},
+    documentCount: row.document_ids?.length ?? 0,
     spec, description: describeSchedule(spec), status, pausedReason: row.paused_reason, adminPaused: Boolean(row.admin_paused_at),
     nextRunAt: row.next_run_at, lastRunAt: row.last_run_at,
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,

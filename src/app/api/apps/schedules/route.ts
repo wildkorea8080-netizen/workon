@@ -4,6 +4,7 @@ import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { renderAppInput, validateAppDefinition } from '@/lib/apps/definition';
+import { appDocumentChoice, CHOSEN_DOCUMENTS_UNAVAILABLE, verifyChosenDocuments } from '@/lib/apps/app-document-choice';
 import { APP_MAX_SCHEDULES_PER_USER, nextRunAt, parseScheduleSpec, scheduleView, type AppScheduleRowLike, SCHEDULE_COLUMNS } from '@/lib/apps/schedule-spec';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,9 @@ export async function GET() {
 }
 
 /**
- * 예약 만들기 — 지금 앱 판 기준으로 입력을 검사해 저장한다. 파일 첨부가 필수인 앱은 예약할 수 없고(첨부는 한 대화에 묶인다),
+ * 예약 만들기 — 지금 앱 판 기준으로 입력을 검사해 저장한다. 올린 파일은 예약할 수 없다(첨부는 한 대화에 묶인다).
+ * 문서함에서 고르기를 허용한 앱은 고른 문서(`document_ids`, 3개까지 — 지금 고를 수 있는 문서만)를 함께 저장하고, 파일이 필수인 앱은
+ * 그 경우에만 예약할 수 있다(0062). 실행 때는 저장한 문서의 지금 근거 판을 쓴다.
  * 한 사람당 5개까지. 실행은 예약한 사람의 권한·사용량으로 한다(`src/lib/apps/schedules.ts`)
  */
 export async function POST(request: NextRequest) {
@@ -47,10 +50,15 @@ export async function POST(request: NextRequest) {
   if (!row || !canUseAgent(row, actor)) return fail('이 앱을 사용할 수 없습니다.', 404);
   const definition = validateAppDefinition(row.app_definition);
   if (!definition.ok || !definition.value) return fail('입력형 앱만 예약할 수 있습니다.', 400);
-  if (definition.value.attachments?.required) return fail('파일 첨부가 필수인 앱은 예약할 수 없습니다.', 400);
+  const choice = appDocumentChoice(definition.value.attachments, body.document_ids, '예약');
+  if (!choice.ok) return fail(choice.message, 400);
+  const documentIds = choice.ids;
   if (row.version !== app_version) return fail('앱 설정이 변경됐습니다. 앱을 새로 열어 입력 항목을 확인해 주세요.', 409);
   const input = renderAppInput(definition.value, inputs);
   if (!input.ok) return fail(input.message, 400);
+  const verified = await verifyChosenDocuments(agent_id, actor, documentIds);
+  if (verified === 'error') return fail('고른 문서를 확인하지 못했습니다.', 503);
+  if (verified === 'unavailable') return fail(CHOSEN_DOCUMENTS_UNAVAILABLE, 400);
 
   const { count, error: countError } = await supabaseAdmin.from('app_schedules').select('id', { count: 'exact', head: true }).eq('user_id', session.user.id);
   if (countError) return fail('예약을 확인하지 못했습니다.', 503);
@@ -59,7 +67,7 @@ export async function POST(request: NextRequest) {
   const now = Date.now();
   const { data: created, error } = await supabaseAdmin.from('app_schedules').insert({
     agent_id, user_id: session.user.id, department_id: actor.departmentId, organization_id: actor.organizationId,
-    app_version, inputs: input.inputs,
+    app_version, inputs: input.inputs, document_ids: documentIds,
     frequency: spec.value.frequency, weekday: spec.value.weekday, month_day: spec.value.monthDay, run_hour: spec.value.hour, run_minute: spec.value.minute,
     status: 'active', next_run_at: nextRunAt(spec.value, now).toISOString(),
   }).select(SCHEDULE_COLUMNS).single();

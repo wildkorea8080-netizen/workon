@@ -104,3 +104,40 @@ export async function loadLibraryDocuments(ids: string[], agentId: string, actor
   }
   return { ok: true, files, refs: (chosen as LibraryDocumentRow[]).map((r) => ({ id: r.id, title: r.title?.trim() || r.file_name })) };
 }
+
+/**
+ * 예약 실행(0062)이 저장한 문서 → 지금 쓸 판. 저장한 문서에 새 판이 나와 근거가 되면(바꿀 옛 판 `replaces_id`로 이어짐) 새 판을 쓴다.
+ * 판 사슬을 앞으로 따라가며 **근거로 쓸 수 있는 마지막 판**을 고른다 — 새 판이 아직 읽는 중이거나 시행일 전이면 옛 판 그대로.
+ * 사슬 어디에도 쓸 판이 없으면(지움·읽기 실패·지난 판만) 실패. 볼 수 있는지(canReadDocument)는 실행(prepare)이 요청자로 다시 본다
+ */
+export function currentEditionIds(
+  storedIds: string[],
+  rows: LibraryDocumentRow[],
+  agentId: string,
+  today: string = kstToday()
+): { ok: true; ids: string[]; changed: boolean } | { ok: false; missing: string[] } {
+  const mine = rows.filter((r) => r.agent_id === agentId);
+  const notCitable = notCitableEditionIds(mine, today);
+  const usable = (r: LibraryDocumentRow) => r.noda_status === 'ready' && !r.retired_at && !notCitable.has(r.id.toLowerCase()) && !!r.storage_path;
+  const byId = new Map(mine.map((r) => [r.id.toLowerCase(), r]));
+  const successor = new Map<string, LibraryDocumentRow>();
+  for (const r of mine) if (r.replaces_id) successor.set(r.replaces_id.toLowerCase(), r);
+
+  const ids: string[] = [];
+  const missing: string[] = [];
+  for (const stored of storedIds) {
+    let cur = stored.toLowerCase();
+    let pick: string | null = byId.get(cur) && usable(byId.get(cur)!) ? cur : null;
+    const seen = new Set([cur]);
+    for (let next = successor.get(cur); next && !seen.has(next.id.toLowerCase()); next = successor.get(cur)) {
+      cur = next.id.toLowerCase();
+      seen.add(cur);
+      if (usable(next)) pick = cur;
+    }
+    if (!pick) missing.push(stored);
+    else if (!ids.includes(pick)) ids.push(pick);
+  }
+  if (missing.length) return { ok: false, missing };
+  const changed = ids.length !== storedIds.length || ids.some((id, i) => id !== storedIds[i].toLowerCase());
+  return { ok: true, ids, changed };
+}

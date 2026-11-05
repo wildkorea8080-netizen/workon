@@ -11,10 +11,14 @@
 // - `Idempotency-Key` 머리글(0051)이 있으면 같은 연동·같은 키의 호출은 24시간 동안 앱을 다시 돌리지 않고 처음 응답(상태·대화 id·안내)을 돌려준다
 //   (`Idempotent-Replayed: true`). 같은 키로 다른 입력이면 422, 처음 호출이 아직 돌면 409. 다시 보내기는 간격·하루 상한·사용 횟수를 쓰지 않는다.
 //   지나가는 실패(5xx·기관 한도 429)는 기록하지 않아 같은 키로 다시 시도할 수 있다.
+// - 문서함에서 고른 문서(0063)는 연동에 저장하고 호출마다 지금 근거 판으로 읽는다(`executeWebhook` — 예약과 같은 `currentEditionIds`).
+//   쓸 판이 없으면 422로 거절한다(문서 없이 돌지 않는다). 외부 시스템은 문서를 고르지 않는다.
 import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
-import { defaultRunAsIo, runAppAs, type RunAsOutcome } from './run-as';
+import { defaultRunAsIo, runAppAs, type RunAsInput, type RunAsOutcome } from './run-as';
+import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
+import { agentDocumentRows } from './app-document-choice';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
   IDEMPOTENCY_HEADER, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
@@ -57,6 +61,34 @@ export const WEBHOOK_KEY_MISMATCH = `같은 ${IDEMPOTENCY_HEADER}로 다른 입�
 export const WEBHOOK_IN_PROGRESS = `같은 ${IDEMPOTENCY_HEADER} 요청을 아직 처리하고 있습니다. 잠시 뒤 같은 키로 다시 보내면 결과를 돌려받습니다.`;
 export const REPLAYED_HEADER = 'Idempotent-Replayed';
 export const WEBHOOK_DEPARTMENT_CHANGED = '연동을 만든 직원의 소속 부서가 바뀌었습니다. 연동을 다시 만들어 주세요.';
+export const WEBHOOK_DOCUMENTS_UNAVAILABLE = '연동에 고른 문서를 더 쓸 수 없습니다(지움·읽기 실패·지난 판). 앱 화면에서 문서를 다시 골라 연동을 새로 만들어 주세요.';
+
+export interface ExecuteWebhookIo {
+  /** 연동에 저장한 문서 id */
+  documentIdsOf(webhookId: string): Promise<string[]>;
+  documentsOf(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>;
+  /** 새 판으로 따라갔으면 다음 호출부터 그 id로 */
+  saveDocumentIds(webhookId: string, ids: string[]): Promise<void>;
+  run(input: RunAsInput): Promise<RunAsOutcome>;
+}
+
+/** 연동 한 번 실행 — 고른 문서를 지금 근거 판으로 맞춰 그 직원으로 앱을 돌린다. 쓸 판이 없으면 앱을 돌리지 않고 422 */
+export async function executeWebhook(w: ClaimedWebhook, inputs: Record<string, string>, io: ExecuteWebhookIo): Promise<RunAsOutcome> {
+  const stored = await io.documentIdsOf(w.id);
+  let documentIds: string[] | undefined;
+  let followed = false;
+  if (stored.length) {
+    const resolved = currentEditionIds(stored, await io.documentsOf(w.agent_id, w.organization_id), w.agent_id);
+    if (!resolved.ok) return { kind: 'rejected', status: 422, message: WEBHOOK_DOCUMENTS_UNAVAILABLE };
+    documentIds = resolved.ids;
+    followed = resolved.changed;
+  }
+  const outcome = await io.run({ userId: w.user_id, departmentId: w.department_id, agentId: w.agent_id, appVersion: w.app_version, inputs, documentIds });
+  if (outcome.kind === 'completed' && followed && documentIds) {
+    try { await io.saveDocumentIds(w.id, documentIds); } catch { /* 다음 호출이 다시 따라간다 */ }
+  }
+  return outcome;
+}
 
 const fail = (status: number, message: string, headers?: Record<string, string>): WebhookResponse => ({ status, body: { ok: false, error: { message } }, headers });
 const errorText = (error: unknown) => (error instanceof Error ? error.message.slice(0, 200) : 'unknown');
@@ -151,7 +183,19 @@ export function webhookDeps(): WebhookDeps {
       if (error) throw new Error(`app_webhook_claim: ${error.message}`);
       return data as ClaimResult;
     },
-    execute: (w, inputs) => runAppAs({ userId: w.user_id, departmentId: w.department_id, agentId: w.agent_id, appVersion: w.app_version, inputs }, WEBHOOK_TITLE_PREFIX, defaultRunAsIo()),
+    execute: (w, inputs) => executeWebhook(w, inputs, {
+      async documentIdsOf(id) {
+        const { data, error } = await supabaseAdmin.from('app_webhooks').select('document_ids').eq('id', id).maybeSingle();
+        if (error) throw new Error(`app_webhooks documents: ${error.message}`);
+        return ((data as { document_ids?: string[] | null } | null)?.document_ids ?? []);
+      },
+      documentsOf: agentDocumentRows,
+      async saveDocumentIds(id, ids) {
+        const { error } = await supabaseAdmin.from('app_webhooks').update({ document_ids: ids }).eq('id', id);
+        if (error) throw new Error(`app_webhooks documents save: ${error.message}`);
+      },
+      run: (input) => runAppAs(input, WEBHOOK_TITLE_PREFIX, defaultRunAsIo()),
+    }),
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_webhooks').update(patch).eq('id', id);
       if (error) throw new Error(`app_webhooks finish: ${error.message}`);

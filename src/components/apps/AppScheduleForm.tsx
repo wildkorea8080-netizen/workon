@@ -10,10 +10,16 @@ import {
 
 /**
  * 실행 화면 아래 '이 입력으로 예약' — 지금 폼의 입력값을 저장해 정해진 시각(한국 시간)에 자동 실행한다.
- * 파일 첨부가 필수인 앱은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 검사는 서버가 다시 한다
+ * 올린 파일은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 문서함에서 고른 문서는 함께 저장되고, 실행 때마다 그 문서의
+ * 지금 판으로 읽는다(0062). 파일이 필수인 앱은 문서를 골랐을 때만 예약할 수 있다. 검사는 서버가 다시 한다
  */
-export default function AppScheduleForm({ agentId, appVersion, definition, values, disabled = false }: {
-  agentId: string; appVersion: number; definition: AppDefinition; values: Record<string, string>; disabled?: boolean;
+export default function AppScheduleForm({ agentId, appVersion, definition, values, documentIds = [], hasUploads = false, disabled = false }: {
+  agentId: string; appVersion: number; definition: AppDefinition; values: Record<string, string>;
+  /** 문서함에서 고른 문서 */
+  documentIds?: string[];
+  /** 올린 파일이 있는가 — 예약에는 실리지 않는다고 알린다 */
+  hasUploads?: boolean;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [frequency, setFrequency] = useState<AppScheduleFrequency>('weekdays');
@@ -21,7 +27,9 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
   const [hour, setHour] = useState(9); const [minute, setMinute] = useState<0 | 30>(0);
   const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<AppScheduleView | null>(null);
-  const filesRequired = Boolean(definition.attachments?.required);
+  const library = definition.attachments?.library === true;
+  const filesRequired = Boolean(definition.attachments?.required) && !library;
+  const needsDocument = Boolean(definition.attachments?.required) && library && documentIds.length === 0;
   const spec = parseScheduleSpec({ frequency, weekday, month_day: monthDay, hour, minute });
 
   async function save() {
@@ -29,8 +37,9 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
     const input = renderAppInput(definition, values);
     if (!input.ok) { setError(`예약할 입력을 먼저 채워 주세요 — ${input.message}`); return; }
     if (!spec.ok) { setError(spec.message); return; }
+    if (needsDocument) { setError('이 앱은 파일이 필요합니다 — 예약하려면 문서함에서 문서를 골라 주세요(올린 파일은 예약에 쓸 수 없습니다).'); return; }
     setSaving(true);
-    const result = await api<AppScheduleView>('/api/apps/schedules', { method: 'POST', json: { agent_id: agentId, app_version: appVersion, inputs: values, frequency, weekday, month_day: monthDay, hour, minute } });
+    const result = await api<AppScheduleView>('/api/apps/schedules', { method: 'POST', json: { agent_id: agentId, app_version: appVersion, inputs: values, ...(documentIds.length ? { document_ids: documentIds } : {}), frequency, weekday, month_day: monthDay, hour, minute } });
     setSaving(false);
     if (result.ok) setSaved(result.data); else setError(result.error.message);
   }
@@ -39,6 +48,7 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
   if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-4 text-sm font-semibold text-[#087581] disabled:opacity-40">이 입력으로 예약 실행 걸기</button>;
   return <fieldset disabled={disabled || saving} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
     <legend className="px-1 text-sm font-semibold">예약 실행 (한국 시간)</legend>
+    {library && <p className="text-xs leading-5 text-slate-600">{documentIds.length ? `문서함에서 고른 문서 ${documentIds.length}개를 함께 저장합니다 — 실행 때마다 그 문서의 지금 판(새 판이 시행되면 새 판)으로 읽습니다.` : '문서함에서 문서를 고르면 함께 저장됩니다.'}{hasUploads ? ' 올린 파일은 예약에 실리지 않습니다.' : ''}</p>}
     <p className="text-xs leading-5 text-slate-600">지금 입력한 값을 저장해 정해진 시각마다 자동으로 실행합니다. 결과는 내 앱 실행 기록에 <span className="font-semibold">[예약]</span> 제목으로 남고, 실행마다 내 사용량이 기록됩니다. 한 사람당 {APP_MAX_SCHEDULES_PER_USER}개까지.</p>
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-sm">주기<select aria-label="예약 주기" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={frequency} onChange={e => setFrequency(e.target.value as AppScheduleFrequency)}>{(Object.keys(FREQUENCY_LABELS) as AppScheduleFrequency[]).map(f => <option key={f} value={f}>{FREQUENCY_LABELS[f]}</option>)}</select></label>

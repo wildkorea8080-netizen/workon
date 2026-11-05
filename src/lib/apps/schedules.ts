@@ -8,7 +8,8 @@
 //   차지가 15분 넘게 남아 있으면(함수가 죽음) 멈춘 차지로 보고 다시 잡는다. 같은 시각이 두 번 돌지 않게 다음 시각은 '지금 뒤'로 센다.
 // - **멈춤**: 앱 설정이 바뀌었거나(판 다름) 앱을 쓸 수 없거나(권한·삭제) 직원 계정을 쓸 수 없으면 예약을 멈추고 이유를 적는다. 그 밖의 실패(한도·모델 오류)는
 //   다음 차례에 다시 하고, 연속 3회 실패하면 멈춘다. 실패·멈춤은 예약한 직원에게 메일로 알린다(메일이 설정돼 있을 때 — 주소는 기록에 남기지 않는다).
-// - 파일 입력은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 실행기는 `/api/cron/app-schedules`(CRON_SECRET)이고 pg_cron이 5분마다 부른다.
+// - 올린 파일은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 문서함에서 고른 문서(0062)는 id로 저장하고 실행 때마다 다시 읽으며,
+//   새 판이 근거가 되면 새 판을 쓴다(`currentEditionIds`). 쓸 판이 없으면 예약을 멈춘다. 실행기는 `/api/cron/app-schedules`(CRON_SECRET)이고 pg_cron이 5분마다 부른다.
 //   Vercel Hobby 예약 작업은 하루 한 번·2개까지라 쓰지 않는다 — docs/benchmarks/allganize/APP_SCHEDULES.md.
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
@@ -16,6 +17,8 @@ import { logSystem } from '@/lib/logger';
 import { isMailConfigured, scheduleFailureMail, sendScheduleFailureEmail } from '@/lib/mailer';
 import { defaultRunAsIo, runAppAs, type RunAsIo } from './run-as';
 import { describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
+import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
+import { agentDocumentRows } from './app-document-choice';
 
 export const SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
 export const SCHEDULE_CLAIM_STALE_MS = 15 * 60 * 1000;
@@ -27,6 +30,7 @@ export const PAUSED_APP_CHANGED = '앱 설정이 바뀌어 예약을 멈췄습�
 export const PAUSED_APP_UNAVAILABLE = '앱을 쓸 수 없어(권한 없음 또는 삭제됨) 예약을 멈췄습니다.';
 export const PAUSED_USER_UNAVAILABLE = '예약한 직원의 계정을 쓸 수 없어 예약을 멈췄습니다.';
 export const PAUSED_DEPARTMENT_CHANGED = '소속 부서가 바뀌어 예약을 멈췄습니다. 예약을 다시 만들어 주세요.';
+export const PAUSED_DOCUMENTS_UNAVAILABLE = '고른 문서를 더 쓸 수 없어(지움·읽기 실패·지난 판) 예약을 멈췄습니다. 앱에서 문서를 다시 골라 새로 예약해 주세요.';
 export const SCHEDULE_TITLE_PREFIX = '[예약] ';
 
 export type AppScheduleRow = AppScheduleRowLike & {
@@ -34,12 +38,12 @@ export type AppScheduleRow = AppScheduleRowLike & {
 };
 
 export type ScheduleOutcome =
-  | { kind: 'completed'; conversationId: string | null }
+  | { kind: 'completed'; conversationId: string | null; /** 새 판으로 따라간 문서 — 다음 실행부터 이 id로 */ documentIds?: string[] }
   | { kind: 'failed'; error: string; conversationId?: string | null }
   | { kind: 'pause'; reason: string };
 
 export type SchedulePatch = Partial<Pick<AppScheduleRow,
-  'status' | 'paused_reason' | 'next_run_at' | 'claimed_at' | 'last_run_at' | 'last_status' | 'last_error' | 'last_conversation_id' | 'consecutive_failures' | 'run_count' | 'updated_at'>>;
+  'status' | 'paused_reason' | 'next_run_at' | 'claimed_at' | 'last_run_at' | 'last_status' | 'last_error' | 'last_conversation_id' | 'consecutive_failures' | 'run_count' | 'updated_at' | 'document_ids'>>;
 
 export interface ScheduleDeps {
   /** 지금 실행할 차례인 활성 예약(차지되지 않았거나 멈춘 차지) — 다음 실행 시각 순 */
@@ -76,7 +80,7 @@ export function finishPatch(row: AppScheduleRow, outcome: ScheduleOutcome, nowMs
     next_run_at: nextRunAt(specOfRow(row), nowMs).toISOString(),
   };
   if (outcome.kind === 'completed') {
-    return { ...base, last_status: 'completed', last_error: null, last_conversation_id: outcome.conversationId ?? null, consecutive_failures: 0 };
+    return { ...base, last_status: 'completed', last_error: null, last_conversation_id: outcome.conversationId ?? null, consecutive_failures: 0, ...(outcome.documentIds ? { document_ids: outcome.documentIds } : {}) };
   }
   if (outcome.kind === 'pause') {
     return { ...base, last_status: 'failed', last_error: outcome.reason, consecutive_failures: row.consecutive_failures + 1, status: 'paused', paused_reason: outcome.reason };
@@ -123,17 +127,28 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
   return result;
 }
 
-/** 예약 실행의 바깥 입출력 — 공용 `runAppAs`와 같다(시험이 바꿔 끼운다) */
-export type ExecuteIo = RunAsIo;
+/** 예약 실행의 바깥 입출력 — 공용 `runAppAs`와 같고, 고른 문서가 있으면 그 비서의 문서 행을 읽는다(시험이 바꿔 끼운다) */
+export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]> };
+
 
 /**
  * 예약 하나를 그 직원으로 실행한다(`run-as.ts`). 거절 상태 403·404(앱을 쓸 수 없음)·409(앱 판 바뀜)와 계정·부서 문제는 '멈춤',
  * 그 밖(한도 429·검사 400·모델 오류)은 '실패'. 스트림의 `error` 이벤트가 하나라도 오면 실패다 — 저장은 실행기가 이미 했다
  */
 export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultRunAsIo()): Promise<ScheduleOutcome> {
-  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs }, SCHEDULE_TITLE_PREFIX, io);
+  // 고른 문서(0062) — 지금 근거로 쓸 판으로 맞춘다. 문서 행을 못 읽으면 던져 '실패'(다음 차례에 다시)
+  let documentIds: string[] | undefined;
+  let followed = false;
+  if (row.document_ids?.length) {
+    const rows = await (io.documentsOf ?? agentDocumentRows)(row.agent_id, row.organization_id);
+    const resolved = currentEditionIds(row.document_ids, rows, row.agent_id);
+    if (!resolved.ok) return { kind: 'pause', reason: PAUSED_DOCUMENTS_UNAVAILABLE };
+    documentIds = resolved.ids;
+    followed = resolved.changed;
+  }
+  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, documentIds }, SCHEDULE_TITLE_PREFIX, io);
   switch (outcome.kind) {
-    case 'completed': return { kind: 'completed', conversationId: outcome.conversationId };
+    case 'completed': return { kind: 'completed', conversationId: outcome.conversationId, ...(followed ? { documentIds } : {}) };
     case 'user_unavailable': return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
     case 'department_changed': return { kind: 'pause', reason: PAUSED_DEPARTMENT_CHANGED };
     case 'rejected':

@@ -4,6 +4,7 @@ import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { validateAppDefinition } from '@/lib/apps/definition';
+import { appDocumentChoice, CHOSEN_DOCUMENTS_UNAVAILABLE, verifyChosenDocuments } from '@/lib/apps/app-document-choice';
 import { generateWebhookToken } from '@/lib/apps/webhooks';
 import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS } from '@/lib/apps/webhook-spec';
 
@@ -25,7 +26,8 @@ export async function GET() {
 }
 
 /**
- * 연동 만들기 — 지금 앱 판으로 만든다. 파일 첨부가 필수인 앱은 만들 수 없고, 쓸 수 있는 연동은 한 사람당 5개.
+ * 연동 만들기 — 지금 앱 판으로 만든다. 올린 파일은 연동에 쓸 수 없다. 문서함에서 고르기를 허용한 앱은 고른 문서(`document_ids`, 3개까지 —
+ * 지금 고를 수 있는 문서만)를 함께 저장하고, 파일이 필수인 앱은 그 경우에만 만들 수 있다(0063). 쓸 수 있는 연동은 한 사람당 5개.
  * **토큰 원문은 이 응답에서 한 번만** 돌려주고 DB에는 SHA-256만 남긴다
  */
 export async function POST(request: NextRequest) {
@@ -49,8 +51,12 @@ export async function POST(request: NextRequest) {
   if (!row || !canUseAgent(row, actor)) return fail('이 앱을 사용할 수 없습니다.', 404);
   const definition = validateAppDefinition(row.app_definition);
   if (!definition.ok || !definition.value) return fail('입력형 앱만 연동할 수 있습니다.', 400);
-  if (definition.value.attachments?.required) return fail('파일 첨부가 필수인 앱은 연동할 수 없습니다.', 400);
+  const choice = appDocumentChoice(definition.value.attachments, body.document_ids, '연동');
+  if (!choice.ok) return fail(choice.message, 400);
   if (row.version !== app_version) return fail('앱 설정이 변경됐습니다. 앱을 새로 열어 입력 항목을 확인해 주세요.', 409);
+  const verified = await verifyChosenDocuments(agent_id, actor, choice.ids);
+  if (verified === 'error') return fail('고른 문서를 확인하지 못했습니다.', 503);
+  if (verified === 'unavailable') return fail(CHOSEN_DOCUMENTS_UNAVAILABLE, 400);
 
   const now = Date.now();
   const { count, error: countError } = await supabaseAdmin.from('app_webhooks').select('id', { count: 'exact', head: true })
@@ -60,7 +66,7 @@ export async function POST(request: NextRequest) {
 
   const token = generateWebhookToken();
   const { data: created, error } = await supabaseAdmin.from('app_webhooks').insert({
-    agent_id, user_id: session.user.id, department_id: actor.departmentId, organization_id: actor.organizationId, app_version,
+    agent_id, user_id: session.user.id, department_id: actor.departmentId, organization_id: actor.organizationId, app_version, document_ids: choice.ids,
     name: spec.name, token_hash: token.hash, token_prefix: token.prefix, status: 'active',
     expires_at: new Date(now + spec.expiryDays * 86_400_000).toISOString(),
   }).select(WEBHOOK_COLUMNS).single();
