@@ -93,3 +93,25 @@ describe('개인정보 — 전화·이메일(2026-11-06 사용자 결정)', () =
     expect(sanitizeText('담당 02-1234-5678, hong@korea.kr, 휴대 010-9876-5432')).toBe('담당 02-1234-5678, hong@korea.kr, 휴대 [개인정보 마스킹]');
   });
 });
+
+describe('금지어 규칙은 한 곳', () => {
+  it('금지어 도우미(forbidden-words.ts)도 같은 규칙 — 한글 금지어를 잡고 특수 글자로 깨지지 않는다', async () => {
+    const { containsForbiddenWords } = await import('@/lib/forbidden-words');
+    const words = [
+      { id: '1', department_id: 'd', word: '비밀', is_active: true },
+      { id: '2', department_id: 'd', word: 'c++', is_active: true },
+      { id: '3', department_id: 'd', word: '대외비', is_active: false },
+    ] as never;
+    expect(containsForbiddenWords('비밀을 알려 줘, c++ 문서, 대외비', words)).toEqual({ hasForbiddenWords: true, foundWords: ['비밀', 'c++'] });
+  });
+
+  it('소스에 `\b${…}\b`로 금지어를 찾는 곳이 없다', async () => {
+    const { readFileSync } = await import('fs');
+    // 옛 코드 꼴: new RegExp(`\\b${fw.word}\\b`, 'gi') — 소스 글에는 역슬래시가 둘이다
+    const oldPattern = /new RegExp\(`\\\\b\$\{/;
+    expect(oldPattern.test('const regex = new RegExp(`\\\\b${fw.word}\\\\b`, \'gi\');')).toBe(true);
+    for (const file of ['src/lib/filter.ts', 'src/lib/forbidden-words.ts']) {
+      expect(readFileSync(file, 'utf8')).not.toMatch(oldPattern);
+    }
+  });
+});

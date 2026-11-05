@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { containsForbiddenWord } from '@/lib/forbidden-match';
 
 // 보안 이벤트 타입
 export type SecurityEventType =
@@ -41,24 +42,8 @@ export async function logSecurityEvent(
 const AMOUNT_UNITS = '(?:천원|만원|백만원|천만원|억원|조원|원|억|조|만|천|명|건|개|톤|㎡|평|%|퍼센트|회|대|가구|kg|km)';
 const LONG_NUMBER = new RegExp(`(?<![\\w,.])\\d{9,15}(?![\\w,.])(?!\\s*${AMOUNT_UNITS})`, 'g');
 
-/** 정규식에 넣을 글자 그대로 — 금지어에 `+`·`(` 같은 글자가 있어도 깨지지 않게 */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 금지어가 글에 있는가(2026-11-06). 예전 `\b금지어\b`는 `\b`가 영문·숫자 경계만 알아 **한글 금지어를 한 번도 잡지 못했고**,
- * 금지어의 특수 글자(`c++`)가 정규식을 깨 대화가 멈췄다.
- * - 영문·숫자·공백만인 금지어: 영문·숫자에 붙지 않은 자리만(대소문자 무시) — 'ass'가 'class'에 걸리지 않게
- * - 그 밖(한글이 든 금지어): 들어 있으면 — 한국어는 조사가 붙어('비밀을') 낱말 경계로 가를 수 없다
- */
-export function containsForbiddenWord(text: string, word: string): boolean {
-  const w = word.normalize('NFC').trim();
-  if (!w) return false;
-  const t = text.normalize('NFC');
-  if (/^[A-Za-z0-9_\s]+$/.test(w)) return new RegExp(`(?<![A-Za-z0-9_])${escapeRegExp(w)}(?![A-Za-z0-9_])`, 'i').test(t);
-  return t.toLocaleLowerCase('ko-KR').includes(w.toLocaleLowerCase('ko-KR'));
-}
+// 금지어 맞추기 규칙은 한 곳(forbidden-match.ts) — 금지어 도우미(forbidden-words.ts)도 같은 규칙을 쓴다
+export { containsForbiddenWord } from '@/lib/forbidden-match';
 
 // 개인정보 패턴 (한국어 포함)
 const PERSONAL_INFO_PATTERNS = [

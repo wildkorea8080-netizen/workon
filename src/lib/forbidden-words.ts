@@ -3,6 +3,7 @@
 
 import { supabase } from '@/lib/supabase';
 import type { ForbiddenWord } from '@/lib/db';
+import { containsForbiddenWord } from '@/lib/forbidden-match';
 
 /**
  * 부서의 금지어 목록을 조회합니다.
@@ -110,8 +111,8 @@ export function containsForbiddenWords(text: string, forbiddenWords: ForbiddenWo
   const foundWords: string[] = [];
 
   for (const fw of activeWords) {
-    const regex = new RegExp(`\\b${fw.word}\\b`, 'gi');
-    if (regex.test(text)) {
+    // 대화 입력 필터와 같은 규칙(forbidden-match.ts) — 예전 `\b`로는 한글 금지어를 잡지 못했다
+    if (containsForbiddenWord(text, fw.word)) {
       foundWords.push(fw.word);
     }
   }
