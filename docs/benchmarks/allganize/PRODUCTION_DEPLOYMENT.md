@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-06(새벽): 지난 파일·이어지는 질문·답변 평가·부서별 도입 현황·완료 시간·공식 앱 신청·반복 단계(0064~0066)
+
+- 2026-11-06 01:17 KST 배포 `dpl_7kFNkPGYU3HvUWfoVAjJqrk2Xebc`(커밋 `0b01ddb`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_9j3pMNLWLi99bsn7KpTC78S1uLJg`(ee11d03)로 promote한다 — **0064~0066은 되돌리지 않는다**(표·함수 추가와 같은 이름 함수 다시 정의뿐 — 옛 코드는 새 표·칸을 읽지 않는다).
+- 들어간 커밋(8개): `681dc5f`(직전 배포 기록), `acdcc66` 대화 '지난 파일' 다시 붙이기, `1ce267a` 이어지는 짧은 질문은 앞 질문과 묶어 한 번 더 찾기, `1f1f614` 답변 평가(0064), `b85887d` 부서별 도입 현황(0065), `9e189ff` 앱 빌더 공식 앱 신청, `981f953` 도입 현황 완료까지 걸린 시간(0066), `0b01ddb` 앱 반복 단계([조건 문서](CONDITIONAL_APP_STEPS.md)·[도입 현황](ADOPTION_REPORT.md)).
+- **배포 전**: 운영 DB에 0064~0066이 없음을 읽기 전용으로 확인한 뒤 차례로 적용(`db:migrate -- 0064` … `-- 0066`, 모두 OK). 다시 읽기 전용 확인: `message_feedback` 표·외래 키·CHECK 셋(평가·이유·이유는 아쉬움에만)·RLS 켜짐·권한 service_role만, `adoption_by_department` 함수 하나(anon 거짓·service_role 참, 한 기관 부르기 1줄), `adoption_report`가 `completed_median_hours`를 포함(칸 16개, 이번 달 완료 작업 없어 null). 가지 Preview(`0b01ddb`, `workon-4mckexkgh`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,795개·tsc 0).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/api/system/maintenance`·`/apps/builder` 200, `GET /api/attachments/reusable`·`POST /api/attachments/reuse`·`PUT /api/messages/[id]/feedback` 401, `GET /api/admin/feedback-summary`·`GET /api/admin/adoption-report/departments`·`GET /api/admin/adoption-report` 403.
+- **확인하지 못한 것**(사용자 몫): 로그인한 대화에서 '지난 파일' 다시 붙이기·짧은 후속 질문의 근거·답변 '도움됨/아쉬움', 관리자 통계의 답변 평가 표·부서별 보기·완료 시간 줄, 앱 빌더의 공식 앱 신청·반복 단계를 둔 앱 실제 실행.
+
 ## 2026-11-05(밤 2): 근거 창 원본 열기·앱 분류 단계
 
 - 2026-11-05 22:52 KST 배포 `dpl_9j3pMNLWLi99bsn7KpTC78S1uLJg`(커밋 `ee11d03`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8WE2so5EPQFsib27LF9PpfNBqAVH`(6ed909c)로 promote한다. 마이그레이션 없음.
