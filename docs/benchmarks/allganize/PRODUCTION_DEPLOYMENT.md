@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-05(밤 2): 근거 창 원본 열기·앱 분류 단계
+
+- 2026-11-05 22:52 KST 배포 `dpl_9j3pMNLWLi99bsn7KpTC78S1uLJg`(커밋 `ee11d03`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8WE2so5EPQFsib27LF9PpfNBqAVH`(6ed909c)로 promote한다. 마이그레이션 없음.
+- 들어간 커밋: `3592c3c`(직전 배포 기록), `55aba8c` 대화 근거 창 '원본 열기'(볼 수 있는 문서·쓸 수 있는 비서·같은 기관 유형만, 60초 서명 주소, PDF는 그 쪽), `ee11d03` 입력형 앱 분류 단계(뒤 단계 조건·갈래가 `@N`으로 가름 — [조건 문서](CONDITIONAL_APP_STEPS.md)).
+- **배포 전**: 가지 Preview(`ee11d03`, `workon-qqmfm4cuv`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,743개·tsc 0).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/api/system/maintenance`·`/apps/builder` 200, `GET /api/documents/[id]/original?page=3`·`GET /api/common-documents/[id]/original`·`GET /api/documents/tag-vocabulary` 401.
+- **확인하지 못한 것**(사용자 몫): 로그인한 대화에서 근거 창 '원본에서 p.N 열기'(PDF가 그 쪽으로 열리는지·HWPX가 원래 이름으로 내려받아지는지), 빌더에서 분류 단계를 둔 앱을 만들어 실제 모델로 실행(분류 정확도는 재지 않았다).
+
 ## 2026-11-05(밤): 문서 태그·태그 분류표·평가 세트·앱 문서함 문서(0059~0063)
 
 - 2026-11-05 22:25 KST 배포 `dpl_8WE2so5EPQFsib27LF9PpfNBqAVH`(커밋 `6ed909c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_4AFuMXsF6zi4dVQ3XBkN3DdsK9k4`(56d20a2)로 promote한다 — **0059~0063은 되돌리지 않는다**(표·칸·CHECK 추가뿐, 옛 코드는 새 표·칸을 읽지 않는다).
