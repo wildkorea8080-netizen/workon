@@ -62,6 +62,36 @@ async function discardNewConversation(conversationId: string, userId: string): P
  * 한 턴을 준비한다. 여기서 거절되면 라우트가 JSON으로 답한다
  * (스트림 시작 전 실패 규약).
  */
+/**
+ * 그 사람·그 비서의 대화에서 바로 앞 사용자 질문(2026-11-05). 대화 주인이 아니거나 읽지 못하면 undefined —
+ * 다시 찾기를 하지 않을 뿐 대화는 막지 않는다(대화 주인 확인은 뒤에서 다시 해 404로 닫는다)
+ */
+export async function previousUserQuestion(conversationId: string, userId: string, agentId: string): Promise<string | undefined> {
+  try {
+    const { data: owned, error } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', userId)
+      .eq('agent_id', agentId)
+      .maybeSingle();
+    if (error || !owned) return undefined;
+    const { data, error: messageError } = await supabaseAdmin
+      .from('messages')
+      .select('content')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'user')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (messageError) return undefined;
+    const content = (data as { content?: unknown } | null)?.content;
+    return typeof content === 'string' && content.trim() ? content : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function prepareTurn(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome> {
   const { agent_id, message: rawMessage, conversation_id, images, attachment_ids } = body;
   // '문서 없이 일반 답변 받기'. 정확히 true일 때만 — 다른 값으로 문서 찾기가 꺼지면 안 된다
@@ -206,9 +236,14 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   // ── 능력 preflight ── 대화를 만들기 전에(판정 R4). 참고 문서를 불러오지 못하면 여기서 거절해
   // 빈 대화가 쌓이거나 새 대화의 첨부가 묶였다 지워지지 않게 한다
   const preflight: Partial<Record<CapabilityId, unknown>> = {};
+  // 이어지는 대화면 바로 앞 질문 — 문서 찾기가 짧은 질문을 앞 질문과 묶어 다시 찾을 때만 쓴다(그 사람·그 비서의 대화일 때만, 못 읽으면 없이)
+  const previousQuestion =
+    !skipDocuments && typeof conversation_id === 'string' && conversation_id && capabilities.some((c) => c.id === 'doc_search')
+      ? await previousUserQuestion(conversation_id, actor.userId, agent_id)
+      : undefined;
   for (const cap of capabilities) {
     if (!cap.preflight) continue;
-    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments });
+    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments, previousQuestion });
     if (!result.ok) return reject(result.message, result.status, { code: result.code });
     if (result.carry !== undefined) preflight[cap.id] = result.carry;
   }

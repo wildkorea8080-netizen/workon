@@ -397,7 +397,7 @@ interface CommonCarry {
 
 type DocSearchCarry =
   | { skipped: true }
-  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry };
+  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry; followUp?: true };
 
 type MatchInput = { agentId: string; organizationId: string | null };
 
@@ -662,6 +662,33 @@ export async function searchLikeChat(
   return out.chunks ?? [];
 }
 
+/** 이어지는 질문으로 볼 만큼 짧은 질문(공백 뺀 글자 수) — 긴 질문은 혼자서 뜻이 선다 */
+export const FOLLOW_UP_MAX_CHARS = 40;
+/** 다시 찾기에 붙이는 앞 질문의 길이 상한 */
+export const FOLLOW_UP_PREVIOUS_MAX_CHARS = 300;
+/** 앞 질문과 묶어 찾은 턴에 붙이는 지시 — 엉뚱한 질문이 앞 질문의 근거를 빌려 답하지 않게 */
+export const FOLLOW_UP_NOTE =
+  '- 이번 질문은 짧아 바로 앞 질문과 묶어 문서를 찾았습니다. 참고 자료가 **지금 질문**과 관련 있을 때만 쓰고, 관련이 없으면 "문서에서 찾지 못했습니다"라고 답하세요.';
+
+/**
+ * 다시 찾기 질의 — 지금 질문이 짧고 앞 질문이 있을 때만 `앞 질문\n지금 질문`, 아니면 null.
+ * 앞 질문의 첨부 표시 줄(`[첨부 …]`)은 뗀다. 같은 질문을 다시 한 경우도 null(같은 결과다)
+ */
+export function followUpQuery(previous: string | undefined, current: string): string | null {
+  if (!previous) return null;
+  const now = current.trim();
+  if (!now || now.replace(/\s/g, '').length > FOLLOW_UP_MAX_CHARS) return null;
+  const before = previous
+    .split('\n')
+    .filter((line) => !/^\s*\[첨부 /.test(line))
+    .join('\n')
+    .trim()
+    .slice(0, FOLLOW_UP_PREVIOUS_MAX_CHARS)
+    .trim();
+  if (!before || before === now) return null;
+  return `${before}\n${now}`;
+}
+
 export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
   const log = deps.log ?? logSystem;
   const unavailable: PreflightResult = {
@@ -677,7 +704,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
     description: '이 비서에 연결한 문서에서 근거를 찾아 출처와 함께 답합니다.',
     isAvailable: () => true,
 
-    async preflight({ organizationId, agentId, message, skipDocuments }) {
+    async preflight({ organizationId, agentId, message, skipDocuments, previousQuestion }) {
       if (skipDocuments) return { ok: true, carry: { skipped: true } satisfies DocSearchCarry };
 
       // 비서 문서 행과 (기관 유형 → 그 유형의 공통 문서 행)을 함께 읽는다. 유형은 그 턴에 읽는다(설계 5.1)
@@ -718,16 +745,18 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
 
       // 두 곳을 찾으면 예산을 나눈다 — 모델에 가는 발췌가 두 배로 늘지 않게(설계 5.1)
       const both = searchAgent && commonType !== null;
-      const [agentCall, commonCall] = await Promise.allSettled([
-        searchAgent
-          ? Promise.resolve().then(() => deps.fetchContext(agentId, message, both ? CONTEXT_BUDGET_AGENT_SHARED : NODA_CONTEXT_BUDGET))
-          : Promise.resolve(undefined),
-        commonType
-          ? Promise.resolve().then(() =>
-              deps.fetchCommonContext(commonType, message, both ? CONTEXT_BUDGET_COMMON_SHARED : NODA_CONTEXT_BUDGET)
-            )
-          : Promise.resolve(undefined),
-      ]);
+      const search = (query: string) =>
+        Promise.allSettled([
+          searchAgent
+            ? Promise.resolve().then(() => deps.fetchContext(agentId, query, both ? CONTEXT_BUDGET_AGENT_SHARED : NODA_CONTEXT_BUDGET))
+            : Promise.resolve(undefined),
+          commonType
+            ? Promise.resolve().then(() =>
+                deps.fetchCommonContext(commonType, query, both ? CONTEXT_BUDGET_COMMON_SHARED : NODA_CONTEXT_BUDGET)
+              )
+            : Promise.resolve(undefined),
+        ]);
+      let [agentCall, commonCall] = await search(message);
 
       // 하나라도 실패하면 닫는다 — 한쪽 근거만으로 답하면 다른 쪽에 답이 있는 질문을 '찾지 못했다'고 할 수 있다.
       // 질문 원문은 남기지 않는다. NodaError 글에는 키가 실리지 않는다(noda.ts)
@@ -754,12 +783,39 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         return unavailable;
       }
 
-      const result = agentCall.status === 'fulfilled' ? agentCall.value : undefined;
-      const commonResult = commonCall.status === 'fulfilled' ? commonCall.value : undefined;
+      let result = agentCall.status === 'fulfilled' ? agentCall.value : undefined;
+      let commonResult = commonCall.status === 'fulfilled' ? commonCall.value : undefined;
+
+      // 이어지는 질문 — 짧은 질문이 아무 근거도 못 찾았고 바로 앞 질문이 있으면, 앞 질문과 묶어 한 번만 다시 찾는다(2026-11-05).
+      // '그럼 국외 출장은?'은 혼자서는 뜻이 비어 근거를 못 찾는다. 다시 찾기가 실패하면 첫 결과(근거 없음)로 간다 — 첫 찾기는 이미 성공했다
+      let followUp = false;
+      const followQuery = followUpQuery(previousQuestion, message);
+      if (followQuery && (result?.sources.length ?? 0) === 0 && (commonResult?.sources.length ?? 0) === 0) {
+        [agentCall, commonCall] = await search(followQuery);
+        if (agentCall.status === 'fulfilled' && commonCall.status === 'fulfilled') {
+          const again = agentCall.value;
+          const commonAgain = commonCall.value;
+          if ((again?.sources.length ?? 0) > 0 || (commonAgain?.sources.length ?? 0) > 0) {
+            result = again;
+            commonResult = commonAgain;
+            followUp = true;
+          }
+        } else {
+          const error = agentCall.status === 'rejected' ? agentCall.reason : commonCall.status === 'rejected' ? commonCall.reason : null;
+          await log({
+            level: 'warning',
+            category: 'api',
+            message: '이어지는 질문의 문서 다시 찾기 실패 — 첫 찾기 결과(근거 없음)로 답함',
+            details: { agent_id: agentId, ...nodaErrorFields(error) },
+            orgId: organizationId,
+          });
+        }
+      }
       return {
         ok: true,
         carry: {
           docs,
+          ...(followUp ? { followUp: true } : {}),
           ...(result ? { result } : {}),
           ...(commonType && commonResult ? { common: { orgType: commonType, docs: commonDocs, result: commonResult } } : {}),
         } satisfies DocSearchCarry,
@@ -807,35 +863,37 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         verifyTenant = commonTenant(carry.common.orgType);
       }
 
+      const addendum = docSearchAddendum({
+        // 비서 묶음은 S4 그대로 통째로 싣되, 대신된 옛 판 조각이 있었으면 받아들인 조각의 블록만(옛 규정 글이 모델에게 가지 않게)
+        context: carry.result
+          ? stripNodaPrefixes(
+              agentMatch.superseded
+                ? keepContextBlocks(carry.result.context, new Set(agentChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number')))
+                : carry.result.context
+            )
+          : null,
+        chunks,
+        hasDocuments: true,
+        skipped: false,
+        // 공통 쪽은 받아들인 조각의 블록만 싣는다 — 뺀 조각(지난 판 등)의 글이 모델에게 가지 않게(설계 실패 기준 2)
+        commonContext: common
+          ? stripNodaPrefixes(
+              keepContextBlocks(
+                common.shifted.context,
+                new Set(commonChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number'))
+              )
+            )
+          : null,
+        commonOrgType: carry.common?.orgType ?? null,
+        searchedCommon: carry.common !== undefined,
+      });
       return {
         chunks,
         dropped: (carry.result?.dropped ?? 0) + (carry.common?.result.dropped ?? 0),
         verifySources,
         ...(verifyTenant ? { verifyTenant } : {}),
-        systemAddendum: docSearchAddendum({
-          // 비서 묶음은 S4 그대로 통째로 싣되, 대신된 옛 판 조각이 있었으면 받아들인 조각의 블록만(옛 규정 글이 모델에게 가지 않게)
-          context: carry.result
-            ? stripNodaPrefixes(
-                agentMatch.superseded
-                  ? keepContextBlocks(carry.result.context, new Set(agentChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number')))
-                  : carry.result.context
-              )
-            : null,
-          chunks,
-          hasDocuments: true,
-          skipped: false,
-          // 공통 쪽은 받아들인 조각의 블록만 싣는다 — 뺀 조각(지난 판 등)의 글이 모델에게 가지 않게(설계 실패 기준 2)
-          commonContext: common
-            ? stripNodaPrefixes(
-                keepContextBlocks(
-                  common.shifted.context,
-                  new Set(commonChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number'))
-                )
-              )
-            : null,
-          commonOrgType: carry.common?.orgType ?? null,
-          searchedCommon: carry.common !== undefined,
-        }),
+        // 앞 질문과 묶어 찾은 턴은 지금 질문과 관련 있을 때만 쓰라고 한 줄 더한다
+        systemAddendum: carry.followUp && chunks.length > 0 && addendum ? `${addendum}\n${FOLLOW_UP_NOTE}` : addendum,
       };
     },
   };

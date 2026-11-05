@@ -50,6 +50,8 @@ export interface PreflightInput {
   agentId: string;
   message: string;
   skipDocuments: boolean;
+  /** 이어지는 대화의 바로 앞 사용자 질문(그 사람의 대화일 때만) — 문서 찾기가 짧은 질문을 다시 찾을 때 쓴다(2026-11-05) */
+  previousQuestion?: string;
 }
 
 /**
