@@ -6,10 +6,11 @@ import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
 import { estimateCostUsd } from '@/lib/models';
 import { kstMonthStart } from '@/lib/kst-time';
+import { API_KEY_PROVIDERS, UNSUPPORTED_PROVIDER_MESSAGE, isApiKeyProvider } from '@/lib/api-key-providers';
 
 export const dynamic = 'force-dynamic';
 
-const PROVIDERS = ['anthropic', 'voyage'] as const;
+const PROVIDERS = API_KEY_PROVIDERS;
 
 // GET: 시스템 기본 키 조회
 export async function GET(request: NextRequest) {
@@ -68,6 +69,8 @@ export async function PATCH(request: NextRequest) {
   const { provider, keyValue } = await request.json();
   if (!provider || !keyValue)
     return NextResponse.json({ ok: false, error: 'provider, keyValue 필수' }, { status: 400 });
+  if (!isApiKeyProvider(provider))
+    return NextResponse.json({ ok: false, error: UNSUPPORTED_PROVIDER_MESSAGE }, { status: 400 });
 
   const encrypted = encryptApiKey(keyValue);
   const prefix    = keyValue.slice(0, 10);

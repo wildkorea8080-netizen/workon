@@ -422,7 +422,8 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 
 > **옛 업로드 길은 S4-b에서 지웠다.** 예전 경로(`document-processor.ts` → Voyage 임베딩 → `search_agent_chunks`)와 그 부품(`embeddings.ts`·`rag.ts`·`pdf-ocr.ts`(Anthropic 스캔 판독)·`spreadsheet.ts`, `VOYAGE_API_KEY`)은 코드에 없다.
 > `tests/legacy-removed.test.ts`가 파일 부재와 import·환경 변수의 재등장을 막는다. 남긴 것: DB의 `documents.embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC(값만 0032가 비운다),
-> 슈퍼관리자 화면의 'Voyage 키' 칸(`super/api-keys`·기관 상세 키 확인 — 키 보관 화면이라 손대지 않았다, 후속 정리), `usage_logs.action='document_ocr'` 옛 행의 화면 표기.
+> `usage_logs.action='document_ocr'` 옛 행의 화면 표기. 슈퍼관리자 화면의 'Voyage 키' 칸은 2026-11-06에 뺐다 — 확인 단추가 보관한 키를 쓰지 않는 업체(api.voyageai.com)로 보냈다.
+> 이제 키 저장·확인·표시는 Anthropic만(`src/lib/api-key-providers.ts`, 저장 두 곳이 종류를 검사, `tests/api-key-providers.test.ts`가 Voyage 주소·칸의 재등장을 막음). 이미 저장된 Voyage 키 행(`api_keys.provider='voyage'`)은 지우지 않았다 — 화면에서만 안 보인다.
 > `hwp.ts`·`pptx.ts`는 채팅 첨부와 양식 채우기가 쓰므로 남았다. 첨부의 스캔 PDF는 NODA `/parse`로 읽는다(아래 '파일 첨부').
 
 **첨부 발표자료(PPTX)는 슬라이드 경계를 남깁니다** (`src/lib/pptx.ts`, 채팅 첨부가 읽음).

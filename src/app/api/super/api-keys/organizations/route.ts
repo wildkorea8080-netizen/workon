@@ -35,10 +35,9 @@ export async function GET(request: NextRequest) {
 
   const result = (orgs ?? []).map((org: { id: string; [k: string]: any }) => {
     const anthropicKey = (allKeys ?? []).find((k: { organization_id: string; provider: string; updated_at?: string }) => k.organization_id === org.id && k.provider === 'anthropic');
-    const voyageKey    = (allKeys ?? []).find((k: { organization_id: string; provider: string; updated_at?: string }) => k.organization_id === org.id && k.provider === 'voyage');
-    const hasOwnKey    = !!(anthropicKey || voyageKey);
-    const lastUpdated  = [anthropicKey?.updated_at, voyageKey?.updated_at]
-      .filter(Boolean).sort().reverse()[0] ?? null;
+    // 옛 Voyage 키는 보지 않는다(api-key-providers.ts — 쓰지 않는 업체)
+    const hasOwnKey    = !!anthropicKey;
+    const lastUpdated  = anthropicKey?.updated_at ?? null;
 
     return {
       id: org.id,
@@ -46,7 +45,6 @@ export async function GET(request: NextRequest) {
       status: org.status,
       hasOwnKey,
       anthropicMasked: anthropicKey?.key_prefix ? anthropicKey.key_prefix + '••••' : null,
-      voyageMasked:    voyageKey?.key_prefix    ? voyageKey.key_prefix    + '••••' : null,
       lastUpdated,
       callsThisMonth: usageCountMap.get(org.id) ?? 0,
     };

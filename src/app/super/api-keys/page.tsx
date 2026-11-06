@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { API_KEY_PROVIDERS } from '@/lib/api-key-providers';
 
 type Tab = 'system' | 'organizations';
 const fmtDate = (s?: string | null) => s ? new Date(s).toLocaleDateString('ko-KR') : '—';
@@ -44,7 +45,6 @@ export default function ApiKeysPage() {
 // ─── 시스템 기본 키 탭 ───────────────────────────────────────
 const PROVIDER_META = {
   anthropic: { icon: '🤖', label: 'Anthropic API Key',  placeholder: 'sk-ant-api03-...' },
-  voyage:    { icon: '🚀', label: 'Voyage AI Key',       placeholder: 'pa-...' },
 };
 
 function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
@@ -123,7 +123,7 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 
       {/* 키 카드 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {(['anthropic', 'voyage'] as const).map(provider => {
+        {API_KEY_PROVIDERS.map(provider => {
           const meta    = PROVIDER_META[provider];
           const keyInfo = data?.keys?.[provider] ?? {};
           const vr      = verifyResult[provider];
@@ -210,7 +210,7 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
           {[
             { label: '시스템 키 사용 기관',   value: `${stats.systemKeyOrgCount ?? 0}개` },
             { label: '총 사용 토큰',          value: fmt(stats.totalTokensThisMonth ?? 0) },
-            { label: '예상 비용 (Claude+Voyage)', value: `$${stats.estimatedCostUsd ?? 0}` },
+            { label: '예상 비용 (Claude)', value: `$${stats.estimatedCostUsd ?? 0}` },
           ].map(s => (
             <div key={s.label} className="p-4 bg-[#0F172A] rounded-xl">
               <p className="text-lg font-bold text-white">{s.value}</p>
@@ -249,7 +249,7 @@ function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
         <table className="w-full text-sm">
           <thead className="border-b border-slate-700/50">
             <tr>
-              {['기관명', 'Anthropic키', 'Voyage키', '자체 키', '마지막 업데이트', '이번달 호출', '관리'].map(h => (
+              {['기관명', 'Anthropic키', '자체 키', '마지막 업데이트', '이번달 호출', '관리'].map(h => (
                 <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-500">{h}</th>
               ))}
             </tr>
@@ -257,12 +257,12 @@ function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
           <tbody className="divide-y divide-slate-700/30">
             {loading ? (
               Array.from({length:3}).map((_,i) => (
-                <tr key={i}>{Array.from({length:7}).map((_,j) => (
+                <tr key={i}>{Array.from({length:6}).map((_,j) => (
                   <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-700/50 rounded animate-pulse"/></td>
                 ))}</tr>
               ))
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-500">기관이 없습니다.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-500">기관이 없습니다.</td></tr>
             ) : (
               rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-700/20 transition-colors">
@@ -270,11 +270,6 @@ function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
                   <td className="px-5 py-3.5">
                     {row.anthropicMasked
                       ? <code className="text-xs text-slate-400 font-mono">{row.anthropicMasked}</code>
-                      : <span className="text-xs text-slate-600">—</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {row.voyageMasked
-                      ? <code className="text-xs text-slate-400 font-mono">{row.voyageMasked}</code>
                       : <span className="text-xs text-slate-600">—</span>}
                   </td>
                   <td className="px-5 py-3.5 text-center text-lg">

@@ -30,19 +30,8 @@ export async function POST(request: NextRequest, { params: _ }: { params: { id: 
       return NextResponse.json({ ok: true, valid, status: res.status });
     }
 
-    if (keyType === 'voyage') {
-      const res = await fetch('https://api.voyageai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ model: 'voyage-3', input: ['test'] }),
-      });
-      const valid = res.status !== 401 && res.status !== 403;
-      return NextResponse.json({ ok: true, valid, status: res.status });
-    }
 
+    // 옛 Voyage 키 확인은 지웠다 — 쓰지 않는 업체로 키를 보내지 않는다(api-key-providers.ts)
     return NextResponse.json({ ok: false, error: '지원하지 않는 keyType' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });

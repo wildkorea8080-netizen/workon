@@ -598,8 +598,8 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
       {!useSystem && (
         <div className="space-y-4">
           {[
+            // 옛 Voyage 키 칸은 지웠다(쓰지 않는 업체 — api-key-providers.ts)
             { provider: 'anthropic', label: 'Anthropic API Key', placeholder: 'sk-ant-...' },
-            { provider: 'voyage',    label: 'Voyage AI Key',     placeholder: 'pa-...' },
           ].map(({ provider, label, placeholder }) => {
             const existing = keyData?.[provider];
             const isEditing = editing === provider;

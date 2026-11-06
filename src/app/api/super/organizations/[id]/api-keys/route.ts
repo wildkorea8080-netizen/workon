@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encryptApiKey, decryptApiKey, maskKey } from '@/lib/crypto';
+import { UNSUPPORTED_PROVIDER_MESSAGE, isApiKeyProvider } from '@/lib/api-key-providers';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,23 +17,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .eq('is_active', true);
 
   const anthropic = (keys ?? []).find((k: { provider: string; [x: string]: any }) => k.provider === 'anthropic');
-  const voyage    = (keys ?? []).find((k: { provider: string; [x: string]: any }) => k.provider === 'voyage');
 
   return NextResponse.json({
     ok: true,
     data: {
-      useSystemDefault: !anthropic && !voyage,
+      useSystemDefault: !anthropic,
       anthropic: anthropic ? {
         id: anthropic.id,
         prefix: anthropic.key_prefix ?? '',
         masked: anthropic.key_value ? maskKey(decryptApiKey(anthropic.key_value)) : '',
         hasKey: !!anthropic.key_value,
-      } : null,
-      voyage: voyage ? {
-        id: voyage.id,
-        prefix: voyage.key_prefix ?? '',
-        masked: voyage.key_value ? maskKey(decryptApiKey(voyage.key_value)) : '',
-        hasKey: !!voyage.key_value,
       } : null,
     },
   });
@@ -55,6 +49,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   if (!provider || !keyValue) {
     return NextResponse.json({ ok: false, error: 'provider와 keyValue 필수' }, { status: 400 });
+  }
+  if (!isApiKeyProvider(provider)) {
+    return NextResponse.json({ ok: false, error: UNSUPPORTED_PROVIDER_MESSAGE }, { status: 400 });
   }
 
   const encrypted = encryptApiKey(keyValue);
