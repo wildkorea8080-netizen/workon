@@ -11,6 +11,7 @@ import CreateAgentModal from '@/components/chat/CreateAgentModal';
 import { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api } from '@/lib/work/client';
 import WorkspaceIcon, { workflowIcon } from '@/components/work/WorkspaceIcon';
+import HomeAsk from '@/components/work/HomeAsk';
 import { appEntries, filterApps, favoriteAppIds, APP_KIND_LABELS, APP_SCOPE_LABELS, type AppKind, type AppScope } from '@/lib/apps/catalog';
 
 type Favorites = { agentIds: string[]; workflowKeys: string[] };
@@ -72,6 +73,8 @@ export default function AppLibrary({ home = false }: { home?: boolean }) {
       <PageTitle title={home ? '오늘 어떤 업무를 처리할까요?' : '업무 앱'} subtitle={home ? '자료를 넣고, 초안을 만들고, 근거를 검토해 결과 파일로 받으세요.' : '질문에 답하는 비서와 파일을 만드는 업무를 한곳에서 찾아보세요.'} action={home ? <Link href="/tasks" className="rounded-[10px] border border-[#003087] bg-white px-5 py-3 text-[15px] font-semibold text-[#003087]">내 작업 이어서 하기</Link> :
         <button type="button" onClick={() => setCreating(true)} className="rounded-[10px] bg-[#003087] px-5 py-3 text-[15px] font-semibold text-white hover:bg-[#002070]">비서 만들기</button>
       } />
+      {/* 앱을 고르지 않고 바로 묻기(2026-11-06) — 질문은 AI 대화로 넘어간다 */}
+      {home && <HomeAsk />}
       {home && <section aria-label="문서 업무 바로 시작" className="workspace-hero mb-9 overflow-hidden rounded-3xl border border-ws-accent-line p-6 md:p-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div><span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-ws-accent-text"><WorkspaceIcon name="spark" className="!h-3.5 !w-3.5" />문서 업무 바로 시작</span>

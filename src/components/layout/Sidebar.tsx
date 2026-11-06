@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
+import { isImeComposing } from '@/lib/ime';
 
 interface Conversation {
   id: string;
@@ -300,7 +301,7 @@ function ConvItem({
             onChange={e => onRenameChange(e.target.value)}
             onBlur={() => onRenameSubmit(c.id)}
             onKeyDown={e => {
-              if (e.key === 'Enter') onRenameSubmit(c.id);
+              if (e.key === 'Enter' && !isImeComposing(e)) onRenameSubmit(c.id);
               if (e.key === 'Escape') onRenameCancel();
             }}
             onClick={e => e.stopPropagation()}

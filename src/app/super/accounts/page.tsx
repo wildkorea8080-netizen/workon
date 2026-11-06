@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { isImeComposing } from '@/lib/ime';
 
 type Tab = 'users' | 'superadmins';
 
@@ -136,7 +137,7 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
           </svg>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="이름 또는 이메일..."
             className="w-full pl-10 pr-4 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#7C3AED]"
-            onKeyDown={e => e.key === 'Enter' && fetchUsers(1)} />
+            onKeyDown={e => e.key === 'Enter' && !isImeComposing(e) && fetchUsers(1)} />
         </div>
         <select value={filterOrg} onChange={e => setFilterOrg(e.target.value)}
           className="px-3 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]">

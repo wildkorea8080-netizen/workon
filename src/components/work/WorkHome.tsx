@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, TASK_STATUS_LABEL, formatDateTime } from '@/lib/work/client';
 import { Card, ErrorNote, PageTitle, StatusBadge, statusTone } from './WorkShell';
+import HomeAsk from './HomeAsk';
 import WorkflowCard from './WorkflowCard';
 import type { ArtifactDto, TaskDto, WorkflowSummaryDto } from './types';
 
@@ -53,6 +54,7 @@ export default function WorkHome() {
           ) : null
         }
       />
+      <HomeAsk />
       <ErrorNote message={error} />
       {!newTasksEnabled && workflows && (
         <p className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[14px] text-amber-900">

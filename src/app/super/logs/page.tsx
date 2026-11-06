@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { isImeComposing } from '@/lib/ime';
 
 type Tab = 'access' | 'system' | 'impersonation';
 
@@ -131,7 +132,7 @@ function AccessLogsTab() {
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="이름/이메일/IP"
           className="px-3 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#7C3AED]"
-          onKeyDown={e => e.key === 'Enter' && load(1)} />
+          onKeyDown={e => e.key === 'Enter' && !isImeComposing(e) && load(1)} />
         <button onClick={() => load(1)}
           className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-semibold rounded-xl">조회</button>
         <button onClick={() => exportCsv(rows.map(r => ({

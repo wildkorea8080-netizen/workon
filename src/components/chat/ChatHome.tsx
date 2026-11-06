@@ -15,6 +15,8 @@ import { chatLaunchTarget, loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 import WorkShell from '@/components/work/WorkShell';
 import { announceConversationsChanged, CHAT_NEW_EVENT, conversationHref } from '@/lib/chat-events';
 import { pickDefaultAgent } from '@/lib/chat-default-agent';
+import { takeQuestion } from '@/lib/chat-handoff';
+import { isImeComposing } from '@/lib/ime';
 
 type ViewMode = 'welcome' | 'chat';
 
@@ -56,6 +58,10 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   // 비서를 고르지 않고 첫 화면에서 바로 물을 때 답할 비서(마지막으로 쓴 비서 → 첫 공식 비서), 그리고 그 질문
   const [defaultAgent, setDefaultAgent] = useState<Agent | null>(null);
   const [initialMessage, setInitialMessage] = useState<string | null>(null);
+  // 답할 비서 고르기가 끝났는지(비서가 없어도 참) — 홈에서 넘겨받은 질문을 이때 보낸다
+  const [defaultReady, setDefaultReady] = useState(false);
+  // 업무 홈 '바로 묻기'가 넘긴 질문(chat-handoff — 주소가 아니라 이 탭의 저장소)
+  const pendingQuestionRef = useRef<string | null>(null);
 
   const lastAgentRef = useRef<Agent | null>(null);
   // 지금 열린 대화 — 주소(`?conv=`)가 같은 대화를 다시 가리켜도(만든 뒤 주소를 바꿀 때·사이드바에서 같은 대화를 누를 때) 다시 불러오지 않는다
@@ -151,9 +157,33 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
       const last = recent[0]?.agent;
       const lastId = (Array.isArray(last) ? last[0]?.id : last?.id) ?? null;
       setDefaultAgent(pickDefaultAgent([...shared, ...personal] as Agent[], lastId));
+      setDefaultReady(true);
     });
     return () => { alive = false; };
   }, [signedIn]);
+
+  // 업무 홈에서 넘긴 질문은 화면이 열리자마자 한 번 꺼낸다(꺼내면 지워짐 — 개발 모드의 두 번 실행에도 한 번만)
+  useEffect(() => {
+    if (pendingQuestionRef.current === null) pendingQuestionRef.current = takeQuestion();
+  }, []);
+
+  // 답할 비서가 정해지면 그 비서로 보낸다. 쓸 비서가 없으면 질문을 입력창에 남겨 비서를 고르게 한다(적은 글을 버리지 않음)
+  useEffect(() => {
+    if (!defaultReady) return;
+    const question = pendingQuestionRef.current;
+    if (!question) return;
+    pendingQuestionRef.current = null;
+    if (!defaultAgent) {
+      setQuickInput(question);
+      return;
+    }
+    setSelectedAgent(defaultAgent);
+    lastAgentRef.current = defaultAgent;
+    conversationIdRef.current = null;
+    setConversationId(null);
+    setInitialMessage(question);
+    setViewMode('chat');
+  }, [defaultReady, defaultAgent]);
 
   // 업무 틀 사이드바의 '+ 새 대화' — 이미 /chat이면 주소가 그대로라 알림으로 첫 화면에 돌아간다
   useEffect(() => {
@@ -341,7 +371,7 @@ function WelcomeView({
             value={quickInput}
             onChange={e => onQuickInputChange(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 onQuickSend();
               }

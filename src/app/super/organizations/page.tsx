@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ORG_TYPES } from '@/lib/org-types';
 import { kstDay } from '@/lib/kst-time';
+import { isImeComposing } from '@/lib/ime';
 
 const PLAN_PRESETS: Record<string, { maxUsers: number; maxAgents: number; maxTokens: number; price: number }> = {
   trial:      { maxUsers: 5,   maxAgents: 3,   maxTokens: 500000,   price: 0       },
@@ -141,7 +142,7 @@ export default function OrganizationsPage() {
             value={search} onChange={e => setSearch(e.target.value)}
             placeholder="기관명 검색..."
             className="w-full pl-10 pr-4 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#7C3AED]"
-            onKeyDown={e => e.key === 'Enter' && fetchOrgs(1)}
+            onKeyDown={e => e.key === 'Enter' && !isImeComposing(e) && fetchOrgs(1)}
           />
         </div>
         <select value={filterPlan} onChange={e => setFilterPlan(e.target.value)}

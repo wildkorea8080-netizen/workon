@@ -7,6 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { kstDay } from '@/lib/kst-time';
+import { isImeComposing } from '@/lib/ime';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -386,7 +387,7 @@ function UsersTab({ orgId }: { orgId: string }) {
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="이름 또는 이메일 검색..."
           className="flex-1 px-4 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#7C3AED]"
-          onKeyDown={e => e.key === 'Enter' && fetch_()} />
+          onKeyDown={e => e.key === 'Enter' && !isImeComposing(e) && fetch_()} />
         <button onClick={fetch_} className="px-5 py-2.5 bg-[#7C3AED] text-white text-sm font-semibold rounded-xl hover:bg-[#6D28D9] transition-colors">검색</button>
       </div>
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">

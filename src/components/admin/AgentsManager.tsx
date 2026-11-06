@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Agent } from '@/lib/db';
 import AgentEditorModal from '@/components/agents/AgentEditorModal';
 import { TIER_LABELS, connectorIdsOf } from '@/lib/agent-form';
+import { isImeComposing } from '@/lib/ime';
 
 type Tab = 'official' | 'pending' | 'rejected';
 
@@ -707,7 +708,7 @@ export default function AgentsManager() {
                   type="text"
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCategory(); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); handleAddCategory(); } }}
                   placeholder="새 카테고리 (예: 인사·복무)"
                   maxLength={30}
                   className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"

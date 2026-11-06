@@ -26,6 +26,7 @@ import { connectorShortLabel } from '@/lib/connector-labels';
 import { connectorIdsOf } from '@/lib/agent-form';
 import { acceptsChatImages, acceptsChatFiles } from '@/lib/capabilities/settings';
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_SEND } from '@/lib/attachments/limits';
+import { isImeComposing } from '@/lib/ime';
 
 interface ToolLink {
   title: string;
@@ -556,7 +557,7 @@ export default function ChatInterface({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) {
       e.preventDefault();
       handleSendMessage();
     }
