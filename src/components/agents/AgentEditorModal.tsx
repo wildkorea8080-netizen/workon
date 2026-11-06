@@ -15,10 +15,11 @@ import {
 } from '@/lib/agent-form';
 import { requestJson } from '@/lib/request-json';
 import TemplatesPanel from './TemplatesPanel';
+import DocumentsPanel from './DocumentsPanel';
 import HistoryPanel from './HistoryPanel';
 
 type ModelOption = { id: string; label: string; note: string };
-type Tab = 'settings' | 'templates' | 'history';
+type Tab = 'settings' | 'documents' | 'templates' | 'history';
 
 const input =
   'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20';
@@ -225,7 +226,7 @@ export default function AgentEditorModal({
             {(
               [
                 ['settings', '설정'],
-                ...(isLink ? [] : [['templates', '양식']]),
+                ...(isLink ? [] : [['documents', '문서'], ['templates', '양식']]),
                 ['history', '변경 기록'],
               ] as [Tab, string][]
             ).map(([key, text]) => (
@@ -259,6 +260,9 @@ export default function AgentEditorModal({
 
           {!agent || !value ? (
             error ? null : <p className="text-sm text-slate-400">불러오는 중...</p>
+          ) : tab === 'documents' ? (
+            // 판을 남기지 않는다(문서는 되돌리기 대상이 아님) — 켜짐 여부는 저장된 판 기준
+            <DocumentsPanel agentId={agent.id} docSearchOn={Boolean(agent.capabilities && 'doc_search' in agent.capabilities)} />
           ) : tab === 'templates' ? (
             <TemplatesPanel agentId={agent.id} version={agent.version} onChanged={refreshAgent} />
           ) : tab === 'history' ? (

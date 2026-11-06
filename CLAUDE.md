@@ -367,7 +367,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   화면(`DocumentsManager`)은 앞 응답을 받은 뒤에 다음 목록을 예약하고(`setTimeout` 사슬 — `setInterval`이면 느린 응답이 겹쳐 쌓인다), 늦게 온 옛 응답은 버린다(요청 순번 — '다시 시도'가 덮이지 않게)
   **나만의 비서·부서 비서의 문서는 부서 공개(`department`)로 저장돼 관리자의 문서 목록에 안 나올 수 있다** — 웹훅이 걸려 있으면 목록 없이도 결과가 써진다.
   웹훅이 없거나 알림을 놓치면 다음에 누가 목록을 열 때까지 `reading`이다(남은 공백). 올린 화면의 `startReading`은 문서마다 읽기 요청을 **한꺼번에**(각각 `keepalive`) 보낸다 —
-  차례로 보내면 화면을 떠날 때 뒤 문서의 요청이 아예 나가지 않는다. 주인이 자기 문서의 읽기 상태를 보는 화면은 후속 작업이다
+  차례로 보내면 화면을 떠날 때 뒤 문서의 요청이 아예 나가지 않는다. 주인은 비서 편집 창의 **'문서' 탭**(2026-11-06, `components/agents/DocumentsPanel.tsx` — `GET /api/documents?agent_id=`, 보이는 범위는 그대로 건 뒤 좁힘)에서 그 비서 문서의 읽기 상태를 보고 다시 시도(읽기 라우트·`canEditAgent`)·지우기(삭제 라우트·`canDeleteAgent`)·더 올리기를 한다(읽는 중일 때만 5초마다 다시 부름, 멈춘 행은 한 번만 다시 걺, 문서 찾기가 꺼졌으면 안내)
 - 새 문서의 `summary`는 NULL, `metadata`는 `{}`, `embedding`은 NULL이다 — 요약·색인은 NODA가 한다. 직접 올리기 상한·형식·개수·위험한 이름 검사는 `document-upload.ts`(발급·확인 두 곳)가 하고
   크기·개수 상수는 `file-types.ts` 한 곳에만 둔다. 예전 `/api/upload`는 지웠다(그 경로의 스캔 판독(Anthropic)과 `usage_logs.action='document_ocr'` 기록은 함께 사라졌다 — OCR은 NODA가 한다)
 - **삭제 순서: NODA → DB 행 → 저장소 원본.** NODA 삭제가 실패하면 행을 `deleting`으로 남기고 `문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.`(502)를 돌려준다 —

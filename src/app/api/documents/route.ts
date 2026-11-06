@@ -14,9 +14,11 @@ import { replayNodaEvents } from '@/lib/noda-events';
 import { logSystem } from '@/lib/logger';
 import type { NodaStatus } from '@/lib/db';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const NODA_DELETE_FAILED_MESSAGE = '문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.';
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
@@ -34,6 +36,12 @@ export async function GET(_request: NextRequest) {
       );
     }
 
+    // `?agent_id=`면 그 비서의 문서만(비서 편집 창의 '문서' 탭, 2026-11-06) — 보이는 범위(visibilityFilter)는 그대로 건다
+    const agentParam = request.nextUrl.searchParams.get('agent_id');
+    if (agentParam !== null && !UUID_RE.test(agentParam)) {
+      return NextResponse.json({ ok: false, error: { message: '비서 id가 올바르지 않습니다.' } }, { status: 400 });
+    }
+
     // 놓친 웹훅을 먼저 받아 둔다 — 1분에 한 번만 돌고 짧게(3초) 끝나며 던지지 않는다(noda-events.ts)
     await replayNodaEvents();
 
@@ -42,17 +50,18 @@ export async function GET(_request: NextRequest) {
     const visibleFilter = visibilityFilter(scope);
 
     // 문서가 1,000개를 넘는 기관에서도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)
-    const { data, error } = await pagedRows<any>((a, b, w) => supabaseAdmin
-      .from('documents')
-      .select(
-        'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
-          'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from, tags',
-        w ? { count: 'exact' } : undefined
-      )
-      .or(visibleFilter)
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(a, b));
+    const { data, error } = await pagedRows<any>((a, b, w) => {
+      let query = supabaseAdmin
+        .from('documents')
+        .select(
+          'id, department_id, agent_id, uploaded_by, file_name, file_type, title, summary, visibility, created_at, updated_at, ' +
+            'noda_status, noda_reason, noda_filename, noda_read_started_at, noda_last_attempt_at, replaces_id, retired_at, effective_from, tags',
+          w ? { count: 'exact' } : undefined
+        )
+        .or(visibleFilter);
+      if (agentParam) query = query.eq('agent_id', agentParam.toLowerCase());
+      return query.order('created_at', { ascending: false }).order('id').range(a, b);
+    });
 
     if (error) {
       return NextResponse.json(
