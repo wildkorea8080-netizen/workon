@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useSession } from 'next-auth/react';
 import { DEFAULT_AI_NOTICE } from '@/lib/branding';
+import { readBrandingSnapshot, writeBrandingSnapshot } from '@/lib/branding-snapshot';
 
 /**
  * 기관 브랜딩 조회 (0020).
@@ -30,6 +32,8 @@ const FALLBACK: Branding = {
 };
 
 let cached: Branding | null = null;
+// 서버가 실제로 답한 값인가(실패해 기본값으로 채운 것은 기억하지 않는다)
+let cachedReal = false;
 let inflight: Promise<Branding> | null = null;
 
 function load(slug?: string): Promise<Branding> {
@@ -42,6 +46,7 @@ function load(slug?: string): Promise<Branding> {
     .then((r) => {
       const data: Branding = r.ok ? { ...FALLBACK, ...r.data } : FALLBACK;
       cached = data;
+      cachedReal = Boolean(r.ok);
       return data;
     })
     .catch(() => FALLBACK)
@@ -55,20 +60,33 @@ function load(slug?: string): Promise<Branding> {
 /** 로고를 바꾼 뒤 다시 받아오게 한다 */
 export function resetBrandingCache() {
   cached = null;
+  cachedReal = false;
 }
 
 export function useBranding(slug?: string): Branding {
-  const [branding, setBranding] = useState<Branding>(cached ?? FALLBACK);
+  const [branding, setBranding] = useState<Branding | null>(cached);
+  const [real, setReal] = useState(cachedReal);
+  // 로그인한 화면은 이 사람이 마지막으로 받은 브랜딩을 먼저 보인다(branding-snapshot — 새로 열 때 기본값이 잠깐 뜨지 않게).
+  // 세션은 서버 렌더링·첫 그림에서 'loading'이라 그때는 기억을 읽지 않는다(그림이 어긋나지 않음). 로그인 전 기관 화면(slug)은 기억하지 않는다
+  const { data: session } = useSession();
+  const userId = slug ? null : session?.user?.id ?? null;
+  const remembered = useMemo(() => (userId && !branding ? readBrandingSnapshot(userId) : null), [userId, branding]);
 
   useEffect(() => {
     let alive = true;
     load(slug).then((data) => {
-      if (alive) setBranding(data);
+      if (!alive) return;
+      setBranding(data);
+      setReal(cachedReal);
     });
     return () => {
       alive = false;
     };
   }, [slug]);
 
-  return branding;
+  useEffect(() => {
+    if (userId && branding && real) writeBrandingSnapshot(userId, branding);
+  }, [userId, branding, real]);
+
+  return branding ?? remembered ?? FALLBACK;
 }
