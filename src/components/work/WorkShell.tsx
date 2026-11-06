@@ -113,6 +113,8 @@ export default function WorkShell({ children }: { children: ReactNode }) {
               <WorkspaceIcon name="panel" />
             </button>
           </div>
+          {/* 가운데(새 업무·업무 메뉴·최근 대화)만 내린다 — 창이 낮아도(작은 노트북·화면 확대) 위 로고·접기와 아래 사용자 메뉴·로그아웃이 잘리지 않게 */}
+          <div className="workspace-sidebar-middle -mx-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-1">
           <Link
             href="/apps"
             aria-label={collapsed ? '새 업무 시작' : undefined}
@@ -139,6 +141,7 @@ export default function WorkShell({ children }: { children: ReactNode }) {
           </nav>
           {/* 접으면 최근 대화는 숨긴다 — 'AI 대화' 아이콘으로 대화 화면에 간다(작은 화면의 '지난 대화' 펼치기는 그대로) */}
           {!collapsed && <Suspense fallback={null}><RecentConversations /></Suspense>}
+          </div>
           {/* 아래 — 내 사용현황·관리자 포털·사용자 메뉴(위쪽 막대에 있던 것) */}
           <div className="mt-auto flex flex-shrink-0 flex-col gap-0.5 border-t border-[#E9EBF2] pt-3">
             {FOOTER.filter((f) => !f.admin || isAdmin).map((f) => (

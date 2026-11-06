@@ -137,3 +137,22 @@ describe('위쪽 막대 없이 사이드바 하나(2026-11-06 오후)', () => {
     expect(menu).toMatch(/isAdmin && <Link role="menuitem" href="\/admin"/);
   });
 });
+
+describe('낮은 창에서도 사이드바 아래가 남는다(2026-11-06)', () => {
+  it('가운데(새 업무·업무 메뉴·최근 대화)만 내리고 위·아래는 고정', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    const middle = shell.indexOf('workspace-sidebar-middle');
+    expect(shell).toContain('className="workspace-sidebar-middle -mx-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-1"');
+    // 로고·접기는 가운데 앞, 새 업무·메뉴·최근 대화는 가운데 안, 사용자 메뉴는 가운데 뒤
+    expect(shell.indexOf('workspace-brand')).toBeLessThan(middle);
+    expect(shell.indexOf('workspace-new')).toBeGreaterThan(middle);
+    expect(shell.indexOf('<RecentConversations />')).toBeGreaterThan(middle);
+    expect(shell.indexOf('<UserMenu up')).toBeGreaterThan(shell.indexOf('<RecentConversations />'));
+    // 사이드바 바깥 틀에는 overflow를 걸지 않는다 — 접은 사이드바의 사용자 메뉴가 오른쪽으로 펼쳐져야 한다
+    expect(shell).not.toMatch(/workspace-sidebar hidden md:flex[^"`]*overflow/);
+  });
+
+  it('최근 대화는 낮은 창에서도 최소 높이를 지킨다(가운데가 내려감)', () => {
+    expect(read('src/components/work/RecentConversations.tsx')).toContain('className="flex min-h-[12rem] flex-1 flex-col border-t');
+  });
+});
