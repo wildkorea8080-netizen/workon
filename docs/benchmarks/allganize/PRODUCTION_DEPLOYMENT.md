@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-06(밤): 기관 테마 색(0067)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 Enter
+
+- 2026-11-06 21:13 KST 배포 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`(커밋 `04b83f1`, `main` fast-forward — GitHub 연동). 사용자 선택("0067 db 적용해줘" → "운영반영"). 되돌릴 때는 직전 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`(4eadd5d)로 promote한다 — 0067 칸은 옛 코드가 읽지 않아 그대로 둬도 된다.
+- **배포 전**: 운영 DB 0067 적용(`npm run db:migrate -- 0067`, 읽기 전용 확인: `theme_color text` NULL 허용·CHECK `#rrggbb` 소문자·적용 기록, 기관 2곳 모두 색 없음). 가지 Preview(`04b83f1`, `workon-kkf9hxlyq`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,882개·tsc 0).
+- 들어간 커밋: `8fb6697`(직전 배포 기록), `4570e2b` 기관 테마 색(관리자 '기관 정보'에서 8색·직접 고르기, 흰 글 대비 4.5:1 미만 거절, 업무 틀 안 화면의 청록 197곳을 Tailwind `ws-*` 색으로), `8e05f43` 넓은 화면은 위쪽 막대 없이(로고는 사이드바 위, 사용자 메뉴는 아래), `4a4f116` 업무 홈 '바로 묻기'(질문은 이 탭의 sessionStorage로 `/chat`에 넘김) + 한글 조합 중 Enter 9곳, `6ef81f3` 마지막 브랜딩을 사람마다 기억, `ac7aa90` 낮은 창에서 사이드바 아래가 잘리지 않게, `77bd480` 기관 전용 로그인도 테마 색(서버가 먼저 읽음), `df07f67` 브랜딩 캐시를 사람·경로별로(공용 로그인 뒤 기본값이 남던 결함), `04b83f1` 0067 적용 기록.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/chat`·`/`·`/signin/{없는 경로}` 200, `POST /api/chat` 401, `GET /api/admin/organization` 403, `GET /api/branding`이 `themeColor: null`을 싣고 옴(없는 경로도 같은 꼴), `/chat` 묶음에 `workon:chat-handoff`·`workon:branding`, CSS에 `--ws-accent:8 127 140`.
+- **확인하지 못한 것**(사용자 몫): 로그인한 화면 — 사이드바 위 로고·아래 사용자 메뉴(로그아웃)·접은 모양, 업무 홈 '바로 묻기' → AI 대화에서 답, 한글 입력 뒤 Enter로 보낼 때 마지막 글자가 남지 않는지, 관리자 '기관 정보'에서 테마 색 저장 → 업무 화면·기관 전용 로그인 색, 기본 청록 화면이 예전과 같은지(가까운 청록 몇 가지를 하나로 합침).
+
 ## 2026-11-06(오후): 사이드바 접기
 
 - 2026-11-06 15:18 KST 배포 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`(커밋 `4eadd5d`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8po4buxTsHomUkTwEsa95sFiWZQv`(04f6b70)로 promote한다. 마이그레이션 없음.
