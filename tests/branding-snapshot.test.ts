@@ -48,10 +48,31 @@ describe('브랜딩 기억', () => {
 
   it('useBranding — 서버가 실제로 답한 값만 기억, 기억은 로그인한 사람·응답 전에만, 로그인 전 기관 화면은 안 씀', () => {
     const hook = read('src/lib/use-branding.ts');
-    expect(hook).toContain('cachedReal = Boolean(r.ok);');
-    expect(hook).toContain('if (userId && branding && real) writeBrandingSnapshot(userId, branding);');
-    expect(hook).toContain('const userId = slug ? null : session?.user?.id ?? null;');
-    expect(hook).toContain('userId && !branding ? readBrandingSnapshot(userId) : null');
-    expect(hook).toContain('return branding ?? remembered ?? FALLBACK;');
+    expect(hook).toContain("r.ok ? { data: { ...FALLBACK, ...r.data }, real: true } : { data: FALLBACK, real: false }");
+    expect(hook).toContain('if (snapshotUser && current?.real) writeBrandingSnapshot(snapshotUser, current.data);');
+    expect(hook).toContain("const snapshotUser = !slug && status === 'authenticated' ? userId : null;");
+    expect(hook).toContain('snapshotUser && !current ? readBrandingSnapshot(snapshotUser) : null');
+    expect(hook).toContain('return current?.data ?? remembered ?? FALLBACK;');
+  });
+});
+
+describe('브랜딩 받기 열쇠 — 누구의·어느 경로의 값인지(2026-11-06)', () => {
+  it('기관 경로·로그인한 사람·로그인 전을 가르고, 세션 확인 중에는 받지 않는다', async () => {
+    const { brandingKey } = await import('@/lib/use-branding');
+    expect(brandingKey('kc', 'loading', null)).toBe('slug:kc');
+    expect(brandingKey('kc', 'authenticated', 'u1')).toBe('slug:kc');
+    expect(brandingKey(undefined, 'loading', null)).toBeNull();
+    expect(brandingKey(undefined, 'unauthenticated', null)).toBe('anon');
+    expect(brandingKey(undefined, 'authenticated', 'u1')).toBe('user:u1');
+    expect(brandingKey(undefined, 'authenticated', 'u2')).toBe('user:u2');
+    // 세션은 있는데 id가 없으면 로그인 전과 같은 열쇠(사람의 기억에 쓰지 않음)
+    expect(brandingKey(undefined, 'authenticated', null)).toBe('anon');
+  });
+
+  it('한 벌만 담던 캐시가 돌아오지 않는다 — 열쇠별로 담고 열쇠가 바뀌면 예전 값을 안 씀', () => {
+    const hook = read('src/lib/use-branding.ts');
+    expect(hook).toContain('const cache = new Map<string, Entry>();');
+    expect(hook).not.toMatch(/^let cached/m);
+    expect(hook).toContain('const current = entry && entry.key === key ? entry.value : key ? cache.get(key) ?? null : null;');
   });
 });
