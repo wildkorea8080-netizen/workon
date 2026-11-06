@@ -424,6 +424,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 > `tests/legacy-removed.test.ts`가 파일 부재와 import·환경 변수의 재등장을 막는다. 남긴 것: DB의 `documents.embedding` 칸과 `search_agent_chunks`·`search_document_chunks` RPC(값만 0032가 비운다),
 > `usage_logs.action='document_ocr'` 옛 행의 화면 표기. 슈퍼관리자 화면의 'Voyage 키' 칸은 2026-11-06에 뺐다 — 확인 단추가 보관한 키를 쓰지 않는 업체(api.voyageai.com)로 보냈다.
 > 이제 키 저장·확인·표시는 Anthropic만(`src/lib/api-key-providers.ts`, 저장 두 곳이 종류를 검사, `tests/api-key-providers.test.ts`가 Voyage 주소·칸의 재등장을 막음). 이미 저장된 Voyage 키 행(`api_keys.provider='voyage'`)은 지우지 않았다 — 화면에서만 안 보인다.
+> **이 화면에 저장한 키(시스템·기관별)는 모델 호출에 쓰지 않는다** — 모든 호출은 서버 환경 변수 `ANTHROPIC_API_KEY` 하나다(`llm/anthropic.ts`). 2026-11-06에 화면을 사실대로 고쳤다(사용자 결정): 옛 'OFF: 기관 자체 키 사용'·'자체 키가 없는 기관이 공용으로 사용'·'시스템 키 사용 기관' 문구를 '보관만 — 호출은 서버 환경 변수 키'(`STORED_KEYS_NOT_USED_NOTICE`)로. 기관별 키로 호출하는 기능은 없다 — 만들면 `tests/api-key-providers.test.ts`(키를 읽는 곳은 슈퍼관리자 키 라우트뿐)와 이 문구를 함께 고친다.
 > `hwp.ts`·`pptx.ts`는 채팅 첨부와 양식 채우기가 쓰므로 남았다. 첨부의 스캔 PDF는 NODA `/parse`로 읽는다(아래 '파일 첨부').
 
 **첨부 발표자료(PPTX)는 슬라이드 경계를 남깁니다** (`src/lib/pptx.ts`, 채팅 첨부가 읽음).

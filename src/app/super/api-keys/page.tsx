@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { API_KEY_PROVIDERS } from '@/lib/api-key-providers';
+import { API_KEY_PROVIDERS, STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
 
 type Tab = 'system' | 'organizations';
 const fmtDate = (s?: string | null) => s ? new Date(s).toLocaleDateString('ko-KR') : '—';
@@ -116,8 +116,8 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
       <div className="flex items-start gap-3 p-4 bg-blue-950/30 border border-blue-700/30 rounded-2xl">
         <span className="text-xl flex-shrink-0">ℹ️</span>
         <div className="text-sm text-slate-300">
-          <p className="font-semibold text-white mb-1">시스템 기본 키 안내</p>
-          <p>자체 API 키를 설정하지 않은 기관에서 공용으로 사용됩니다.<br/>발생 비용은 운영사(WORKON)에서 부담합니다.</p>
+          <p className="font-semibold text-white mb-1">저장한 키 안내</p>
+          <p>{STORED_KEYS_NOT_USED_NOTICE}</p>
         </div>
       </div>
 
@@ -205,12 +205,13 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 
       {/* 이번달 사용 현황 */}
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-6">
-        <h3 className="text-sm font-bold text-white mb-4">이번달 시스템 키 사용 현황</h3>
+        {/* 서버가 세는 것: 활성 기관 수, 이번 달 기관 칸이 빈 사용 기록의 토큰 — '시스템 키 사용량'이 아니다(모든 호출이 서버 키) */}
+        <h3 className="text-sm font-bold text-white mb-4">이번달 기관이 비어 있는 사용 기록</h3>
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: '시스템 키 사용 기관',   value: `${stats.systemKeyOrgCount ?? 0}개` },
-            { label: '총 사용 토큰',          value: fmt(stats.totalTokensThisMonth ?? 0) },
-            { label: '예상 비용 (Claude)', value: `$${stats.estimatedCostUsd ?? 0}` },
+            { label: '활성 기관',                 value: `${stats.systemKeyOrgCount ?? 0}개` },
+            { label: '기관이 비어 있는 기록의 토큰', value: fmt(stats.totalTokensThisMonth ?? 0) },
+            { label: '그 예상 비용 (Claude)',      value: `$${stats.estimatedCostUsd ?? 0}` },
           ].map(s => (
             <div key={s.label} className="p-4 bg-[#0F172A] rounded-xl">
               <p className="text-lg font-bold text-white">{s.value}</p>
@@ -240,7 +241,7 @@ function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-slate-500">
-          ✅ 자체 키 &nbsp; 🔄 시스템 키 사용 중 &nbsp; ❌ 미설정
+          ✅ 기관 키 보관 중 &nbsp; 🔄 보관한 키 없음 — 어느 쪽이든 호출은 서버 환경 변수 키로 갑니다
         </p>
         <p className="text-xs text-slate-500">총 {rows.length}개 기관</p>
       </div>
@@ -249,7 +250,7 @@ function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
         <table className="w-full text-sm">
           <thead className="border-b border-slate-700/50">
             <tr>
-              {['기관명', 'Anthropic키', '자체 키', '마지막 업데이트', '이번달 호출', '관리'].map(h => (
+              {['기관명', 'Anthropic키', '키 보관', '마지막 업데이트', '이번달 호출', '관리'].map(h => (
                 <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-500">{h}</th>
               ))}
             </tr>

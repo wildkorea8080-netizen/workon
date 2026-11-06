@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { kstDay } from '@/lib/kst-time';
 import { isImeComposing } from '@/lib/ime';
+import { STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -548,7 +549,7 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ useSystemDefault: true }),
       });
-      onToast('시스템 기본 키로 설정됐습니다.');
+      onToast('이 기관의 키를 더 보관하지 않습니다.');
     }
   };
 
@@ -584,8 +585,9 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-white">시스템 기본 키 사용</p>
-            <p className="text-xs text-slate-500 mt-0.5">ON: 시스템 환경변수 키 사용 · OFF: 기관 자체 키 사용</p>
+            <p className="text-sm font-semibold text-white">기관 키 보관 안 함</p>
+            <p className="text-xs text-slate-500 mt-0.5">ON: 이 기관의 키를 보관하지 않음 · OFF: 이 기관의 키를 보관함</p>
+            <p className="text-xs text-amber-400/80 mt-1">{STORED_KEYS_NOT_USED_NOTICE}</p>
           </div>
           <button onClick={() => handleToggleSystem(!useSystem)}
             className={`w-12 h-6 rounded-full transition-colors relative ${useSystem ? 'bg-[#7C3AED]' : 'bg-slate-700'}`}>
