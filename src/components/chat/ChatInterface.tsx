@@ -100,6 +100,8 @@ export interface ChatInterfaceProps {
   conversationId: string | null;
   onConversationCreated: (id: string) => void;
   onChangeAgent: () => void;
+  /** 첫 화면 입력창에 적은 질문 — 대화를 열자마자 한 번 보낸다(2026-11-06, 전에는 적은 글이 버려졌다) */
+  initialMessage?: string | null;
 }
 
 type ModelOption = {
@@ -115,6 +117,7 @@ export default function ChatInterface({
   conversationId,
   onConversationCreated,
   onChangeAgent,
+  initialMessage = null,
 }: ChatInterfaceProps) {
   const branding = useBranding();
   // 기관이 허용한 모델(0021). 비서의 모델을 보여주는 데만 쓴다.
@@ -558,6 +561,23 @@ export default function ChatInterface({
       handleSendMessage();
     }
   };
+
+  // 첫 화면에서 적은 질문은 이 화면이 열리면 한 번만 보낸다 — 입력창에 넣은 뒤 그 글이 들어간 다음 그림에서 보낸다
+  const initialSentRef = useRef(false);
+  const [autoSend, setAutoSend] = useState(false);
+  useEffect(() => {
+    if (initialSentRef.current || !initialMessage?.trim() || conversationId) return;
+    initialSentRef.current = true;
+    setInputMessage(initialMessage.trim());
+    setAutoSend(true);
+  }, [initialMessage, conversationId]);
+  useEffect(() => {
+    if (!autoSend || !inputMessage.trim()) return;
+    setAutoSend(false);
+    void handleSendMessage();
+    // handleSendMessage는 그림마다 새로 만들어진다 — 입력이 들어간 그 그림의 것을 한 번만 부른다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, inputMessage]);
 
   const canAttachAnything = canAttachImages || canAttachFiles;
   const attachLabel = canAttachFiles ? (canAttachImages ? '파일·이미지 첨부' : '파일 첨부') : '이미지 첨부';

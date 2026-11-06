@@ -14,6 +14,7 @@ import NoticesBanner from '@/components/NoticesBanner';
 import { chatLaunchTarget, loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 import WorkShell from '@/components/work/WorkShell';
 import { announceConversationsChanged, CHAT_NEW_EVENT, conversationHref } from '@/lib/chat-events';
+import { pickDefaultAgent } from '@/lib/chat-default-agent';
 
 type ViewMode = 'welcome' | 'chat';
 
@@ -52,6 +53,9 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   const [quickInput, setQuickInput] = useState('');
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  // 비서를 고르지 않고 첫 화면에서 바로 물을 때 답할 비서(마지막으로 쓴 비서 → 첫 공식 비서), 그리고 그 질문
+  const [defaultAgent, setDefaultAgent] = useState<Agent | null>(null);
+  const [initialMessage, setInitialMessage] = useState<string | null>(null);
 
   const lastAgentRef = useRef<Agent | null>(null);
   // 지금 열린 대화 — 주소(`?conv=`)가 같은 대화를 다시 가리켜도(만든 뒤 주소를 바꿀 때·사이드바에서 같은 대화를 누를 때) 다시 불러오지 않는다
@@ -63,6 +67,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
     setSelectedAgent(agent);
     lastAgentRef.current = agent;
     conversationIdRef.current = null;
+    setInitialMessage(null);
     setConversationId(null);
     setViewMode('chat');
   }, [router]);
@@ -85,6 +90,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
       }
 
       conversationIdRef.current = id;
+      setInitialMessage(null);
       setConversationId(id);
       setViewMode('chat');
     } catch {
@@ -98,10 +104,12 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
     setConversationId(null);
     setViewMode('welcome');
     setQuickInput('');
+    setInitialMessage(null);
   }, []);
 
   const handleConversationCreated = useCallback((id: string) => {
     conversationIdRef.current = id;
+    setInitialMessage(null);
     setConversationId(id);
     setSidebarRefresh(n => n + 1);
     if (workspace) {
@@ -118,15 +126,34 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
     setViewMode('welcome');
   }, []);
 
+  // 첫 화면에서 적은 질문을 그 비서의 대화로 보낸다(대화 화면이 열리며 한 번 보냄) — 예전에는 화면만 바뀌고 적은 글이 버려졌다
   const handleQuickSend = useCallback(() => {
-    const agent = selectedAgent || lastAgentRef.current;
-    if (!agent || !quickInput.trim()) return;
+    const agent = selectedAgent || lastAgentRef.current || defaultAgent;
+    const text = quickInput.trim();
+    if (!agent || !text) return;
     setSelectedAgent(agent);
+    lastAgentRef.current = agent;
+    conversationIdRef.current = null;
     setConversationId(null);
+    setInitialMessage(text);
     setViewMode('chat');
-    // QuickInput은 chat으로 전환 후 자동 전송 불가능하므로 clear
     setQuickInput('');
-  }, [selectedAgent, quickInput]);
+  }, [selectedAgent, quickInput, defaultAgent]);
+
+  // 답할 비서 고르기 — 화면이 받은 목록(서버가 권한으로 거른 것)과 마지막 대화의 비서로. 실패하면 예전처럼 비서를 먼저 고르게 한다
+  const signedIn = Boolean(session?.user?.departmentId);
+  useEffect(() => {
+    if (!signedIn) return;
+    let alive = true;
+    const read = (url: string) => fetch(url).then((r) => r.json()).then((b) => (b?.ok && Array.isArray(b.data) ? b.data : [])).catch(() => []);
+    Promise.all([read('/api/agents'), read('/api/agents?personal=true'), read('/api/conversations?limit=1')]).then(([shared, personal, recent]) => {
+      if (!alive) return;
+      const last = recent[0]?.agent;
+      const lastId = (Array.isArray(last) ? last[0]?.id : last?.id) ?? null;
+      setDefaultAgent(pickDefaultAgent([...shared, ...personal] as Agent[], lastId));
+    });
+    return () => { alive = false; };
+  }, [signedIn]);
 
   // 업무 틀 사이드바의 '+ 새 대화' — 이미 /chat이면 주소가 그대로라 알림으로 첫 화면에 돌아간다
   useEffect(() => {
@@ -207,6 +234,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
             conversationId={conversationId}
             onConversationCreated={handleConversationCreated}
             onChangeAgent={handleChangeAgent}
+            initialMessage={initialMessage}
           />
         ) : (
           <WelcomeView
@@ -215,7 +243,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
             onQuickInputChange={setQuickInput}
             onQuickSend={handleQuickSend}
             onAgentSelect={handleAgentSelect}
-            hasLastAgent={!!lastAgentRef.current}
+            answeringAgentName={(lastAgentRef.current ?? defaultAgent)?.name ?? null}
           />
         )}
       </section>
@@ -276,7 +304,8 @@ interface WelcomeViewProps {
   onQuickInputChange: (v: string) => void;
   onQuickSend: () => void;
   onAgentSelect: (agent: Agent) => void;
-  hasLastAgent: boolean;
+  /** 바로 물으면 답할 비서 이름 — 없으면 비서를 먼저 골라야 한다 */
+  answeringAgentName: string | null;
 }
 
 function WelcomeView({
@@ -285,8 +314,9 @@ function WelcomeView({
   onQuickInputChange,
   onQuickSend,
   onAgentSelect,
-  hasLastAgent,
+  answeringAgentName,
 }: WelcomeViewProps) {
+  const hasLastAgent = Boolean(answeringAgentName);
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-5 pb-4 pt-9 md:px-9">
@@ -333,7 +363,12 @@ function WelcomeView({
             </svg>
           </button>
         </div>
-        {!hasLastAgent && (
+        {hasLastAgent ? (
+          // 누가 답하는지 숨기지 않는다 — 비서마다 문서·기능이 다르다
+          <p className="mt-2 text-xs text-slate-500">
+            답할 비서: <span className="font-semibold text-[#087581]">{answeringAgentName}</span> · 다른 비서에게 물으려면 아래에서 고르세요
+          </p>
+        ) : (
           <p className="mt-2 text-xs text-slate-400">아래에서 비서를 먼저 고르면 바로 대화를 시작할 수 있어요.</p>
         )}
       </div>
