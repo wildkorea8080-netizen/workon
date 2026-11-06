@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { kstMonthStart } from '@/lib/kst-time';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,18 +14,23 @@ export async function GET(request: NextRequest) {
   const search  = searchParams.get('search') ?? '';
   const orgId   = searchParams.get('orgId')  ?? '';
   const role    = searchParams.get('role')   ?? 'all';
-  const page    = Math.max(1, parseInt(searchParams.get('page')  ?? '1'));
-  const limit   = Math.min(100, parseInt(searchParams.get('limit') ?? '30'));
+  // 숫자가 아니면 범위 조회가 깨진다 — 쪽 1 이상, 쪽 크기 1~100
+  const rawPage  = parseInt(searchParams.get('page')  ?? '1', 10);
+  const rawLimit = parseInt(searchParams.get('limit') ?? '30', 10);
+  const page    = Number.isFinite(rawPage) ? Math.max(1, rawPage) : 1;
+  const limit   = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 30;
 
   try {
     // 1) 부서 → 기관 맵 구성
-    const { data: depts } = await supabaseAdmin
-      .from('departments')
-      .select('id, name, organization_id');
-
-    const { data: orgs } = await supabaseAdmin
-      .from('organizations')
-      .select('id, name');
+    // 모든 기관의 부서·기관을 쪽마다 끝까지 — 한 번에 읽으면 1,000행에서 조용히 잘려, 뒤 부서의 이름이 '—'가 되고
+    // 기관으로 거를 때 그 기관 부서가 빠져 직원이 목록에서 사라졌다(2026-11-06)
+    const [{ data: depts, error: deptError }, { data: orgs, error: orgError }] = await Promise.all([
+      pagedRows<{ id: string; name: string; organization_id: string }>((a, b, w) => supabaseAdmin
+        .from('departments').select('id, name, organization_id', w ? { count: 'exact' } : undefined).order('id').range(a, b)),
+      pagedRows<{ id: string; name: string }>((a, b, w) => supabaseAdmin
+        .from('organizations').select('id, name', w ? { count: 'exact' } : undefined).order('id').range(a, b)),
+    ]);
+    if (deptError || orgError) throw new Error((deptError ?? orgError)!.message);
 
     const orgMap = Object.fromEntries((orgs ?? []).map((o: { id: string; name: string }) => [o.id, o.name]));
     const deptMap = Object.fromEntries(

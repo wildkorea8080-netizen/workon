@@ -13,8 +13,11 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    // 숫자가 아니거나 너무 크면 범위 조회가 깨지거나 1,000행 상한에 걸린다 — 1~100, 0 이상으로 맞춘다
+    const rawLimit = parseInt(searchParams.get('limit') || '20', 10);
+    const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, rawLimit)) : 20;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, rawOffset) : 0;
 
     // 사용자의 대화 목록 조회
     const { data: conversations, error } = await supabaseAdmin
@@ -33,25 +36,24 @@ export async function GET(request: NextRequest) {
     }
 
     // 각 대화의 첫 번째 사용자 메시지를 미리보기로 추가
-    const conversationIds = (conversations || []).map((c: { id: string }) => c.id);
+    const conversationIds: string[] = (conversations || []).map((c: { id: string }) => c.id);
     let firstMessages: Record<string, string> = {};
 
     if (conversationIds.length > 0) {
-      const { data: msgs } = await supabaseAdmin
+      // 대화마다 첫 사용자 메시지 한 줄만(2026-11-06). 예전에는 모든 대화의 사용자 메시지를 한 번에 읽어,
+      // 1,000행 상한(오류 없이 앞부분만 옴)을 넘으면 뒤 대화의 미리보기가 조용히 빠졌다. 미리보기는 200자
+      const firsts = await Promise.all(conversationIds.map((id) => supabaseAdmin
         .from('messages')
-        .select('conversation_id, content, role')
-        .in('conversation_id', conversationIds)
+        .select('content')
+        .eq('conversation_id', id)
         .eq('role', 'user')
-        .order('created_at', { ascending: true });
-
-      if (msgs) {
-        // conversation_id별로 첫 번째 메시지만 보관
-        for (const msg of msgs) {
-          if (!firstMessages[msg.conversation_id]) {
-            firstMessages[msg.conversation_id] = msg.content;
-          }
-        }
-      }
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()));
+      conversationIds.forEach((id, i) => {
+        const content = (firsts[i].data as { content?: unknown } | null)?.content;
+        if (typeof content === 'string') firstMessages[id] = content.slice(0, 200);
+      });
     }
 
     const enriched = (conversations || []).map((c: any) => ({

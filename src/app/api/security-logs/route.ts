@@ -74,7 +74,8 @@ export async function GET(request: NextRequest) {
     // 전체 개수 조회
     let countQuery = supabaseAdmin
       .from('security_logs')
-      .select('id', { count: 'exact' })
+      // 수만 센다 — 행은 받지 않는다(예전에는 개수를 세려고 최대 1,000행을 함께 받았다)
+      .select('id', { count: 'exact', head: true })
       .eq('department_id', user.department_id);
 
     if (eventType) {
