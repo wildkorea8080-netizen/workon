@@ -34,7 +34,7 @@ export default function AnswerFeedback({ messageId, initial }: { messageId: stri
   }
 
   const base = 'rounded-md border px-2 py-0.5 text-[11px] disabled:opacity-50';
-  const on = 'border-[#003087] bg-[#003087]/5 text-[#003087] font-semibold';
+  const on = 'border-[#087f8c] bg-[#087f8c]/5 text-[#087f8c] font-semibold';
   const off = 'border-slate-200 text-slate-500 hover:text-slate-800';
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5" aria-label="답변 평가">

@@ -55,7 +55,7 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
         {source && (
           <>
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
-              <div className="min-w-0 border-l-4 border-[#003087] pl-3">
+              <div className="min-w-0 border-l-4 border-[#087f8c] pl-3">
                 <div className="text-sm font-bold text-slate-900">답변 근거 문서</div>
                 <div className="text-xs text-slate-500 mt-0.5 truncate" title={title}>
                   [{sourceNumber(source)}] {title}
@@ -64,7 +64,7 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
                   <div className="text-xs text-slate-500 mt-0.5">시행 {source.effectiveFrom}</div>
                 )}
                 {source.scope === 'common' && (
-                  <div className="text-xs text-[#003087] mt-0.5">
+                  <div className="text-xs text-[#087f8c] mt-0.5">
                     공통 기준{typeof source.editionYear === 'number' ? ` · ${source.editionYear}년 판` : ''}
                   </div>
                 )}
@@ -107,7 +107,7 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
                 <button
                   type="button"
                   onClick={() => setViewing(true)}
-                  className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-[#003087]/30 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-[#003087]/5"
+                  className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-[#087f8c]/30 px-3 py-1.5 text-xs font-semibold text-[#087f8c] hover:bg-[#087f8c]/5"
                 >
                   원문에서 보기
                 </button>
@@ -117,7 +117,7 @@ export default function SourcePanel({ source, onClose }: SourcePanelProps) {
                   href={originalHref}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#003087]/30 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-[#003087]/5"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#087f8c]/30 px-3 py-1.5 text-xs font-semibold text-[#087f8c] hover:bg-[#087f8c]/5"
                 >
                   {hasPage ? `원본에서 p.${source.page} 열기` : '원본 열기'}
                 </a>

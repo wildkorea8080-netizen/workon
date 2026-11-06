@@ -50,7 +50,7 @@ export default function ReusableFilePicker({ disabled, onPick }: { disabled: boo
         aria-label="지난 파일 다시 붙이기"
         aria-expanded={open}
         title="최근 90일 안에 대화에 붙였던 파일·비서가 만들어 준 파일을 다시 붙입니다"
-        className="h-8 rounded-lg px-2 text-xs font-medium text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:cursor-not-allowed"
+        className="h-8 rounded-lg px-2 text-xs font-medium text-slate-500 hover:text-[#087f8c] hover:bg-white disabled:text-slate-300 disabled:cursor-not-allowed"
       >
         지난 파일
       </button>

@@ -583,7 +583,7 @@ export default function ChatInterface({
         </div>
         <button
           onClick={onChangeAgent}
-          className="flex-shrink-0 text-xs text-brand-600 hover:text-brand-700 font-semibold px-2.5 py-1 rounded-lg hover:bg-brand-50 transition-colors"
+          className="flex-shrink-0 text-xs text-[#087f8c] hover:text-[#087581] font-semibold px-2.5 py-1 rounded-lg hover:bg-[#e7f5f5] transition-colors"
         >
           다른 비서 선택
         </button>
@@ -592,9 +592,9 @@ export default function ChatInterface({
       {/* 민감정보 안내.
           공공기관은 주민등록번호·연락처가 담긴 공문과 명단을 상시 다룬다.
           하단 AI 고지와 별개로, 무엇을 넣기 **전에** 보여야 뜻이 있다. */}
-      <div className="px-5 pt-3 bg-[#F5F7FA] flex-shrink-0">
-        <div className="flex items-start gap-2 bg-[#003087]/5 border border-[#003087]/10 rounded-xl px-3.5 py-2.5">
-          <svg className="w-4 h-4 text-[#003087] flex-shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="px-5 pt-3 bg-[#F7F8FC] flex-shrink-0">
+        <div className="flex items-start gap-2 bg-[#087f8c]/5 border border-[#087f8c]/10 rounded-xl px-3.5 py-2.5">
+          <svg className="w-4 h-4 text-[#087f8c] flex-shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0l-7.1 12.25A2 2 0 004.99 19z" />
           </svg>
           <p className="text-xs text-slate-600 leading-relaxed">
@@ -606,14 +606,14 @@ export default function ChatInterface({
 
       {/* 메시지 영역 */}
       <div
-        className="flex-1 overflow-y-auto px-5 pt-3 pb-5 space-y-1 bg-[#F5F7FA]"
+        className="flex-1 overflow-y-auto px-5 pt-3 pb-5 space-y-1 bg-[#F7F8FC]"
         onScroll={(e) => {
           followRef.current = isNearBottom(e.currentTarget);
         }}
       >
         {loadingConv ? (
           <div className="flex items-center justify-center h-full">
-            <div className="w-5 h-5 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-[#16818c] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : messages.length === 0 ? (
           // 아이콘과 이름만 띄우면 무엇을 넣어야 하는지 알 수 없다.
@@ -660,7 +660,7 @@ export default function ChatInterface({
                         setInputMessage(prompt);
                         textareaRef.current?.focus();
                       }}
-                      className="text-xs text-slate-600 bg-white border border-slate-200 hover:border-[#003087] hover:text-[#003087] rounded-full px-3 py-1.5 transition-colors"
+                      className="text-xs text-slate-600 bg-white border border-slate-200 hover:border-[#087f8c] hover:text-[#087f8c] rounded-full px-3 py-1.5 transition-colors"
                     >
                       {prompt}
                     </button>
@@ -729,7 +729,7 @@ export default function ChatInterface({
             <button
               type="button"
               onClick={onChangeAgent}
-              className="text-xs font-semibold text-[#003087] border border-[#003087]/20 hover:bg-[#003087]/5 rounded-lg px-2.5 py-1.5 transition-colors"
+              className="text-xs font-semibold text-[#087f8c] border border-[#087f8c]/20 hover:bg-[#087f8c]/5 rounded-lg px-2.5 py-1.5 transition-colors"
             >
               다른 비서와 새 대화
             </button>
@@ -797,7 +797,7 @@ export default function ChatInterface({
           />
         )}
 
-        <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#003087] focus-within:ring-2 focus-within:ring-[#003087]/10 transition-all">
+        <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-[#087f8c] focus-within:ring-2 focus-within:ring-[#087f8c]/10 transition-all">
           {canAttachAnything && (
             <button
               type="button"
@@ -805,7 +805,7 @@ export default function ChatInterface({
               disabled={isLoading || preparingImages}
               aria-label={attachLabel}
               title={attachTitle}
-              className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#003087] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+              className="flex-shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:text-[#087f8c] hover:bg-white disabled:text-slate-300 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-colors"
             >
               {preparingImages ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -839,7 +839,7 @@ export default function ChatInterface({
               preparingImages ||
               fileAttach.busy
             }
-            className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#003087] hover:bg-[#002070] disabled:bg-slate-200 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors"
+            className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#087f8c] hover:bg-[#066775] disabled:bg-slate-200 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors"
           >
             {isLoading ? (
               <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">

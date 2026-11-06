@@ -79,7 +79,7 @@ src/
 │   ├── login/ signin/ signup/ register/  # 인증 페이지
 │   ├── maintenance/      # 점검 모드 안내
 │   ├── page.tsx          # 직원 홈 — 기관 스위치가 켜지면 업무 홈, 아니면 대화(ChatHome)
-│   ├── chat/             # AI 대화(옛 홈 — `/?conv=`는 업무 홈 기관에서 `/chat?conv=`로)
+│   ├── chat/             # AI 대화(옛 홈 — `/?conv=`는 업무 홈 기관에서 `/chat?conv=`로). 2026-11-06부터 업무 틀(`<ChatHome workspace />` → WorkShell) 안에서 업무 화면과 같은 청록·밝은 대화 목록으로 그린다(업무 홈을 끈 기관의 `/`는 틀 없이) — `tests/chat-workspace-design.test.ts`가 옛 남색 재등장을 막음
 │   └── assistants/ tasks/ files/ templates/  # 업무 화면 — 업무 비서·내 작업함·작업실(tasks/[id])·결과물·양식
 ├── components/
 │   ├── admin/   chat/   super/   layout/   work/(업무 화면 — TaskWorkbench·ItemsView·SettlementView·QaView·CollectionView)

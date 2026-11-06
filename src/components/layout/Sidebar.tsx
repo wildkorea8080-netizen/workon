@@ -167,12 +167,12 @@ export default function Sidebar({
   const userInitial = userName.slice(0, 1).toUpperCase();
 
   return (
-    <aside className="w-60 flex-shrink-0 bg-[#1C2B4A] flex flex-col h-full overflow-hidden relative">
+    <aside aria-label="대화 목록" className="w-60 flex-shrink-0 border-r border-[#E9EBF2] bg-white flex flex-col h-full overflow-hidden relative">
       {/* 새 대화 버튼 */}
       <div className="p-3 pt-4">
         <button
           onClick={onNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-2.5 border border-white/30 rounded-xl text-white text-sm font-semibold hover:bg-white/10 transition-colors"
+          className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#087f8c] rounded-xl bg-white text-[#087581] text-sm font-semibold hover:bg-[#e7f5f5] transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -184,7 +184,7 @@ export default function Sidebar({
       {/* 검색 */}
       <div className="px-3 pb-2">
         <div className="relative">
-          <svg className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -192,22 +192,23 @@ export default function Sidebar({
             placeholder="대화 검색..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-white/10 border border-white/10 text-white placeholder-white/30 pl-8 pr-3 py-2 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-white/30"
+            aria-label="대화 검색"
+            className="w-full bg-[#FAFBFD] border border-[#E7E9F1] text-slate-800 placeholder-slate-400 pl-8 pr-3 py-2 rounded-lg text-xs focus:border-[#16818c] focus:outline-none focus:ring-2 focus:ring-[#16818c]/20"
           />
         </div>
       </div>
 
       {/* 대화 목록 */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-200">
         {loading ? (
-          <p className="text-white/30 text-xs text-center py-6">불러오는 중...</p>
+          <p className="text-slate-400 text-xs text-center py-6">불러오는 중...</p>
         ) : filtered.length === 0 ? (
-          <p className="text-white/30 text-xs text-center py-6">대화가 없습니다.</p>
+          <p className="text-slate-400 text-xs text-center py-6">대화가 없습니다.</p>
         ) : (
           GROUP_ORDER.map(group =>
             grouped[group].length > 0 ? (
               <div key={group}>
-                <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-1 mb-1">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest px-1 mb-1">
                   {group}
                 </p>
                 {grouped[group].map(c => (
@@ -234,19 +235,19 @@ export default function Sidebar({
       </div>
 
       {/* 하단 프로필 */}
-      <div className="p-3 border-t border-white/10 flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+      <div className="p-3 border-t border-[#E9EBF2] flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-full bg-[#e7f5f5] flex items-center justify-center text-[#087581] text-xs font-bold flex-shrink-0">
           {userInitial}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-white text-xs font-semibold truncate">{userName}</p>
-          <p className="text-white/40 text-[10px] truncate">{session?.user?.email}</p>
+          <p className="text-slate-800 text-xs font-semibold truncate">{userName}</p>
+          <p className="text-slate-400 text-[10px] truncate">{session?.user?.email}</p>
         </div>
       </div>
 
       {/* 토스트 */}
       {toast && (
-        <div className="absolute bottom-16 left-3 right-3 bg-white text-slate-800 text-xs font-medium px-3 py-2.5 rounded-xl shadow-lg text-center animate-fade-in z-10">
+        <div className="absolute bottom-16 left-3 right-3 bg-[#22283D] text-white text-xs font-medium px-3 py-2.5 rounded-xl shadow-lg text-center animate-fade-in z-10">
           {toast}
         </div>
       )}
@@ -280,7 +281,7 @@ function ConvItem({
     <div
       onClick={!isRenaming ? onSelect : undefined}
       className={`group flex items-start gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors ${
-        selected ? 'bg-white/15' : 'hover:bg-white/8'
+        selected ? 'bg-[#e7f5f5]' : 'hover:bg-slate-50'
       }`}
     >
       <div className={`w-6 h-6 rounded-md ${color} flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5`}>
@@ -299,13 +300,13 @@ function ConvItem({
               if (e.key === 'Escape') onRenameCancel();
             }}
             onClick={e => e.stopPropagation()}
-            className="w-full bg-white/20 text-white text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-white/40"
+            className="w-full bg-white border border-[#9bc9ce] text-slate-800 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-[#16818c]/20"
           />
         ) : (
-          <p className="text-white text-xs truncate leading-tight">
+          <p className={`text-xs truncate leading-tight ${selected ? 'text-[#087581] font-semibold' : 'text-slate-700'}`}>
             {/* 공유 중인 대화를 목록에서 알아볼 수 있어야 한다. 마우스를 올려야
                 아이콘이 보이는 구조라 표시가 없으면 공유 사실을 잊는다. */}
-            {c.is_shared && <span className="text-emerald-300 mr-1" title="공유 중">🔗</span>}
+            {c.is_shared && <span className="text-emerald-600 mr-1" title="공유 중">🔗</span>}
             {c.title}
           </p>
         )}
@@ -317,7 +318,7 @@ function ConvItem({
           {/* 이름 변경 */}
           <button
             onClick={e => onStartRename(c, e)}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 text-white/50 hover:text-white transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
             title="이름 변경"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -329,7 +330,7 @@ function ConvItem({
           {c.is_shared && (
             <button
               onClick={e => onUnshare(c.id, e)}
-              className="w-5 h-5 flex items-center justify-center rounded hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 transition-colors"
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-amber-50 text-amber-500 hover:text-amber-600 transition-colors"
               title="공유 중단"
             >
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -340,8 +341,8 @@ function ConvItem({
           {/* 공유 */}
           <button
             onClick={e => onShare(c.id, e)}
-            className={`w-5 h-5 flex items-center justify-center rounded hover:bg-white/20 transition-colors ${
-              c.is_shared ? 'text-emerald-300 hover:text-emerald-200' : 'text-white/50 hover:text-white'
+            className={`w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100 transition-colors ${
+              c.is_shared ? 'text-emerald-600 hover:text-emerald-700' : 'text-slate-400 hover:text-slate-700'
             }`}
             title={c.is_shared ? '공유 중 — 링크 다시 복사' : '공유 링크 복사'}
           >
@@ -352,7 +353,7 @@ function ConvItem({
           {/* 삭제 */}
           <button
             onClick={e => onDelete(c.id, e)}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-500/30 text-white/50 hover:text-red-300 transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
             title="삭제"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

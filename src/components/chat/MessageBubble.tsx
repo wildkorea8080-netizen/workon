@@ -74,8 +74,8 @@ export default function MessageBubble({
     <div className={`flex gap-3 mb-5 group ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 아바타 */}
       {!isUser && (
-        <div className="w-7 h-7 rounded-lg bg-[#1C2B4A] flex items-center justify-center flex-shrink-0 mt-0.5">
-          <svg className="w-3.5 h-3.5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="w-7 h-7 rounded-lg bg-[#e7f5f5] flex items-center justify-center flex-shrink-0 mt-0.5">
+          <svg className="w-3.5 h-3.5 text-[#087581]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
         </div>
@@ -89,7 +89,7 @@ export default function MessageBubble({
         <div
           className={`px-4 py-3 text-sm leading-relaxed ${
             isUser
-              ? 'bg-[#003087] text-white rounded-2xl rounded-tr-sm shadow-sm'
+              ? 'bg-[#087f8c] text-white rounded-2xl rounded-tr-sm shadow-sm'
               : refusal
               ? 'bg-amber-50 text-amber-900 border border-amber-200 rounded-2xl rounded-tl-sm'
               : error
@@ -135,7 +135,7 @@ export default function MessageBubble({
                   type="button"
                   onClick={onRetry}
                   disabled={refusalDisabled}
-                  className="text-xs font-semibold text-white bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
+                  className="text-xs font-semibold text-white bg-[#087f8c] hover:bg-[#066775] disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
                 >
                   다시 묻기
                 </button>
@@ -143,7 +143,7 @@ export default function MessageBubble({
                   type="button"
                   onClick={onSkipDocuments}
                   disabled={refusalDisabled}
-                  className="text-xs font-semibold text-[#003087] bg-white border border-[#003087]/30 hover:bg-[#003087]/5 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
+                  className="text-xs font-semibold text-[#087f8c] bg-white border border-[#087f8c]/30 hover:bg-[#087f8c]/5 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed rounded-lg px-3 py-1.5 transition-colors"
                 >
                   문서 없이 일반 답변 받기
                 </button>
@@ -212,7 +212,7 @@ export default function MessageBubble({
                           type="button"
                           onClick={() => onOpenSource?.(source)}
                           title="근거 보기"
-                          className="inline-flex items-center align-baseline mx-0.5 px-1 rounded bg-[#003087]/10 text-[#003087] text-[11px] font-semibold leading-4 hover:bg-[#003087]/20 no-underline"
+                          className="inline-flex items-center align-baseline mx-0.5 px-1 rounded bg-[#087f8c]/10 text-[#087f8c] text-[11px] font-semibold leading-4 hover:bg-[#087f8c]/20 no-underline"
                         >
                           {children}
                         </button>
@@ -220,7 +220,7 @@ export default function MessageBubble({
                     }
                     return (
                       <a href={href} target="_blank" rel="noopener noreferrer"
-                        className="text-[#003087] underline underline-offset-2 hover:text-[#002070]">
+                        className="text-[#087f8c] underline underline-offset-2 hover:text-[#066775]">
                         {children}
                       </a>
                     );
@@ -262,7 +262,7 @@ export default function MessageBubble({
                 href={`/api/files/${file.id}`}
                 className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors"
               >
-                <span className="w-9 h-9 rounded-lg bg-[#003087]/10 text-[#003087] text-[11px] font-bold flex items-center justify-center flex-shrink-0">
+                <span className="w-9 h-9 rounded-lg bg-[#087f8c]/10 text-[#087f8c] text-[11px] font-bold flex items-center justify-center flex-shrink-0">
                   {file.file_name.toLowerCase().endsWith('.xlsx')
                     ? 'XLS'
                     : file.file_name.toLowerCase().endsWith('.docx')
@@ -282,7 +282,7 @@ export default function MessageBubble({
         {links && links.length > 0 && (
           <div className="mt-2 w-full space-y-2">
             <div className="flex items-center space-x-2">
-              <div className="w-1 h-4 bg-[#003087] rounded-full" />
+              <div className="w-1 h-4 bg-[#087f8c] rounded-full" />
               <div className="text-xs font-medium text-slate-600">출처</div>
               <div className="text-xs text-slate-500">({links.length}개)</div>
             </div>
@@ -295,7 +295,7 @@ export default function MessageBubble({
                   rel="noopener noreferrer"
                   className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-md p-2.5 hover:bg-slate-100 transition-colors"
                 >
-                  <svg className="w-3.5 h-3.5 text-[#003087] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5 text-[#087f8c] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
                   <span className="text-xs text-slate-700 break-all">{link.title}</span>
@@ -332,7 +332,7 @@ export default function MessageBubble({
 
       {/* 사용자 아바타 */}
       {isUser && (
-        <div className="w-7 h-7 rounded-lg bg-[#003087] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <div className="w-7 h-7 rounded-lg bg-[#087f8c] flex items-center justify-center flex-shrink-0 mt-0.5">
           <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>

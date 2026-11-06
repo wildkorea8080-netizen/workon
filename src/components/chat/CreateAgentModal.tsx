@@ -194,7 +194,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                   ['department', '부서 비서', '우리 부서와 하위 부서가 함께 쓰고, 부서원 누구나 고칩니다'],
                 ] as const).map(([key, text, hint]) => (
                   <button key={key} type="button" onClick={() => setTier(key)}
-                    className={`flex-1 px-3 py-2 rounded-xl border text-left ${tier === key ? 'border-[#003087] bg-blue-50 text-[#003087]' : 'border-slate-200 text-slate-500'}`}>
+                    className={`flex-1 px-3 py-2 rounded-xl border text-left ${tier === key ? 'border-[#087f8c] bg-blue-50 text-[#087f8c]' : 'border-slate-200 text-slate-500'}`}>
                     <span className="block text-xs font-semibold">{text}</span>
                     <span className="block text-[11px] opacity-70">{hint}</span>
                   </button>
@@ -213,7 +213,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                     onClick={() => setIcon(e)}
                     className={`w-9 h-9 flex items-center justify-center rounded-lg text-lg transition-all ${
                       icon === e
-                        ? 'bg-brand-100 ring-2 ring-brand-400 scale-110'
+                        ? 'bg-[#d4ecee] ring-2 ring-[#16818c] scale-110'
                         : 'hover:bg-slate-100'
                     }`}
                   >
@@ -233,7 +233,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="예) 인사규정 전문 비서"
-                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#16818c]"
               />
             </div>
 
@@ -243,7 +243,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
               <select
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#16818c] bg-white"
               >
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -269,7 +269,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
               onChange={e => setSystemPrompt(e.target.value)}
               placeholder="예) 나는 우리 기관의 인사규정 전문가야. 복무규정, 출장규정 관련 질문에 답해줘."
               rows={4}
-              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#16818c] resize-none"
             />
             <button
               type="button"
@@ -333,8 +333,8 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                       onClick={() => fileInputRef.current?.click()}
                       className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors ${
                         dragOver
-                          ? 'border-brand-400 bg-brand-50'
-                          : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50'
+                          ? 'border-[#16818c] bg-[#e7f5f5]'
+                          : 'border-slate-200 hover:border-[#9bc9ce] hover:bg-slate-50'
                       }`}
                     >
                       <svg className="w-7 h-7 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -350,7 +350,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                         자주 묻는 내용을 <span className="text-slate-500">질문/답변 형식</span>으로 정리해 함께
                         올리면 훨씬 잘 찾습니다.
                       </p>
-                      <p className="text-xs text-brand-600 font-medium mt-1">클릭하거나 드래그하여 업로드</p>
+                      <p className="text-xs text-[#087f8c] font-medium mt-1">클릭하거나 드래그하여 업로드</p>
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -414,7 +414,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                                   : prev.filter(id => id !== connector.id)
                               )
                             }
-                            className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                            className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#087f8c] focus:ring-[#087f8c]"
                           />
                           <span className="min-w-0">
                             <span className="block text-xs font-medium text-slate-800">{connector.label}</span>
@@ -451,7 +451,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
             type="button"
             onClick={handleSubmit}
             disabled={submitting || !name.trim()}
-            className="flex-1 py-2.5 bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors"
+            className="flex-1 py-2.5 bg-[#087f8c] hover:bg-[#066775] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors"
           >
             {submitting ? '생성 중...' : '비서 만들기'}
           </button>
@@ -478,7 +478,7 @@ function Toggle({
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
       className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-        checked ? 'bg-brand-600' : 'bg-slate-200'
+        checked ? 'bg-[#087f8c]' : 'bg-slate-200'
       } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
     >
       <span
