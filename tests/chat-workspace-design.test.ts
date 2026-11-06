@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
@@ -34,3 +34,35 @@ describe('AI 대화 화면 디자인', () => {
     expect(sidebar).not.toMatch(/text-white\/|bg-white\/\d/);
   });
 });
+
+describe('사이드바 하나 — 업무 메뉴 아래 최근 대화(2026-11-06)', () => {
+  it('업무 틀 사이드바가 최근 대화를 Suspense 안에서 그린다(useSearchParams)', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    expect(shell).toContain('<Suspense fallback={null}><RecentConversations /></Suspense>');
+    const recent = read('src/components/work/RecentConversations.tsx');
+    expect(recent).toMatch(/<Sidebar\s+embedded/);
+    expect(recent).toContain("pathname.startsWith('/chat') ? params.get('conv') : null");
+  });
+
+  it('업무 틀의 대화 화면에는 대화 목록 둘째 칸이 없다(업무 홈을 끈 기관의 `/`에는 남음)', () => {
+    const home = read('src/components/chat/ChatHome.tsx');
+    expect(home).toContain('{!workspace && <Sidebar');
+    expect(home).toContain("window.history.replaceState(null, '', conversationHref(id))");
+    expect(home).toMatch(/if \(conversationIdRef\.current === id\) return;/);
+  });
+
+  it('알림 — 새 대화·목록 바뀜은 창 이벤트, 대화 주소는 conv 매개변수', async () => {
+    const events = await import('@/lib/chat-events');
+    expect(events.conversationHref('a b')).toBe('/chat?conv=a%20b');
+    const seen: string[] = [];
+    const target = new EventTarget();
+    vi.stubGlobal('window', target);
+    target.addEventListener(events.CHAT_NEW_EVENT, () => seen.push('new'));
+    target.addEventListener(events.CHAT_LIST_CHANGED_EVENT, () => seen.push('changed'));
+    events.announceNewChat();
+    events.announceConversationsChanged();
+    vi.unstubAllGlobals();
+    expect(seen).toEqual(['new', 'changed']);
+  });
+});
+

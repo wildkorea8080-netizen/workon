@@ -3,10 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { useEffect, type ReactNode } from 'react';
+import { Suspense, useEffect, type ReactNode } from 'react';
 import Header from '@/components/layout/Header';
 import NoticesBanner from '@/components/NoticesBanner';
 import WorkspaceIcon from './WorkspaceIcon';
+import RecentConversations from './RecentConversations';
 
 /**
  * 업무 화면 틀 — 기존 헤더(기관 브랜딩·관리자 메뉴)와 공지 배너를 그대로 쓰고 왼쪽에 업무 메뉴를 둔다.
@@ -58,23 +59,26 @@ export default function WorkShell({ children }: { children: ReactNode }) {
         ))}
       </nav>
       <div className="flex flex-1 overflow-hidden">
-        <nav aria-label="업무 메뉴" className="workspace-sidebar hidden md:flex w-60 flex-shrink-0 flex-col gap-1 border-r border-[#E9EBF2] bg-white p-4">
-          <div className="px-3 pb-5 pt-3"><p className="text-[11px] font-bold tracking-[.16em] text-slate-400">WORKSPACE</p><p className="mt-2 text-sm font-semibold text-slate-700">나의 업무 공간</p></div>
-          <Link href="/apps" className="workspace-new mb-5 flex items-center justify-center gap-2 rounded-xl bg-[#087f8c] px-4 py-3 text-sm font-semibold text-white hover:bg-[#066775]"><WorkspaceIcon name="plus" />새 업무 시작</Link>
-          {NAV.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              aria-current={n.match(pathname) ? 'page' : undefined}
-              className={`flex items-center gap-3 rounded-xl px-3 py-3 text-[14px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#087f8c] ${
-                n.match(pathname) ? 'bg-[#e7f5f5] text-[#087581] font-semibold' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <WorkspaceIcon name={n.icon} />{n.label}
-            </Link>
-          ))}
-          <div className="mt-auto rounded-xl border border-[#dfeded] bg-[#f3f9f9] p-4"><WorkspaceIcon name="spark" className="mb-2 text-[#16818c]" /><p className="text-xs font-semibold text-slate-700">자료에서 결과물까지</p><p className="mt-1.5 text-xs leading-5 text-slate-500">초안을 만들고 근거를 검토해<br />업무에 필요한 파일로 받으세요.</p></div>
-        </nav>
+        {/* 사이드바 하나 — 위에 업무 메뉴, 아래에 최근 대화(2026-11-06, 대화 화면의 둘째 칸을 없앰) */}
+        <div className="workspace-sidebar hidden md:flex w-64 flex-shrink-0 flex-col border-r border-[#E9EBF2] bg-white px-4 pb-3 pt-4">
+          <p className="px-3 pb-3 pt-1 text-[11px] font-bold tracking-[.16em] text-slate-400">WORKSPACE</p>
+          <Link href="/apps" className="workspace-new mb-3 flex items-center justify-center gap-2 rounded-xl bg-[#087f8c] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#066775]"><WorkspaceIcon name="plus" />새 업무 시작</Link>
+          <nav aria-label="업무 메뉴" className="mb-3 flex flex-shrink-0 flex-col gap-0.5">
+            {NAV.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                aria-current={n.match(pathname) ? 'page' : undefined}
+                className={`flex items-center gap-3 rounded-xl px-3 py-2 text-[14px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#087f8c] ${
+                  n.match(pathname) ? 'bg-[#e7f5f5] text-[#087581] font-semibold' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <WorkspaceIcon name={n.icon} />{n.label}
+              </Link>
+            ))}
+          </nav>
+          <Suspense fallback={null}><RecentConversations /></Suspense>
+        </div>
         <main id="workspace-content" className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>

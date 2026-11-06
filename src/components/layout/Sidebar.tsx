@@ -18,6 +18,8 @@ interface SidebarProps {
   onConversationSelect: (id: string) => void;
   onNewConversation: () => void;
   refreshTrigger?: number;
+  /** 업무 틀의 사이드바 안에 '최근 대화'로 넣을 때 — 새 대화 단추·아래 프로필 없이 목록만(새 대화는 틀이 머리에 둔다) */
+  embedded?: boolean;
 }
 
 const AGENT_COLORS = [
@@ -48,6 +50,7 @@ export default function Sidebar({
   onConversationSelect,
   onNewConversation,
   refreshTrigger,
+  embedded = false,
 }: SidebarProps) {
   const { data: session } = useSession();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -166,10 +169,11 @@ export default function Sidebar({
   const userName = session?.user?.name || session?.user?.email?.split('@')[0] || '사용자';
   const userInitial = userName.slice(0, 1).toUpperCase();
 
+  const Shell = embedded ? 'div' : 'aside';
   return (
-    <aside aria-label="대화 목록" className="w-60 flex-shrink-0 border-r border-[#E9EBF2] bg-white flex flex-col h-full overflow-hidden relative">
+    <Shell aria-label="대화 목록" className={embedded ? 'relative flex min-h-0 flex-1 flex-col' : 'w-60 flex-shrink-0 border-r border-[#E9EBF2] bg-white flex flex-col h-full overflow-hidden relative'}>
       {/* 새 대화 버튼 */}
-      <div className="p-3 pt-4">
+      {!embedded && <div className="p-3 pt-4">
         <button
           onClick={onNewConversation}
           className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#087f8c] rounded-xl bg-white text-[#087581] text-sm font-semibold hover:bg-[#e7f5f5] transition-colors"
@@ -179,10 +183,10 @@ export default function Sidebar({
           </svg>
           새 대화
         </button>
-      </div>
+      </div>}
 
       {/* 검색 */}
-      <div className="px-3 pb-2">
+      <div className={embedded ? 'px-1 pb-2' : 'px-3 pb-2'}>
         <div className="relative">
           <svg className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -199,7 +203,7 @@ export default function Sidebar({
       </div>
 
       {/* 대화 목록 */}
-      <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-200">
+      <div className={`flex-1 overflow-y-auto ${embedded ? 'px-0' : 'px-2'} pb-2 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-200`}>
         {loading ? (
           <p className="text-slate-400 text-xs text-center py-6">불러오는 중...</p>
         ) : filtered.length === 0 ? (
@@ -234,8 +238,8 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* 하단 프로필 */}
-      <div className="p-3 border-t border-[#E9EBF2] flex items-center gap-2.5">
+      {/* 하단 프로필 — 업무 틀에서는 머리 막대에 프로필이 있어 두지 않는다 */}
+      {!embedded && <div className="p-3 border-t border-[#E9EBF2] flex items-center gap-2.5">
         <div className="w-8 h-8 rounded-full bg-[#e7f5f5] flex items-center justify-center text-[#087581] text-xs font-bold flex-shrink-0">
           {userInitial}
         </div>
@@ -243,15 +247,15 @@ export default function Sidebar({
           <p className="text-slate-800 text-xs font-semibold truncate">{userName}</p>
           <p className="text-slate-400 text-[10px] truncate">{session?.user?.email}</p>
         </div>
-      </div>
+      </div>}
 
       {/* 토스트 */}
       {toast && (
-        <div className="absolute bottom-16 left-3 right-3 bg-[#22283D] text-white text-xs font-medium px-3 py-2.5 rounded-xl shadow-lg text-center animate-fade-in z-10">
+        <div className="absolute bottom-4 left-3 right-3 bg-[#22283D] text-white text-xs font-medium px-3 py-2.5 rounded-xl shadow-lg text-center animate-fade-in z-10">
           {toast}
         </div>
       )}
-    </aside>
+    </Shell>
   );
 }
 

@@ -13,6 +13,7 @@ import type { Agent } from '@/lib/db';
 import NoticesBanner from '@/components/NoticesBanner';
 import { chatLaunchTarget, loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 import WorkShell from '@/components/work/WorkShell';
+import { announceConversationsChanged, CHAT_NEW_EVENT, conversationHref } from '@/lib/chat-events';
 
 type ViewMode = 'welcome' | 'chat';
 
@@ -53,17 +54,21 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   const lastAgentRef = useRef<Agent | null>(null);
+  // 지금 열린 대화 — 주소(`?conv=`)가 같은 대화를 다시 가리켜도(만든 뒤 주소를 바꿀 때·사이드바에서 같은 대화를 누를 때) 다시 불러오지 않는다
+  const conversationIdRef = useRef<string | null>(null);
 
   const handleAgentSelect = useCallback((agent: Agent | null) => {
     if (!agent) return;
     if (agent.app_definition) { router.push(`/apps/run?agent=${encodeURIComponent(agent.id)}`); return; }
     setSelectedAgent(agent);
     lastAgentRef.current = agent;
+    conversationIdRef.current = null;
     setConversationId(null);
     setViewMode('chat');
   }, [router]);
 
   const handleConversationSelect = useCallback(async (id: string) => {
+    if (conversationIdRef.current === id) return;
     try {
       const res = await fetch(`/api/conversations/${id}`);
       const result = await res.json();
@@ -79,6 +84,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
         setSelectedAgent(lastAgentRef.current);
       }
 
+      conversationIdRef.current = id;
       setConversationId(id);
       setViewMode('chat');
     } catch {
@@ -87,6 +93,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   }, []);
 
   const handleNewConversation = useCallback(() => {
+    conversationIdRef.current = null;
     setSelectedAgent(null);
     setConversationId(null);
     setViewMode('welcome');
@@ -94,11 +101,18 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   }, []);
 
   const handleConversationCreated = useCallback((id: string) => {
+    conversationIdRef.current = id;
     setConversationId(id);
     setSidebarRefresh(n => n + 1);
-  }, []);
+    if (workspace) {
+      // 사이드바(업무 틀)가 목록을 다시 읽고 이 대화를 고른 것으로 보이게 — 주소만 바꾸고 화면은 다시 그리지 않는다
+      announceConversationsChanged();
+      window.history.replaceState(null, '', conversationHref(id));
+    }
+  }, [workspace]);
 
   const handleChangeAgent = useCallback(() => {
+    conversationIdRef.current = null;
     setSelectedAgent(null);
     setConversationId(null);
     setViewMode('welcome');
@@ -113,6 +127,14 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
     // QuickInput은 chat으로 전환 후 자동 전송 불가능하므로 clear
     setQuickInput('');
   }, [selectedAgent, quickInput]);
+
+  // 업무 틀 사이드바의 '+ 새 대화' — 이미 /chat이면 주소가 그대로라 알림으로 첫 화면에 돌아간다
+  useEffect(() => {
+    if (!workspace) return;
+    const reset = () => handleNewConversation();
+    window.addEventListener(CHAT_NEW_EVENT, reset);
+    return () => window.removeEventListener(CHAT_NEW_EVENT, reset);
+  }, [workspace, handleNewConversation]);
 
   // 로딩
   if (status === 'loading') {
@@ -169,13 +191,13 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   const launchNote = launchError && <p role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">{launchError} <Link href="/apps" className="underline">업무 앱 보기</Link></p>;
   const body = (
     <div className="flex flex-1 overflow-hidden">
-      {/* 대화 목록 */}
-      <Sidebar
+      {/* 대화 목록 — 업무 틀에서는 틀의 사이드바 '최근 대화'가 맡는다(2026-11-06) */}
+      {!workspace && <Sidebar
         selectedConversationId={conversationId}
         onConversationSelect={handleConversationSelect}
         onNewConversation={handleNewConversation}
         refreshTrigger={sidebarRefresh}
-      />
+      />}
 
       {/* 메인 영역 */}
       <section aria-label="AI 대화" className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -212,6 +234,19 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
         <WelcomeTour />
         <div className="flex h-full flex-col overflow-hidden">
           {launchNote}
+          {/* 작은 화면에서는 틀의 사이드바가 숨으므로 지난 대화를 여기서 연다 */}
+          <details className="md:hidden border-b border-[#E9EBF2] bg-white">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#087581]">지난 대화</summary>
+            <div className="flex max-h-[50vh] flex-col overflow-hidden px-3 pb-3">
+              <Sidebar
+                embedded
+                selectedConversationId={conversationId}
+                onConversationSelect={(id) => router.push(conversationHref(id))}
+                onNewConversation={handleNewConversation}
+                refreshTrigger={sidebarRefresh}
+              />
+            </div>
+          </details>
           {body}
         </div>
       </WorkShell>
