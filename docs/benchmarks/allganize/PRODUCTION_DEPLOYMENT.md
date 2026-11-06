@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-06(오전): AI 대화 화면을 업무 화면과 같은 디자인으로
+
+- 2026-11-06 10:40 KST 배포 `dpl_CdmkaG3Fm47gK7murQXiMhXcMqr3`(커밋 `a3a2f41`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8uQLLZPMjfPCkeoqWuSYwPatVBhN`(f6d11a1)로 promote한다. 마이그레이션 없음.
+- 들어간 커밋: `3a4a394`(직전 배포 기록), `a3a2f41` `/chat`을 업무 틀(WorkShell) 안에서 그리기·밝은 대화 목록·첫 화면과 비서 탭을 업무 홈 꼴로·대화 부품의 남색을 청록으로(기능 그대로, 업무 홈을 끈 기관의 `/`는 틀 없이).
+- **배포 전**: 가지 Preview(`a3a2f41`, `workon-api7rxy9a`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 2,830개·tsc 0).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/chat`·`/api/system/maintenance` 200, `POST /api/chat` 401, 운영 주소가 새 배포를 가리킴.
+- **확인하지 못한 것**(사용자 몫): 로그인한 `/chat` 화면 모양(왼쪽 업무 메뉴 + 대화 목록 + 대화)·대화·공유·첨부가 그대로 되는지, 좁은 화면에서 두 목록이 나란히 있어 대화 칸이 좁지 않은지.
+
 ## 2026-11-06(아침 3): 1,000행 상한 목록 둘
 
 - 2026-11-06 09:33 KST 배포 `dpl_8uQLLZPMjfPCkeoqWuSYwPatVBhN`(커밋 `f6d11a1`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_CJFVQsNcwwXpBPYtE1eMX2XPLbvF`(7972d66)로 promote한다. 마이그레이션 없음.
