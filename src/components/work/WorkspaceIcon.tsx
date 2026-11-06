@@ -13,6 +13,8 @@ const paths: Record<string, string> = {
   arrow: 'M5 12h14 M13 6l6 6-6 6',
   plus: 'M12 5v14 M5 12h14',
   panel: 'M3 4h18v16H3z M9 4v16',
+  stats: 'M4 20V11 M10 20V5 M16 20v-6 M21 20H3',
+  admin: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z M9 12l2 2 4-4',
   spark: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z',
   translate: 'M3 5h12 M9 2v3 M5 5c0 6 7 10 7 10 M13 5c-1 5-5 9-10 11 M14 21l4-10 4 10 M16 17h4',
   edit: 'm14 4 6 6 M3 21l5-1L21 7l-6-6L2 14z M3 21h18',

@@ -97,3 +97,43 @@ describe('사이드바 접기(2026-11-06)', () => {
     expect(read('src/lib/sidebar-pref.ts')).not.toMatch(/^import /m);
   });
 });
+
+describe('위쪽 막대 없이 사이드바 하나(2026-11-06 오후)', () => {
+  it('넓은 화면은 머리 막대 없이 — 작은 화면에만 막대(사이드바가 없으므로)', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    expect(shell).toContain('<div className="md:hidden"><Header /></div>');
+    expect(shell).not.toMatch(/^\s*<Header \/>\s*$/m);
+  });
+
+  it('기관 로고·이름은 사이드바 맨 위(업무 홈으로), 접으면 첫 글자 칸만', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    expect(shell).toContain('aria-label={`${branding.name} 업무 홈`}');
+    expect(shell).toContain('branding.logoUrl && !collapsed ?');
+    expect(shell).toContain('{brandInitial(branding.name)}');
+  });
+
+  it('첫 글자 칸 — 기관명 첫 글자, 비면 W', async () => {
+    const { brandInitial } = await import('@/lib/branding');
+    expect(brandInitial('한국공사')).toBe('한');
+    expect(brandInitial('  workon')).toBe('W');
+    expect(brandInitial('')).toBe('W');
+  });
+
+  it('사이드바 아래에 내 사용현황·관리자 포털(관리자만)·사용자 메뉴(위로 열림, 접으면 동그라미만)', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    expect(shell).toContain("{ href: '/my/stats', icon: 'stats', label: '내 사용현황', admin: false }");
+    expect(shell).toContain("{ href: '/admin', icon: 'admin', label: '관리자 포털', admin: true }");
+    expect(shell).toContain('FOOTER.filter((f) => !f.admin || isAdmin)');
+    expect(shell).toContain('<UserMenu up compact={collapsed} wide={!collapsed} />');
+  });
+
+  it('사용자 메뉴는 한 벌 — 머리 막대도 같은 부품, 로그아웃·Esc로 닫기', () => {
+    expect(read('src/components/layout/Header.tsx')).toContain('<UserMenu />');
+    expect(read('src/components/layout/Header.tsx')).not.toContain('signOut');
+    const menu = read('src/components/layout/UserMenu.tsx');
+    expect(menu).toContain("signOut({ callbackUrl: '/login' })");
+    expect(menu).toContain("if (e.key === 'Escape') setOpen(false);");
+    expect(menu).toContain("up ? 'bottom-full left-0 mb-2' : 'right-0 top-full mt-2'");
+    expect(menu).toMatch(/isAdmin && <Link role="menuitem" href="\/admin"/);
+  });
+});

@@ -9,3 +9,9 @@
 /** 기관이 따로 지정하지 않았을 때 쓰는 AI 고지 문구. */
 export const DEFAULT_AI_NOTICE =
   'AI가 생성한 결과입니다. 사실과 다를 수 있으니 중요한 내용은 원문과 담당자를 통해 확인하세요.';
+
+/** 로고가 없을 때·사이드바를 접었을 때의 첫 글자 칸 — 기관명 첫 글자(없으면 W) */
+export function brandInitial(name: string): string {
+  const first = Array.from(name.trim())[0];
+  return first ? first.toUpperCase() : 'W';
+}

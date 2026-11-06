@@ -5,12 +5,14 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import Header from '@/components/layout/Header';
+import UserMenu from '@/components/layout/UserMenu';
 import NoticesBanner from '@/components/NoticesBanner';
 import WorkspaceIcon from './WorkspaceIcon';
 import RecentConversations from './RecentConversations';
 import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebar-pref';
 import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
+import { brandInitial } from '@/lib/branding';
 
 /**
  * 업무 화면 틀 — 기존 헤더(기관 브랜딩·관리자 메뉴)와 공지 배너를 그대로 쓰고 왼쪽에 업무 메뉴를 둔다.
@@ -28,12 +30,20 @@ const NAV = [
   { href: '/chat', icon: 'chat', label: 'AI 대화', match: (p: string) => p.startsWith('/chat') },
 ];
 
+/** 사이드바 아래 — 위쪽 막대에 있던 링크(관리자 포털은 관리자만) */
+const FOOTER = [
+  { href: '/my/stats', icon: 'stats', label: '내 사용현황', admin: false },
+  { href: '/admin', icon: 'admin', label: '관리자 포털', admin: true },
+];
+
 export default function WorkShell({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname() ?? '/';
   // 기관 테마 색(0067) — 없으면 globals.css :root의 기본 청록 그대로
-  const { themeColor } = useBranding();
+  const branding = useBranding();
+  const { themeColor } = branding;
+  const isAdmin = session?.user?.role === 'ADMIN';
   // 사이드바 접기 — 서버 렌더링과 어긋나지 않게 펼친 채로 그리고 마운트 뒤 이 브라우저에 기억한 값을 읽는다
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => setCollapsed(readSidebarCollapsed()), []);
@@ -58,7 +68,8 @@ export default function WorkShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="workspace-shell flex flex-col h-screen bg-[#F7F8FC] text-[#22283D]" style={{ fontFamily: 'Pretendard, -apple-system, sans-serif', ...((themeStyle(themeColor) ?? {}) as CSSProperties) }}>
-      <Header />
+      {/* 넓은 화면은 위쪽 막대 없이 사이드바 하나(2026-11-06 — 기관 로고는 사이드바 맨 위, 사용자 메뉴는 맨 아래). 작은 화면은 사이드바가 없어 막대를 둔다 */}
+      <div className="md:hidden"><Header /></div>
       <NoticesBanner />
       <nav aria-label="업무 메뉴" className="md:hidden flex gap-1 overflow-x-auto border-b border-[#DCE3EC] bg-white px-4 py-2">
         {NAV.map((n) => (
@@ -78,15 +89,26 @@ export default function WorkShell({ children }: { children: ReactNode }) {
           className={`workspace-sidebar hidden md:flex ${collapsed ? 'w-[72px] px-3' : 'w-64 px-4'} flex-shrink-0 flex-col border-r border-[#E9EBF2] bg-white pb-3 pt-4 transition-[width] duration-150`}
           data-collapsed={collapsed ? 'true' : undefined}
         >
-          <div className={`flex items-center pb-3 pt-1 ${collapsed ? 'justify-center' : 'justify-between pl-3'}`}>
-            {!collapsed && <p className="text-[11px] font-bold tracking-[.16em] text-slate-400">WORKSPACE</p>}
+          <div className={`flex pb-3 pt-1 ${collapsed ? 'flex-col items-center gap-2' : 'items-center justify-between gap-2 pl-1'}`}>
+            <Link href="/" aria-label={`${branding.name} 업무 홈`} title={collapsed ? branding.name : undefined} className="workspace-brand flex min-w-0 items-center gap-2 rounded-lg hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent">
+              {branding.logoUrl && !collapsed ? (
+                // 가로로 긴 CI가 흔해 사이드바 너비만큼 준다. 접으면 첫 글자 칸만
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={branding.logoUrl} alt={branding.name} className="h-9 max-w-[172px] object-contain object-left" />
+              ) : (
+                <>
+                  <span aria-hidden="true" className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-ws-accent text-base font-bold text-white">{brandInitial(branding.name)}</span>
+                  {!collapsed && <span className="truncate text-[15px] font-bold tracking-tight text-slate-900">{branding.name}</span>}
+                </>
+              )}
+            </Link>
             <button
               type="button"
               onClick={toggleSidebar}
               aria-expanded={!collapsed}
               aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}
               title={collapsed ? '사이드바 펼치기' : '사이드바 접기'}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent"
+              className="flex-shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent"
             >
               <WorkspaceIcon name="panel" />
             </button>
@@ -117,6 +139,23 @@ export default function WorkShell({ children }: { children: ReactNode }) {
           </nav>
           {/* 접으면 최근 대화는 숨긴다 — 'AI 대화' 아이콘으로 대화 화면에 간다(작은 화면의 '지난 대화' 펼치기는 그대로) */}
           {!collapsed && <Suspense fallback={null}><RecentConversations /></Suspense>}
+          {/* 아래 — 내 사용현황·관리자 포털·사용자 메뉴(위쪽 막대에 있던 것) */}
+          <div className="mt-auto flex flex-shrink-0 flex-col gap-0.5 border-t border-[#E9EBF2] pt-3">
+            {FOOTER.filter((f) => !f.admin || isAdmin).map((f) => (
+              <Link
+                key={f.href}
+                href={f.href}
+                aria-label={collapsed ? f.label : undefined}
+                title={collapsed ? f.label : undefined}
+                className={`flex items-center rounded-xl py-2 text-[13px] text-slate-500 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'}`}
+              >
+                <WorkspaceIcon name={f.icon} />{!collapsed && f.label}
+              </Link>
+            ))}
+            <div className={collapsed ? 'flex justify-center pt-1' : 'pt-1'}>
+              <UserMenu up compact={collapsed} wide={!collapsed} />
+            </div>
+          </div>
         </div>
         <main id="workspace-content" className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>

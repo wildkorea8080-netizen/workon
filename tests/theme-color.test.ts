@@ -115,7 +115,8 @@ describe('테마 색 연결', () => {
 
   it('업무 틀이 기관 색을 CSS 변수로 덮어쓴다', () => {
     const shell = read('src/components/work/WorkShell.tsx');
-    expect(shell).toContain('const { themeColor } = useBranding();');
+    expect(shell).toContain('const branding = useBranding();');
+    expect(shell).toContain('const { themeColor } = branding;');
     expect(shell).toContain('themeStyle(themeColor)');
   });
 
