@@ -24,8 +24,8 @@ export default function AppDraftPanel({ tier, version, draft, agentId, busy, onP
     <p className="leading-6 text-amber-900">배포하지 않은 시험 판이 있습니다 — {kstTime(draft.saved_at)} 저장, 판 {draft.base_version} 기준. 부서 사람들은 아직 지금 판(판 {version})을 씁니다.</p>
     {stale && <p role="alert" className="text-xs text-red-700">시험 판을 만든 뒤 앱이 새로 배포됐습니다. 배포할 수 없으니 앱을 새로 열어 지금 판을 보고 다시 저장해 주세요.</p>}
     <div className="flex flex-wrap items-center gap-3">
-      <Link href={`/apps/run?agent=${encodeURIComponent(agentId)}&draft=1`} className="font-semibold text-[#087581] underline">시험 판으로 실행</Link>
-      <button type="button" disabled={busy || stale} onClick={onPublish} className="rounded-lg bg-[#087f8c] px-3 py-1.5 font-semibold text-white disabled:opacity-40">배포</button>
+      <Link href={`/apps/run?agent=${encodeURIComponent(agentId)}&draft=1`} className="font-semibold text-ws-accent-text underline">시험 판으로 실행</Link>
+      <button type="button" disabled={busy || stale} onClick={onPublish} className="rounded-lg bg-ws-accent px-3 py-1.5 font-semibold text-white disabled:opacity-40">배포</button>
       <button type="button" disabled={busy} onClick={onDiscard} className="text-xs text-red-600 disabled:opacity-40">시험 판 버리기</button>
     </div>
     <p className="text-xs leading-5 text-slate-600">시험 판 실행은 이 앱을 고칠 수 있는 사람만 할 수 있고, 사용량은 평소처럼 기록됩니다. 배포하면 판 번호가 올라가고 변경 기록에 남습니다.</p>

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { parseIpList, isIpAllowed, isValidIpPattern } from '@/lib/ip-access';
+import { DEFAULT_THEME_COLOR, THEME_PRESETS, normalizeHex, themeColorProblem, themeVars } from '@/lib/theme-color';
+import { resetBrandingCache } from '@/lib/use-branding';
 
 interface ModelInfo {
   id: string;
@@ -17,6 +19,8 @@ interface OrgInfo {
   slug: string | null;
   logo_url: string | null;
   ai_notice: string | null;
+  /** 업무 화면 강조 색(0067). NULL이면 기본 청록 */
+  theme_color: string | null;
   domain: string | null;
   type: string | null;
   allowed_models: string[] | null;
@@ -52,6 +56,8 @@ export default function OrganizationManager() {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [aiNotice, setAiNotice] = useState('');
+  // 빈 글 = 기본 청록
+  const [themeColor, setThemeColor] = useState('');
   const [allowedIps, setAllowedIps] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +79,7 @@ export default function OrganizationManager() {
       setSlug(orgRes.data.slug ?? '');
       setAllowedIps((orgRes.data.allowed_ips ?? []).join('\n'));
       setAiNotice(orgRes.data.ai_notice ?? '');
+      setThemeColor(orgRes.data.theme_color ?? '');
       // 저장값이 아니라 정책이 확정한 목록을 보여준다. 레지스트리에서 사라진
       // 모델이 저장값에 남아 있으면 화면과 실제가 어긋난다.
       setModels(orgRes.data.effectiveModels ?? []);
@@ -107,7 +114,13 @@ export default function OrganizationManager() {
     !!org?.currentIp &&
     !isIpAllowed(org.currentIp, ipList);
 
+  const themeProblem = themeColor.trim() ? themeColorProblem(themeColor) : null;
+
   const handleSave = async () => {
+    if (themeProblem) {
+      setError(`테마 색: ${themeProblem}`);
+      return;
+    }
     if (wouldLockOut) {
       const msg =
         `지금 접속한 주소(${org?.currentIp})가 허용 목록에 없습니다. ` +
@@ -124,6 +137,7 @@ export default function OrganizationManager() {
           name,
           slug,
           ai_notice: aiNotice,
+          theme_color: themeColor.trim() || null,
           allowed_models: models,
           allowed_ips: allowedIps,
         }),
@@ -132,6 +146,9 @@ export default function OrganizationManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setOrg(result.data);
       setAllowedIps((result.data.allowed_ips ?? []).join('\n'));
+      setThemeColor(result.data.theme_color ?? '');
+      // 화면 머리·업무 틀이 새 색을 다시 받아 가게
+      resetBrandingCache();
       notify('저장했습니다.');
     } catch (err) {
       setError(err instanceof Error ? err.message : '저장에 실패했습니다.');
@@ -314,6 +331,8 @@ export default function OrganizationManager() {
             대화 화면 하단에 항상 표시됩니다. 생성 결과를 그대로 신뢰하면 안 된다는 안내입니다.
           </p>
         </div>
+
+        <ThemeColorField value={themeColor} onChange={setThemeColor} problem={themeProblem} />
 
         <div>
           <label className={label}>접속 허용 IP</label>
@@ -518,6 +537,64 @@ function BudgetCard({ budget }: { budget: BudgetInfo }) {
           한도를 모두 사용해 <strong>이용이 중단된 상태</strong>입니다. 관리자에게 문의하세요.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * 테마 색(0067) — 업무 화면의 단추·선택된 메뉴·테두리 색. 흰 단추 글이 읽히는 진한 색만 받는다(저장 라우트가 다시 봄).
+ * 미리보기는 같은 계산(themeVars)으로 그려 저장 뒤 화면과 어긋나지 않게 한다.
+ */
+function ThemeColorField({ value, onChange, problem }: { value: string; onChange: (v: string) => void; problem: string | null }) {
+  const current = normalizeHex(value) ?? DEFAULT_THEME_COLOR;
+  const vars = themeVars(problem ? null : current);
+  const pick = (hex: string) => onChange(hex === DEFAULT_THEME_COLOR ? '' : hex);
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-500 mb-1" htmlFor="theme-color-input">테마 색</label>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="테마 색 고르기">
+        {THEME_PRESETS.map((p) => {
+          const selected = current === p.color;
+          return (
+            <button
+              key={p.color}
+              type="button"
+              onClick={() => pick(p.color)}
+              aria-pressed={selected}
+              className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[12px] ${selected ? 'border-slate-700 text-slate-900' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}
+            >
+              <span className="h-4 w-4 rounded" style={{ background: p.color }} aria-hidden />
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          type="color"
+          value={current}
+          onChange={(e) => pick(e.target.value)}
+          aria-label="색 직접 고르기"
+          className="h-9 w-11 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"
+        />
+        <input
+          id="theme-color-input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={`${DEFAULT_THEME_COLOR} (비우면 기본 청록)`}
+          maxLength={7}
+          className="w-56 px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+        />
+      </div>
+      {problem && <p role="alert" className="mt-1 text-[12px] text-red-600">{problem}</p>}
+      <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3" aria-label="테마 색 미리보기">
+        <span className="rounded-xl px-4 py-2 text-sm font-semibold text-white" style={{ background: vars['--ws-accent'] }}>새 업무 시작</span>
+        <span className="rounded-xl px-3 py-2 text-[14px] font-semibold" style={{ background: vars['--ws-accent-soft'], color: vars['--ws-accent-text'] }}>선택된 메뉴</span>
+        <span className="rounded-xl border px-3 py-2 text-[13px] text-slate-600" style={{ borderColor: vars['--ws-accent-border'] }}>카드 테두리</span>
+      </div>
+      <p className="mt-1 text-[11px] text-slate-400">
+        직원 업무 화면(업무 홈·업무 앱·AI 대화)의 단추와 선택된 메뉴 색입니다. 단추 글자가 흰색이라 너무 밝은 색은 고를 수 없습니다.
+      </p>
     </div>
   );
 }

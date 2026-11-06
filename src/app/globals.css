@@ -23,11 +23,21 @@ body {
 }
 
 /* 업무 공간: 기관 CI는 보존하고 탐색·입력·결과 카드에 공통 리듬을 적용한다. */
+/* 업무 화면 강조 색 — 기관 테마 색(0067)이 있으면 업무 틀이 덮어쓴다. 값은 RGB 세 숫자(Tailwind `ws-*` 색이 투명도를 붙임) — 기본값은 src/lib/theme-color.ts DEFAULT_THEME_VARS와 같아야 한다 */
+:root {
+  --ws-accent: 8 127 140;
+  --ws-accent-hover: 6 103 117;
+  --ws-accent-text: 8 117 129;
+  --ws-accent-muted: 70 123 130;
+  --ws-accent-soft: 231 245 245;
+  --ws-accent-line: 214 235 236;
+  --ws-accent-border: 155 201 206;
+}
 .workspace-shell {
-  --workspace-accent: #087f8c;
+  --workspace-accent: rgb(var(--ws-accent));
 }
 .workspace-hero {
-  background: radial-gradient(ellipse at 95% 0%, #dcf0f3 0%, transparent 55%), linear-gradient(115deg, #e8f6f4, #f2f9f8 65%, #eaf4f8);
+  background: radial-gradient(ellipse at 95% 0%, rgb(var(--ws-accent-soft)) 0%, transparent 55%), linear-gradient(115deg, rgb(var(--ws-accent-soft)), #f7fafa 65%, #f2f6f8);
 }
 .workspace-card {
   box-shadow: 0 3px 12px rgb(34 40 61 / 2%);
@@ -38,10 +48,10 @@ body {
 }
 .workspace-shell .app-tile:hover,
 .workspace-shell .featured-app:focus-within {
-  border-color: #9bc9ce;
+  border-color: rgb(var(--ws-accent-border));
   box-shadow: 0 8px 24px rgb(17 97 108 / 7%);
 }
-.app-tone-0 .app-icon { background: #e3f3f4; color: #087581; }
+.app-tone-0 .app-icon { background: rgb(var(--ws-accent-soft)); color: rgb(var(--ws-accent-text)); }
 .app-tone-1 .app-icon { background: #e8f3ff; color: #4e8bbd; }
 .app-tone-2 .app-icon { background: #e5f5ef; color: #42937d; }
 .app-tone-3 .app-icon { background: #fff1e6; color: #bd8753; }
@@ -55,7 +65,7 @@ body {
   color: var(--workspace-accent);
 }
 .workspace-shell :is(a, button)[class*="bg-[#003087]"]:hover {
-  background-color: #066775;
+  background-color: rgb(var(--ws-accent-hover));
 }
 .workspace-shell :is(a, button)[class*="border-[#003087]"] {
   border-color: var(--workspace-accent);
@@ -70,7 +80,7 @@ body {
   border-color: #e0e4ed;
 }
 .workspace-shell :is(a, button, input, select, textarea):focus-visible {
-  outline: 2px solid #16818c;
+  outline: 2px solid rgb(var(--ws-accent-text));
   outline-offset: 3px;
 }
 .workspace-shell main { scroll-behavior: smooth; }

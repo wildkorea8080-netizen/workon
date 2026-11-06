@@ -16,6 +16,8 @@ export interface Branding {
   logoUrl: string | null;
   slug: string | null;
   aiNotice: string;
+  /** 기관 테마 색(0067, `#rrggbb`). null = 기본 청록 */
+  themeColor: string | null;
 }
 
 /** 서버가 답하기 전 화면. 여기서 빈 문자열을 쓰면 제목이 잠깐 사라진다. */
@@ -24,6 +26,7 @@ const FALLBACK: Branding = {
   logoUrl: null,
   slug: null,
   aiNotice: DEFAULT_AI_NOTICE,
+  themeColor: null,
 };
 
 let cached: Branding | null = null;

@@ -5,6 +5,7 @@ import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { enabledModels } from '@/lib/models';
 import { isValidIpPattern, parseIpList, clientIpFrom } from '@/lib/ip-access';
 import { getAllowedModelIds } from '@/lib/model-policy';
+import { DEFAULT_THEME_COLOR, normalizeHex, themeColorProblem } from '@/lib/theme-color';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models, allowed_ips')
+    .select('id, name, slug, logo_url, ai_notice, theme_color, domain, type, allowed_models, allowed_ips')
     .eq('id', ctx.organizationId)
     .maybeSingle();
 
@@ -189,6 +190,22 @@ export async function PATCH(request: NextRequest) {
       update.ai_notice = notice || null;
     }
 
+    // 테마 색 (0067) — null·빈 값이면 기본 청록. 흰 단추 글이 읽히지 않는 밝은 색은 거절
+    if (body.theme_color !== undefined) {
+      const raw = body.theme_color === null ? '' : String(body.theme_color).trim();
+      if (!raw) {
+        update.theme_color = null;
+      } else {
+        const problem = themeColorProblem(raw);
+        if (problem) {
+          return NextResponse.json({ ok: false, error: { message: problem } }, { status: 400 });
+        }
+        const hex = normalizeHex(raw);
+        // 기본 색을 고르면 NULL로 둔다 — 기본 색을 나중에 바꿔도 따라가게
+        update.theme_color = hex === DEFAULT_THEME_COLOR ? null : hex;
+      }
+    }
+
     // 허용 모델 정책 (0021)
     if (body.allowed_models !== undefined) {
       const known = new Set(enabledModels().map((m) => m.id));
@@ -264,7 +281,7 @@ export async function PATCH(request: NextRequest) {
     .from('organizations')
     .update(update)
     .eq('id', ctx.organizationId)
-    .select('id, name, slug, logo_url, ai_notice, domain, type, allowed_models')
+    .select('id, name, slug, logo_url, ai_notice, theme_color, domain, type, allowed_models')
     .single();
 
   if (error) {

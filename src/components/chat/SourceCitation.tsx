@@ -28,9 +28,9 @@ export default function SourceCitation({ sources, onOpen }: SourceCitationProps)
             type="button"
             onClick={() => onOpen?.(source)}
             title={`${title} · ${location}`}
-            className="inline-flex items-center gap-1.5 max-w-[280px] bg-white border border-slate-200 hover:border-[#087f8c]/40 hover:bg-[#087f8c]/5 rounded-md px-2 py-1 text-xs text-slate-700 transition-colors"
+            className="inline-flex items-center gap-1.5 max-w-[280px] bg-white border border-slate-200 hover:border-ws-accent/40 hover:bg-ws-accent/5 rounded-md px-2 py-1 text-xs text-slate-700 transition-colors"
           >
-            <span className="font-semibold text-[#087f8c]">[{sourceNumber(source)}]</span>
+            <span className="font-semibold text-ws-accent">[{sourceNumber(source)}]</span>
             <span className="truncate">{title}</span>
             {typeof source.page === 'number' && <span className="text-slate-400 flex-shrink-0">p.{source.page}</span>}
             {source.ocr && (

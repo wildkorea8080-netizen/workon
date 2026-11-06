@@ -58,7 +58,7 @@ export default function AppApprovalPanel({ agent, hasDraft, onRequested }: {
           <p className="text-xs leading-5 text-slate-500">기관 관리자가 승인하면 공식 앱이 되어 정한 범위의 직원 모두가 씁니다. 신청은 지금 판(판 {agent.version}) 기준입니다.</p>
           {hasDraft && <p role="alert" className="text-xs leading-5 text-amber-800">배포하지 않은 시험 판이 있습니다 — 관리자는 지금 판을 검토합니다. 시험 판 내용으로 신청하려면 먼저 배포하세요.</p>}
           <textarea aria-label="신청 메모" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" rows={2} maxLength={APPROVAL_NOTE_MAX} placeholder="관리자에게 남길 말(선택) — 어떤 업무에 쓰는지" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button type="button" disabled={busy} onClick={() => void request()} className="rounded-xl border border-[#087581] px-4 py-2 text-sm font-semibold text-[#087581] disabled:opacity-40">{busy ? '신청 중…' : '공식 앱으로 신청'}</button>
+          <button type="button" disabled={busy} onClick={() => void request()} className="rounded-xl border border-ws-accent-text px-4 py-2 text-sm font-semibold text-ws-accent-text disabled:opacity-40">{busy ? '신청 중…' : '공식 앱으로 신청'}</button>
         </>
       )}
       {error && <p role="alert" className="text-xs text-red-700">{error}</p>}

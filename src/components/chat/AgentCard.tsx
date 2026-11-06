@@ -5,7 +5,7 @@ import type { Agent } from '@/lib/db';
 import { requestJson } from '@/lib/request-json';
 
 const AVATAR_COLORS = [
-  { bg: 'bg-[#087f8c]',   light: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-[#087f8c]'  },
+  { bg: 'bg-ws-accent',   light: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-ws-accent'  },
   { bg: 'bg-[#0066CC]',   light: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-700'    },
   { bg: 'bg-teal-600',    light: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-700'   },
   { bg: 'bg-violet-600',  light: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-700' },
@@ -15,7 +15,7 @@ const AVATAR_COLORS = [
 
 // 카테고리별 뱃지 색상
 const CATEGORY_BADGE: Record<string, string> = {
-  '공공기관': 'bg-blue-50 text-[#087f8c] border border-blue-200',
+  '공공기관': 'bg-blue-50 text-ws-accent border border-blue-200',
   '업무':     'bg-amber-50 text-amber-700 border border-amber-200',
   '문서':     'bg-violet-50 text-violet-700 border border-violet-200',
   '번역':     'bg-teal-50 text-teal-700 border border-teal-200',
@@ -60,7 +60,7 @@ export default function AgentCard({
   return (
     <>
       <div
-        className={`group relative flex flex-col gap-3 p-4 bg-white border rounded-2xl cursor-pointer transition-all duration-150 hover:shadow-[0_8px_24px_rgb(17_97_108_/_7%)] hover:border-[#9bc9ce] ${c.border}`}
+        className={`group relative flex flex-col gap-3 p-4 bg-white border rounded-2xl cursor-pointer transition-all duration-150 hover:shadow-[0_8px_24px_rgb(17_97_108_/_7%)] hover:border-ws-accent-border ${c.border}`}
         onClick={() => {
           // 링크형 비서는 대화를 시작하지 않고 기관 시스템으로 넘긴다.
           // noopener를 빼면 열린 창이 window.opener로 이 페이지를 조작할 수 있다.
@@ -146,7 +146,7 @@ export default function AgentCard({
             {canManage && !agent.approval_status && (
               <button
                 onClick={() => setShowApprovalModal(true)}
-                className="w-full mt-1 py-1.5 text-xs font-semibold text-[#087f8c] border border-[#bfe0e3] rounded-lg hover:bg-[#e7f5f5] transition-colors"
+                className="w-full mt-1 py-1.5 text-xs font-semibold text-ws-accent border border-[#bfe0e3] rounded-lg hover:bg-ws-accent-soft transition-colors"
               >
                 공식 등록 신청
               </button>
@@ -179,7 +179,7 @@ export default function AgentCard({
         {/* 호버 CTA (승인 버튼 없을 때만) */}
         {agent.tier === 'official' && (
           <div className="absolute inset-x-0 bottom-0 flex items-center justify-center py-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white/90 to-transparent rounded-b-xl pointer-events-none">
-            <span className="text-xs font-semibold text-[#087f8c]">대화 시작 →</span>
+            <span className="text-xs font-semibold text-ws-accent">대화 시작 →</span>
           </div>
         )}
       </div>
@@ -250,7 +250,7 @@ function RequestApprovalModal({
             onChange={e => setNote(e.target.value)}
             placeholder="관리자에게 전달할 신청 사유를 입력하세요."
             rows={3}
-            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#16818c] resize-none"
+            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent-text resize-none"
           />
         </div>
 
@@ -268,7 +268,7 @@ function RequestApprovalModal({
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="flex-1 py-2.5 bg-[#087f8c] hover:bg-[#087581] disabled:bg-slate-300 text-white font-semibold rounded-xl text-sm transition-colors"
+            className="flex-1 py-2.5 bg-ws-accent hover:bg-ws-accent-text disabled:bg-slate-300 text-white font-semibold rounded-xl text-sm transition-colors"
           >
             {submitting ? '신청 중...' : '신청하기'}
           </button>

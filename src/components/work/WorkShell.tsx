@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import Header from '@/components/layout/Header';
 import NoticesBanner from '@/components/NoticesBanner';
 import WorkspaceIcon from './WorkspaceIcon';
 import RecentConversations from './RecentConversations';
 import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebar-pref';
+import { useBranding } from '@/lib/use-branding';
+import { themeStyle } from '@/lib/theme-color';
 
 /**
  * 업무 화면 틀 — 기존 헤더(기관 브랜딩·관리자 메뉴)와 공지 배너를 그대로 쓰고 왼쪽에 업무 메뉴를 둔다.
@@ -30,6 +32,8 @@ export default function WorkShell({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname() ?? '/';
+  // 기관 테마 색(0067) — 없으면 globals.css :root의 기본 청록 그대로
+  const { themeColor } = useBranding();
   // 사이드바 접기 — 서버 렌더링과 어긋나지 않게 펼친 채로 그리고 마운트 뒤 이 브라우저에 기억한 값을 읽는다
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => setCollapsed(readSidebarCollapsed()), []);
@@ -53,7 +57,7 @@ export default function WorkShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="workspace-shell flex flex-col h-screen bg-[#F7F8FC] text-[#22283D]" style={{ fontFamily: 'Pretendard, -apple-system, sans-serif' }}>
+    <div className="workspace-shell flex flex-col h-screen bg-[#F7F8FC] text-[#22283D]" style={{ fontFamily: 'Pretendard, -apple-system, sans-serif', ...((themeStyle(themeColor) ?? {}) as CSSProperties) }}>
       <Header />
       <NoticesBanner />
       <nav aria-label="업무 메뉴" className="md:hidden flex gap-1 overflow-x-auto border-b border-[#DCE3EC] bg-white px-4 py-2">
@@ -82,7 +86,7 @@ export default function WorkShell({ children }: { children: ReactNode }) {
               aria-expanded={!collapsed}
               aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}
               title={collapsed ? '사이드바 펼치기' : '사이드바 접기'}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#087f8c]"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent"
             >
               <WorkspaceIcon name="panel" />
             </button>
@@ -91,7 +95,7 @@ export default function WorkShell({ children }: { children: ReactNode }) {
             href="/apps"
             aria-label={collapsed ? '새 업무 시작' : undefined}
             title={collapsed ? '새 업무 시작' : undefined}
-            className={`workspace-new mb-3 flex items-center justify-center gap-2 rounded-xl bg-[#087f8c] text-sm font-semibold text-white hover:bg-[#066775] ${collapsed ? 'p-2.5' : 'px-4 py-2.5'}`}
+            className={`workspace-new mb-3 flex items-center justify-center gap-2 rounded-xl bg-ws-accent text-sm font-semibold text-white hover:bg-ws-accent-hover ${collapsed ? 'p-2.5' : 'px-4 py-2.5'}`}
           >
             <WorkspaceIcon name="plus" />{!collapsed && '새 업무 시작'}
           </Link>
@@ -103,8 +107,8 @@ export default function WorkShell({ children }: { children: ReactNode }) {
                 aria-current={n.match(pathname) ? 'page' : undefined}
                 aria-label={collapsed ? n.label : undefined}
                 title={collapsed ? n.label : undefined}
-                className={`flex items-center rounded-xl py-2 text-[14px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#087f8c] ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${
-                  n.match(pathname) ? 'bg-[#e7f5f5] text-[#087581] font-semibold' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                className={`flex items-center rounded-xl py-2 text-[14px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ws-accent ${collapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${
+                  n.match(pathname) ? 'bg-ws-accent-soft text-ws-accent-text font-semibold' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                 }`}
               >
                 <WorkspaceIcon name={n.icon} />{!collapsed && n.label}

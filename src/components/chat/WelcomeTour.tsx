@@ -93,7 +93,7 @@ export default function WelcomeTour() {
               <span
                 key={i}
                 className={`h-1.5 rounded-full transition-all ${
-                  i === step ? 'w-5 bg-[#087f8c]' : 'w-1.5 bg-slate-200'
+                  i === step ? 'w-5 bg-ws-accent' : 'w-1.5 bg-slate-200'
                 }`}
               />
             ))}
@@ -117,7 +117,7 @@ export default function WelcomeTour() {
             )}
             <button
               onClick={() => (isLast ? close() : setStep((s) => s + 1))}
-              className="px-5 py-2.5 bg-[#087f8c] hover:bg-[#066775] text-white text-sm font-semibold rounded-xl"
+              className="px-5 py-2.5 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl"
             >
               {isLast ? '시작하기' : '다음'}
             </button>

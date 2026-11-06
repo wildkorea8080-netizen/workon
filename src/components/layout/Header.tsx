@@ -41,7 +41,7 @@ export default function Header() {
           />
         ) : (
           <>
-            <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#087f8c] text-lg font-bold text-white">W</span>
+            <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-xl bg-ws-accent text-lg font-bold text-white">W</span>
             <span className="max-w-[130px] truncate text-slate-900 font-bold text-lg tracking-tight sm:max-w-[240px]">{branding.name}</span>
           </>
         )}

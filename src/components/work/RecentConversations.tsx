@@ -33,7 +33,7 @@ export default function RecentConversations() {
     <section aria-label="최근 대화" className="flex min-h-0 flex-1 flex-col border-t border-[#E9EBF2] pt-3">
       <div className="mb-2 flex items-center justify-between px-3">
         <h2 className="text-[11px] font-bold tracking-[.12em] text-slate-400">최근 대화</h2>
-        <button type="button" onClick={startNew} className="rounded-lg px-2 py-1 text-xs font-semibold text-[#087581] hover:bg-[#e7f5f5]">+ 새 대화</button>
+        <button type="button" onClick={startNew} className="rounded-lg px-2 py-1 text-xs font-semibold text-ws-accent-text hover:bg-ws-accent-soft">+ 새 대화</button>
       </div>
       <Sidebar
         embedded

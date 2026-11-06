@@ -106,8 +106,8 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
             aria-pressed={activeTab === tab.key}
             className={`flex items-center gap-1 whitespace-nowrap rounded-full border px-4 py-2 text-xs font-medium transition-colors ${
               activeTab === tab.key
-                ? 'border-[#087f8c] bg-[#087f8c] text-white'
-                : 'border-[#E5E7EF] bg-white text-slate-500 hover:border-[#8ebfc4]'
+                ? 'border-ws-accent bg-ws-accent text-white'
+                : 'border-[#E5E7EF] bg-white text-slate-500 hover:border-ws-accent-border'
             }`}
           >
             {'icon' in tab && <span className="text-amber-400">{tab.icon}</span>}
@@ -120,7 +120,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
       <div className="p-4">
         {loading ? (
           <div className="text-center py-6 text-sm text-slate-400">
-            <div className="inline-block w-5 h-5 border-2 border-[#16818c] border-t-transparent rounded-full animate-spin mb-2" />
+            <div className="inline-block w-5 h-5 border-2 border-ws-accent-text border-t-transparent rounded-full animate-spin mb-2" />
             <p>불러오는 중...</p>
           </div>
         ) : error ? (
@@ -150,7 +150,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
             {activeTab === 'personal' && (
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="flex flex-col items-center justify-center gap-2 p-4 bg-[#FAFBFD] border-2 border-dashed border-[#E0E4ED] rounded-2xl text-slate-400 hover:border-[#9bc9ce] hover:text-[#087f8c] hover:bg-[#e7f5f5] transition-all duration-150 min-h-[120px]"
+                className="flex flex-col items-center justify-center gap-2 p-4 bg-[#FAFBFD] border-2 border-dashed border-[#E0E4ED] rounded-2xl text-slate-400 hover:border-ws-accent-border hover:text-ws-accent hover:bg-ws-accent-soft transition-all duration-150 min-h-[120px]"
               >
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

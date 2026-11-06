@@ -54,7 +54,7 @@ function BranchEditor({ branch, fields, label, onChange, onRemove }: { branch: A
       <option value="all">{MODE_LABEL.all}</option><option value="any">{MODE_LABEL.any}</option>
     </select></label>
     {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={fields} label={`${label} 조건 ${r + 1}`} disabled={false} onChange={next => changeRules(rules.map((x, i) => i === r ? next : x))} onRemove={() => changeRules(rules.filter((_, i) => i !== r))} />)}
-    {rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-[#087581]" onClick={() => changeRules([...rules, defaultRule(fields[0])])}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
+    {rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeRules([...rules, defaultRule(fields[0])])}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
     <textarea className={input} aria-label={`${label} 처리 지시`} maxLength={2000} rows={3} placeholder="이 갈래일 때의 처리 지시" value={branch.instruction} onChange={e => onChange({ ...branch, instruction: e.target.value })} />
   </div>;
 }
@@ -78,7 +78,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
   function changeBranches(index: number, branches: AppBranch[]) { changeStep(index, { branches: branches.length ? branches : undefined }); }
   return <section className="space-y-4 border-t pt-5"><h2 className="font-semibold">4. 단계별 처리 (선택)</h2>
     <p className="text-xs leading-5 text-slate-500">최대 3단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
-    {!definition.steps?.length && <button type="button" className="text-sm text-[#087581]" onClick={() => onChange(d => ({ ...d, steps: [{ name: '자료 정리', instruction: '원문에 있는 사실과 요구 사항을 정리하세요.' }, { name: '초안 작성', instruction: '원문과 앞 단계의 정리 결과를 바탕으로 업무 초안을 작성하세요.' }, { name: '검토·보완', instruction: '원문과 초안을 대조해 근거 없는 표현을 고치고 최종 초안을 작성하세요.' }] }))}>정리 → 초안 → 검토 구성 추가</button>}
+    {!definition.steps?.length && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [{ name: '자료 정리', instruction: '원문에 있는 사실과 요구 사항을 정리하세요.' }, { name: '초안 작성', instruction: '원문과 앞 단계의 정리 결과를 바탕으로 업무 초안을 작성하세요.' }, { name: '검토·보완', instruction: '원문과 초안을 대조해 근거 없는 표현을 고치고 최종 초안을 작성하세요.' }] }))}>정리 → 초안 → 검토 구성 추가</button>}
     {definition.steps?.map((step, index) => {
       const last = index === definition.steps!.length - 1;
       // 이 단계의 조건·갈래가 볼 수 있는 항목 — 입력 항목 + 앞선 분류 단계의 결과
@@ -87,7 +87,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
       const mode: AppConditionMode = step.when ? conditionMode(step.when) : 'all';
       return <div key={index} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
         <div className="flex items-center justify-between gap-2"><span className="text-xs text-slate-500">단계 {index + 1}{last ? ' · 최종 결과' : ''}</span><div className="flex gap-3">
-          {([-1, 1] as const).map(delta => <button key={delta} type="button" disabled={index + delta < 0 || index + delta >= (definition.steps?.length ?? 0)} aria-label={`단계 ${index + 1} ${delta === -1 ? '위로' : '아래로'}`} className="text-xs text-[#087581] disabled:opacity-30" onClick={() => onChange(d => { const steps = [...(d.steps ?? [])]; [steps[index], steps[index + delta]] = [steps[index + delta], steps[index]]; return { ...d, steps }; })}>{delta === -1 ? '위로' : '아래로'}</button>)}
+          {([-1, 1] as const).map(delta => <button key={delta} type="button" disabled={index + delta < 0 || index + delta >= (definition.steps?.length ?? 0)} aria-label={`단계 ${index + 1} ${delta === -1 ? '위로' : '아래로'}`} className="text-xs text-ws-accent-text disabled:opacity-30" onClick={() => onChange(d => { const steps = [...(d.steps ?? [])]; [steps[index], steps[index + delta]] = [steps[index + delta], steps[index]]; return { ...d, steps }; })}>{delta === -1 ? '위로' : '아래로'}</button>)}
           <button type="button" className="text-xs text-red-600" onClick={() => onChange(d => { const steps = d.steps?.filter((_, i) => i !== index); return { ...d, steps: steps?.length ? steps : undefined }; })}>단계 삭제</button>
         </div></div>
         <input className={input} aria-label={`단계 ${index + 1} 이름`} maxLength={40} value={step.name} onChange={e => changeStep(index, { name: e.target.value })} />
@@ -97,10 +97,10 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         </select></label>
         {step.lookup ? <div className="space-y-2 rounded-lg border border-teal-100 bg-white p-3">
           <input className={input} aria-label={`단계 ${index + 1} 조회어`} maxLength={APP_LOOKUP_QUERY_MAX} value={step.lookup.query} placeholder="조회어 — 입력 항목을 넣으려면 아래 단추를 누르세요" onChange={e => changeStep(index, { lookup: { ...step.lookup!, query: e.target.value } })} />
-          <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-[#087581]" onClick={() => changeStep(index, { lookup: { ...step.lookup!, query: `${step.lookup!.query}${step.lookup!.query && !step.lookup!.query.endsWith(' ') ? ' ' : ''}{{${f.key}}}`.slice(0, APP_LOOKUP_QUERY_MAX) } })}>+ {f.label}</button>)}</div>
+          <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-ws-accent-text" onClick={() => changeStep(index, { lookup: { ...step.lookup!, query: `${step.lookup!.query}${step.lookup!.query && !step.lookup!.query.endsWith(' ') ? ' ' : ''}{{${f.key}}}`.slice(0, APP_LOOKUP_QUERY_MAX) } })}>+ {f.label}</button>)}</div>
           {APP_LOOKUP_TOOLS[step.lookup.tool].article && <div className="space-y-2">
             <input className={input} aria-label={`단계 ${index + 1} 조문 번호`} maxLength={APP_LOOKUP_ARTICLE_MAX} value={step.lookup.article ?? ''} placeholder="조문 번호(선택) — 예: 15 또는 제15조. 비우면 앞 조문부터" onChange={e => changeStep(index, { lookup: { ...step.lookup!, article: e.target.value || undefined } })} />
-            <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-[#087581]" onClick={() => changeStep(index, { lookup: { ...step.lookup!, article: `{{${f.key}}}` } })}>조문 번호 = {f.label}</button>)}</div>
+            <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-ws-accent-text" onClick={() => changeStep(index, { lookup: { ...step.lookup!, article: `{{${f.key}}}` } })}>조문 번호 = {f.label}</button>)}</div>
           </div>}
           <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 법령을 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>
           {!lookupTools.includes(step.lookup.tool) && <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>}
@@ -118,7 +118,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
           <option value="">항상 실행</option><option value="all" disabled={last}>아래 조건이 모두 맞을 때만 실행</option><option value="any" disabled={last}>아래 조건 중 하나라도 맞을 때 실행</option>
         </select></label>
         {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={visible} label={`단계 ${index + 1} 조건 ${r + 1}`} disabled={last} onChange={next => changeRules(index, rules.map((x, i) => i === r ? next : x), mode)} onRemove={() => changeRules(index, rules.filter((_, i) => i !== r), mode)} />)}
-        {!last && rules.length > 0 && rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-[#087581]" onClick={() => changeRules(index, [...rules, defaultRule(fields[0])], mode)}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
+        {!last && rules.length > 0 && rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeRules(index, [...rules, defaultRule(fields[0])], mode)}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
         {last && step.when && <p role="alert" className="text-xs text-red-700">마지막 단계는 조건을 ‘항상 실행’으로 바꿔 주세요.</p>}
         {!step.lookup && !step.classify && (() => {
           const lists = fields.filter(f => f.type === 'textarea');
@@ -132,10 +132,10 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         {!step.lookup && !step.classify && <div className="space-y-2 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600">갈래 (선택) — 위에서부터 처음 맞는 갈래의 지시로 처리하고, 맞는 갈래가 없으면 위의 기본 지시로 처리합니다</div>
           {(step.branches ?? []).map((branch, b) => <BranchEditor key={b} branch={branch} fields={visible} label={`단계 ${index + 1} 갈래 ${b + 1}`} onChange={next => changeBranches(index, (step.branches ?? []).map((x, i) => i === b ? next : x))} onRemove={() => changeBranches(index, (step.branches ?? []).filter((_, i) => i !== b))} />)}
-          {(step.branches?.length ?? 0) < APP_MAX_BRANCHES && <button type="button" className="text-xs text-[#087581]" onClick={() => changeBranches(index, [...(step.branches ?? []), defaultBranch(fields, (step.branches?.length ?? 0) + 1)])}>+ 갈래 추가</button>}
+          {(step.branches?.length ?? 0) < APP_MAX_BRANCHES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeBranches(index, [...(step.branches ?? []), defaultBranch(fields, (step.branches?.length ?? 0) + 1)])}>+ 갈래 추가</button>}
         </div>}
       </div>;
     })}
-    {Boolean(definition.steps?.length) && (definition.steps?.length ?? 0) < 3 && <button type="button" className="text-sm text-[#087581]" onClick={() => onChange(d => ({ ...d, steps: [...(d.steps ?? []), { name: '추가 처리', instruction: '앞 단계의 결과를 바탕으로 최종 결과를 작성하세요.' }] }))}>+ 단계 추가</button>}
+    {Boolean(definition.steps?.length) && (definition.steps?.length ?? 0) < 3 && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [...(d.steps ?? []), { name: '추가 처리', instruction: '앞 단계의 결과를 바탕으로 최종 결과를 작성하세요.' }] }))}>+ 단계 추가</button>}
   </section>;
 }

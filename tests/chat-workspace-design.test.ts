@@ -30,7 +30,7 @@ describe('AI 대화 화면 디자인', () => {
   it('대화 목록은 밝은 바탕 — 선택한 대화는 업무 메뉴와 같은 청록', () => {
     const sidebar = read('src/components/layout/Sidebar.tsx');
     expect(sidebar).toContain('border-r border-[#E9EBF2] bg-white');
-    expect(sidebar).toContain("selected ? 'bg-[#e7f5f5]'");
+    expect(sidebar).toContain("selected ? 'bg-ws-accent-soft'");
     expect(sidebar).not.toMatch(/text-white\/|bg-white\/\d/);
   });
 });

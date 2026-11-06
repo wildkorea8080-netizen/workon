@@ -175,7 +175,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   // 비로그인 랜딩
   if (!session) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#1C2B4A] to-[#087f8c] flex items-center justify-center px-4">
+      <div className="min-h-screen bg-gradient-to-br from-[#1C2B4A] to-ws-accent flex items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-8 text-center">
           <div>
             <div className="text-5xl mb-4">🏛️</div>
@@ -185,7 +185,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
           <div className="bg-white rounded-2xl shadow-xl p-6 space-y-3">
             <Link
               href="/login"
-              className="w-full flex items-center justify-center py-3 rounded-xl bg-[#087f8c] hover:bg-[#066775] text-white font-semibold text-sm transition-colors"
+              className="w-full flex items-center justify-center py-3 rounded-xl bg-ws-accent hover:bg-ws-accent-hover text-white font-semibold text-sm transition-colors"
             >
               로그인
             </Link>
@@ -264,7 +264,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
           {launchNote}
           {/* 작은 화면에서는 틀의 사이드바가 숨으므로 지난 대화를 여기서 연다 */}
           <details className="md:hidden border-b border-[#E9EBF2] bg-white">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#087581]">지난 대화</summary>
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-ws-accent-text">지난 대화</summary>
             <div className="flex max-h-[50vh] flex-col overflow-hidden px-3 pb-3">
               <Sidebar
                 embedded
@@ -320,7 +320,7 @@ function WelcomeView({
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-5 pb-4 pt-9 md:px-9">
-        <p className="mb-3 text-[11px] font-bold tracking-[.18em] text-[#467b82]">AI ASSISTANT</p>
+        <p className="mb-3 text-[11px] font-bold tracking-[.18em] text-ws-accent-muted">AI ASSISTANT</p>
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[26px] font-bold leading-tight tracking-tight text-[#22283D]">안녕하세요, {userName}님</h1>
@@ -330,13 +330,13 @@ function WelcomeView({
                 시도했다가 안 되는 것을 발견하고 신뢰를 잃는다. */}
             <p className="mt-2 text-[14px] leading-6 text-slate-500">기관 문서를 근거로 답하고, 사진·화면 캡처도 읽습니다.</p>
           </div>
-          <Link href="/apps" className="rounded-xl border border-[#E7E9F1] bg-white px-4 py-2.5 text-sm font-semibold text-[#087581] hover:border-[#9bc9ce]">
+          <Link href="/apps" className="rounded-xl border border-[#E7E9F1] bg-white px-4 py-2.5 text-sm font-semibold text-ws-accent-text hover:border-ws-accent-border">
             업무 앱 둘러보기
           </Link>
         </div>
 
         {/* 빠른 입력창 */}
-        <div className="workspace-card flex items-end gap-3 rounded-2xl border border-[#E7E9F1] bg-white px-5 py-4 transition-all focus-within:border-[#16818c] focus-within:ring-2 focus-within:ring-[#16818c]/15">
+        <div className="workspace-card flex items-end gap-3 rounded-2xl border border-[#E7E9F1] bg-white px-5 py-4 transition-all focus-within:border-ws-accent-text focus-within:ring-2 focus-within:ring-ws-accent-text/15">
           <textarea
             value={quickInput}
             onChange={e => onQuickInputChange(e.target.value)}
@@ -356,7 +356,7 @@ function WelcomeView({
             onClick={onQuickSend}
             disabled={!quickInput.trim() || !hasLastAgent}
             aria-label="보내기"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-[#087f8c] text-white transition-colors hover:bg-[#066775] disabled:cursor-not-allowed disabled:bg-slate-200"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-ws-accent text-white transition-colors hover:bg-ws-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" />
@@ -366,7 +366,7 @@ function WelcomeView({
         {hasLastAgent ? (
           // 누가 답하는지 숨기지 않는다 — 비서마다 문서·기능이 다르다
           <p className="mt-2 text-xs text-slate-500">
-            답할 비서: <span className="font-semibold text-[#087581]">{answeringAgentName}</span> · 다른 비서에게 물으려면 아래에서 고르세요
+            답할 비서: <span className="font-semibold text-ws-accent-text">{answeringAgentName}</span> · 다른 비서에게 물으려면 아래에서 고르세요
           </p>
         ) : (
           <p className="mt-2 text-xs text-slate-400">아래에서 비서를 먼저 고르면 바로 대화를 시작할 수 있어요.</p>

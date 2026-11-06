@@ -45,7 +45,7 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
   }
 
   if (filesRequired) return <p className="mt-4 text-xs leading-5 text-slate-500">이 앱은 파일 첨부가 필수라 예약 실행을 걸 수 없습니다.</p>;
-  if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-4 text-sm font-semibold text-[#087581] disabled:opacity-40">이 입력으로 예약 실행 걸기</button>;
+  if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-4 text-sm font-semibold text-ws-accent-text disabled:opacity-40">이 입력으로 예약 실행 걸기</button>;
   return <fieldset disabled={disabled || saving} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
     <legend className="px-1 text-sm font-semibold">예약 실행 (한국 시간)</legend>
     {library && <p className="text-xs leading-5 text-slate-600">{documentIds.length ? `문서함에서 고른 문서 ${documentIds.length}개를 함께 저장합니다 — 실행 때마다 그 문서의 지금 판(새 판이 시행되면 새 판)으로 읽습니다.` : '문서함에서 문서를 고르면 함께 저장됩니다.'}{hasUploads ? ' 올린 파일은 예약에 실리지 않습니다.' : ''}</p>}
@@ -57,7 +57,7 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
       <label className="text-sm">시각<span className="mt-1 flex gap-2"><select aria-label="시" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={hour} onChange={e => setHour(Number(e.target.value))}>{Array.from({ length: 24 }, (_, i) => i).map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>)}</select><select aria-label="분" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={minute} onChange={e => setMinute(Number(e.target.value) === 30 ? 30 : 0)}><option value={0}>00분</option><option value={30}>30분</option></select></span></label>
     </div>
     <div className="flex flex-wrap items-center gap-3">
-      <button type="button" onClick={() => void save()} className="rounded-xl bg-[#087f8c] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? '저장 중…' : `${spec.ok ? describeSchedule(spec.value) : '예약'}에 실행 예약`}</button>
+      <button type="button" onClick={() => void save()} className="rounded-xl bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? '저장 중…' : `${spec.ok ? describeSchedule(spec.value) : '예약'}에 실행 예약`}</button>
       <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500">닫기</button>
     </div>
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}

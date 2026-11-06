@@ -40,7 +40,7 @@ export default function AppWebhookForm({ agentId, appVersion, definition, docume
   }
 
   if (definition.attachments?.required && !library) return <p className="mt-2 text-xs leading-5 text-slate-500">이 앱은 파일 첨부가 필수라 외부 연동을 만들 수 없습니다.</p>;
-  if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-2 block text-sm font-semibold text-[#087581] disabled:opacity-40">외부 시스템 연동(Webhook) 만들기</button>;
+  if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-2 block text-sm font-semibold text-ws-accent-text disabled:opacity-40">외부 시스템 연동(Webhook) 만들기</button>;
   if (created) return <div className="mt-4 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
     <p className="text-sm font-semibold text-amber-900">연동 토큰 — 지금 한 번만 보입니다. 안전한 곳에 옮겨 두세요.</p>
     <code className="block break-all rounded-lg bg-white p-3 text-xs">{created.token}</code>
@@ -58,7 +58,7 @@ export default function AppWebhookForm({ agentId, appVersion, definition, docume
       <label className="text-sm">유효 기간<select aria-label="유효 기간" value={expiry} onChange={e => setExpiry(Number(e.target.value) as WebhookExpiryDays)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2">{WEBHOOK_EXPIRY_DAYS.map(d => <option key={d} value={d}>{d}일</option>)}</select></label>
     </div>
     <div className="flex flex-wrap items-center gap-3">
-      <button type="button" onClick={() => void save()} className="rounded-xl bg-[#087f8c] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? '만드는 중…' : '연동 토큰 만들기'}</button>
+      <button type="button" onClick={() => void save()} className="rounded-xl bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? '만드는 중…' : '연동 토큰 만들기'}</button>
       <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500">닫기</button>
     </div>
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}

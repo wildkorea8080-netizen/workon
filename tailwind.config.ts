@@ -22,6 +22,17 @@ const config: Config = {
           800: '#001559',
           900: '#000A42',
         },
+        // 업무 화면 강조 색(기관 테마 색 0067) — 값은 CSS 변수(RGB 세 숫자)라 업무 틀이 기관마다 바꾼다.
+        // 기본값은 globals.css :root, 계산은 src/lib/theme-color.ts. `bg-ws-accent/10`처럼 투명도도 된다
+        ws: {
+          accent: 'rgb(var(--ws-accent) / <alpha-value>)',
+          'accent-hover': 'rgb(var(--ws-accent-hover) / <alpha-value>)',
+          'accent-text': 'rgb(var(--ws-accent-text) / <alpha-value>)',
+          'accent-muted': 'rgb(var(--ws-accent-muted) / <alpha-value>)',
+          'accent-soft': 'rgb(var(--ws-accent-soft) / <alpha-value>)',
+          'accent-line': 'rgb(var(--ws-accent-line) / <alpha-value>)',
+          'accent-border': 'rgb(var(--ws-accent-border) / <alpha-value>)',
+        },
         // 직접 사용용 별칭
         primary:       '#003087',
         'primary-light': '#0066CC',

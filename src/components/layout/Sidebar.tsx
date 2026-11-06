@@ -176,7 +176,7 @@ export default function Sidebar({
       {!embedded && <div className="p-3 pt-4">
         <button
           onClick={onNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#087f8c] rounded-xl bg-white text-[#087581] text-sm font-semibold hover:bg-[#e7f5f5] transition-colors"
+          className="w-full flex items-center justify-center gap-2 py-2.5 border border-ws-accent rounded-xl bg-white text-ws-accent-text text-sm font-semibold hover:bg-ws-accent-soft transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -197,7 +197,7 @@ export default function Sidebar({
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             aria-label="대화 검색"
-            className="w-full bg-[#FAFBFD] border border-[#E7E9F1] text-slate-800 placeholder-slate-400 pl-8 pr-3 py-2 rounded-lg text-xs focus:border-[#16818c] focus:outline-none focus:ring-2 focus:ring-[#16818c]/20"
+            className="w-full bg-[#FAFBFD] border border-[#E7E9F1] text-slate-800 placeholder-slate-400 pl-8 pr-3 py-2 rounded-lg text-xs focus:border-ws-accent-text focus:outline-none focus:ring-2 focus:ring-ws-accent-text/20"
           />
         </div>
       </div>
@@ -240,7 +240,7 @@ export default function Sidebar({
 
       {/* 하단 프로필 — 업무 틀에서는 머리 막대에 프로필이 있어 두지 않는다 */}
       {!embedded && <div className="p-3 border-t border-[#E9EBF2] flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-full bg-[#e7f5f5] flex items-center justify-center text-[#087581] text-xs font-bold flex-shrink-0">
+        <div className="w-8 h-8 rounded-full bg-ws-accent-soft flex items-center justify-center text-ws-accent-text text-xs font-bold flex-shrink-0">
           {userInitial}
         </div>
         <div className="flex-1 min-w-0">
@@ -285,7 +285,7 @@ function ConvItem({
     <div
       onClick={!isRenaming ? onSelect : undefined}
       className={`group flex items-start gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors ${
-        selected ? 'bg-[#e7f5f5]' : 'hover:bg-slate-50'
+        selected ? 'bg-ws-accent-soft' : 'hover:bg-slate-50'
       }`}
     >
       <div className={`w-6 h-6 rounded-md ${color} flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5`}>
@@ -304,10 +304,10 @@ function ConvItem({
               if (e.key === 'Escape') onRenameCancel();
             }}
             onClick={e => e.stopPropagation()}
-            className="w-full bg-white border border-[#9bc9ce] text-slate-800 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-[#16818c]/20"
+            className="w-full bg-white border border-ws-accent-border text-slate-800 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-ws-accent-text/20"
           />
         ) : (
-          <p className={`text-xs truncate leading-tight ${selected ? 'text-[#087581] font-semibold' : 'text-slate-700'}`}>
+          <p className={`text-xs truncate leading-tight ${selected ? 'text-ws-accent-text font-semibold' : 'text-slate-700'}`}>
             {/* 공유 중인 대화를 목록에서 알아볼 수 있어야 한다. 마우스를 올려야
                 아이콘이 보이는 구조라 표시가 없으면 공유 사실을 잊는다. */}
             {c.is_shared && <span className="text-emerald-600 mr-1" title="공유 중">🔗</span>}

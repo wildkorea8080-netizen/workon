@@ -76,7 +76,7 @@ export default function ConversationSidebar({
       <div className="px-4 py-4">
         <button
           onClick={onNewConversation}
-          className="w-full bg-[#087f8c] hover:bg-[#087581] text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-colors"
+          className="w-full bg-ws-accent hover:bg-ws-accent-text text-white px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -96,7 +96,7 @@ export default function ConversationSidebar({
             placeholder="대화 검색..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-white/10 border border-white/10 text-white placeholder-white/30 pl-9 pr-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#087f8c] focus:border-transparent"
+            className="w-full bg-white/10 border border-white/10 text-white placeholder-white/30 pl-9 pr-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent focus:border-transparent"
           />
         </div>
       </div>
@@ -106,7 +106,7 @@ export default function ConversationSidebar({
         <div className="px-4 pb-3 flex flex-wrap gap-1.5">
           <button
             onClick={() => setFilterAgent(null)}
-            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterAgent === null ? 'bg-[#087f8c] text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterAgent === null ? 'bg-ws-accent text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
           >
             전체
           </button>
@@ -114,7 +114,7 @@ export default function ConversationSidebar({
             <button
               key={a}
               onClick={() => setFilterAgent(a)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterAgent === a ? 'bg-[#087f8c] text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterAgent === a ? 'bg-ws-accent text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
             >
               {a}
             </button>
@@ -155,7 +155,7 @@ function ConvItem({ c, selected, onSelect }: { c: Conversation; selected: boolea
     <div
       onClick={onSelect}
       className={`flex items-start gap-2.5 px-2 py-2.5 rounded-lg cursor-pointer transition-colors ${
-        selected ? 'bg-[#087f8c]/30 border border-[#087f8c]/40' : 'hover:bg-white/8'
+        selected ? 'bg-ws-accent/30 border border-ws-accent/40' : 'hover:bg-white/8'
       }`}
     >
       <div className={`w-7 h-7 rounded-lg ${color} flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 mt-0.5`}>

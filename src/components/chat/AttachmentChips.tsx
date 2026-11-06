@@ -37,7 +37,7 @@ export function PendingFileChips({
           chip.stage === 'failed'
             ? 'border-red-200 bg-red-50 text-red-700'
             : chip.stage === 'ready'
-            ? 'border-[#087f8c]/20 bg-[#087f8c]/5 text-slate-700'
+            ? 'border-ws-accent/20 bg-ws-accent/5 text-slate-700'
             : 'border-slate-200 bg-white text-slate-500';
         return (
           <div key={chip.key} className={`flex items-center gap-2 border rounded-lg px-3 py-1.5 text-xs ${tone}`}>
@@ -102,7 +102,7 @@ export function ConversationAttachments({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="text-xs font-semibold text-[#087f8c] hover:underline"
+        className="text-xs font-semibold text-ws-accent hover:underline"
       >
         이 대화의 첨부 {items.length}개 {open ? '▴' : '▾'}
       </button>
