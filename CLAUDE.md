@@ -30,6 +30,7 @@
 - (2026-11-06 아침 3) 1,000행 상한 목록 둘(`f6d11a1`, 마이그레이션 없음)을 `dpl_8uQLLZPMjfPCkeoqWuSYwPatVBhN`로 배포했다.
 - (2026-11-06 오전) AI 대화 화면을 업무 틀·청록 디자인으로(`a3a2f41`, 마이그레이션 없음)를 `dpl_CdmkaG3Fm47gK7murQXiMhXcMqr3`로 배포했다.
 - (2026-11-06 낮) 사이드바 하나(`a2e9124`)·비서 없이 바로 묻기(`04f6b70`, 마이그레이션 없음)를 `dpl_8po4buxTsHomUkTwEsa95sFiWZQv`로 배포했다.
+- (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-03 밤) 앱 외부 연동(0049)·관리자 통제(0050)·연동 재시도 중복 막기(0051)를 운영 적용하고 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(`3deae59`)로 배포했다.
 - (2026-11-03) 단계 갈래·긴 첨부 나눠 읽기·앱 예약 실행(0048 운영 적용)을 `dpl_BHdvNEhXreRn9BvUmqN1Ah65YeHy`(`ef2bcbe`)로 운영 배포했다. 첫 빌드는 route·page 파일이 허용 밖 값을 내보내 실패했다 — `tests/route-exports.test.ts`가 이제 그 규칙을 본다(`tsc`는 못 봄). 새 라우트·화면이 든 묶음은 가지 Preview Ready를 먼저 보고 `main`에 올린다.
 - 자세한 완료 범위·위험·우선순위·검증 순서는 인수인계 문서를 따른다.
