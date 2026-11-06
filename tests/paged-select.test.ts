@@ -77,7 +77,7 @@ describe('사용 기록을 읽는 곳(원본 확인)', () => {
         const before = src.slice(Math.max(0, at - 220), at);
         const isWrite = /\.insert\(|\.update\(|\.delete\(/.test(chunk.slice(0, 120));
         const bounded = /\.range\(|\.limit\(|head: true/.test(chunk) || /pagedRows/.test(before);
-        if (!isWrite && !bounded && !file.includes('/api/reports/')) offenders.push(`${file}: ${chunk.split('\n')[0]}`);
+        if (!isWrite && !bounded) offenders.push(`${file}: ${chunk.split('\n')[0]}`);
         at = src.indexOf("from('usage_logs')", at + 1);
       }
     }
