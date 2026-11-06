@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useBranding } from '@/lib/use-branding';
+import { themeStyle } from '@/lib/theme-color';
 
 /**
  * 로그인 폼.
@@ -12,7 +13,7 @@ import { useBranding } from '@/lib/use-branding';
  * /login 과 /signin/{slug} 가 함께 쓴다. 화면을 복제하면 한쪽만 고치는
  * 사고가 나므로 한 벌만 둔다. slug가 있으면 그 기관 브랜딩으로 그린다.
  */
-export default function LoginForm({ slug }: { slug?: string }) {
+export default function LoginForm({ slug, themeColor }: { slug?: string; themeColor?: string | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // 기관 전용 경로(/signin/{slug})면 그 기관 브랜딩으로 그린다.
@@ -26,6 +27,12 @@ export default function LoginForm({ slug }: { slug?: string }) {
   const [loading, setLoading] = useState(false);
 
   const isAdminLogin = role === 'admin';
+  // 기관 전용 로그인(/signin/{slug})은 그 기관 테마 색(0067)으로 — 정하지 않은 기관과 공용 /login은 지금 남색 그대로
+  // 서버가 읽어 준 색(첫 그림부터)이 있으면 그것을, 없으면 브랜딩 응답의 색
+  const theme = slug ? themeStyle(themeColor !== undefined ? themeColor : branding.themeColor) : null;
+  const c = theme
+    ? { bg: 'from-ws-accent-hover via-ws-accent to-ws-accent-text', sub: 'text-white/80', field: 'focus:ring-ws-accent/30 focus:border-ws-accent', button: 'bg-ws-accent hover:bg-ws-accent-hover', link: 'hover:text-ws-accent-text', strong: 'text-ws-accent-text' }
+    : { bg: 'from-[#001a5c] via-[#003087] to-[#0066CC]', sub: 'text-white/60', field: 'focus:ring-[#003087]/30 focus:border-[#003087]', button: 'bg-[#003087] hover:bg-[#002070]', link: 'hover:text-[#003087]', strong: 'text-[#003087]' };
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,7 +52,7 @@ export default function LoginForm({ slug }: { slug?: string }) {
     redirectError === 'unauthenticated' ? '다시 로그인해주세요.' : null;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#001a5c] via-[#003087] to-[#0066CC] flex items-center justify-center px-4">
+    <main className={`min-h-screen bg-gradient-to-br ${c.bg} flex items-center justify-center px-4`} style={(theme ?? undefined) as CSSProperties | undefined}>
       <div className="w-full max-w-[420px]">
 
         {/* 로고 영역 */}
@@ -78,7 +85,7 @@ export default function LoginForm({ slug }: { slug?: string }) {
           >
             {branding.name}
           </h1>
-          <p className="text-white/60 text-sm mt-1">
+          <p className={`${c.sub} text-sm mt-1`}>
             {slug ? '기관 전용 로그인' : '공공기관 전용 AI 비서 플랫폼'}
           </p>
         </div>
@@ -126,7 +133,7 @@ export default function LoginForm({ slug }: { slug?: string }) {
                 onChange={e => setEmail(e.target.value)}
                 required
                 placeholder="example@gov.kr"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#003087]/30 focus:border-[#003087] transition-all"
+                className={`w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 ${c.field} transition-all`}
               />
             </div>
             <div>
@@ -137,14 +144,14 @@ export default function LoginForm({ slug }: { slug?: string }) {
                 onChange={e => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#003087]/30 focus:border-[#003087] transition-all"
+                className={`w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 ${c.field} transition-all`}
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors shadow-sm mt-2"
+              className={`w-full py-3 ${c.button} disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors shadow-sm mt-2`}
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -162,13 +169,13 @@ export default function LoginForm({ slug }: { slug?: string }) {
           <div className="mt-5 pt-5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <Link
               href={isAdminLogin ? '/login' : '/login?role=admin'}
-              className="hover:text-[#003087] transition-colors"
+              className={`${c.link} transition-colors`}
             >
               {isAdminLogin ? '일반 사용자 로그인' : '관리자 로그인'}
             </Link>
             {!isAdminLogin && (
-              <Link href="/signup" className="hover:text-[#003087] transition-colors">
-                계정이 없으신가요? <span className="font-semibold text-[#003087]">회원가입</span>
+              <Link href="/signup" className={`${c.link} transition-colors`}>
+                계정이 없으신가요? <span className={`font-semibold ${c.strong}`}>회원가입</span>
               </Link>
             )}
           </div>
