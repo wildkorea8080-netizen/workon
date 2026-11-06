@@ -2,6 +2,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import DocumentsManager from '@/components/admin/DocumentsManager';
 import RAGSearchTester from '@/components/admin/RAGSearchTester';
 import RagEvalPanel from '@/components/admin/RagEvalPanel';
+import CommonLibraryPanel from '@/components/admin/CommonLibraryPanel';
 
 export default async function AdminDocumentsPage() {
   const session = await getServerAuthSession();
@@ -20,10 +21,12 @@ export default async function AdminDocumentsPage() {
     <section className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">📚 문서 관리</h1>
-        <p className="text-slate-600 mt-2">문서를 업로드하고 관리합니다. 업로드 시 자동으로 텍스트 추출, 청킹, 임베딩이 처리됩니다.</p>
+        <p className="text-slate-600 mt-2">비서가 근거로 쓸 문서를 올리고 관리합니다. 올린 문서는 문서 읽기 서비스(NODA)가 읽어 대화에서 찾을 수 있게 합니다.</p>
       </div>
 
       <DocumentsManager />
+
+      <CommonLibraryPanel />
 
       <RAGSearchTester />
 
