@@ -12,6 +12,7 @@ const paths: Record<string, string> = {
   search: 'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
   arrow: 'M5 12h14 M13 6l6 6-6 6',
   plus: 'M12 5v14 M5 12h14',
+  panel: 'M3 4h18v16H3z M9 4v16',
   spark: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z',
   translate: 'M3 5h12 M9 2v3 M5 5c0 6 7 10 7 10 M13 5c-1 5-5 9-10 11 M14 21l4-10 4 10 M16 17h4',
   edit: 'm14 4 6 6 M3 21l5-1L21 7l-6-6L2 14z M3 21h18',

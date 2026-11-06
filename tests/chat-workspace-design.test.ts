@@ -66,3 +66,34 @@ describe('사이드바 하나 — 업무 메뉴 아래 최근 대화(2026-11-06)
   });
 });
 
+
+describe('사이드바 접기(2026-11-06)', () => {
+  it('접으면 아이콘만 — 이름은 aria-label·title로, 최근 대화는 숨김', () => {
+    const shell = read('src/components/work/WorkShell.tsx');
+    expect(shell).toContain("aria-label={collapsed ? '사이드바 펼치기' : '사이드바 접기'}");
+    expect(shell).toContain('aria-expanded={!collapsed}');
+    expect(shell).toContain('aria-label={collapsed ? n.label : undefined}');
+    expect(shell).toContain('{!collapsed && n.label}');
+    expect(shell).toContain('{!collapsed && <Suspense fallback={null}><RecentConversations /></Suspense>}');
+    // 서버 렌더링과 어긋나지 않게 처음엔 펼친 채로, 마운트 뒤 기억한 값을 읽는다
+    expect(shell).toContain('useState(false)');
+    expect(shell).toContain('useEffect(() => setCollapsed(readSidebarCollapsed()), [])');
+  });
+
+  it('접었는지는 이 브라우저에만 — 저장소를 못 쓰면 펼친 채로', async () => {
+    const pref = await import('@/lib/sidebar-pref');
+    const map = new Map<string, string>();
+    const store = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v), removeItem: (k: string) => void map.delete(k) };
+    expect(pref.readSidebarCollapsed(store)).toBe(false);
+    pref.writeSidebarCollapsed(true, store);
+    expect(map.get(pref.SIDEBAR_COLLAPSED_KEY)).toBe('1');
+    expect(pref.readSidebarCollapsed(store)).toBe(true);
+    pref.writeSidebarCollapsed(false, store);
+    expect(map.has(pref.SIDEBAR_COLLAPSED_KEY)).toBe(false);
+    const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }, removeItem: () => { throw new Error('blocked'); } };
+    expect(pref.readSidebarCollapsed(broken)).toBe(false);
+    expect(() => pref.writeSidebarCollapsed(true, broken)).not.toThrow();
+    expect(pref.readSidebarCollapsed(null)).toBe(false);
+    expect(read('src/lib/sidebar-pref.ts')).not.toMatch(/^import /m);
+  });
+});
