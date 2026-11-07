@@ -1,4 +1,8 @@
-export type AppField = { key: string; label: string; type: 'text' | 'textarea' | 'number' | 'date' | 'select'; required: boolean; options?: string[] };
+/**
+ * 입력 항목. `requiredWhen`(조건부 필수, 2026-11-08) — 늘 필수가 아닌 항목이 **다른 항목의 값**에 따라 필수가 된다
+ * (예: 종류가 '민원'이면 민원 번호 필수). 조건 꼴·비교는 단계 실행 조건과 같고, 자기 자신·분류 결과(@N)는 볼 수 없다
+ */
+export type AppField = { key: string; label: string; type: 'text' | 'textarea' | 'number' | 'date' | 'select'; required: boolean; options?: string[]; requiredWhen?: AppStepCondition };
 export type AppConditionOp = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'before' | 'after' | 'filled' | 'empty';
 /** 입력 항목 하나에 대한 비교. filled·empty는 값이 없다 */
 export type AppRule = { field: string; op: AppConditionOp; value?: string };
@@ -213,6 +217,23 @@ export function chooseBranch(step: AppStep, inputs: Record<string, string> | und
   return step.branches?.find(branch => conditionHolds(branch.when, inputs)) ?? null;
 }
 
+/**
+ * 이 입력에서 항목이 필수인가 — 늘 필수이거나, 조건부 필수(`requiredWhen`)의 조건이 지금 다른 항목 값으로 맞을 때.
+ * 서버 입력 검사(renderAppInput)와 실행 화면 표시가 같은 판정을 쓴다
+ */
+export function fieldRequired(field: AppField, inputs: Record<string, string> | undefined): boolean {
+  return field.required || Boolean(field.requiredWhen && conditionHolds(field.requiredWhen, inputs));
+}
+
+/** 조건 한 줄 — `종류: 민원(같음) 또는 연락처: 비어 있음`. 지워진 항목은 '삭제된 항목' */
+export function describeCondition(condition: AppStepCondition, fields: AppField[]): string {
+  const joiner = conditionMode(condition) === 'any' ? ' 또는 ' : ' 그리고 ';
+  return conditionRules(condition).map(rule => {
+    const label = fields.find(f => f.key === rule.field)?.label ?? '삭제된 항목';
+    return rule.op === 'filled' || rule.op === 'empty' ? `${label}: ${APP_CONDITION_LABELS[rule.op]}` : `${label}: ${rule.value ?? ''}(${APP_CONDITION_LABELS[rule.op]})`;
+  }).join(joiner);
+}
+
 /** 조건 꼴 `{ all: [...] }`·`{ any: [...] }` 하나를 검사·정규화한다(둘 다 있거나 둘 다 없으면 거절). 맞지 않으면 null */
 function normalizeCondition(raw: unknown, fields: AppField[]): AppStepCondition | null {
   if (!object(raw) || (raw.all !== undefined) === (raw.any !== undefined)) return null;
@@ -236,6 +257,15 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
       field.options = f.options.map(o => o.trim());
     }
     fields.push(field);
+  }
+  // 조건부 필수 — 모든 항목을 읽은 뒤에 본다(뒤에 있는 항목도 가리킬 수 있다). 자기 자신·분류 결과는 볼 수 없고, 늘 필수인 항목에는 두지 않는다
+  for (const [i, f] of (raw.fields as unknown[]).entries()) {
+    if (!object(f) || f.requiredWhen === undefined) continue;
+    const field = fields[i];
+    if (field.required) return { ok: false, message: `${field.label}: 늘 필수인 항목에는 조건부 필수를 둘 수 없습니다.` };
+    const when = normalizeCondition(f.requiredWhen, fields.filter(x => x.key !== field.key));
+    if (!when) return { ok: false, message: `${field.label}: 조건부 필수 조건은 1~${APP_MAX_RULES}개, 다른 입력 항목과 그 종류에 맞는 비교·값만 사용할 수 있습니다.` };
+    field.requiredWhen = when;
   }
   const steps: AppStep[] = [];
   if (raw.steps !== undefined) {
@@ -330,11 +360,16 @@ export function renderAppInput(def: AppDefinition, raw: unknown): { ok: true; me
   if (!object(raw) || Object.keys(raw).some(k => !def.fields.some(f => f.key === k))) return { ok: false, message: '현재 앱의 입력 항목을 사용해 주세요.' };
   const values: Record<string, string> = Object.create(null);
   const inputs: Record<string, string> = Object.create(null);
+  // 먼저 모든 항목의 글을 읽는다 — 조건부 필수는 다른 항목의 값으로 정해진다
+  const texts: Record<string, string> = Object.create(null);
   for (const field of def.fields) {
     const value = raw[field.key] ?? '';
     if (typeof value !== 'string' || value.length > (field.type === 'textarea' ? 6000 : 500)) return { ok: false, message: `${field.label}: 입력 길이나 형식을 확인해 주세요.` };
-    const text = value.trim();
-    if (field.required && !text) return { ok: false, message: `${field.label} 항목을 입력해 주세요.` };
+    texts[field.key] = value.trim();
+  }
+  for (const field of def.fields) {
+    const text = texts[field.key];
+    if (!text && fieldRequired(field, texts)) return { ok: false, message: field.required || !field.requiredWhen ? `${field.label} 항목을 입력해 주세요.` : `${field.label} 항목을 입력해 주세요 — ${describeCondition(field.requiredWhen, def.fields)}일 때는 필수입니다.` };
     if (text && field.type === 'select' && !field.options?.includes(text)) return { ok: false, message: `${field.label}: 목록에서 선택해 주세요.` };
     if (text && field.type === 'number' && (!NUMBER.test(text) || !Number.isFinite(Number(text)))) return { ok: false, message: `${field.label}: 숫자를 입력해 주세요.` };
     if (text && field.type === 'date' && !isDate(text)) return { ok: false, message: `${field.label}: 올바른 날짜를 입력해 주세요.` };

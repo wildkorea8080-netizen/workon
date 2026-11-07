@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -15,7 +15,7 @@ const needsValue = (op: AppConditionOp) => op !== 'filled' && op !== 'empty';
 export const MODE_JOINER: Record<AppConditionMode, string> = { all: '그리고', any: '또는' };
 export const MODE_LABEL: Record<AppConditionMode, string> = { all: '모두 맞을 때(그리고)', any: '하나라도 맞을 때(또는)' };
 
-function RuleEditor({ rule, fields, label, disabled, onChange, onRemove }: { rule: AppRule; fields: AppField[]; label: string; disabled: boolean; onChange: (rule: AppRule) => void; onRemove: () => void }) {
+export function RuleEditor({ rule, fields, label, disabled, onChange, onRemove }: { rule: AppRule; fields: AppField[]; label: string; disabled: boolean; onChange: (rule: AppRule) => void; onRemove: () => void }) {
   const field = fields.find(f => f.key === rule.field);
   const ops = field ? conditionOpsFor(field) : [];
   return <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr_auto] sm:items-center">
@@ -31,6 +31,30 @@ function RuleEditor({ rule, fields, label, disabled, onChange, onRemove }: { rul
       </select>
       : <input aria-label={`${label} 값`} className={input} disabled={disabled || !field} type={field?.type === 'number' ? 'number' : field?.type === 'date' ? 'date' : 'text'} maxLength={80} value={rule.value ?? ''} placeholder={field?.type === 'number' ? '숫자' : '비교할 글'} onChange={e => onChange({ ...rule, value: e.target.value })} />}
     <button type="button" className="text-xs text-red-600 disabled:opacity-30" disabled={disabled} onClick={onRemove}>조건 삭제</button>
+  </div>;
+}
+
+/**
+ * 입력 항목의 '다른 항목에 따라 필수'(조건부 필수, 2026-11-08) — 늘 필수가 아닌 항목에만. 조건은 다른 입력 항목만 본다(자기 자신·분류 결과 아님).
+ * 다른 항목이 없으면 감춘다(이미 걸린 조건은 보여 고치게 한다)
+ */
+export function RequiredWhenEditor({ field, fields, onChange }: { field: AppField; fields: AppField[]; onChange: (when: AppStepCondition | undefined) => void }) {
+  const others = fields.filter(f => f.key !== field.key);
+  const when = field.requiredWhen;
+  if (field.required || (!others.length && !when)) return null;
+  const rules = when ? conditionRules(when) : [];
+  const mode = when ? conditionMode(when) : 'all';
+  const set = (next: AppRule[], nextMode: AppConditionMode = mode) => onChange(next.length ? makeCondition(nextMode, next) : undefined);
+  return <div className="space-y-2">
+    <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label={`${field.label} 조건부 필수`} checked={Boolean(when)} disabled={!others.length} onChange={e => set(e.target.checked ? [defaultRule(others[0])] : [])} />다른 항목에 따라 필수</label>
+    {when && <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+      <select aria-label={`${field.label} 필수 조건 묶기`} className={input} value={mode} onChange={e => set(rules, e.target.value as AppConditionMode)}>
+        <option value="all">아래 조건이 모두 맞을 때 필수</option><option value="any">아래 조건 중 하나라도 맞을 때 필수</option>
+      </select>
+      {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={others} label={`${field.label} 필수 조건 ${r + 1}`} disabled={false} onChange={next => set(rules.map((x, i) => i === r ? next : x))} onRemove={() => set(rules.filter((_, i) => i !== r))} />)}
+      {others.length > 0 && rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => set([...rules, defaultRule(others[0])])}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
+      <p className="text-xs leading-5 text-slate-500">조건이 맞으면 실행 화면에 ‘(필수)’가 붙고, 비워 두면 실행·예약·외부 연동 모두 거절됩니다.</p>
+    </div>}
   </div>;
 }
 
