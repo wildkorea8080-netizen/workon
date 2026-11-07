@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-07(오후 2): 기본 입력형 앱 다섯·관리자 '기본 비서·앱 세트'
+
+- 2026-11-07 14:02 KST 배포 `dpl_CknxZF5uXr1d92YZQ7qMWCCbNdj6`(커밋 `f84f67a`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_AmntxY7NErQLnEEEYxPUYxMnjZ41`(93c8cba)로 promote한다. 마이그레이션 없음.
+- 들어간 커밋: `638a950`(직전 배포 기록), 기본 입력형 앱 다섯(사업 위험 검토·안내 메일 초안·과업지시서 초안·행사 안내문 초안·질의별 답변 방향 정리, 범주 '업무 앱', 능력 없음), `f84f67a` 관리자 비서 화면 '기본 비서·앱 세트'(`GET`·`POST /api/admin/preset-agents` — 설치는 기관 전체 관리자만, 이미 있는지는 기관 전체 이름으로, `security_logs` `preset_agents_installed`).
+- **배포 전**: 가지 Preview(`f84f67a`, `workon-9u0nzty8d`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 시험 DB를 띄운 전체 시험 194파일 2,946개·tsc 0).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/chat` 200, `/admin/agents` 307(로그인으로), `GET`·`POST /api/admin/preset-agents` 403, 운영 주소가 새 배포를 가리킴.
+- **운영 DB는 바꾸지 않았다** — 기존 기관 2곳에는 아직 기본 입력형 앱이 없다. 기관 전체 관리자가 관리자 비서 화면에서 설치하거나 사용자가 `npm run seed:agents`를 돌린다. 새로 등록하는 기관은 등록 때 함께 깔린다.
+- **확인하지 못한 것**(사용자 몫): 로그인한 관리자 화면에서 패널 목록·설치(설치 뒤 공식 비서 목록·직원 앱 목록에 '업무 앱'으로 나오는지), 기관 전체 관리자가 아닌 관리자에게 설치 단추가 막혀 보이는지, 다섯 앱을 실제로 돌린 답 품질.
+
 ## 2026-11-07(오후): 반복 단계 줄 단위 이어 실행·앱 실행 시간 예산
 
 - 2026-11-07 13:30 KST 배포 `dpl_AmntxY7NErQLnEEEYxPUYxMnjZ41`(커밋 `93c8cba`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8yP1r9js9VX6VXry6oxbsfvYUZrT`(4e45b00)로 promote한다. 마이그레이션 없음.
