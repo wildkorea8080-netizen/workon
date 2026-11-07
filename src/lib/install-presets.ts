@@ -124,21 +124,7 @@ export async function installPresetAgents(
 
     // 갱신 대상은 프리셋이 정의하는 것들뿐이다. 노출 여부·공개 범위·정렬처럼
     // 운영자가 조정하는 값은 건드리지 않는다. 판으로 남긴다.
-    const saved = await saveAgentSettings(
-      existing.id,
-      existing.version,
-      {
-        description: preset.description,
-        system_prompt: preset.systemPrompt,
-        icon: preset.icon,
-        color: preset.color,
-        category: preset.category,
-        capabilities: mergePresetCapabilities(existing.capabilities, preset),
-        ...(preset.appDefinition ? { app_definition: preset.appDefinition } : {}),
-      },
-      null,
-      'preset_update'
-    );
+    const saved = await saveAgentSettings(existing.id, existing.version, presetSettingsPatch(preset, existing.capabilities), null, 'preset_update');
 
     if (!saved.ok) {
       console.warn('[install-presets] 비서 갱신 실패', preset.name, saved.reason);
@@ -152,11 +138,28 @@ export async function installPresetAgents(
 }
 
 /**
+ * 갱신할 판 설정 — 프리셋이 정하는 것만(노출 여부·공개 범위·정렬처럼 운영자가 조정하는 값은 아님).
+ * 스크립트(`--update`)와 관리자 화면 갱신이 같은 값을 쓴다
+ */
+export function presetSettingsPatch(preset: AgentPreset, existingCapabilities: unknown) {
+  return {
+    description: preset.description,
+    system_prompt: preset.systemPrompt,
+    icon: preset.icon,
+    color: preset.color,
+    category: preset.category,
+    capabilities: mergePresetCapabilities(existingCapabilities, preset),
+    ...(preset.appDefinition ? { app_definition: preset.appDefinition } : {}),
+  };
+}
+
+/**
  * 기본 비서의 능력. 사진 읽기는 모든 대화형 비서에 켠다.
- * 입력형 앱은 비운다 — 입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다(사진 능력이 있으면 `isInputOnlyRun`이 거짓)
+ * 입력형 앱은 사진 읽기를 켜지 않는다 — 입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다(사진 능력이 있으면 `isInputOnlyRun`이 거짓).
+ * 조회 단계를 쓰는 앱(`connectors`)만 그 커넥터를 공공 데이터 능력으로 켠다(조회 결과가 바뀔 수 있어 이어 실행 대상은 아니다)
  */
 export function presetCapabilities(preset: AgentPreset): CapabilitySettings {
-  if (preset.appDefinition) return {};
+  if (preset.appDefinition) return preset.connectors?.length ? { public_data: { connectors: preset.connectors } } : {};
   return preset.connectors?.length
     ? { image: {}, public_data: { connectors: preset.connectors } }
     : { image: {} };
@@ -171,7 +174,10 @@ export function mergePresetCapabilities(existing: unknown, preset: AgentPreset):
     existing && typeof existing === 'object' && !Array.isArray(existing)
       ? { ...(existing as Record<string, unknown>) }
       : {};
-  if (preset.appDefinition) return base as CapabilitySettings;
+  if (preset.appDefinition) {
+    if (preset.connectors?.length) base.public_data = { connectors: preset.connectors };
+    return base as CapabilitySettings;
+  }
   base.image = {};
   if (preset.connectors?.length) base.public_data = { connectors: preset.connectors };
   else delete base.public_data;

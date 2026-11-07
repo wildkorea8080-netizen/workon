@@ -457,11 +457,12 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 (`installPresetAgents`). **정의는 그 파일 한 곳에만 둡니다** — 스크립트가
 목록을 따로 들고 있으면 한쪽만 바뀌어 기관마다 다른 세트를 받습니다.
 
-**기본 입력형 앱 다섯**(2026-11-07, `PUBLIC_SECTOR_FORM_PRESETS`, 범주 '업무 앱'): 사업 위험 검토·안내 메일 초안·과업지시서 초안·행사 안내문 초안·질의별 답변 방향 정리(질의 목록의 줄마다 반복).
-프리셋에 `appDefinition`이 있으면 행에 `app_definition`을 싣고 **능력을 비운다**(사진 읽기를 켜지 않음 — 입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다, `isInputOnlyRun`).
+**기본 입력형 앱 여섯**(2026-11-07, `PUBLIC_SECTOR_FORM_PRESETS`, 범주 '업무 앱'): 사업 위험 검토·안내 메일 초안·과업지시서 초안·행사 안내문 초안·질의별 답변 방향 정리(질의 목록의 줄마다 반복)·법령 근거 조사(조회 단계 — 법령 검색 → 법령 이름을 넣었을 때만 조문 본문 → 조회 결과로만 정리).
+프리셋에 `appDefinition`이 있으면 행에 `app_definition`을 싣고 **사진 읽기를 켜지 않는다**(입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다, `isInputOnlyRun`). 조회 단계를 쓰는 앱만 `connectors`로 그 커넥터를 공공 데이터 능력에 켠다(법령 근거 조사 = `law`).
 정의는 저장 검사(`validateAppDefinition`)를 그대로 통과해야 한다(`tests/agent-presets-apps.test.ts`). 이미 있는 기관에는 사용자가 `npm run seed:agents`(없는 것만)로 깐다 — 운영 DB에 쓰므로 `-- --dry`로 먼저 본다.
 
-**기관 관리자가 화면에서도 깐다**(2026-11-07): 관리자 비서 화면 위 '기본 비서·앱 세트'(`components/admin/PresetSetPanel.tsx` ← `GET`·`POST /api/admin/preset-agents`, `src/lib/preset-install-admin.ts`)가 이 기관에 아직 없는 기본 비서·앱을 보이고, 고른 것만 설치한다(`installPresetAgents`의 `only`). 보기는 관리자 누구나, **설치는 기관 전체 관리자만**(설치한 비서가 기관 전체에 공개되므로), 설치는 요청자 부서(최상위)에. 이미 있는지는 **기관 전체의 지우지 않은 공식·부서 비서 이름**으로 본다 — DB 유일 색인(`agents_shared_name_idx`)은 부서 안이라 설치 함수에만 맡기면 다른 부서에 같은 이름이 있어도 한 벌 더 깔린다. 지운 기본 비서는 '없음'으로 보여 다시 깔 수 있다. 무엇이 깔렸는지는 설치 뒤 다시 읽어 정하고 `security_logs`(`preset_agents_installed`, low — 이름만)에 남긴다. 갱신(`--update`)은 화면에 없다.
+**기관 관리자가 화면에서도 깐다**(2026-11-07): 관리자 비서 화면 위 '기본 비서·앱 세트'(`components/admin/PresetSetPanel.tsx` ← `GET`·`POST /api/admin/preset-agents`, `src/lib/preset-install-admin.ts`)가 이 기관에 아직 없는 기본 비서·앱을 보이고, 고른 것만 설치한다(`installPresetAgents`의 `only`). 보기는 관리자 누구나, **설치는 기관 전체 관리자만**(설치한 비서가 기관 전체에 공개되므로), 설치는 요청자 부서(최상위)에. 이미 있는지는 **기관 전체의 지우지 않은 공식·부서 비서 이름**으로 본다 — DB 유일 색인(`agents_shared_name_idx`)은 부서 안이라 설치 함수에만 맡기면 다른 부서에 같은 이름이 있어도 한 벌 더 깔린다. 지운 기본 비서는 '없음'으로 보여 다시 깔 수 있다. 무엇이 깔렸는지는 설치 뒤 다시 읽어 정하고 `security_logs`(`preset_agents_installed`, low — 이름만)에 남긴다.
+같은 패널이 **갱신**도 한다(`mode: 'update'`, `updateChosenPresets`): 상태(`presetState`)는 `missing`·`current`·`outdated`(사람이 고치지 않았는데 지금 세트와 내용이 다름 — 이것만 갱신)·`edited`(`updated_by` 있음 — 안 바꿈)·`manual`(같은 이름이 여럿이거나 공식 비서가 아님 — 안 바꿈). 비교는 갱신 값(`presetSettingsPatch` — 스크립트 `--update`와 같은 값)과 행을 열쇠 순서와 상관없이 맞댄다(jsonb는 열쇠 순서를 바꿔 저장). 갱신은 `save_agent`(`preset_update`, 판으로 남음)로, 판이 그 사이 바뀌었으면 실패로 센다. 기록 `preset_agents_updated`.
 
 `npm run seed:agents`는 이 기능 이전에 만들어진 기관을 메우는 용도입니다.
 여러 번 돌려도 같은 이름은 건너뜁니다.
@@ -571,6 +572,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   내려받는 이름(`download`)은 서명 주소에 **직접 한 번만** 인코딩해 붙인다 — SDK 옵션으로 넘기면 한글 이름이
   이중 인코딩돼 받은 파일 이름이 퍼센트 코드가 된다
 - 대화를 지우면 파일도 지운다(`deleteConversationFiles` — DB 연쇄 삭제는 저장소를 안 지운다)
+- **결과물 화면(`/files`)의 '대화에서 만든 파일'**(2026-11-07): `GET /api/files`(`src/lib/my-generated-files.ts`)가 내 `generated_files`를 최근 것부터 50개씩(`?cursor=` — 앞 쪽 마지막 파일의 시각·id, 앱 실행 기록과 같은 꼴) 돌려준다 — 이름·크기·만든 곳(`template_name`)·대화 제목만, 저장소 경로 없음, 주인만. 내려받기는 그대로 `/api/files/[id]`, 대화 링크는 `/chat?conv=`. 화면은 이 모듈의 꼴만 가져온다(값을 가져오면 화면 묶음에 서버 코드가 들어감)
 - 사용자를 지우면(슈퍼관리자 '계정 삭제' = 탈퇴 처리) DB 처리 **전에** 경로를 모으고(`listUserFilePaths`) **성공한 뒤** 저장소를 지운다(`removeUserFiles`).
   대화를 지우면 `generated_files` 행이 연쇄 삭제돼 경로를 잃고, 저장소를 먼저 지우면 DB 단계가 실패했을 때 기록만 남고 파일이 사라진다
 - 파일 링크는 `ToolOutcome.files` → SSE `tool_end.files` → `messages.source_references.files` → 채팅 화면 파일 카드(배지는 확장자에 따라 `DOC`·`HWP`)

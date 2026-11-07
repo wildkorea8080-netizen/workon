@@ -359,7 +359,8 @@ export const PUBLIC_SECTOR_PRESETS: AgentPreset[] = [
 /**
  * 기본 입력형 앱(2026-11-07) — 폼을 채우면 정해 둔 단계로 초안을 만드는 앱. 파일·외부 도구 없이 입력 글만 쓴다(그래서 멈추면 이어 실행된다).
  * 알리웍스 공개 앱 대응표의 core 항목(프로젝트 위험 검토 079·메일 초안 005·RFP 작성 지원 103·세미나 기획 086)과
- * 반복 단계(질의마다)를 공공기관 업무로 옮겼다. 정의는 `validateAppDefinition`을 통과해야 한다(`tests/agent-presets-apps.test.ts`).
+ * 반복 단계(질의마다)를 공공기관 업무로 옮겼다. '법령 근거 조사'는 조회 단계(법령 검색 → 법령 이름을 넣었을 때만 조문 본문)로 근거를 먼저 가져오는 여러 단계 조사형이다(대응표 research-multistep).
+ * 조회 단계를 쓰는 앱만 `connectors`를 둔다 — 그 커넥터를 앱 능력으로 켜야 조회 단계가 돈다. 정의는 `validateAppDefinition`을 통과해야 한다(`tests/agent-presets-apps.test.ts`).
  */
 export const PUBLIC_SECTOR_FORM_PRESETS: AgentPreset[] = [
   {
@@ -493,6 +494,36 @@ export const PUBLIC_SECTOR_FORM_PRESETS: AgentPreset[] = [
       steps: [
         { name: '질의별 답변 방향', instruction: '이 질의 하나에 대해 질의 요지(한 줄), 답변 방향(2~3줄), 확인할 근거, 소관 부서 후보를 정리하세요.', repeat: { field: 'questions' } },
         { name: '답변 준비표 정리', instruction: '질의별 결과를 모아 질의 순서대로 답변 준비표를 만들고, 끝에 공통으로 확인할 자료와 서로 겹치거나 충돌하는 답변 방향을 정리하세요.' },
+      ],
+    },
+  },
+  {
+    name: '법령 근거 조사',
+    description: '알고 싶은 것과 검색어를 넣으면 국가법령정보에서 법령을 찾고(법령 이름을 알면 그 조문 본문까지) 조회한 원문만으로 정리합니다.',
+    category: '업무 앱',
+    icon: '⚖️',
+    color: '#2E86AB',
+    connectors: ['law'],
+    systemPrompt: `당신은 공공기관 직원의 법령 근거 조사를 돕습니다. 앞 단계에서 국가법령정보로 조회한 결과만 근거로 씁니다.
+
+지키는 것
+- 조회 결과에 없는 법령·조문·시행일을 쓰지 마세요. 기억으로 보태지 않습니다
+- 조문을 인용할 때는 법령 이름과 조 번호를 함께 적고, 조회 결과의 원문 표현을 지킵니다
+- 조회 결과로 답할 수 없으면 '조회 결과에서 확인하지 못했다'고 쓰고 더 찾아볼 검색어를 제안합니다
+- 법률 자문이 아니라 조사 결과입니다. 최종 판단은 담당자·법무 확인이 필요하다고 밝히세요`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'question', label: '알고 싶은 것', type: 'textarea', required: true },
+        { key: 'keyword', label: '법령 검색어', type: 'text', required: true },
+        { key: 'law_name', label: '확인할 법령 이름(알면)', type: 'text', required: false },
+        { key: 'article', label: '조문 번호(알면)', type: 'text', required: false },
+      ],
+      steps: [
+        { name: '법령 찾기', instruction: '', lookup: { tool: 'law_search', query: '{{keyword}}' } },
+        { name: '조문 본문 읽기', instruction: '', when: { all: [{ field: 'law_name', op: 'filled' }] }, lookup: { tool: 'law_article', query: '{{law_name}}', article: '{{article}}' } },
+        { name: '근거 정리', instruction: '조회 결과만으로 직원의 질문에 답하세요. 관련 법령 목록(법령 이름·종류·시행일), 질문에 해당하는 조문과 그 요지, 조회 결과로 확인하지 못한 점, 더 찾아볼 검색어 순서로 쓰세요.' },
       ],
     },
   },

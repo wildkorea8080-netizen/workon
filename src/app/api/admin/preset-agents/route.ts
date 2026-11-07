@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { installChosenPresets, presetStatus } from '@/lib/preset-install-admin';
+import { installChosenPresets, presetStatus, updateChosenPresets } from '@/lib/preset-install-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,8 @@ export async function GET() {
 
 /**
  * 고른 기본 비서·앱을 설치한다 — 기관 전체 관리자만(설치한 비서가 기관 전체에 공개된다). 이미 있는 이름은 건너뛴다.
- * `security_logs`에 설치한 이름을 남긴다(기관 전체에 보이는 비서가 늘어나는 일이라)
+ * `mode: 'update'`면 설치 대신 지금 세트 내용으로 갱신한다(사람이 고치지 않은 것만, 판으로 남김).
+ * `security_logs`에 이름을 남긴다(기관 전체에 보이는 비서가 늘거나 바뀌는 일이라)
  */
 export async function POST(request: Request) {
   const session = await getServerAuthSession();
@@ -46,13 +47,25 @@ export async function POST(request: Request) {
   if (!actor?.organizationId) return jsonError('소속 기관을 찾을 수 없습니다.', 403);
   if (!actor.managesWholeOrganization) return jsonError('기관 전체를 관리하는 관리자만 기본 세트를 설치할 수 있습니다.', 403);
 
-  const body = (await request.json().catch(() => null)) as { names?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { names?: unknown; mode?: unknown } | null;
   const names = body?.names;
   if (!Array.isArray(names) || names.length > 50 || names.some((n) => typeof n !== 'string')) return jsonError('설치할 비서·앱 이름 목록을 보내 주세요.', 400);
+  if (body?.mode !== undefined && body.mode !== 'install' && body.mode !== 'update') return jsonError('설치 방식을 확인해 주세요.', 400);
 
   const org = await organizationType(actor.organizationId);
   if (!org.ok) return jsonError('기본 세트를 지금 설치할 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
   try {
+    if (body?.mode === 'update') {
+      const result = await updateChosenPresets({ organizationId: actor.organizationId, organizationType: org.type, names: names as string[] });
+      if (!result.ok) return jsonError(result.message, 400);
+      if (result.updated.length) {
+        await supabaseAdmin.from('security_logs').insert({
+          department_id: actor.departmentId, user_id: actor.userId, event_type: 'preset_agents_updated', severity: 'low',
+          details: { names: result.updated, failed: result.failed },
+        });
+      }
+      return NextResponse.json({ ok: true, data: { updated: result.updated, skipped: result.skipped, failed: result.failed } });
+    }
     const result = await installChosenPresets({ organizationId: actor.organizationId, organizationType: org.type, departmentId: actor.departmentId, names: names as string[] });
     if (!result.ok) return jsonError(result.message, 400);
     if (result.installed.length) {
