@@ -1,5 +1,6 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import AgentsManager from '@/components/admin/AgentsManager';
+import PresetSetPanel from '@/components/admin/PresetSetPanel';
 
 export default async function AdminAgentsPage() {
   const session = await getServerAuthSession();
@@ -20,6 +21,8 @@ export default async function AdminAgentsPage() {
         <h1 className="text-2xl font-semibold text-slate-900">에이전트 관리</h1>
         <p className="text-slate-600 mt-2">부서의 AI 에이전트를 생성하고 관리합니다.</p>
       </div>
+
+      <PresetSetPanel />
 
       <AgentsManager />
     </section>

@@ -456,6 +456,12 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
 (`installPresetAgents`). **정의는 그 파일 한 곳에만 둡니다** — 스크립트가
 목록을 따로 들고 있으면 한쪽만 바뀌어 기관마다 다른 세트를 받습니다.
 
+**기본 입력형 앱 다섯**(2026-11-07, `PUBLIC_SECTOR_FORM_PRESETS`, 범주 '업무 앱'): 사업 위험 검토·안내 메일 초안·과업지시서 초안·행사 안내문 초안·질의별 답변 방향 정리(질의 목록의 줄마다 반복).
+프리셋에 `appDefinition`이 있으면 행에 `app_definition`을 싣고 **능력을 비운다**(사진 읽기를 켜지 않음 — 입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다, `isInputOnlyRun`).
+정의는 저장 검사(`validateAppDefinition`)를 그대로 통과해야 한다(`tests/agent-presets-apps.test.ts`). 이미 있는 기관에는 사용자가 `npm run seed:agents`(없는 것만)로 깐다 — 운영 DB에 쓰므로 `-- --dry`로 먼저 본다.
+
+**기관 관리자가 화면에서도 깐다**(2026-11-07): 관리자 비서 화면 위 '기본 비서·앱 세트'(`components/admin/PresetSetPanel.tsx` ← `GET`·`POST /api/admin/preset-agents`, `src/lib/preset-install-admin.ts`)가 이 기관에 아직 없는 기본 비서·앱을 보이고, 고른 것만 설치한다(`installPresetAgents`의 `only`). 보기는 관리자 누구나, **설치는 기관 전체 관리자만**(설치한 비서가 기관 전체에 공개되므로), 설치는 요청자 부서(최상위)에. 이미 있는지는 **기관 전체의 지우지 않은 공식·부서 비서 이름**으로 본다 — DB 유일 색인(`agents_shared_name_idx`)은 부서 안이라 설치 함수에만 맡기면 다른 부서에 같은 이름이 있어도 한 벌 더 깔린다. 지운 기본 비서는 '없음'으로 보여 다시 깔 수 있다. 무엇이 깔렸는지는 설치 뒤 다시 읽어 정하고 `security_logs`(`preset_agents_installed`, low — 이름만)에 남긴다. 갱신(`--update`)은 화면에 없다.
+
 `npm run seed:agents`는 이 기능 이전에 만들어진 기관을 메우는 용도입니다.
 여러 번 돌려도 같은 이름은 건너뜁니다.
 
