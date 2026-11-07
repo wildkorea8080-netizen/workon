@@ -8,8 +8,9 @@ export type AppStepSource = { title: string; url: string };
  * `kind: 'lookup'` = 공공 데이터 조회 단계 — `query`는 실제로 보낸 조회어, `sources`는 도구가 준 원문 링크(10개까지)
  * `kind: 'classify'` = 분류 단계 — `output`은 고른 선택지 하나(뒤 단계 조건의 `@N` 값)
  * `repeated` = 반복 단계가 처리한 줄 수(2026-11-06) — 파일마다 반복이면 파일 수이고 `repeatedFiles: true`(2026-11-07)
+ * `partial` = 줄마다 반복이 도중에 멈췄을 때 끝난 줄의 결과 글(줄 순서, 2026-11-07) — 이어 실행이 그 줄들을 다시 부르지 않는다. `reusedItems` = 이어 실행에서 다시 쓴 줄 수
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; query?: string; article?: string; sources?: AppStepSource[] };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; partial?: string[]; reusedItems?: number; query?: string; article?: string; sources?: AppStepSource[] };
 /** 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호 */
 export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
@@ -130,8 +131,14 @@ export async function runAppIntermediateSteps(args: {
       const items = byFile ? (args.files ?? []).map((name) => name.trim()).filter(Boolean) : repeatItems(args.inputs?.[(repeat as { field: string }).field]);
       if (!items.length) throw new AppInputError(byFile ? `${args.steps[index].name}: 반복할 파일이 없습니다. 파일을 첨부하거나 문서함에서 고른 뒤 다시 실행해 주세요.` : `${args.steps[index].name}: 반복할 줄이 없습니다. 입력 항목에 한 줄에 하나씩 적거나 단계 실행 조건을 두세요.`);
       if (items.length > APP_REPEAT_MAX) throw new AppInputError(`${args.steps[index].name}: 반복은 ${APP_REPEAT_MAX}줄까지입니다(지금 ${items.length}줄). 줄을 줄이거나 나눠 실행해 주세요.`);
-      const parts: string[] = [];
+      // 이어 실행 — 지난번에 끝난 줄(`partial`)은 다시 부르지 않는다. 줄마다만(파일 앱은 이어 실행 대상이 아니다), 줄 수보다 적을 때만
+      const record = args.records[index];
+      const reuse = !byFile && Array.isArray(record.partial) && record.partial.length < items.length ? record.partial : [];
+      const done: string[] = [...reuse];
+      const parts: string[] = reuse.map((text, i) => `### ${i + 1}. ${items[i].slice(0, 80)}\n${text}`);
+      if (reuse.length) record.reusedItems = reuse.length; else delete record.reusedItems;
       for (const [i, item] of items.entries()) {
+        if (i < reuse.length) continue;
         await args.guard();
         const focus = byFile
           ? `이번 파일(${i + 1}/${items.length}): ${item.slice(0, 120)}\n첨부 원자료 가운데 이 파일의 내용에 대한 결과만 작성하세요. 다른 파일은 다루지 마세요. 이 파일의 내용을 찾지 못하면 찾지 못했다고만 쓰세요.`
@@ -141,7 +148,10 @@ export async function runAppIntermediateSteps(args: {
         args.usage.input_tokens += response.usage.input_tokens; args.usage.output_tokens += response.usage.output_tokens;
         if (!response.text.trim() || response.usage.output_tokens >= APP_INTERMEDIATE_TOKENS) throw new Error(`단계 결과가 비었거나 처리 길이 상한을 초과했습니다(${i + 1}번째 ${byFile ? '파일' : '항목'}).`);
         parts.push(`### ${i + 1}. ${item.slice(0, 80)}\n${response.text.trim()}`);
+        // 끝난 줄을 기록에 — 뒤 줄에서 멈추면 이 기록이 저장되고 이어 실행이 여기서부터 간다(파일마다는 남기지 않음)
+        if (!byFile) { done.push(response.text.trim()); record.partial = [...done]; }
       }
+      delete record.partial;
       const output = parts.join('\n\n');
       if (output.length > 12000) throw new Error('반복 결과가 처리 길이 상한을 넘었습니다. 줄이나 파일 수를 줄여 다시 실행해 주세요.');
       args.records[index].output = output; args.records[index].repeated = items.length; if (byFile) args.records[index].repeatedFiles = true; else delete args.records[index].repeatedFiles; args.records[index].status = 'completed'; args.update(index);

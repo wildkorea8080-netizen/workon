@@ -15,7 +15,7 @@ export async function loadAppResumeSource(agent: Agent, conversationId: string, 
     const refs = message.source_references ?? {};
     const input = renderAppInput(agent.app_definition, refs.app_inputs);
     if (!input.ok || !restoreAppSteps(agent.app_definition, refs, input.message).ok) continue;
-    const records = (refs.app_steps as AppStepRecord[]).map(step => ({ name: step.name, status: step.status, ...(step.status === 'completed' ? { output: step.output, reused: step.reused === true } : {}) }));
+    const records = (refs.app_steps as AppStepRecord[]).map(step => ({ name: step.name, status: step.status, ...(step.status === 'completed' ? { output: step.output, reused: step.reused === true } : {}), ...(step.status === 'failed' && Array.isArray(step.partial) && step.partial.length ? { partial: step.partial } : {}) }));
     return { id: message.id, conversationId, inputs: input.inputs, records };
   }
   return null;
