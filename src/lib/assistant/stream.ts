@@ -32,7 +32,22 @@ export interface StreamTurnDeps {
   verify?: VerifyFn;
   /** 앱의 공공 데이터 조회 단계가 부르는 커넥터 — 시험이 바꿔 끼운다 */
   executeTool?: (toolName: string, input: Record<string, unknown>) => Promise<ToolResult>;
+  /** 지금 시각(ms) — 앱 단계 시간 예산을 시험이 바꿔 끼운다 */
+  now?: () => number;
+  /**
+   * 새 모델 호출을 시작하지 않을 마감 시각(ms) — 한 함수 호출에서 실행을 여럿 이어 도는 예약 실행기가 그 호출 전체의 마감을 넘긴다.
+   * 턴의 시간 예산(시작 + `APP_STEP_TIME_BUDGET_MS`)과 둘 중 이른 쪽
+   */
+  deadlineAt?: number;
 }
+
+/**
+ * 앱 실행의 시간 예산(2026-11-07) — 턴을 시작한 뒤 이만큼 지나면 긴 첨부 추리기·중간 단계의 **새** 모델 호출을 시작하지 않고 멈춘다.
+ * 함수 시간 제한(`/api/chat`·연동·예약 모두 300초)에 걸려 함수가 끊기면 끝난 단계도 저장되지 않아 이어 실행조차 못 한다.
+ * 3분에 멈추면 진행 중이던 호출 하나와 마지막 단계가 끝날 몫(약 2분)이 남고, 멈춘 기록은 저장돼 이어 실행할 수 있다(줄마다 반복은 끝난 줄부터).
+ */
+export const APP_STEP_TIME_BUDGET_MS = 180_000;
+export const APP_TIME_BUDGET_MESSAGE = '처리 시간이 길어 여기서 멈췄습니다. 끝난 단계·줄은 기록에 남았습니다 — 이어 실행하거나, 입력·첨부를 줄여 다시 실행해 주세요.';
 
 const defaultVerify: VerifyFn = (input) => noda.verifyAnswer(input);
 
@@ -312,6 +327,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   // 대화 id와 출처를 먼저 보내 화면이 바로 반영하게 한다
   send({ event: 'meta', data: { conversation_id: turn.conversationId, chunks: turn.chunks } });
 
+  const now = deps.now ?? Date.now;
+  const deadline = Math.min(now() + APP_STEP_TIME_BUDGET_MS, deps.deadlineAt ?? Infinity);
   const progress: LoopProgress = {
     usage: { model: turn.modelId, input_tokens: 0, output_tokens: 0 },
     capabilityUsage: [],
@@ -323,6 +340,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   const updateStep = (index: number) => send({ event: 'app_step', data: { index, total: appRecords.length, step: { ...appRecords[index] } } });
   // 모델을 한 번 더 부르기 전마다 기관 한도·모델 정책을 다시 본다 — 긴 첨부 추리기와 중간 단계가 같은 검사를 쓴다
   const guard = async () => {
+    // 시간 예산을 먼저(DB를 부르지 않는다) — 넘었으면 직원이 고칠 수 있는 안내로 멈춰 기록을 저장한다
+    if (now() > deadline) throw new AppInputError(APP_TIME_BUDGET_MESSAGE);
     const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId);
     const allowed = await getAllowedModelIds(turn.ctx.organizationId);
     if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');

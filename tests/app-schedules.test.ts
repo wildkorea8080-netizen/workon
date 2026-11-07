@@ -5,7 +5,7 @@ import {
 } from '@/lib/apps/schedule-spec';
 import {
   PAUSED_AFTER_FAILURES, PAUSED_APP_CHANGED, PAUSED_APP_UNAVAILABLE, PAUSED_DEPARTMENT_CHANGED, PAUSED_USER_UNAVAILABLE,
-  SCHEDULE_BATCH, SCHEDULE_MAX_CONSECUTIVE_FAILURES, SCHEDULE_RUN_BUDGET_MS, SCHEDULE_TITLE_PREFIX,
+  SCHEDULE_BATCH, SCHEDULE_MAX_CONSECUTIVE_FAILURES, SCHEDULE_RUN_BUDGET_MS, SCHEDULE_TITLE_PREFIX, SCHEDULE_TURN_DEADLINE_MS,
   executeSchedule, finishPatch, runDueSchedules, type AppScheduleRow, type ExecuteIo, type ScheduleDeps, type ScheduleOutcome,
 } from '@/lib/apps/schedules';
 import { scheduleFailureMail } from '@/lib/mailer';
@@ -223,5 +223,32 @@ describe('실패 안내 메일·마이그레이션·실행기 라우트', () => 
     // Vercel Hobby 예약 작업(2개·하루 한 번)에는 넣지 않는다 — pg_cron이 부른다
     const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: { path: string }[] };
     expect(vercel.crons.some(c => c.path === '/api/cron/app-schedules')).toBe(false);
+  });
+});
+
+describe('실행기 호출 전체의 마감(2026-11-07)', () => {
+  it('예약마다 같은 마감(호출 시작 + SCHEDULE_TURN_DEADLINE_MS)을 넘긴다 — 셋째 예약도 300초 안에 끝나게', async () => {
+    const rows = [row({ id: 's1' }), row({ id: 's2' })];
+    const { deps, advance } = fakeDeps(rows, {}, { execute: vi.fn(async () => { advance(60_000); return { kind: 'completed', conversationId: 'c' } as ScheduleOutcome; }) });
+    const started = deps.now();
+    await runDueSchedules(deps);
+    expect(deps.execute.mock.calls.map((c) => c[1])).toEqual([started + SCHEDULE_TURN_DEADLINE_MS, started + SCHEDULE_TURN_DEADLINE_MS]);
+    expect(SCHEDULE_TURN_DEADLINE_MS).toBeGreaterThan(SCHEDULE_RUN_BUDGET_MS);
+    expect(SCHEDULE_TURN_DEADLINE_MS).toBeLessThanOrEqual(220_000);
+  });
+  it('executeSchedule은 마감을 대화 실행기에 넘기고, 없으면 넘기지 않는다', async () => {
+    const turn = { conversationId: 'c1' } as unknown as PreparedTurn;
+    const make = () => ({
+      loadUser: vi.fn(async () => ({ id: 'u1', email: null, role: 'USER', department_id: 'd1', is_active: true, deleted_at: null })),
+      prepare: vi.fn(async () => ({ ok: true as const, turn })),
+      stream: vi.fn(async (_t: PreparedTurn, send: (e: TurnEvent) => void, _o?: { deadlineAt?: number }) => { send({ event: 'done', data: { usage: { model: 'm', input_tokens: 1, output_tokens: 1 }, title: null, number_check: null } }); }),
+      retitle: vi.fn(async () => {}),
+    });
+    const withDeadline = make();
+    await executeSchedule(row(), withDeadline as unknown as ExecuteIo, 123_456);
+    expect(withDeadline.stream.mock.calls[0][2]).toEqual({ deadlineAt: 123_456 });
+    const without = make();
+    await executeSchedule(row(), without as unknown as ExecuteIo);
+    expect(without.stream.mock.calls[0][2]).toBeUndefined();
   });
 });

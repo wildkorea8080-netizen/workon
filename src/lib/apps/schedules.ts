@@ -25,6 +25,11 @@ export const SCHEDULE_CLAIM_STALE_MS = 15 * 60 * 1000;
 /** 한 번 불릴 때 쓰는 시간 예산 — 라우트 `maxDuration` 300초 안에서 실행 하나(단계 3개 + 최종, 최대 수 분)가 끝날 여유를 둔다 */
 export const SCHEDULE_RUN_BUDGET_MS = 180_000;
 export const SCHEDULE_BATCH = 3;
+/**
+ * 한 번 불린 실행기 안에서 앱 실행이 **새 모델 호출을 시작하지 않을** 마감(시작 + 이 값, 2026-11-07) — 셋째 예약이 179초에 시작해도
+ * 진행 중이던 호출과 마지막 단계·저장이 300초 안에 끝나게. 넘으면 그 실행은 '시간이 길어 멈춤' 실패로 기록된다
+ */
+export const SCHEDULE_TURN_DEADLINE_MS = 200_000;
 export const PAUSED_AFTER_FAILURES = `연속 ${SCHEDULE_MAX_CONSECUTIVE_FAILURES}회 실패해 예약을 멈췄습니다. 입력과 앱 설정을 확인한 뒤 다시 켜 주세요.`;
 export const PAUSED_APP_CHANGED = '앱 설정이 바뀌어 예약을 멈췄습니다. 앱을 다시 열어 새로 예약해 주세요.';
 export const PAUSED_APP_UNAVAILABLE = '앱을 쓸 수 없어(권한 없음 또는 삭제됨) 예약을 멈췄습니다.';
@@ -50,7 +55,8 @@ export interface ScheduleDeps {
   due(nowMs: number, limit: number): Promise<AppScheduleRow[]>;
   /** 조건부로 차지했으면 true. 다른 실행기가 먼저 잡았으면 false */
   claim(id: string, nowMs: number): Promise<boolean>;
-  execute(row: AppScheduleRow): Promise<ScheduleOutcome>;
+  /** `deadlineAt` = 이 실행기 호출 전체의 마감(새 모델 호출을 시작하지 않을 시각) */
+  execute(row: AppScheduleRow, deadlineAt: number): Promise<ScheduleOutcome>;
   finish(id: string, patch: SchedulePatch): Promise<void>;
   notifyFailure(row: AppScheduleRow, info: { error: string; paused: boolean; nextRunAt: string | null }): Promise<void>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string): Promise<void>;
@@ -106,7 +112,7 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
     if (!claimed) { result.skipped++; continue; }
 
     let outcome: ScheduleOutcome;
-    try { outcome = await deps.execute(row); }
+    try { outcome = await deps.execute(row, started + SCHEDULE_TURN_DEADLINE_MS); }
     catch (error) { outcome = { kind: 'failed', error: errorText(error) }; }
 
     const patch = finishPatch(row, outcome, deps.now());
@@ -135,7 +141,7 @@ export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId
  * 예약 하나를 그 직원으로 실행한다(`run-as.ts`). 거절 상태 403·404(앱을 쓸 수 없음)·409(앱 판 바뀜)와 계정·부서 문제는 '멈춤',
  * 그 밖(한도 429·검사 400·모델 오류)은 '실패'. 스트림의 `error` 이벤트가 하나라도 오면 실패다 — 저장은 실행기가 이미 했다
  */
-export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultRunAsIo()): Promise<ScheduleOutcome> {
+export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultRunAsIo(), deadlineAt?: number): Promise<ScheduleOutcome> {
   // 고른 문서(0062) — 지금 근거로 쓸 판으로 맞춘다. 문서 행을 못 읽으면 던져 '실패'(다음 차례에 다시)
   let documentIds: string[] | undefined;
   let followed = false;
@@ -146,7 +152,7 @@ export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defau
     documentIds = resolved.ids;
     followed = resolved.changed;
   }
-  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, documentIds }, SCHEDULE_TITLE_PREFIX, io);
+  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, documentIds, ...(deadlineAt !== undefined ? { deadlineAt } : {}) }, SCHEDULE_TITLE_PREFIX, io);
   switch (outcome.kind) {
     case 'completed': return { kind: 'completed', conversationId: outcome.conversationId, ...(followed ? { documentIds } : {}) };
     case 'user_unavailable': return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
@@ -178,7 +184,7 @@ export function scheduleDeps(): ScheduleDeps {
       if (error) throw new Error(`app_schedules claim: ${error.message}`);
       return (data ?? []).length === 1;
     },
-    execute: (row) => executeSchedule(row),
+    execute: (row, deadlineAt) => executeSchedule(row, undefined, deadlineAt),
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_schedules').update(patch).eq('id', id);
       if (error) throw new Error(`app_schedules finish: ${error.message}`);

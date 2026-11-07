@@ -43,7 +43,7 @@ vi.mock('@/lib/supabaseAdmin', () => {
 import { setLlmAdapterForTests } from '@/lib/llm';
 import { LlmApiError, LLM_MESSAGES } from '@/lib/llm/errors';
 import type { LlmAdapter, LlmStreamEvent } from '@/lib/llm/types';
-import { streamTurn, type StreamTurnDeps, type VerifyFn } from '@/lib/assistant/stream';
+import { APP_STEP_TIME_BUDGET_MS, APP_TIME_BUDGET_MESSAGE, streamTurn, type StreamTurnDeps, type VerifyFn } from '@/lib/assistant/stream';
 import { NodaError, nodaTenant, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { storedUserContent, buildUserContent } from '@/lib/assistant/prompt';
 import type { PreparedTurn, TurnEvent } from '@/lib/assistant/types';
@@ -725,5 +725,46 @@ describe('긴 첨부 나눠 읽기(맵) — 단계 앞에서 조각마다 추리
     expect(events.some(e => e.event === 'error' && String((e.data as { message: string }).message).includes('첨부를 줄여'))).toBe(true);
     const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as { status: string }[];
     expect(records.every(s => s.status !== 'completed')).toBe(true);
+  });
+});
+
+describe('앱 실행의 시간 예산(2026-11-07)', () => {
+  const steps = [{ name: '질의별 답', instruction: '답하세요', repeat: { field: 'items' } }, { name: '회신', instruction: '모아 쓰세요' }];
+  const inputs = { items: ['하나', '둘', '셋'].join('\n') };
+
+  it('3분이 지나면 새 모델 호출을 시작하지 않고 멈춘다 — 끝난 줄을 저장하고 고칠 수 있는 안내를 보낸다', async () => {
+    let clock = 1_000_000;
+    const a = adapter(); const complete = a.complete;
+    a.complete = async (req) => { const r = await complete(req); clock += APP_STEP_TIME_BUDGET_MS + 1; return r; };
+    const streaming = vi.fn(a.stream); a.stream = streaming;
+    setLlmAdapterForTests(a);
+    const events = await run(turn({ appSteps: steps, appStepInputs: inputs, isNewConversation: false }), undefined, { now: () => clock });
+    expect(streaming).not.toHaveBeenCalled();
+    const records = (inserted('messages')[1].source_references as Record<string, unknown>).app_steps as Array<{ status: string; partial?: string[] }>;
+    expect(records.map((r) => r.status)).toEqual(['failed', 'not_run']);
+    expect(records[0].partial).toEqual(['여비 문의']);
+    const last = events.at(-1) as { event: string; data: { message: string } };
+    expect(last).toEqual({ event: 'error', data: { message: APP_TIME_BUDGET_MESSAGE } });
+    expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 3, output_tokens: 2, aborted: true });
+  });
+
+  it('넘겨받은 마감(deadlineAt)이 더 이르면 그것을 따른다 — 이미 지났으면 모델을 부르지 않는다', async () => {
+    const a = adapter(); const completing = vi.fn(a.complete); a.complete = completing;
+    setLlmAdapterForTests(a);
+    const events = await run(turn({ appSteps: steps, appStepInputs: inputs, isNewConversation: false }), undefined, { now: () => 5_000, deadlineAt: 4_999 });
+    expect(completing).not.toHaveBeenCalled();
+    expect((events.at(-1) as { data: { message: string } }).data.message).toBe(APP_TIME_BUDGET_MESSAGE);
+  });
+
+  it('예산 안이면 평소처럼 끝난다', async () => {
+    setLlmAdapterForTests(adapter());
+    const events = await run(turn({ appSteps: steps, appStepInputs: inputs, isNewConversation: false }), undefined, { now: () => 0 });
+    expect(events.at(-1)?.event).toBe('done');
+  });
+
+  it('대화 라우트에 함수 시간 제한 300초를 적어 둔다(예산이 이 값을 전제로 한다)', async () => {
+    const { readFileSync } = await import('fs');
+    expect(readFileSync('src/app/api/chat/route.ts', 'utf8')).toContain('export const maxDuration = 300;');
+    expect(APP_STEP_TIME_BUDGET_MS).toBeLessThanOrEqual(200_000);
   });
 });

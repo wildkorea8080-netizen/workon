@@ -8,7 +8,9 @@ import { prepareTurn } from '@/lib/assistant/prepare';
 import { streamTurn } from '@/lib/assistant/stream';
 import type { PrepareOutcome, PreparedTurn, SendEvent } from '@/lib/assistant/types';
 
-export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string>; /** 문서함에서 고른 문서(예약 0062) */ documentIds?: string[] };
+export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string>; /** 문서함에서 고른 문서(예약 0062) */ documentIds?: string[];
+  /** 새 모델 호출을 시작하지 않을 마감 시각(ms) — 예약 실행기가 그 호출 전체의 마감을 넘긴다(streamTurn `deadlineAt`) */
+  deadlineAt?: number };
 export type RunAsUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
 
 export type RunAsOutcome =
@@ -25,7 +27,7 @@ export type RunAsOutcome =
 export interface RunAsIo {
   loadUser(userId: string): Promise<RunAsUser | null>;
   prepare(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome>;
-  stream(turn: PreparedTurn, send: SendEvent): Promise<void>;
+  stream(turn: PreparedTurn, send: SendEvent, options?: { deadlineAt?: number }): Promise<void>;
   /** 대화 제목 앞에 표시(`[예약] `·`[연동] `)를 붙인다 — 앱 실행 기록에서 사람이 돌린 실행과 가르게 */
   retitle(conversationId: string, prefix: string): Promise<void>;
 }
@@ -48,7 +50,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
       if (event.event === 'meta') conversationId = event.data.conversation_id;
       else if (event.event === 'error') error = error ?? event.data.message;
       else if (event.event === 'done') done = true;
-    });
+    }, input.deadlineAt !== undefined ? { deadlineAt: input.deadlineAt } : undefined);
   } catch (failure) { error = error ?? errorText(failure); }
   if (error) return { kind: 'failed', error, conversationId };
   if (!done) return { kind: 'failed', error: '응답이 끝나지 않았습니다.', conversationId };
@@ -66,7 +68,7 @@ export function defaultRunAsIo(): RunAsIo {
       return (data as RunAsUser | null) ?? null;
     },
     prepare: prepareTurn,
-    stream: (turn, send) => streamTurn(turn, send),
+    stream: (turn, send, options) => streamTurn(turn, send, options?.deadlineAt !== undefined ? { deadlineAt: options.deadlineAt } : {}),
     async retitle(conversationId, prefix) {
       const { data } = await supabaseAdmin.from('conversations').select('title').eq('id', conversationId).maybeSingle();
       const title: string = data?.title ?? '';

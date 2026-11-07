@@ -9,6 +9,9 @@ import type { TurnEvent } from '@/lib/assistant/types';
  * 대화 한 턴. 일은 실행기(src/lib/assistant/)가 한다.
  * 여기서는 인증 → 준비(거절이면 JSON) → SSE로 흘려보내기만 한다.
  */
+/** 함수 시간 제한을 적어 둔다 — 앱 단계의 시간 예산(stream.ts `APP_STEP_TIME_BUDGET_MS`)이 이 값을 전제로 한다(연동·예약 라우트와 같은 300초) */
+export const maxDuration = 300;
+
 function sse(event: TurnEvent): string {
   return `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`;
 }
