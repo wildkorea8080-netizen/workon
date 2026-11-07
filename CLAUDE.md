@@ -1284,6 +1284,11 @@ MAIL_FROM=
    이 테스트를 쓰면서 `forbidden-words/[id]`의 PATCH·DELETE, `documents` DELETE,
    `stats` GET에 관리자 검사가 없던 것을 찾았습니다.
 
+   **인증만으로는 부족한 곳이 있습니다.** 옛 `/api/agents/favorite`는 로그인만 보고 POST가 아무 비서 id나 받아 두었고,
+   GET이 '같은 부서'의 그 비서를 칸 전부(`*` — 지시문 포함)로 돌려줘 **동료의 나만의 비서 설정을 id만 알면 읽을 수 있었습니다**(2026-11-07 고침).
+   이제 GET·POST 더하기 모두 `canUseAgent`로 거르고(빼기는 언제나), 200개 상한을 둡니다(`tests/agent-favorite-route.test.ts`).
+   id를 받아 비서·문서를 돌려주는 라우트는 부서 필터가 아니라 권한 모듈(`agent-permissions.ts`)로 판정하세요.
+
    **아직 없는 것**: DB를 거치는 경로(테넌트 격리, 관리 범위, 트리거).
    그쪽은 `npm run db:check`·`npm run isolation:check`·`npm run connector:probe`가
    실측으로 봅니다.
