@@ -41,6 +41,8 @@ export interface InstallOptions {
    * 되돌릴 방법이 없으므로, 애매하면 건드리지 않는 쪽으로 판단한다.
    */
   update?: boolean;
+  /** 이 이름의 프리셋만 설치한다(관리자 화면에서 고른 것, 2026-11-07). 없으면 세트 전부 */
+  only?: string[];
 }
 
 export async function installPresetAgents(
@@ -49,7 +51,8 @@ export async function installPresetAgents(
   organizationType: string | null | undefined,
   options: InstallOptions = {}
 ): Promise<InstallResult> {
-  const presets = presetsForOrganizationType(organizationType);
+  const all = presetsForOrganizationType(organizationType);
+  const presets = options.only ? all.filter((p) => options.only!.includes(p.name)) : all;
 
   // ── 카테고리 ──
   // 관리 화면 드롭다운은 agent_categories를 읽는다. 여기 없으면 비서에 붙은
@@ -131,6 +134,7 @@ export async function installPresetAgents(
         color: preset.color,
         category: preset.category,
         capabilities: mergePresetCapabilities(existing.capabilities, preset),
+        ...(preset.appDefinition ? { app_definition: preset.appDefinition } : {}),
       },
       null,
       'preset_update'
@@ -147,8 +151,12 @@ export async function installPresetAgents(
   return { installed, skipped, categories, updated, preserved };
 }
 
-/** 기본 비서의 능력. 사진 읽기는 모든 대화형 비서에 켠다. */
+/**
+ * 기본 비서의 능력. 사진 읽기는 모든 대화형 비서에 켠다.
+ * 입력형 앱은 비운다 — 입력 글만 쓰는 앱이라야 멈췄을 때 이어 실행된다(사진 능력이 있으면 `isInputOnlyRun`이 거짓)
+ */
 export function presetCapabilities(preset: AgentPreset): CapabilitySettings {
+  if (preset.appDefinition) return {};
   return preset.connectors?.length
     ? { image: {}, public_data: { connectors: preset.connectors } }
     : { image: {} };
@@ -163,6 +171,7 @@ export function mergePresetCapabilities(existing: unknown, preset: AgentPreset):
     existing && typeof existing === 'object' && !Array.isArray(existing)
       ? { ...(existing as Record<string, unknown>) }
       : {};
+  if (preset.appDefinition) return base as CapabilitySettings;
   base.image = {};
   if (preset.connectors?.length) base.public_data = { connectors: preset.connectors };
   else delete base.public_data;
@@ -190,5 +199,6 @@ function buildRow(preset: AgentPreset, departmentId: string, order: number) {
     agent_type: 'chat',
     owner_id: null,
     capabilities: presetCapabilities(preset),
+    ...(preset.appDefinition ? { app_definition: preset.appDefinition } : {}),
   };
 }

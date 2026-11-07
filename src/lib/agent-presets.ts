@@ -10,6 +10,8 @@
  * 라우트가 각자 목록을 들고 있으면 한쪽만 바뀌어 기관마다 다른 세트를 받게 된다.
  */
 
+import type { AppDefinition } from '@/lib/apps/definition';
+
 export interface AgentPreset {
   name: string;
   description: string;
@@ -19,10 +21,12 @@ export interface AgentPreset {
   systemPrompt: string;
   /** 이 비서가 쓸 커넥터. 키가 없는 커넥터는 도구 목록에서 알아서 빠진다. */
   connectors?: string[];
+  /** 입력형 앱이면 입력 폼·단계(2026-11-07) — 있으면 사진 읽기 없이 능력이 비고, 앱 목록에 '입력형 앱'으로 나온다 */
+  appDefinition?: AppDefinition;
 }
 
 /** 카테고리 노출 순서. 표시 분류일 뿐 권한이 아니다(권한은 agents.visibility). */
-export const PRESET_CATEGORIES = ['공공기관', '검토·교정', '번역', '자료조사', '사무지원'];
+export const PRESET_CATEGORIES = ['공공기관', '검토·교정', '번역', '자료조사', '사무지원', '업무 앱'];
 
 /**
  * 공공기관 세트.
@@ -353,6 +357,148 @@ export const PUBLIC_SECTOR_PRESETS: AgentPreset[] = [
 ];
 
 /**
+ * 기본 입력형 앱(2026-11-07) — 폼을 채우면 정해 둔 단계로 초안을 만드는 앱. 파일·외부 도구 없이 입력 글만 쓴다(그래서 멈추면 이어 실행된다).
+ * 알리웍스 공개 앱 대응표의 core 항목(프로젝트 위험 검토 079·메일 초안 005·RFP 작성 지원 103·세미나 기획 086)과
+ * 반복 단계(질의마다)를 공공기관 업무로 옮겼다. 정의는 `validateAppDefinition`을 통과해야 한다(`tests/agent-presets-apps.test.ts`).
+ */
+export const PUBLIC_SECTOR_FORM_PRESETS: AgentPreset[] = [
+  {
+    name: '사업 위험 검토',
+    description: '사업 개요·일정·예산을 넣으면 위험 요인과 대응 방안을 확인 목록으로 정리합니다.',
+    category: '업무 앱',
+    icon: '⚠️',
+    color: '#C2410C',
+    systemPrompt: `당신은 공공기관 사업 담당자가 사업계획의 위험을 미리 점검하도록 돕습니다.
+
+지키는 것
+- 입력에 적힌 사실만 근거로 씁니다. 입력에 없는 예산·일정·법령 조항을 만들지 마세요
+- 위험마다 '왜 위험한지'를 입력의 어느 내용에서 읽었는지 밝힙니다
+- 판단이 어려운 것은 [확인 필요]로 남깁니다
+- 법령 위반 여부는 단정하지 말고 담당 부서·법무 확인이 필요하다고 씁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'checklist',
+      fields: [
+        { key: 'project', label: '사업명', type: 'text', required: true },
+        { key: 'summary', label: '사업 개요(목적·대상·추진 방식)', type: 'textarea', required: true },
+        { key: 'plan', label: '일정·예산·추진 체계', type: 'textarea', required: false },
+        { key: 'concern', label: '특히 걱정되는 점', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '위험 요인 찾기', instruction: '입력한 사업 내용에서 위험 요인을 일정·예산·법령·절차·이해관계자·성과 측면으로 나눠 찾으세요. 위험마다 근거가 된 입력 내용을 짧게 인용하고, 발생 가능성과 영향을 높음·보통·낮음으로 표시하세요. 입력에 근거가 없는 위험은 쓰지 마세요.' },
+        { name: '대응 방안 정리', instruction: '앞 단계의 위험마다 예방 조치와 발생 시 대응, 확인할 부서·자료를 정리하세요. 우선순위가 높은 위험부터 확인 목록으로 쓰고, 끝에 사업 담당자가 지금 확인할 일 3가지를 적으세요.' },
+      ],
+    },
+  },
+  {
+    name: '안내 메일 초안',
+    description: '받는 사람·목적·확인된 사실을 넣으면 업무 안내·요청 메일 초안을 씁니다.',
+    category: '업무 앱',
+    icon: '✉️',
+    color: '#0F8B8D',
+    systemPrompt: `당신은 공공기관 직원의 업무 메일을 대신 써 주는 도우미입니다.
+
+지키는 것
+- 정중하되 짧게 씁니다. 첫 문단에 메일의 목적을 밝힙니다
+- 입력한 사실(일시·장소·기한·금액·첨부)만 씁니다. 없는 사실을 채우지 말고 [확인 필요]로 남기세요
+- 요청 메일이면 회신 기한과 회신 방법을 분명히 적습니다
+- 제목 후보 2개를 맨 앞에 제시합니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'recipient', label: '받는 사람(기관·부서·직위)', type: 'text', required: true },
+        { key: 'purpose', label: '메일 목적', type: 'select', required: true, options: ['안내', '자료 요청', '회신', '협조 요청', '감사 인사'] },
+        { key: 'facts', label: '전할 내용(확인된 사실)', type: 'textarea', required: true },
+        { key: 'deadline', label: '기한·일시', type: 'text', required: false },
+        { key: 'sender', label: '보내는 사람(부서·이름·연락처)', type: 'text', required: false },
+      ],
+    },
+  },
+  {
+    name: '과업지시서 초안',
+    description: '사업명·목적·과업 범위를 넣으면 용역 과업지시서(제안요청서) 초안을 필수 항목에 맞춰 씁니다.',
+    category: '업무 앱',
+    icon: '📑',
+    color: '#4A90D9',
+    systemPrompt: `당신은 공공기관 용역 발주 담당자가 과업지시서(제안요청서)를 쓰도록 돕습니다.
+
+지키는 것
+- 입력에 없는 금액·기간·인력 기준을 만들지 마세요. 빈 항목은 [작성 필요]로 남깁니다
+- 과업 범위는 산출물과 함께 씁니다(무엇을 해서 무엇을 내는지)
+- 특정 업체에 유리해 보이는 조건(특정 제품명·과도한 실적 요건)은 쓰지 말고, 입력에 있으면 확인이 필요하다고 표시하세요
+- 계약·입찰 방법은 관련 규정 확인이 필요하다고 안내합니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'project', label: '사업(용역)명', type: 'text', required: true },
+        { key: 'background', label: '추진 배경·목적', type: 'textarea', required: true },
+        { key: 'scope', label: '과업 범위·내용', type: 'textarea', required: true },
+        { key: 'period', label: '기간·예산', type: 'text', required: false },
+        { key: 'deliverables', label: '산출물·납품 방법', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '필수 항목 점검', instruction: '과업지시서 필수 항목(과업 개요·배경과 목적·과업 범위와 내용·수행 기간·산출물·수행 방법과 일정·보고 체계·보안과 자료 관리·검사와 검수)마다 입력에 있는 내용과 빠진 내용을 표로 정리하세요. 빠진 항목은 무엇을 정해야 하는지 한 줄로 적으세요.' },
+        { name: '과업지시서 작성', instruction: '앞 단계의 점검 결과로 과업지시서 초안을 항목 순서대로 쓰세요. 입력에 없는 내용은 [작성 필요]로 남기고, 끝에 발주 전에 확인할 사항을 정리하세요.' },
+      ],
+    },
+  },
+  {
+    name: '행사 안내문 초안',
+    description: '행사 개요를 넣으면 제목 후보와 참가 안내문·모집 공지 초안을 씁니다.',
+    category: '업무 앱',
+    icon: '📣',
+    color: '#7C3AED',
+    systemPrompt: `당신은 공공기관 행사(설명회·세미나·교육) 담당자의 안내문 작성을 돕습니다.
+
+지키는 것
+- 참가자가 알아야 할 것(일시·장소·대상·신청 방법·기한·문의처)을 먼저, 빠짐없이 씁니다
+- 입력에 없는 일시·장소·정원은 [확인 필요]로 남기세요
+- 과장하지 않습니다. 어려운 행정용어는 풀어 씁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'title', label: '행사 이름(가제)', type: 'text', required: true },
+        { key: 'kind', label: '행사 종류', type: 'select', required: true, options: ['설명회', '세미나·토론회', '교육', '공청회', '기타'] },
+        { key: 'when_where', label: '일시·장소', type: 'text', required: false },
+        { key: 'target', label: '대상·정원', type: 'text', required: false },
+        { key: 'content', label: '행사 내용·순서', type: 'textarea', required: true },
+        { key: 'apply', label: '신청 방법·기한·문의처', type: 'textarea', required: false },
+      ],
+    },
+  },
+  {
+    name: '질의별 답변 방향 정리',
+    description: '여러 질의를 한 줄에 하나씩 넣으면 질의마다 답변 방향과 확인할 근거를 정리한 뒤 한데 모읍니다.',
+    category: '업무 앱',
+    icon: '🗂️',
+    color: '#0369A1',
+    systemPrompt: `당신은 민원·의회·감사 질의에 답변을 준비하는 담당자를 돕습니다.
+
+지키는 것
+- 답을 단정하지 않습니다. 이 단계는 '답변 방향'이고 사실·수치·법령은 담당자가 확인합니다
+- 질의마다 확인할 근거(법령·내부 규정·통계·사업 실적)를 구체적으로 적습니다
+- 수치를 지어내지 말고 [확인 필요]로 남기세요
+- 다른 기관 소관이면 그렇다고 밝힙니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'bullets',
+      fields: [
+        { key: 'questions', label: '질의 목록(한 줄에 하나)', type: 'textarea', required: true },
+        { key: 'kind', label: '질의 종류', type: 'select', required: true, options: ['민원', '의회 질의', '감사 요구', '언론 문의', '기타'] },
+        { key: 'context', label: '배경·참고 사항', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '질의별 답변 방향', instruction: '이 질의 하나에 대해 질의 요지(한 줄), 답변 방향(2~3줄), 확인할 근거, 소관 부서 후보를 정리하세요.', repeat: { field: 'questions' } },
+        { name: '답변 준비표 정리', instruction: '질의별 결과를 모아 질의 순서대로 답변 준비표를 만들고, 끝에 공통으로 확인할 자료와 서로 겹치거나 충돌하는 답변 방향을 정리하세요.' },
+      ],
+    },
+  },
+];
+
+/**
  * 기관 유형에 맞는 세트를 고른다.
  *
  * 지금은 공공기관 세트 하나뿐이다. 유형이 늘면 여기서 갈라진다 —
@@ -361,5 +507,5 @@ export const PUBLIC_SECTOR_PRESETS: AgentPreset[] = [
 export function presetsForOrganizationType(type: string | null | undefined): AgentPreset[] {
   // 협회·공단·교육청도 공문·보고서·민원 업무 구조가 같다.
   // 맞지 않는 비서는 관리자가 노출을 끄면 된다(is_published).
-  return PUBLIC_SECTOR_PRESETS;
+  return [...PUBLIC_SECTOR_PRESETS, ...PUBLIC_SECTOR_FORM_PRESETS];
 }
