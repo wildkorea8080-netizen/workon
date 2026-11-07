@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-08 새벽) 입력형 앱 입력 항목의 조건부 필수(`c4fdc12`, 마이그레이션 없음)를 `dpl_6FAbRZNgt7qqtAZngysv9CMxQ1zn`로 배포했다.
 - (2026-11-07 오후 3) 결과물 '대화에서 만든 파일'·법령 근거 조사 앱·관리자 기본 세트 갱신(`568b1a9`까지, 마이그레이션 없음)을 `dpl_5pvBpre1eUxByd6fj4SiaJBwUbNg`로 배포했다.
 - (2026-11-07 오후 2) 기본 입력형 앱 다섯·관리자 '기본 비서·앱 세트'(`f84f67a`까지, 마이그레이션 없음 — 운영 DB에는 아직 안 깔림)를 `dpl_CknxZF5uXr1d92YZQ7qMWCCbNdj6`로 배포했다.
 - (2026-11-07 오후) 반복 단계 줄 단위 이어 실행·앱 실행 시간 예산(3분, `/api/chat` `maxDuration = 300`, 예약은 호출 전체 마감)(`93c8cba`까지, 마이그레이션 없음)을 `dpl_AmntxY7NErQLnEEEYxPUYxMnjZ41`로 배포했다.

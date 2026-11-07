@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-08(새벽): 입력형 앱 입력 항목의 조건부 필수
+
+- 2026-11-08 00:26 KST 배포 `dpl_6FAbRZNgt7qqtAZngysv9CMxQ1zn`(커밋 `c4fdc12`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`(6a7d080)로 promote한다. 마이그레이션 없음.
+- 들어간 커밋: `d5ec1e1`(직전 배포 기록), `c4fdc12` 입력 항목의 조건부 필수(`fields[].requiredWhen` — 다른 입력 항목 값에 따라 필수, `renderAppInput`이 판정해 실행·예약·연동 모두 거절, 빌더 '다른 항목에 따라 필수', 실행 화면의 '(필수)'·조건 안내 — [조건 문서](CONDITIONAL_APP_STEPS.md)).
+- **배포 전**: 가지 Preview(`c4fdc12`, `workon-h3lsld037`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 전체 시험 197파일 2,875개 통과·100개 건너뜀(시험 DB 없이)·tsc 0 — 이 PC의 다른 프로젝트가 메모리를 써서 `--maxWorkers=1`로 돌림).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/run`·`/apps/builder`·`/api/system/maintenance` 200, `GET /api/files` 401, 운영 주소가 새 배포를 가리킴.
+- **확인하지 못한 것**(사용자 몫): 로그인한 빌더에서 조건부 필수를 걸어 저장하고, 실행 화면에서 조건에 따라 '(필수)'가 붙고 비우면 거절되는지(브라우저로 보지 않음).
+
 ## 2026-11-07(밤): 입력형 앱 실행 전 예상 AI 호출 수
 
 - 2026-11-07 20:54 KST 배포 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`(커밋 `6a7d080`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_5pvBpre1eUxByd6fj4SiaJBwUbNg`(568b1a9)로 promote한다. 마이그레이션 없음.
