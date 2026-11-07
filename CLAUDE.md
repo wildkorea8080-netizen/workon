@@ -32,6 +32,7 @@
 - (2026-11-06 낮) 사이드바 하나(`a2e9124`)·비서 없이 바로 묻기(`04f6b70`, 마이그레이션 없음)를 `dpl_8po4buxTsHomUkTwEsa95sFiWZQv`로 배포했다.
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
+- (2026-11-07 오후) 반복 단계 줄 단위 이어 실행·앱 실행 시간 예산(3분, `/api/chat` `maxDuration = 300`, 예약은 호출 전체 마감)(`93c8cba`까지, 마이그레이션 없음)을 `dpl_AmntxY7NErQLnEEEYxPUYxMnjZ41`로 배포했다.
 - (2026-11-07 낮) 앱 반복 단계를 첨부 파일마다(`4e45b00`, 마이그레이션 없음)를 `dpl_8yP1r9js9VX6VXry6oxbsfvYUZrT`로 배포했다.
 - (2026-11-07 오전) 관리자 '공통 기준 문서'·비서 편집 창 '문서' 탭·옛 `/api/reports` 지움·키 화면 Voyage 칸 빼기와 사실대로 문구·옛 즐겨찾기 라우트 권한(`acdc4f2`까지 7개 커밋, 마이그레이션 없음)을 `dpl_CgDMdzNTPtQ7n7mnnUkFjtapvwmn`로 배포했다.
 - (2026-11-03 밤) 앱 외부 연동(0049)·관리자 통제(0050)·연동 재시도 중복 막기(0051)를 운영 적용하고 `dpl_4cmoK59Heat6g1FTzD1t7r2CppVW`(`3deae59`)로 배포했다.
