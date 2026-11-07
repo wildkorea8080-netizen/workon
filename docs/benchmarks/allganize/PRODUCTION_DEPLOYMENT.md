@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-07(낮): 앱 반복 단계를 첨부 파일마다
+
+- 2026-11-07 12:27 KST 배포 `dpl_8yP1r9js9VX6VXry6oxbsfvYUZrT`(커밋 `4e45b00`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_CgDMdzNTPtQ7n7mnnUkFjtapvwmn`(acdc4f2)로 promote한다. 마이그레이션 없음.
+- 들어간 커밋: `a71ca3a`(직전 배포 기록), `4e45b00` 입력형 앱의 중간 단계를 첨부 파일마다 반복(올린 파일 → 문서함 문서 순서, 파일마다 모델 한 번·원자료는 매번 전부, 결과는 파일 이름 머리로 이어 붙임, 긴 첨부 추리기 지시에 파일 이름을 남기라는 줄).
+- **배포 전**: 가지 Preview(`4e45b00`, `workon-avf8nvyo7`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 시험 DB를 띄운 전체 시험 191파일 2,912개·tsc 0).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/chat`·`/` 200, `POST /api/chat`·`GET /api/agents/favorite` 401, 운영 주소가 새 배포를 가리킴.
+- **확인하지 못한 것**(사용자 몫): 앱 빌더에서 '첨부 파일마다' 고르기·저장, 파일 둘 이상으로 실행해 파일별 결과와 '반복 N개 파일' 표시, 실제 모델이 파일을 가려 쓰는지(비용 때문에 재지 않음).
+
 ## 2026-11-07(오전): 공통 기준 문서·비서 '문서' 탭·권한 구멍 셋
 
 - 2026-11-07 10:56 KST 배포 `dpl_CgDMdzNTPtQ7n7mnnUkFjtapvwmn`(커밋 `acdc4f2`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`(04b83f1)로 promote한다. 마이그레이션 없음.
