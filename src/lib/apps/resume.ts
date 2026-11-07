@@ -27,7 +27,7 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
       // 기록의 갈래가 지금 정의·입력으로 고를 갈래와 다르면(갈래를 고쳤거나 없앴음) 다른 지시로 만든 결과라 재사용하지 않는다
       const branch = chooseBranch(step, judged)?.name;
       if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
-      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated } : {}) }); completed++;
+      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}) }); completed++;
     } else if (!failed && saved.status === 'skipped') {
       if (!step.when || conditionHolds(step.when, judged)) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'skipped' });

@@ -67,7 +67,11 @@ export type AppClassify = { options: string[] };
  * 반복(2026-11-06) — 중간 AI 단계를 긴 글 입력 항목의 **줄마다** 한 번씩 돌린다(빈 줄 빼고 최대 8줄). 결과는 줄 순서대로 이어 붙인다.
  * 질의 목록·사업 목록처럼 같은 처리를 여러 항목에 하는 앱. 줄마다 모델 호출 하나(사용량도 줄 수만큼)
  */
-export type AppRepeat = { field: string };
+export type AppRepeat = { field: string } | { files: true };
+/** 파일마다 반복(2026-11-07) — 첨부 파일·문서함에서 고른 문서마다 한 번씩(앱 파일 상한 3개). 정의에 파일 받기가 켜져 있어야 한다 */
+export function repeatsFiles(repeat: AppRepeat | undefined): repeat is { files: true } {
+  return Boolean(repeat && 'files' in repeat && repeat.files === true);
+}
 export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify; repeat?: AppRepeat };
 /** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean } };
@@ -293,10 +297,16 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         // 반복 — AI 처리 중간 단계만(조회·분류 아님), 긴 글 입력 항목 하나를 줄마다
         if (isLookup || step.classify !== undefined) return { ok: false, message: '반복은 AI 처리 단계에만 둘 수 있습니다.' };
         const repeat = step.repeat;
-        const key = object(repeat) && typeof repeat.field === 'string' ? repeat.field : null;
-        const field = key ? fields.find((f) => f.key === key) : undefined;
-        if (!field || field.type !== 'textarea') return { ok: false, message: '반복할 항목은 긴 글 입력 항목이어야 합니다(줄마다 한 번씩 처리).' };
-        normalized.repeat = { field: field.key };
+        if (object(repeat) && repeat.files === true && repeat.field === undefined) {
+          // 파일마다 — 이 앱이 파일을 받아야 한다(받지 않는 앱이면 반복할 것이 영영 없다)
+          if (!object(raw.attachments)) return { ok: false, message: '파일마다 반복하려면 앱 설정에서 파일 첨부 받기를 켜 주세요.' };
+          normalized.repeat = { files: true };
+        } else {
+          const key = object(repeat) && typeof repeat.field === 'string' && repeat.files === undefined ? repeat.field : null;
+          const field = key ? fields.find((f) => f.key === key) : undefined;
+          if (!field || field.type !== 'textarea') return { ok: false, message: '반복할 항목은 긴 글 입력 항목(줄마다)이거나 첨부 파일(파일마다)이어야 합니다.' };
+          normalized.repeat = { field: field.key };
+        }
       }
       if (step.classify !== undefined) {
         // 분류 단계 — AI 처리 중간 단계만, 갈래 없이. 선택지는 한 줄·30자·서로 다른 2~6개

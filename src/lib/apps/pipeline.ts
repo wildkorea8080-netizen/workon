@@ -1,4 +1,4 @@
-import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_REPEAT_MAX, repeatItems, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
+import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_REPEAT_MAX, repeatItems, repeatsFiles, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
 import { AppInputError } from './long-input';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
 
@@ -7,9 +7,9 @@ export type AppStepSource = { title: string; url: string };
  * `branch` = 이 실행에서 고른 갈래 이름(기본 지시로 돌았으면 없음). 재개 검사가 지금 입력으로 고를 갈래와 맞춰 본다.
  * `kind: 'lookup'` = 공공 데이터 조회 단계 — `query`는 실제로 보낸 조회어, `sources`는 도구가 준 원문 링크(10개까지)
  * `kind: 'classify'` = 분류 단계 — `output`은 고른 선택지 하나(뒤 단계 조건의 `@N` 값)
- * `repeated` = 반복 단계가 처리한 줄 수(2026-11-06)
+ * `repeated` = 반복 단계가 처리한 줄 수(2026-11-06) — 파일마다 반복이면 파일 수이고 `repeatedFiles: true`(2026-11-07)
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; query?: string; article?: string; sources?: AppStepSource[] };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; query?: string; article?: string; sources?: AppStepSource[] };
 /** 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호 */
 export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
@@ -66,6 +66,8 @@ export function stageSystem(system: string, step: AppStep, final: boolean, branc
 export async function runAppIntermediateSteps(args: {
   steps: AppStep[]; records: AppStepRecord[]; model: string; system: string; messages: LlmMessage[];
   inputs?: Record<string, string>;
+  /** 이번 실행의 원자료 파일 이름 — 올린 파일 다음 문서함에서 고른 문서, 원자료 자리와 같은 순서(파일마다 반복이 쓴다) */
+  files?: string[];
   usage: LlmUsage; complete: (request: LlmRequest) => Promise<LlmCompletion>;
   guard: () => Promise<void>; update: (index: number) => void;
   lookup?: AppLookupRunner;
@@ -123,22 +125,26 @@ export async function runAppIntermediateSteps(args: {
     args.records[index].status = 'running'; args.update(index);
     const repeat = args.steps[index].repeat;
     if (repeat) {
-      // 반복 — 긴 글 입력의 줄마다 모델을 한 번씩(같은 지시·같은 이전 결과), 결과는 줄 순서대로. 줄마다 쓴 토큰은 실패해도 센다
-      const items = repeatItems(args.inputs?.[repeat.field]);
-      if (!items.length) throw new AppInputError(`${args.steps[index].name}: 반복할 줄이 없습니다. 입력 항목에 한 줄에 하나씩 적거나 단계 실행 조건을 두세요.`);
+      // 반복 — 긴 글 입력의 줄마다(또는 원자료 파일마다) 모델을 한 번씩(같은 지시·같은 이전 결과·같은 원자료), 결과는 순서대로. 쓴 토큰은 실패해도 센다
+      const byFile = repeatsFiles(repeat);
+      const items = byFile ? (args.files ?? []).map((name) => name.trim()).filter(Boolean) : repeatItems(args.inputs?.[(repeat as { field: string }).field]);
+      if (!items.length) throw new AppInputError(byFile ? `${args.steps[index].name}: 반복할 파일이 없습니다. 파일을 첨부하거나 문서함에서 고른 뒤 다시 실행해 주세요.` : `${args.steps[index].name}: 반복할 줄이 없습니다. 입력 항목에 한 줄에 하나씩 적거나 단계 실행 조건을 두세요.`);
       if (items.length > APP_REPEAT_MAX) throw new AppInputError(`${args.steps[index].name}: 반복은 ${APP_REPEAT_MAX}줄까지입니다(지금 ${items.length}줄). 줄을 줄이거나 나눠 실행해 주세요.`);
       const parts: string[] = [];
       for (const [i, item] of items.entries()) {
         await args.guard();
-        const system = `${stageSystem(args.system, args.steps[index], false, branch)}\n\n이번 항목(${i + 1}/${items.length}): ${item}\n이 항목에 대한 결과만 작성하세요. 다른 항목은 다루지 마세요.`;
+        const focus = byFile
+          ? `이번 파일(${i + 1}/${items.length}): ${item.slice(0, 120)}\n첨부 원자료 가운데 이 파일의 내용에 대한 결과만 작성하세요. 다른 파일은 다루지 마세요. 이 파일의 내용을 찾지 못하면 찾지 못했다고만 쓰세요.`
+          : `이번 항목(${i + 1}/${items.length}): ${item}\n이 항목에 대한 결과만 작성하세요. 다른 항목은 다루지 마세요.`;
+        const system = `${stageSystem(args.system, args.steps[index], false, branch)}\n\n${focus}`;
         const response = await args.complete({ model: args.model, system, messages: stageMessages(args.messages, args.records), maxTokens: APP_INTERMEDIATE_TOKENS });
         args.usage.input_tokens += response.usage.input_tokens; args.usage.output_tokens += response.usage.output_tokens;
-        if (!response.text.trim() || response.usage.output_tokens >= APP_INTERMEDIATE_TOKENS) throw new Error(`단계 결과가 비었거나 처리 길이 상한을 초과했습니다(${i + 1}번째 항목).`);
+        if (!response.text.trim() || response.usage.output_tokens >= APP_INTERMEDIATE_TOKENS) throw new Error(`단계 결과가 비었거나 처리 길이 상한을 초과했습니다(${i + 1}번째 ${byFile ? '파일' : '항목'}).`);
         parts.push(`### ${i + 1}. ${item.slice(0, 80)}\n${response.text.trim()}`);
       }
       const output = parts.join('\n\n');
-      if (output.length > 12000) throw new Error('반복 결과가 처리 길이 상한을 넘었습니다. 줄 수를 줄여 다시 실행해 주세요.');
-      args.records[index].output = output; args.records[index].repeated = items.length; args.records[index].status = 'completed'; args.update(index);
+      if (output.length > 12000) throw new Error('반복 결과가 처리 길이 상한을 넘었습니다. 줄이나 파일 수를 줄여 다시 실행해 주세요.');
+      args.records[index].output = output; args.records[index].repeated = items.length; if (byFile) args.records[index].repeatedFiles = true; else delete args.records[index].repeatedFiles; args.records[index].status = 'completed'; args.update(index);
       continue;
     }
     await args.guard();

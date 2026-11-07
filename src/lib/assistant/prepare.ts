@@ -341,6 +341,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
 
   let fileContext = '';
   let appMaterialPieces: PreparedTurn['appMaterialPieces'];
+  let appFileNames: string[] | undefined;
   if (appStepInputs && (sentIds.length || libraryFiles.length)) {
     try {
       const selected = attachments.filter(a => sentIds.includes(a.id));
@@ -350,6 +351,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
         ...(await Promise.all(selected.map(async a => ({ name: a.fileName, extract: await loadTurnExtract(ctx, a) })))),
         ...libraryFiles,
       ]);
+      appFileNames = [...selected.map(a => a.fileName), ...libraryFiles.map(f => f.name)];
       // 긴 첨부는 조각으로 넘긴다 — 실행기(stream.ts)가 조각마다 추린 글을 사용자 메시지에 덧붙인다(모델 호출이라 여기서는 못 한다)
       if (material.context !== undefined) fileContext = material.context;
       else appMaterialPieces = { pieces: material.pieces, chars: material.chars };
@@ -377,6 +379,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       appStepInputs,
       appMaterialPieces,
+      ...(appFileNames?.length ? { appFileNames } : {}),
       ...(libraryRefs.length ? { appDocuments: libraryRefs } : {}),
       appResumeRecords,
       appResumeFrom,

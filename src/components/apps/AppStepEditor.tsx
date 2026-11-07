@@ -1,6 +1,8 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep } from '@/lib/apps/definition';
+/** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
+const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
 
 /** 항목을 고르거나 바꿀 때의 첫 규칙 — 비교는 그 종류의 첫 비교, 값은 목록이면 첫 선택값 */
@@ -122,10 +124,17 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         {last && step.when && <p role="alert" className="text-xs text-red-700">마지막 단계는 조건을 ‘항상 실행’으로 바꿔 주세요.</p>}
         {!step.lookup && !step.classify && (() => {
           const lists = fields.filter(f => f.type === 'textarea');
+          // 파일마다 반복(2026-11-07) — 파일 첨부 받기를 켠 앱만. 고르는 값은 항목 키 또는 FILES
+          const files = Boolean(definition.attachments);
+          const first = lists[0] ? { field: lists[0].key } : files ? { files: true as const } : undefined;
+          const value = repeatsFiles(step.repeat) ? FILES : step.repeat && 'field' in step.repeat ? step.repeat.field : '';
           return <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 반복`} disabled={last || !lists.length} checked={Boolean(step.repeat)} onChange={e => changeStep(index, { repeat: e.target.checked && lists[0] ? { field: lists[0].key } : undefined })} />목록의 줄마다 반복 — 긴 글 입력의 한 줄마다 이 단계를 한 번씩 처리하고 결과를 이어 붙입니다(최대 {APP_REPEAT_MAX}줄, 줄마다 AI 사용량){last ? ' (마지막 단계는 안 됨)' : !lists.length ? ' (긴 글 입력 항목이 있어야 함)' : ''}</label>
-            {step.repeat && <select aria-label={`단계 ${index + 1} 반복할 항목`} className={input} value={step.repeat.field} onChange={e => changeStep(index, { repeat: { field: e.target.value } })}>
-              {!lists.some(f => f.key === step.repeat!.field) && <option value={step.repeat.field} disabled>삭제된 항목</option>}{lists.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 반복`} disabled={last || !first} checked={Boolean(step.repeat)} onChange={e => changeStep(index, { repeat: e.target.checked ? first : undefined })} />반복 — 긴 글 입력의 한 줄마다, 또는 첨부 파일마다 이 단계를 한 번씩 처리하고 결과를 이어 붙입니다(최대 {APP_REPEAT_MAX}번, 한 번마다 AI 사용량){last ? ' (마지막 단계는 안 됨)' : !first ? ' (긴 글 입력 항목이나 파일 첨부 받기가 있어야 함)' : ''}</label>
+            {step.repeat && <select aria-label={`단계 ${index + 1} 반복할 항목`} className={input} value={value} onChange={e => changeStep(index, { repeat: e.target.value === FILES ? { files: true } : { field: e.target.value } })}>
+              {value !== FILES && !lists.some(f => f.key === value) && <option value={value} disabled>삭제된 항목</option>}
+              {value === FILES && !files && <option value={FILES} disabled>첨부 파일마다 (파일 첨부 받기가 꺼짐)</option>}
+              {lists.map(f => <option key={f.key} value={f.key}>{f.label}의 줄마다</option>)}
+              {files && <option value={FILES}>첨부 파일마다 (문서함에서 고른 문서 포함)</option>}
             </select>}
           </div>;
         })()}

@@ -93,11 +93,11 @@ describe('재개·화면', () => {
     const html = renderToStaticMarkup(createElement(AppStepEditor, { definition: def, onChange: () => {} }));
     expect(html).toContain('aria-label="단계 1 반복"');
     expect(html).toContain('aria-label="단계 1 반복할 항목"');
-    expect(html).toMatch(/<option value="items"[^>]*>질의 목록<\/option>/);
+    expect(html).toMatch(/<option value="items"[^>]*>질의 목록의 줄마다<\/option>/);
     expect(html).not.toMatch(/반복할 항목"[^]*<option value="title"/);
     const noList = renderToStaticMarkup(createElement(AppStepEditor, { definition: { ...def, fields: [fields[1]], steps: [{ name: 'a', instruction: 'x' }, { name: '끝', instruction: '끝' }] }, onChange: () => {} }));
     expect(noList).toMatch(/aria-label="단계 1 반복" disabled=""/);
-    expect(noList).toContain('긴 글 입력 항목이 있어야 함');
+    expect(noList).toContain('긴 글 입력 항목이나 파일 첨부 받기가 있어야 함');
     expect(renderToStaticMarkup(createElement(AppStepResults, { steps: [{ name: '질의별 답', status: 'completed', output: 'x', repeated: 3 }] }))).toContain('· 반복 3줄');
   });
 });

@@ -33,6 +33,8 @@ export interface PreparedTurn {
   appStepInputs?: Record<string, string>;
   /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
   appMaterialPieces?: { pieces: string[]; chars: number };
+  /** 이번 실행의 원자료 파일 이름(올린 파일 다음 문서함에서 고른 문서, 원자료 자리와 같은 순서) — 파일마다 반복 단계가 쓴다(2026-11-07) */
+  appFileNames?: string[];
   /** 문서함에서 고른 문서(2026-11-05) — 답변 행 `source_references.app_documents`(id·이름만). 이어 실행 대상에서 뺀다 */
   appDocuments?: { id: string; title: string }[];
   appResumeRecords?: import('@/lib/apps/pipeline').AppStepRecord[];

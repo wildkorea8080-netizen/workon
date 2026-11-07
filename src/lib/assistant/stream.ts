@@ -341,6 +341,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
     const staged = turn.appSteps?.length ? await runAppIntermediateSteps({
       steps: turn.appSteps, records: appRecords, model: turn.modelId, system: turn.systemPrompt,
       inputs: turn.appStepInputs,
+      files: turn.appFileNames,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
       guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup),
     }) : null;
