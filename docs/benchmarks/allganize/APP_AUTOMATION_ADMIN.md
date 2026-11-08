@@ -34,7 +34,7 @@
 - **토큰은 회수하지 않는다** — 다시 켜면 그대로 쓴다. 영구히 막으려면 하나씩 회수.
 - **닫힘**: 기관 칸을 읽지 못하면(0068 전 등) 외부 호출 500, 연동 만들기 503. 직원 목록의 안내만 열어 둔다(안내일 뿐이라). 관리자 목록은 스위치를 못 읽어도 연동·예약은 보인다(스위치 칸만 빠짐).
 - **예약에는 걸지 않는다** — 예약은 기관 안에서 직원 권한으로 도는 일이라 외부 데이터 흐름이 아니다(멈추려면 0050의 예약 멈춤).
-- **DB(0068)**: `organizations.app_webhooks_disabled_at timestamptz`·`app_webhooks_disabled_reason text`, 짝 CHECK(둘 다 있거나 둘 다 없음)·사유 1~300자. 추가만, 여러 번 적용해도 안전. **코드 배포 전에 적용**.
+- **DB(0068)**: `organizations.app_webhooks_disabled_at timestamptz`·`app_webhooks_disabled_reason text`, 짝 CHECK(둘 다 있거나 둘 다 없음)·사유 1~300자. 추가만, 여러 번 적용해도 안전. **코드 배포 전에 적용** — 운영 DB 적용 2026-11-08(칸 둘·CHECK 확인), 코드 배포 `dpl_CJiXcrNHWRm9LReriozmHQCVgk5L`.
 - 검증: `tests/app-webhook-switch.test.ts`(9개 — 끄기·켜기 조건부와 보안 로그, 이미 그 상태면 기록 없음, 권한 403·쓰기 실패 503, 읽기·적용 전 던짐, 호출 앞 검사는 활성·안 만료 토큰만, 직원·관리자 보기, PUT 인증·꼴, 관리자 화면, 0068·감사 이름), `tests/app-webhooks.test.ts`(꺼졌으면 차지·실행 전에 403, 토큰·본문이 틀리면 기관을 안 봄, 읽지 못하면 던짐), `tests/app-webhooks-route.test.ts`(만들기 403·503, 목록 안내·못 읽어도 목록). 시험 DB에 0068을 두 번 적용·짝 CHECK·길이 CHECK 확인. 브라우저 확인 없음.
 
 ## 계정 탈퇴와 연결

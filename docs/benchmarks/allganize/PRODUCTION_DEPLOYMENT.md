@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-08(아침): 기관 전체 외부 연동 스위치(0068)·앱 결과를 기관 한글 양식에
+
+- 2026-11-08 09:21 KST 배포 `dpl_CJiXcrNHWRm9LReriozmHQCVgk5L`(커밋 `b587269`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_6FAbRZNgt7qqtAZngysv9CMxQ1zn`(c4fdc12)로 promote한다(0068 칸은 그대로 두어도 옛 코드는 읽지 않는다).
+- **마이그레이션 0068 운영 적용**(코드 전, `npm run db:migrate -- 0068`): `organizations.app_webhooks_disabled_at`·`app_webhooks_disabled_reason` 두 칸과 `organizations_app_webhooks_switch_check` 확인(읽기 전용 트랜잭션), 기관 2곳 모두 켜짐(끈 기관 0).
+- 들어간 커밋: `9f64363`(직전 배포 기록), `cc92e87` 기관 전체 외부 연동 스위치(기관 전체 관리자가 사유와 함께 끄고 켬, 끄면 외부 호출은 차지 전에 403·새 연동 403·직원 목록 안내, 토큰은 그대로, 보안 로그 high — [관리자 통제](APP_AUTOMATION_ADMIN.md)), `b587269` 앱 결과를 앱 비서의 기관 한글 양식(`{{주요 내용}}`·`{{본문}}` 자리)에 담아 내보내기(마이그레이션 없음 — [결과 내보내기](APP_RESULT_EXPORT.md)).
+- **배포 전**: 가지 Preview(`b587269`, `workon-ksmo7nahz`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 시험 DB를 띄운 전체 시험 199파일 3,000개 통과·tsc 0, 기관 양식 결과를 한글 2018로 열기·다시 저장·PDF 1쪽 확인).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/run`·`/apps/webhooks`·`/api/system/maintenance` 200, `/admin/app-automations` 307(로그인으로), `GET /api/apps/export` 401, `PUT /api/admin/app-automations/webhook-switch` 401, 무효 토큰 `POST /api/apps/webhook` 401(스위치 칸 읽기 전 거절 그대로), 운영 주소가 새 배포를 가리킴.
+- **확인하지 못한 것**(사용자 몫): 로그인한 관리자 '앱 예약·연동'에서 기관 전체 끄기·켜기와 그동안 외부 호출 403, 앱 결과 내보내기의 '담을 양식' 고르기·기관 양식 파일(브라우저로 보지 않음 — 개발 서버가 운영 DB를 씀).
+
 ## 2026-11-08(새벽): 입력형 앱 입력 항목의 조건부 필수
 
 - 2026-11-08 00:26 KST 배포 `dpl_6FAbRZNgt7qqtAZngysv9CMxQ1zn`(커밋 `c4fdc12`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`(6a7d080)로 promote한다. 마이그레이션 없음.
