@@ -744,7 +744,8 @@ describe('앱 실행의 시간 예산(2026-11-07)', () => {
     expect(records.map((r) => r.status)).toEqual(['failed', 'not_run']);
     expect(records[0].partial).toEqual(['여비 문의']);
     const last = events.at(-1) as { event: string; data: { message: string } };
-    expect(last).toEqual({ event: 'error', data: { message: APP_TIME_BUDGET_MESSAGE } });
+    // 입력만 쓰는 실행이라 재개용 입력을 저장했다 — 실행 화면이 자동으로 이어 가도록 코드를 붙인다(2026-11-08)
+    expect(last).toEqual({ event: 'error', data: { message: APP_TIME_BUDGET_MESSAGE, code: 'app_time_budget' } });
     expect(details(inserted('usage_logs')[0])).toMatchObject({ input_tokens: 3, output_tokens: 2, aborted: true });
   });
 
@@ -754,6 +755,14 @@ describe('앱 실행의 시간 예산(2026-11-07)', () => {
     const events = await run(turn({ appSteps: steps, appStepInputs: inputs, isNewConversation: false }), undefined, { now: () => 5_000, deadlineAt: 4_999 });
     expect(completing).not.toHaveBeenCalled();
     expect((events.at(-1) as { data: { message: string } }).data.message).toBe(APP_TIME_BUDGET_MESSAGE);
+  });
+
+  it('재개용 입력을 저장하지 않는 실행(문서 찾기가 켜진 앱)에는 자동 이어 실행 코드를 붙이지 않는다', async () => {
+    const a = adapter(); setLlmAdapterForTests(a);
+    const t = turn({ appSteps: steps, appStepInputs: inputs, isNewConversation: false });
+    t.ctx.capabilities = { doc_search: {} } as typeof t.ctx.capabilities;
+    const events = await run(t, undefined, { now: () => 5_000, deadlineAt: 4_999 });
+    expect(events.at(-1)).toEqual({ event: 'error', data: { message: APP_TIME_BUDGET_MESSAGE } });
   });
 
   it('예산 안이면 평소처럼 끝난다', async () => {

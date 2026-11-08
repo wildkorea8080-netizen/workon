@@ -15,6 +15,7 @@ import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type N
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
+import { APP_TIME_BUDGET_CODE } from '@/lib/apps/stream';
 import { isInputOnlyRun } from '@/lib/apps/resume';
 import { checkTokenLimit } from '@/lib/usage-limit';
 import { getAllowedModelIds } from '@/lib/model-policy';
@@ -414,7 +415,9 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       orgId: turn.ctx.organizationId,
     });
     // 직원이 고칠 수 있는 입력 문제(긴 첨부 추리기 실패)는 그 글을 그대로 — 일반 안내로는 무엇을 줄여야 하는지 모른다
-    send({ event: 'error', data: { message: friendlyLlmMessage(error) ?? (error instanceof AppInputError ? error.message : GENERIC_TURN_ERROR) } });
+    // 처리 시간 예산에 멈췄고 이어 갈 기록을 저장했으면 코드를 붙인다 — 실행 화면이 끝난 단계부터 자동으로 이어 간다(2026-11-08)
+    const timeBudget = error instanceof AppInputError && error.message === APP_TIME_BUDGET_MESSAGE && Boolean(savedInputs);
+    send({ event: 'error', data: { message: friendlyLlmMessage(error) ?? (error instanceof AppInputError ? error.message : GENERIC_TURN_ERROR), ...(timeBudget ? { code: APP_TIME_BUDGET_CODE } : {}) } });
     return;
   }
 
