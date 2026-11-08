@@ -1,4 +1,4 @@
-import { chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
+import { branchJumpIndex, chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
 import type { AppStepRecord } from './pipeline';
 
 /**
@@ -24,9 +24,16 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
   const records: AppStepRecord[] = []; let failed = false; let completed = 0; let partialReused = false;
   // 조건 판정 값 — 입력값 + 재사용할 분류 단계의 결과(@N). 실행기와 같은 값으로 갈래·건너뛰기를 맞춰 본다
   const judged: Record<string, string> = { ...original.inputs };
+  // 앞 단계의 갈래가 건너간 자리(2026-11-08) — 그 앞 단계는 기록에서도 건너뛰어져 있어야 한다(실행기와 같은 규칙)
+  let skipUntil = -1;
   for (let index = 0; index < steps.length; index++) {
     const saved = references.app_steps[index]; const step = steps[index];
     if (!saved || typeof saved !== 'object' || saved.name !== step.name) return fail('단계 기록이 현재 앱과 다릅니다. 새로 실행해 주세요.');
+    if (index < skipUntil) {
+      if (failed || saved.status !== 'skipped') return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
+      records.push({ name: step.name, status: 'skipped', jumped: true });
+      continue;
+    }
     if (!failed && saved.status === 'completed') {
       if (index === steps.length - 1 || typeof saved.output !== 'string' || !saved.output.trim() || saved.output.length > 12000 || (step.when && !conditionHolds(step.when, judged))) return fail('재사용할 단계 결과를 확인하지 못했습니다. 새로 실행해 주세요.');
       if (step.classify) {
@@ -41,8 +48,10 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
       const branch = chooseBranch(step, judged)?.name;
       if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}) }); completed++;
+      const target = branchJumpIndex(index, step.branches?.find(b => b.name === branch), steps.length);
+      if (target !== null) skipUntil = Math.max(skipUntil, target);
     } else if (!failed && saved.status === 'skipped') {
-      if (!step.when || conditionHolds(step.when, judged)) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
+      if (saved.jumped === true || !step.when || conditionHolds(step.when, judged)) return fail('단계의 실행 조건과 기록이 다릅니다. 새로 실행해 주세요.');
       records.push({ name: step.name, status: 'skipped' });
     } else {
       if (!failed && saved.status === 'failed') {
@@ -69,4 +78,17 @@ const ATTACHMENT_ONLY_CAPABILITIES: ReadonlySet<string> = new Set(['file_read', 
  */
 export function isInputOnlyRun(capabilityIds: readonly string[], attachmentCount: number): boolean {
   return attachmentCount === 0 && capabilityIds.every(id => ATTACHMENT_ONLY_CAPABILITIES.has(id));
+}
+
+/**
+ * 멈춘 답변에 이어 갈 진행이 남았나(2026-11-08, 예약 자동 이어 실행) — 재개용 입력(`app_inputs`, 입력만 쓰는 실행에만 저장됨)이 있고
+ * 끝난 단계가 있거나 반복이 도중에 멈춘 줄이 있을 때. 대략의 판정이다 — 실제로 이어 갈 수 있는지는 이어 실행 요청을 대화 실행기가 다시 본다
+ */
+export function hasResumableProgress(references: unknown): boolean {
+  if (!references || typeof references !== 'object' || Array.isArray(references)) return false;
+  const refs = references as Record<string, unknown>;
+  if (!refs.app_inputs || typeof refs.app_inputs !== 'object' || Array.isArray(refs.app_inputs) || !Array.isArray(refs.app_steps)) return false;
+  const steps = refs.app_steps as Array<Record<string, unknown> | null>;
+  if (!steps.some((s) => s?.status === 'failed' || s?.status === 'not_run')) return false;
+  return steps.some((s) => s?.status === 'completed' || (s?.status === 'failed' && Array.isArray(s.partial) && s.partial.length > 0));
 }

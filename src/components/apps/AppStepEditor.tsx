@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -67,8 +67,11 @@ export function defaultBranch(fields: AppField[], ordinal: number): AppBranch {
  * 단계의 갈래 하나 — 이름·조건(1~3개, 모두 또는 하나라도)·이 갈래일 때의 지시. 갈래에는 조건이 꼭 하나는 있어야 해서
  * 마지막 조건은 지우지 못한다(갈래 자체를 지운다)
  */
-function BranchEditor({ branch, fields, label, onChange, onRemove }: { branch: AppBranch; fields: AppField[]; label: string; onChange: (branch: AppBranch) => void; onRemove: () => void }) {
+function BranchEditor({ branch, fields, label, stepIndex, steps, onChange, onRemove }: { branch: AppBranch; fields: AppField[]; label: string; stepIndex: number; steps: AppStep[]; onChange: (branch: AppBranch) => void; onRemove: () => void }) {
   const rules = conditionRules(branch.when);
+  // 건너갈 단계(2026-11-08) — 이 단계보다 두 단계 이상 뒤만. 단계 순서를 바꿔 맞지 않게 된 값은 저장 전에 알린다
+  const targets = steps.map((s, i) => ({ number: i + 1, name: s.name })).filter(t => t.number >= stepIndex + 3);
+  const brokenNext = branch.next !== undefined && branchJumpIndex(stepIndex, branch, steps.length) === null;
   const mode = conditionMode(branch.when);
   const changeRules = (next: AppRule[], nextMode: AppConditionMode = mode) => { if (next.length) onChange({ ...branch, when: makeCondition(nextMode, next) }); };
   return <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
@@ -82,6 +85,12 @@ function BranchEditor({ branch, fields, label, onChange, onRemove }: { branch: A
     {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={fields} label={`${label} 조건 ${r + 1}`} disabled={false} onChange={next => changeRules(rules.map((x, i) => i === r ? next : x))} onRemove={() => changeRules(rules.filter((_, i) => i !== r))} />)}
     {rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeRules([...rules, defaultRule(fields[0])])}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
     <textarea className={input} aria-label={`${label} 처리 지시`} maxLength={2000} rows={3} placeholder="이 갈래일 때의 처리 지시" value={branch.instruction} onChange={e => onChange({ ...branch, instruction: e.target.value })} />
+    {(targets.length > 0 || branch.next !== undefined) && <label className="block text-xs text-slate-500">이 갈래로 처리한 뒤<select aria-label={`${label} 다음 단계`} className={`${input} mt-1`} value={branch.next ?? ''} onChange={e => { const { next: _next, ...rest } = branch; void _next; onChange(e.target.value ? { ...rest, next: Number(e.target.value) } : rest); }}>
+      <option value="">바로 다음 단계로</option>
+      {targets.map(t => <option key={t.number} value={t.number}>단계 {t.number}({t.name})로 건너가기 — 사이 단계는 건너뜀</option>)}
+      {brokenNext && <option value={branch.next}>단계 {branch.next}(지금은 갈 수 없음)</option>}
+    </select></label>}
+    {brokenNext && <p role="alert" className="text-xs text-red-700">단계 순서가 바뀌어 건너갈 단계가 맞지 않습니다 — 다시 골라 주세요.</p>}
   </div>;
 }
 
@@ -103,7 +112,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
   function changeRules(index: number, rules: AppRule[], mode: AppConditionMode) { changeStep(index, { when: rules.length ? makeCondition(mode, rules) : undefined }); }
   function changeBranches(index: number, branches: AppBranch[]) { changeStep(index, { branches: branches.length ? branches : undefined }); }
   return <section className="space-y-4 border-t pt-5"><h2 className="font-semibold">4. 단계별 처리 (선택)</h2>
-    <p className="text-xs leading-5 text-slate-500">최대 3단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
+    <p className="text-xs leading-5 text-slate-500">최대 {APP_MAX_STEPS}단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 갈래마다 처리한 뒤 뒤쪽 단계로 건너가게 할 수 있습니다(앞으로만 — 사이 단계는 건너뛰고, 여러 갈래가 같은 단계로 가면 거기서 합쳐집니다). 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
     {!definition.steps?.length && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [{ name: '자료 정리', instruction: '원문에 있는 사실과 요구 사항을 정리하세요.' }, { name: '초안 작성', instruction: '원문과 앞 단계의 정리 결과를 바탕으로 업무 초안을 작성하세요.' }, { name: '검토·보완', instruction: '원문과 초안을 대조해 근거 없는 표현을 고치고 최종 초안을 작성하세요.' }] }))}>정리 → 초안 → 검토 구성 추가</button>}
     {definition.steps?.map((step, index) => {
       const last = index === definition.steps!.length - 1;
@@ -164,11 +173,11 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
         })()}
         {!step.lookup && !step.classify && <div className="space-y-2 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600">갈래 (선택) — 위에서부터 처음 맞는 갈래의 지시로 처리하고, 맞는 갈래가 없으면 위의 기본 지시로 처리합니다</div>
-          {(step.branches ?? []).map((branch, b) => <BranchEditor key={b} branch={branch} fields={visible} label={`단계 ${index + 1} 갈래 ${b + 1}`} onChange={next => changeBranches(index, (step.branches ?? []).map((x, i) => i === b ? next : x))} onRemove={() => changeBranches(index, (step.branches ?? []).filter((_, i) => i !== b))} />)}
+          {(step.branches ?? []).map((branch, b) => <BranchEditor key={b} branch={branch} fields={visible} label={`단계 ${index + 1} 갈래 ${b + 1}`} stepIndex={index} steps={definition.steps ?? []} onChange={next => changeBranches(index, (step.branches ?? []).map((x, i) => i === b ? next : x))} onRemove={() => changeBranches(index, (step.branches ?? []).filter((_, i) => i !== b))} />)}
           {(step.branches?.length ?? 0) < APP_MAX_BRANCHES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeBranches(index, [...(step.branches ?? []), defaultBranch(fields, (step.branches?.length ?? 0) + 1)])}>+ 갈래 추가</button>}
         </div>}
       </div>;
     })}
-    {Boolean(definition.steps?.length) && (definition.steps?.length ?? 0) < 3 && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [...(d.steps ?? []), { name: '추가 처리', instruction: '앞 단계의 결과를 바탕으로 최종 결과를 작성하세요.' }] }))}>+ 단계 추가</button>}
+    {Boolean(definition.steps?.length) && (definition.steps?.length ?? 0) < APP_MAX_STEPS && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [...(d.steps ?? []), { name: '추가 처리', instruction: '앞 단계의 결과를 바탕으로 최종 결과를 작성하세요.' }] }))}>+ 단계 추가</button>}
   </section>;
 }

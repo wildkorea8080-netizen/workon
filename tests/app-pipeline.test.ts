@@ -43,7 +43,7 @@ describe('bounded staged text apps', () => {
   it('retains validated stages while rejecting loops, excessive counts and empty instructions', () => {
     const base = { schemaVersion: 1, fields: [{ key: 'x', label: '자료', type: 'text', required: true }], output: 'bullets' };
     expect(validateAppDefinition({ ...base, steps })).toMatchObject({ ok: true, value: { steps } });
-    for (const invalid of [[], [...steps, steps[0]], [{ name: 'a', instruction: '' }]]) expect(validateAppDefinition({ ...base, steps: invalid }).ok).toBe(false);
+    for (const invalid of [[], [...steps, ...steps] /* 6단계 — 상한 5(2026-11-08) */, [{ name: 'a', instruction: '' }]]) expect(validateAppDefinition({ ...base, steps: invalid }).ok).toBe(false);
   });
   it('runs intermediate calls in order and passes their outputs with the original input', async () => {
     const args = setup(); const result = await runAppIntermediateSteps(args);

@@ -18,9 +18,11 @@ export const conditionMode = (c: AppStepCondition): AppConditionMode => ('any' i
 export const makeCondition = (mode: AppConditionMode, rules: AppRule[]): AppStepCondition => (mode === 'any' ? { any: rules } : { all: rules });
 /**
  * 단계의 갈래 하나 — 조건이 맞으면 단계의 기본 지시 대신 이 지시로 실행한다(알리웍스 조건 노드의 '옵션' 꼴).
- * 갈래는 **위에서부터 처음 맞는 하나**만 고르고, 맞는 갈래가 없으면 기본 지시다. 갈래에는 조건이 반드시 있다
+ * 갈래는 **위에서부터 처음 맞는 하나**만 고르고, 맞는 갈래가 없으면 기본 지시다. 갈래에는 조건이 반드시 있다.
+ * `next`(2026-11-08) = 이 갈래로 단계를 마친 뒤 건너갈 **단계 번호**(1부터) — 사이 단계는 건너뛴다(그래프 분기). 앞으로만, 적어도 한 단계를 건너뛰어야 한다
+ * (그래서 고리가 생기지 않는다). 여러 갈래가 같은 단계로 건너가면 거기서 합쳐진다. 없으면 바로 다음 단계
  */
-export type AppBranch = { name: string; when: AppStepCondition; instruction: string };
+export type AppBranch = { name: string; when: AppStepCondition; instruction: string; next?: number };
 /**
  * 공공 데이터 조회 단계(2026-11-04) — 모델을 부르지 않고 승인된 커넥터의 검색 도구 **하나를 정해 둔 조회어로** 부른다
  * (알리웍스 연동 노드의 '툴 하나 고정 호출' 꼴). 조회어의 `{{항목 키}}`는 입력값으로 바뀐다. 결과 글은 다음 단계의 자료가 된다.
@@ -81,6 +83,8 @@ export type AppStep = { name: string; instruction: string; when?: AppStepConditi
 /** `exportTemplateId`(2026-11-08) — 결과 한글 파일의 기본 양식: 이 앱 비서에 올린 HWPX 양식 id. 쓸 때 그 앱의 지금 양식인지 다시 보고, 아니면 표준 보고서 */
 export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean }; exportTemplateId?: string };
 export const APP_MAX_FILES = 3;
+/** 처리 단계 수 상한(마지막 결과 작성 단계 포함) — 2026-11-08에 3에서 5로(갈래의 건너가기와 함께) */
+export const APP_MAX_STEPS = 5;
 export const APP_MAX_RULES = 3;
 export const APP_MAX_BRANCHES = 3;
 export const APP_REPEAT_MAX = 8;
@@ -219,6 +223,16 @@ export function chooseBranch(step: AppStep, inputs: Record<string, string> | und
 }
 
 /**
+ * 갈래로 단계를 마친 뒤 건너갈 단계의 **자리**(0부터) — 갈래에 `next`가 없거나 앞으로 건너가지 않으면 null.
+ * 실행기(pipeline.ts)·재개 검사(resume.ts)·호출 수 어림(call-estimate.ts)이 같은 규칙을 쓴다
+ */
+export function branchJumpIndex(stepIndex: number, branch: AppBranch | null | undefined, stepCount: number): number | null {
+  if (!branch?.next || !Number.isInteger(branch.next)) return null;
+  const target = branch.next - 1;
+  return target >= stepIndex + 2 && target <= stepCount - 1 ? target : null;
+}
+
+/**
  * 이 입력에서 항목이 필수인가 — 늘 필수이거나, 조건부 필수(`requiredWhen`)의 조건이 지금 다른 항목 값으로 맞을 때.
  * 서버 입력 검사(renderAppInput)와 실행 화면 표시가 같은 판정을 쓴다
  */
@@ -271,7 +285,8 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
   }
   const steps: AppStep[] = [];
   if (raw.steps !== undefined) {
-    if (!Array.isArray(raw.steps) || raw.steps.length < 1 || raw.steps.length > 3) return { ok: false, message: '처리 단계는 1~3개로 구성해 주세요.' };
+    if (!Array.isArray(raw.steps) || raw.steps.length < 1 || raw.steps.length > APP_MAX_STEPS) return { ok: false, message: `처리 단계는 1~${APP_MAX_STEPS}개로 구성해 주세요.` };
+    const stepCount = raw.steps.length;
     for (const step of raw.steps) {
       // 이 단계의 조건·갈래가 볼 수 있는 항목 — 입력 항목 + 앞선 분류 단계의 결과
       const visible = conditionFields(fields, steps, steps.length);
@@ -321,7 +336,14 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           if (branches.some(b => b.name === name)) return { ok: false, message: '한 단계 안의 갈래 이름은 서로 달라야 합니다.' };
           const when = normalizeCondition(branch.when, visible);
           if (!when) return { ok: false, message: `갈래마다 조건을 1~${APP_MAX_RULES}개 두고, 현재 입력 항목(또는 앞 분류 단계의 결과)과 그 종류에 맞는 비교·값만 사용할 수 있습니다.` };
-          branches.push({ name, when, instruction: branch.instruction.trim() });
+          // 건너갈 단계 — 앞으로만, 적어도 한 단계를 건너뛰고, 마지막 단계까지(고리가 생기지 않는다)
+          if (branch.next !== undefined && branch.next !== null) {
+            const here = steps.length + 1;
+            if (typeof branch.next !== 'number' || !Number.isInteger(branch.next) || branch.next < here + 2 || branch.next > stepCount) {
+              return { ok: false, message: `갈래 '${name}'의 다음 단계는 단계 ${here}보다 두 단계 이상 뒤(단계 ${here + 2}~${stepCount})여야 합니다. 단계 순서를 바꿨다면 다음 단계를 다시 골라 주세요.` };
+            }
+          }
+          branches.push({ name, when, instruction: branch.instruction.trim(), ...(typeof branch.next === 'number' ? { next: branch.next } : {}) });
         }
         normalized.branches = branches;
       }

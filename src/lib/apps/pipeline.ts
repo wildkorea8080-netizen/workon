@@ -1,4 +1,4 @@
-import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_REPEAT_MAX, repeatItems, repeatsFiles, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
+import { APP_CLASSIFY_TOKENS, APP_LOOKUP_OUTPUT_MAX, APP_MAX_STEPS, APP_REPEAT_MAX, branchJumpIndex, repeatItems, repeatsFiles, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
 import { AppInputError } from './long-input';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
 
@@ -9,8 +9,9 @@ export type AppStepSource = { title: string; url: string };
  * `kind: 'classify'` = 분류 단계 — `output`은 고른 선택지 하나(뒤 단계 조건의 `@N` 값)
  * `repeated` = 반복 단계가 처리한 줄 수(2026-11-06) — 파일마다 반복이면 파일 수이고 `repeatedFiles: true`(2026-11-07)
  * `partial` = 줄마다 반복이 도중에 멈췄을 때 끝난 줄의 결과 글(줄 순서, 2026-11-07) — 이어 실행이 그 줄들을 다시 부르지 않는다. `reusedItems` = 이어 실행에서 다시 쓴 줄 수
+ * `jumped` = 앞 단계의 갈래가 건너가서 건너뛴 단계(2026-11-08) — 실행 조건 때문에 건너뛴 것과 가른다
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; partial?: string[]; reusedItems?: number; query?: string; article?: string; sources?: AppStepSource[] };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; partial?: string[]; reusedItems?: number; query?: string; article?: string; sources?: AppStepSource[]; jumped?: true };
 /** 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호 */
 export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
@@ -73,14 +74,24 @@ export async function runAppIntermediateSteps(args: {
   guard: () => Promise<void>; update: (index: number) => void;
   lookup?: AppLookupRunner;
 }): Promise<{ system: string; messages: LlmMessage[] }> {
-  if (args.steps.length < 1 || args.steps.length > 3) throw new Error('지원하지 않는 단계 수입니다.');
+  if (args.steps.length < 1 || args.steps.length > APP_MAX_STEPS) throw new Error('지원하지 않는 단계 수입니다.');
   if (args.steps[args.steps.length - 1].when) throw new Error('마지막 단계는 항상 실행해야 합니다.');
   if (args.steps[args.steps.length - 1].lookup) throw new Error('마지막 단계는 AI 처리여야 합니다.');
   if (args.steps[args.steps.length - 1].classify) throw new Error('마지막 단계는 분류 단계일 수 없습니다.');
   // 조건 판정 값 — 입력값 + 끝난 분류 단계의 결과(@N). 재개 때 재사용한 분류 결과도 여기서 들어간다
   const judged = evaluationInputs(args.inputs, args.steps, args.records);
+  // 갈래가 건너간 자리(2026-11-08) — 이 자리 앞의 단계는 건너뛴다. 이어 실행에서 다시 쓴 단계의 갈래도 같은 자리로 건너간다
+  let skipUntil = -1;
+  const jumpAfter = (index: number, branchName: string | undefined) => {
+    const target = branchJumpIndex(index, args.steps[index].branches?.find(b => b.name === branchName), args.steps.length);
+    if (target !== null) skipUntil = Math.max(skipUntil, target);
+  };
   for (let index = 0; index < args.steps.length - 1; index++) {
-    if (args.records[index].status === 'completed' && args.records[index].reused) { args.update(index); continue; }
+    if (index < skipUntil) {
+      const record = args.records[index];
+      record.status = 'skipped'; record.jumped = true; delete record.branch; delete record.output; args.update(index); continue;
+    }
+    if (args.records[index].status === 'completed' && args.records[index].reused) { jumpAfter(index, args.records[index].branch); args.update(index); continue; }
     const condition = args.steps[index].when;
     if (condition && !conditionHolds(condition, judged)) {
       args.records[index].status = 'skipped'; args.update(index); continue;
@@ -155,6 +166,7 @@ export async function runAppIntermediateSteps(args: {
       const output = parts.join('\n\n');
       if (output.length > 12000) throw new Error('반복 결과가 처리 길이 상한을 넘었습니다. 줄이나 파일 수를 줄여 다시 실행해 주세요.');
       args.records[index].output = output; args.records[index].repeated = items.length; if (byFile) args.records[index].repeatedFiles = true; else delete args.records[index].repeatedFiles; args.records[index].status = 'completed'; args.update(index);
+      jumpAfter(index, branch?.name);
       continue;
     }
     await args.guard();
@@ -163,6 +175,7 @@ export async function runAppIntermediateSteps(args: {
     args.usage.input_tokens += response.usage.input_tokens; args.usage.output_tokens += response.usage.output_tokens;
     if (!response.text.trim() || response.text.length > 12000 || response.usage.output_tokens >= APP_INTERMEDIATE_TOKENS) throw new Error('단계 결과가 비었거나 처리 길이 상한을 초과했습니다.');
     args.records[index].output = response.text.trim(); args.records[index].status = 'completed'; args.update(index);
+    jumpAfter(index, branch?.name);
   }
   const last = args.steps.length - 1;
   const lastBranch = chooseBranch(args.steps[last], judged);
