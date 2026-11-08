@@ -15,6 +15,11 @@ export const WEBHOOK_EXPIRY_DAYS = [30, 90, 365] as const;
 /** 호출 본문 상한 — 입력 전체 16,000자(renderAppInput)에 JSON 여유를 둔다 */
 export const WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
 export const WEBHOOK_TITLE_PREFIX = '[연동] ';
+/** 기관 전체 외부 연동 스위치(0068)가 꺼져 있을 때 — 외부 호출 403·새 연동 거절·직원 목록 안내에 같은 문구 */
+export const WEBHOOK_ORG_DISABLED = '기관 관리자가 외부 연동(Webhook)을 꺼 두었습니다. 다시 켤 때까지 연동으로 앱을 실행할 수 없습니다.';
+export const WEBHOOK_ORG_DISABLED_CREATE = '기관 관리자가 외부 연동(Webhook)을 꺼 두어 새 연동을 만들 수 없습니다.';
+/** 기관 전체 스위치 상태 — 관리자 화면. `canChange`는 기관 전체를 관리하는 관리자만 참 */
+export type WebhookSwitchView = { disabled: boolean; disabledAt: string | null; reason: string | null; canChange: boolean };
 
 /** 재시도 중복 막기 머리글(0051). 같은 연동·같은 키는 24시간 동안 앱을 다시 돌리지 않고 처음 결과를 돌려준다 */
 export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
@@ -73,10 +78,12 @@ export type AppWebhookView = {
   /** 관리자 회수·계정 탈퇴일 때의 까닭(0050). 직원이 스스로 회수했으면 null */
   revokedReason: string | null; lastUsedAt: string | null; useCount: number;
   lastStatus: 'completed' | 'failed' | null; lastError: string | null; lastConversationId: string | null; createdAt: string;
+  /** 쓰는 중이지만 기관이 외부 연동을 꺼 두어 지금은 돌지 않는다(0068) — 토큰은 그대로, 다시 켜면 쓴다 */
+  blockedByOrg: boolean;
 };
 
 /** DB 행 → 화면. 토큰 해시·사용자·부서는 내보내지 않는다 */
-export function webhookView(row: AppWebhookRowLike, appName: string | null, nowMs: number): AppWebhookView {
+export function webhookView(row: AppWebhookRowLike, appName: string | null, nowMs: number, orgDisabled = false): AppWebhookView {
   const state = row.status === 'revoked' ? 'revoked' : Date.parse(row.expires_at) <= nowMs ? 'expired' : 'active';
   return {
     id: row.id, agentId: row.agent_id, appName: appName ?? '삭제된 앱', appVersion: row.app_version, name: row.name, tokenPrefix: row.token_prefix,
@@ -84,6 +91,7 @@ export function webhookView(row: AppWebhookRowLike, appName: string | null, nowM
     state, expiresAt: row.expires_at, revokedAt: row.revoked_at, revokedReason: row.revoked_reason ?? null, lastUsedAt: row.last_used_at, useCount: row.use_count,
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,
     lastError: row.last_error, lastConversationId: row.last_conversation_id, createdAt: row.created_at,
+    blockedByOrg: orgDisabled && state === 'active',
   };
 }
 

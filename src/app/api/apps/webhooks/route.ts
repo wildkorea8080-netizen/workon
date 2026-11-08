@@ -6,7 +6,8 @@ import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/a
 import { validateAppDefinition } from '@/lib/apps/definition';
 import { appDocumentChoice, CHOSEN_DOCUMENTS_UNAVAILABLE, verifyChosenDocuments } from '@/lib/apps/app-document-choice';
 import { generateWebhookToken } from '@/lib/apps/webhooks';
-import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS } from '@/lib/apps/webhook-spec';
+import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS, WEBHOOK_ORG_DISABLED_CREATE } from '@/lib/apps/webhook-spec';
+import { readWebhookSwitch } from '@/lib/apps/webhook-switch';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
@@ -22,7 +23,10 @@ export async function GET() {
     .eq('user_id', session.user.id).order('created_at', { ascending: false });
   if (error) return fail('연동을 불러오지 못했습니다.', 503);
   const now = Date.now();
-  return NextResponse.json({ ok: true, data: ((data ?? []) as WebhookRow[]).map(row => webhookView(row, agentName(row), now)) });
+  // 기관 스위치는 안내용 — 읽지 못해도 목록은 보인다(실제 막기는 호출이 한다)
+  const actor = await getActorScope(session).catch(() => null);
+  const orgDisabled = actor?.organizationId ? await readWebhookSwitch(actor.organizationId).then(s => s.disabled, () => false) : false;
+  return NextResponse.json({ ok: true, data: ((data ?? []) as WebhookRow[]).map(row => webhookView(row, agentName(row), now, orgDisabled)) });
 }
 
 /**
@@ -57,6 +61,11 @@ export async function POST(request: NextRequest) {
   const verified = await verifyChosenDocuments(agent_id, actor, choice.ids);
   if (verified === 'error') return fail('고른 문서를 확인하지 못했습니다.', 503);
   if (verified === 'unavailable') return fail(CHOSEN_DOCUMENTS_UNAVAILABLE, 400);
+
+  // 기관이 외부 연동을 꺼 두었으면 만들지 않는다(0068) — 읽지 못하면 닫는다
+  const orgSwitch = await readWebhookSwitch(actor.organizationId).catch(() => null);
+  if (!orgSwitch) return fail('기관 설정을 확인하지 못했습니다.', 503);
+  if (orgSwitch.disabled) return fail(WEBHOOK_ORG_DISABLED_CREATE, 403);
 
   const now = Date.now();
   const { count, error: countError } = await supabaseAdmin.from('app_webhooks').select('id', { count: 'exact', head: true })

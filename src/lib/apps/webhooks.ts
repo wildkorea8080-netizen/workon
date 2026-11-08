@@ -11,6 +11,7 @@
 // - `Idempotency-Key` 머리글(0051)이 있으면 같은 연동·같은 키의 호출은 24시간 동안 앱을 다시 돌리지 않고 처음 응답(상태·대화 id·안내)을 돌려준다
 //   (`Idempotent-Replayed: true`). 같은 키로 다른 입력이면 422, 처음 호출이 아직 돌면 409. 다시 보내기는 간격·하루 상한·사용 횟수를 쓰지 않는다.
 //   지나가는 실패(5xx·기관 한도 429)는 기록하지 않아 같은 키로 다시 시도할 수 있다.
+// - 기관 전체 관리자가 외부 연동을 끄면(0068, `webhook-switch.ts`) 호출은 차지 전에 403 — 토큰은 그대로라 다시 켜면 쓴다.
 // - 문서함에서 고른 문서(0063)는 연동에 저장하고 호출마다 지금 근거 판으로 읽는다(`executeWebhook` — 예약과 같은 `currentEditionIds`).
 //   쓸 판이 없으면 422로 거절한다(문서 없이 돌지 않는다). 외부 시스템은 문서를 고르지 않는다.
 import { createHash, randomBytes } from 'crypto';
@@ -21,8 +22,9 @@ import { currentEditionIds, type LibraryDocumentRow } from './library-documents'
 import { agentDocumentRows } from './app-document-choice';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
-  IDEMPOTENCY_HEADER, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
+  IDEMPOTENCY_HEADER, WEBHOOK_ORG_DISABLED, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
 } from './webhook-spec';
+import { tokenOrgWebhooksDisabled } from './webhook-switch';
 
 export function hashWebhookToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
@@ -43,6 +45,11 @@ export type ClaimResult =
 export type CallRecord = { http_status: number; conversation_id: string | null; message: string | null };
 
 export interface WebhookDeps {
+  /**
+   * 이 토큰의 기관이 외부 연동을 꺼 두었는가(0068) — 차지 **전에** 본다(꺼진 동안의 호출이 간격·하루 상한·사용 횟수를 쓰지 않게).
+   * 쓸 수 있는 토큰(활성·안 만료)만 보고, 그 밖은 거짓(차지가 401로 거절한다 — 무효 토큰에 기관 상태를 알리지 않는다). 읽지 못하면 던진다(닫힘)
+   */
+  orgDisabled(tokenHash: string, nowMs: number): Promise<boolean>;
   claim(tokenHash: string, nowMs: number, idempotency?: { key: string; requestHash: string }): Promise<ClaimResult>;
   /** 키 있는 호출의 결과를 남긴다(null이면 지워 같은 키로 다시 시도할 수 있게 — 서버 쪽 실패) */
   recordCall(callId: string, record: CallRecord | null): Promise<void>;
@@ -119,6 +126,7 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   const inputs = readInputs((parsed as { inputs?: unknown } | null)?.inputs ?? {});
   if (!inputs) return fail(400, 'inputs는 항목 키와 글·숫자 값의 객체여야 합니다.');
 
+  if (await deps.orgDisabled(hashWebhookToken(token), deps.now())) return fail(403, WEBHOOK_ORG_DISABLED);
   const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs), 'utf8').digest('hex') } : undefined;
   const claim = await deps.claim(hashWebhookToken(token), deps.now(), idempotency);
   if (!claim.ok) {
@@ -175,6 +183,7 @@ function replayResponse(call: ReplayedCall): WebhookResponse {
 
 export function webhookDeps(): WebhookDeps {
   return {
+    orgDisabled: tokenOrgWebhooksDisabled,
     async claim(tokenHash, nowMs, idempotency) {
       const { data, error } = await supabaseAdmin.rpc('app_webhook_claim', {
         p_token_hash: tokenHash, p_now: new Date(nowMs).toISOString(), p_min_interval_seconds: WEBHOOK_MIN_INTERVAL_SECONDS, p_daily_limit: WEBHOOK_DAILY_LIMIT,

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, formatDateTime } from '@/lib/work/client';
-import { APP_MAX_WEBHOOKS_PER_USER, WEBHOOK_DAILY_LIMIT, WEBHOOK_MIN_INTERVAL_SECONDS, type AppWebhookView } from '@/lib/apps/webhook-spec';
+import { APP_MAX_WEBHOOKS_PER_USER, WEBHOOK_DAILY_LIMIT, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_ORG_DISABLED, type AppWebhookView } from '@/lib/apps/webhook-spec';
 
 const STATE_LABEL: Record<AppWebhookView['state'], { label: string; tone: 'ok' | 'warn' | 'neutral' }> = {
   active: { label: '쓰는 중', tone: 'ok' }, expired: { label: '만료', tone: 'neutral' }, revoked: { label: '회수함', tone: 'neutral' },
@@ -32,6 +32,7 @@ function Webhooks() {
     <div className="my-5 flex justify-end"><button type="button" disabled={loading} onClick={() => void load()} className="text-sm text-ws-accent-text disabled:opacity-40">새로고침</button></div>
     {loading ? <p role="status" className="py-10 text-center text-slate-500">연동을 불러오는 중…</p> : items.length ? <div className="space-y-4">{items.map(w => { const badge = STATE_LABEL[w.state]; return <Card key={w.id}>
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-ws-accent-text">{w.appName} · 앱 판 {w.appVersion}</p><h2 className="font-semibold">{w.name}</h2><p className="mt-2 text-xs text-slate-500">토큰 <code>{w.tokenPrefix}…</code> · {formatDateTime(w.expiresAt)}까지 · 실행 {w.useCount}회{w.lastUsedAt ? ` · 마지막 ${formatDateTime(w.lastUsedAt)}` : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
+      {w.blockedByOrg && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-900">{WEBHOOK_ORG_DISABLED}</p>}
       {w.state === 'revoked' && w.revokedReason && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">{w.revokedReason}</p>}
       {w.documentCount > 0 && <p className="mt-3 text-xs text-slate-600">문서함 문서 {w.documentCount}개 — 호출마다 그 문서의 지금 판으로 읽습니다.</p>}
       {w.lastStatus === 'failed' && w.lastError && <p className="mt-3 text-xs leading-5 text-slate-600">마지막 실패 이유: {w.lastError}</p>}

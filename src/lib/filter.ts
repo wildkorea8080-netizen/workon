@@ -13,7 +13,9 @@ export type SecurityEventType =
   /** 관리자가 직원의 앱 연동을 회수함 / 예약을 멈춤(잠금) / 잠금을 풂 (0050) */
   | 'app_webhook_revoked'
   | 'app_schedule_paused'
-  | 'app_schedule_unlocked';
+  | 'app_schedule_unlocked'
+  | 'app_webhooks_org_disabled'
+  | 'app_webhooks_org_enabled';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(

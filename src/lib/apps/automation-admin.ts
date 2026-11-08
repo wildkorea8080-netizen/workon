@@ -2,6 +2,7 @@ import type { ActorScope } from '@/lib/agent-permissions';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSecurityEvent } from '@/lib/filter';
 import { readScheduleHealth } from '@/lib/apps/schedule-health';
+import { readWebhookSwitch, webhookSwitchView } from '@/lib/apps/webhook-switch';
 import {
   ADMIN_AUTOMATION_LIMIT, ADMIN_UNLOCKED_REASON, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
   type AdminAutomationList, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
@@ -33,6 +34,7 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
   const runnerPromise = readScheduleHealth(nowMs, { organizationId: actor.organizationId, departmentIds: actor.managedDepartmentIds })
     .then((h) => ({ alive: h.runnerAlive, lastRunAt: h.runnerLastRunAt, overdueCount: h.overdueCount, stuckClaimCount: h.stuckClaimCount, problems: h.problems }))
     .catch(() => null);
+  const switchPromise = readWebhookSwitch(actor.organizationId).then((s) => webhookSwitchView(s, actor)).catch(() => null);
   const [webhooks, schedules, departments] = await Promise.all([
     supabaseAdmin.from('app_webhooks').select(WEBHOOK_SELECT).eq('organization_id', actor.organizationId)
       .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_AUTOMATION_LIMIT + 1),
@@ -51,6 +53,7 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
       schedules: scheduleRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminScheduleView(r, deptName.get(r.department_id) ?? null, nowMs)),
       truncated: hookRows.length > ADMIN_AUTOMATION_LIMIT || scheduleRows.length > ADMIN_AUTOMATION_LIMIT,
       runner: await runnerPromise,
+      webhookSwitch: await switchPromise,
     },
   };
 }

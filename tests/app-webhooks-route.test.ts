@@ -43,6 +43,7 @@ import { GET, POST } from '@/app/api/apps/webhooks/route';
 import { DELETE } from '@/app/api/apps/webhooks/[id]/route';
 import { POST as CALL } from '@/app/api/apps/webhook/route';
 import { hashWebhookToken } from '@/lib/apps/webhooks';
+import { WEBHOOK_ORG_DISABLED_CREATE } from '@/lib/apps/webhook-spec';
 
 beforeEach(() => {
   state.session = 'user'; state.actor = true; state.results = {}; state.calls = []; state.handled = []; state.handlerThrows = false;
@@ -106,6 +107,29 @@ describe('GET·POST /api/apps/webhooks', () => {
     state.results.agents = [{ data: agentRow() }]; state.results.app_webhooks = [{ count: 5 }];
     expect(await json(await post(valid))).toMatchObject({ status: 400, body: { error: { message: expect.stringContaining('5개까지') } } });
     expect(state.calls.filter(c => c[0] === 'app_webhooks' && c[1] === 'insert')).toHaveLength(0);
+  });
+});
+
+describe('기관 전체 스위치(0068) — 직원 화면', () => {
+  it('꺼 두었으면 새 연동을 만들지 않고(403), 기관을 읽지 못하면 503 — 토큰을 만들지 않는다', async () => {
+    state.results.agents = [{ data: agentRow() }];
+    state.results.organizations = [{ data: { app_webhooks_disabled_at: '2026-11-08T00:00:00Z', app_webhooks_disabled_reason: '보안 점검' } }];
+    expect(await json(await post(valid))).toMatchObject({ status: 403, body: { error: { message: WEBHOOK_ORG_DISABLED_CREATE } } });
+    state.results.agents = [{ data: agentRow() }];
+    state.results.organizations = [{ error: { message: 'column does not exist' } }];
+    expect((await post(valid)).status).toBe(503);
+    expect(state.calls).toContainEqual(['organizations', 'eq', 'id', 'org']);
+    expect(state.calls.filter(c => c[0] === 'app_webhooks' && c[1] === 'insert')).toHaveLength(0);
+  });
+  it('목록은 쓰는 중인 연동에만 기관이 꺼 두었다고 표시하고, 기관을 읽지 못해도 목록은 보인다', async () => {
+    state.results.app_webhooks = [{ data: [{ ...hookRow(), agent: { name: '민원 앱' } }, { ...hookRow({ id: 'x', status: 'revoked', revoked_at: '2026-11-04T00:00:00Z' }), agent: null }] }];
+    state.results.organizations = [{ data: { app_webhooks_disabled_at: '2026-11-08T00:00:00Z', app_webhooks_disabled_reason: '보안 점검' } }];
+    const { body } = await json(await GET());
+    expect(body.data.map((w: { blockedByOrg: boolean }) => w.blockedByOrg)).toEqual([true, false]);
+    state.results.app_webhooks = [{ data: [{ ...hookRow(), agent: { name: '민원 앱' } }] }];
+    state.results.organizations = [{ error: { message: 'down' } }];
+    const again = await json(await GET());
+    expect(again.status).toBe(200); expect(again.body.data[0].blockedByOrg).toBe(false);
   });
 });
 

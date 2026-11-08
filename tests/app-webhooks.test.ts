@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_TITLE_PREFIX,
+  WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_ORG_DISABLED, WEBHOOK_TITLE_PREFIX,
   bearerWebhookToken, canonicalInputs, parseIdempotencyKey, parseWebhookCreate, webhookCurlExample, webhookView,
 } from '@/lib/apps/webhook-spec';
 import {
@@ -16,6 +16,7 @@ const claimed = { id: 'w1', agent_id: 'a1', user_id: 'u1', department_id: 'd1', 
 
 function deps(outcome: RunAsOutcome | Error = { kind: 'completed', conversationId: 'c1' }, claim: ClaimResult = { ok: true, webhook: claimed }) {
   return {
+    orgDisabled: vi.fn<WebhookDeps['orgDisabled']>(async () => false),
     claim: vi.fn<WebhookDeps['claim']>(async () => claim),
     execute: vi.fn<WebhookDeps['execute']>(async () => { if (outcome instanceof Error) throw outcome; return outcome; }),
     finish: vi.fn<WebhookDeps['finish']>(async () => {}), recordCall: vi.fn<WebhookDeps['recordCall']>(async () => {}), log: vi.fn<WebhookDeps['log']>(async () => {}), now: vi.fn<WebhookDeps['now']>(() => Date.parse('2026-11-03T00:00:00Z')),
@@ -113,6 +114,26 @@ describe('handleWebhookCall — 상태 가르기', () => {
     const d = deps(); d.finish.mockRejectedValueOnce(new Error('저장 실패'));
     expect((await call(d)).status).toBe(200);
     expect(d.log.mock.calls.map(c => c[1])).toContain('앱 연동 실행 결과를 저장하지 못함');
+  });
+});
+
+describe('기관 전체 스위치(0068)', () => {
+  it('기관이 외부 연동을 꺼 두었으면 차지 전에 403 — 간격·하루 상한·사용 횟수를 쓰지 않고 실행하지 않는다', async () => {
+    const d = deps();
+    d.orgDisabled.mockResolvedValue(true);
+    const res = await call(d);
+    expect(res).toMatchObject({ status: 403, body: { ok: false, error: { message: WEBHOOK_ORG_DISABLED } } });
+    expect(d.orgDisabled).toHaveBeenCalledWith(token.hash, Date.parse('2026-11-03T00:00:00Z'));
+    expect(d.claim).not.toHaveBeenCalled(); expect(d.execute).not.toHaveBeenCalled(); expect(d.finish).not.toHaveBeenCalled();
+  });
+  it('토큰 꼴·본문이 틀리면 기관을 보기 전에 거절하고, 기관을 읽지 못하면 던진다(라우트가 500 — 닫힘)', async () => {
+    const d = deps();
+    expect((await call(d, {}, 'Bearer nope')).status).toBe(401);
+    expect((await call(d, 'not json')).status).toBe(400);
+    expect(d.orgDisabled).not.toHaveBeenCalled();
+    d.orgDisabled.mockRejectedValue(new Error('db'));
+    await expect(call(d)).rejects.toThrow('db');
+    expect(d.claim).not.toHaveBeenCalled();
   });
 });
 
