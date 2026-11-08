@@ -10,6 +10,7 @@ import type { Document, Agent } from '@/lib/db';
 import { uploadReferenceDocument, startReading, type DocumentUploadStage } from '@/lib/document-upload-client';
 import { isInForce, kstToday } from '@/lib/edition-dates';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
+import DocumentReferencesModal from '@/components/admin/DocumentReferencesModal';
 import { applyVocabulary, filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
 import TagVocabularyPanel, { type VocabularyState } from '@/components/admin/TagVocabularyPanel';
 import TagBatchDraft from '@/components/admin/TagBatchDraft';
@@ -98,6 +99,8 @@ export default function DocumentsManager() {
   const [assigning, setAssigning] = useState(false);
   // 두 판 비교(신구 대비) — 새 판 id
   const [compareId, setCompareId] = useState<string | null>(null);
+  // 참조 문서(2026-11-08) — 이 문서가 인용한 규정·지침이 문서함에 있는지
+  const [referencesId, setReferencesId] = useState<string | null>(null);
   // 목록 찾기·거르기와 태그 고치기(0060)
   const [filter, setFilter] = useState<DocumentFilter>({});
   const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean; suggesting?: boolean; note?: string | null } | null>(null);
@@ -746,6 +749,15 @@ export default function DocumentsManager() {
                       옛 판과 비교
                     </button>
                   )}
+                  {doc.noda_status !== 'deleting' && (
+                    <button
+                      onClick={() => setReferencesId(doc.id)}
+                      className="px-2.5 py-1.5 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+                      title="이 문서가 「」로 인용한 규정·지침이 문서함에 있는지, 지금 판인지 봅니다"
+                    >
+                      참조 문서
+                    </button>
+                  )}
                   <button
                     onClick={() => setTagEdit({ id: doc.id, text: (doc.tags ?? []).join(', '), error: null, saving: false })}
                     className="px-2.5 py-1.5 text-xs font-medium bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
@@ -790,6 +802,7 @@ export default function DocumentsManager() {
       </div>
 
       {compareId && <EditionCompareModal endpoint={compareEndpoint('documents', compareId)} onClose={() => setCompareId(null)} />}
+      {referencesId && <DocumentReferencesModal documentId={referencesId} onClose={() => setReferencesId(null)} />}
 
       {/* 비서 추가 모달 */}
       {assignModal && (
