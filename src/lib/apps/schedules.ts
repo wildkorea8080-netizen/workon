@@ -12,6 +12,9 @@
 //   문서함에서 고른 문서(0062)는 id로 저장하고 실행 때마다 다시 읽으며,
 //   새 판이 근거가 되면 새 판을 쓴다(`currentEditionIds`). 쓸 판이 없으면 예약을 멈춘다. 실행기는 `/api/cron/app-schedules`(CRON_SECRET)이고 pg_cron이 5분마다 부른다.
 //   Vercel Hobby 예약 작업은 하루 한 번·2개까지라 쓰지 않는다 — docs/benchmarks/allganize/APP_SCHEDULES.md.
+// - **자동 이어 실행**(0074): 입력만 쓰는 예약(올린 파일·고른 문서 없음)이 처리 시간 예산 등으로 멈춰도 끝난 단계가 남았으면, 실패로 세지 않고
+//   다음 실행기 차례(약 5분 뒤)에 손 '이어 실행'과 같은 길로 이어 간다 — 한 차례에 SCHEDULE_MAX_RESUMES번까지. 이어 실행이 거절되면(대화를 지움·앱 바뀜)
+//   실패로 세고 곧 처음부터 다시 한다(앱이 바뀌었으면 그때 멈춤).
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
@@ -23,6 +26,7 @@ import { agentDocumentRows } from './app-document-choice';
 import { readScheduleSwitch } from './webhook-switch';
 import { saveScheduledResultFile } from './schedule-result-file';
 import { attachScheduleFiles, discardAttachments, scheduleFilesOf, type ScheduleFileIo } from './schedule-files';
+import { hasResumableProgress } from './resume';
 
 export const SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
 export { SCHEDULE_CLAIM_STALE_MS } from './schedule-spec';
@@ -41,18 +45,27 @@ export const PAUSED_USER_UNAVAILABLE = '예약한 직원의 계정을 쓸 수 �
 export const PAUSED_DEPARTMENT_CHANGED = `소속 부서가 바뀌어 예약을 멈췄습니다. 앱 예약 목록에서 '고치기'로 저장하면 지금 부서로 다시 켜집니다.`;
 export const PAUSED_DOCUMENTS_UNAVAILABLE = `고른 문서를 더 쓸 수 없어(지움·읽기 실패·지난 판) 예약을 멈췄습니다. 앱 예약 목록에서 '고치기'로 문서를 다시 골라 저장해 주세요.`;
 export const SCHEDULE_TITLE_PREFIX = '[예약] ';
+/** 한 차례에서 멈춘 실행을 이어 가는 횟수(0074) — 넘으면 평소 실패로 센다 */
+export const SCHEDULE_MAX_RESUMES = 2;
+export const RESUMING_NOTE = '처리 시간이 길어 멈춘 실행을 몇 분 뒤 이어서 합니다(끝난 단계는 다시 하지 않습니다).';
+export const RESUME_REJECTED = (reason: string) => `멈춘 실행을 이어 가지 못해 곧 처음부터 다시 합니다(${reason.slice(0, 120)})`;
 
 export type AppScheduleRow = AppScheduleRowLike & {
   user_id: string; department_id: string; organization_id: string; claimed_at: string | null; updated_at: string;
+  /** 이어 갈 멈춘 답변(0074) — 칸이 없는 옛 행·시험 행은 평소 실행 */
+  resume_message_id?: string | null;
+  resume_count?: number | null;
 };
 
 export type ScheduleOutcome =
   | { kind: 'completed'; conversationId: string | null; /** 새 판으로 따라간 문서 — 다음 실행부터 이 id로 */ documentIds?: string[] }
-  | { kind: 'failed'; error: string; conversationId?: string | null }
-  | { kind: 'pause'; reason: string };
+  | { kind: 'failed'; error: string; conversationId?: string | null; /** 이어 실행이 거절됨 — 다음 정해진 시각이 아니라 곧(다음 실행기 차례) 처음부터 */ restartSoon?: boolean }
+  | { kind: 'pause'; reason: string }
+  /** 멈췄지만 끝난 단계가 남아 다음 실행기 차례에 이어 간다(0074) — 실패로 세지 않는다 */
+  | { kind: 'resume'; messageId: string; conversationId: string | null; error: string };
 
 export type SchedulePatch = Partial<Pick<AppScheduleRow,
-  'status' | 'paused_reason' | 'next_run_at' | 'claimed_at' | 'last_run_at' | 'last_status' | 'last_error' | 'last_conversation_id' | 'consecutive_failures' | 'run_count' | 'updated_at' | 'document_ids'>>;
+  'status' | 'paused_reason' | 'next_run_at' | 'claimed_at' | 'last_run_at' | 'last_status' | 'last_error' | 'last_conversation_id' | 'consecutive_failures' | 'run_count' | 'updated_at' | 'document_ids' | 'resume_message_id' | 'resume_count'>>;
 
 export interface ScheduleDeps {
   /** 지금 실행할 차례인 활성 예약(차지되지 않았거나 멈춘 차지) — 다음 실행 시각 순 */
@@ -86,6 +99,8 @@ export interface ScheduleRun {
   held: number;
   /** 시간 예산에 닿아 남은 예약을 다음 호출에 넘겼다 */
   partial: boolean;
+  /** 멈춘 실행을 다음 차례에 이어 가도록 넘김(0074) — 실패로 세지 않는다 */
+  continued: number;
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message.slice(0, 300) : '알 수 없는 오류');
@@ -96,7 +111,16 @@ export function finishPatch(row: AppScheduleRow, outcome: ScheduleOutcome, nowMs
   const base: SchedulePatch = {
     claimed_at: null, last_run_at: now, updated_at: now, run_count: row.run_count + 1,
     next_run_at: nextRunAt(specOfRow(row), nowMs).toISOString(),
+    // 이어 가던 차례가 끝났으면(완료·실패·멈춤) 이어 실행 칸을 비운다 — 비어 있으면 쓰지 않는다
+    ...(row.resume_message_id || row.resume_count ? { resume_message_id: null, resume_count: 0 } : {}),
   };
+  if (outcome.kind === 'resume') {
+    // 다음 실행기 차례(지금 이후 첫 호출)에 이어 간다 — 실패 수는 그대로, 다음 정해진 시각은 이어 간 실행이 끝난 뒤 다시 센다
+    return {
+      ...base, next_run_at: now, last_status: 'failed', last_error: RESUMING_NOTE, last_conversation_id: outcome.conversationId,
+      resume_message_id: outcome.messageId, resume_count: (row.resume_count ?? 0) + 1,
+    };
+  }
   if (outcome.kind === 'completed') {
     return { ...base, last_status: 'completed', last_error: null, last_conversation_id: outcome.conversationId ?? null, consecutive_failures: 0, ...(outcome.documentIds ? { document_ids: outcome.documentIds } : {}) };
   }
@@ -105,7 +129,8 @@ export function finishPatch(row: AppScheduleRow, outcome: ScheduleOutcome, nowMs
   }
   const failures = row.consecutive_failures + 1;
   return {
-    ...base, last_status: 'failed', last_error: outcome.error.slice(0, 300), last_conversation_id: outcome.conversationId ?? null, consecutive_failures: failures,
+    ...base, ...(outcome.restartSoon ? { next_run_at: now } : {}),
+    last_status: 'failed', last_error: outcome.error.slice(0, 300), last_conversation_id: outcome.conversationId ?? null, consecutive_failures: failures,
     ...(failures >= SCHEDULE_MAX_CONSECUTIVE_FAILURES ? { status: 'paused' as const, paused_reason: PAUSED_AFTER_FAILURES } : {}),
   };
 }
@@ -113,13 +138,14 @@ export function finishPatch(row: AppScheduleRow, outcome: ScheduleOutcome, nowMs
 /** 기관이 예약 실행을 꺼 둔 차례 — 실행하지 않고 다음 차례로만 넘긴다(실행 횟수·결과·실패 수는 그대로) */
 export function heldPatch(row: AppScheduleRow, nowMs: number): SchedulePatch {
   const now = new Date(nowMs).toISOString();
-  return { claimed_at: null, updated_at: now, next_run_at: nextRunAt(specOfRow(row), nowMs).toISOString() };
+  // 멈춘 실행을 이어 가던 중이었으면 그만둔다 — 다음 정해진 시각에는 처음부터
+  return { claimed_at: null, updated_at: now, next_run_at: nextRunAt(specOfRow(row), nowMs).toISOString(), ...(row.resume_message_id ? { resume_message_id: null, resume_count: 0 } : {}) };
 }
 
 /** 차례가 된 예약을 차지해 하나씩 실행한다. 한 예약의 실패가 다른 예약을 막지 않는다 */
 export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> {
   const started = deps.now();
-  const result: ScheduleRun = { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, held: 0, partial: false };
+  const result: ScheduleRun = { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, held: 0, partial: false, continued: 0 };
   const rows = await deps.due(started, SCHEDULE_BATCH);
   // 기관 스위치(0070)는 한 번 불릴 때 기관마다 한 번만 읽는다
   const switches = new Map<string, Promise<boolean>>();
@@ -174,6 +200,12 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
       }
       continue;
     }
+    if (outcome.kind === 'resume') {
+      // 실패 메일을 보내지 않는다 — 이어 간 실행이 끝나면 완료·실패가 평소대로 알린다
+      result.continued++;
+      await deps.log('info', '앱 예약 실행을 다음 차례에 이어 감', { schedule_id: row.id, agent_id: row.agent_id, reason: outcome.error.slice(0, 200), resume_count: patch.resume_count }, row.organization_id);
+      continue;
+    }
     const paused = patch.status === 'paused';
     if (paused) result.paused++; else result.failed++;
     const error = outcome.kind === 'pause' ? outcome.reason : outcome.error;
@@ -185,7 +217,27 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
 }
 
 /** 예약 실행의 바깥 입출력 — 공용 `runAppAs`와 같고, 고른 문서가 있으면 그 비서의 문서 행을 읽는다(시험이 바꿔 끼운다) */
-export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>; files?: ScheduleFileIo };
+export type ExecuteIo = RunAsIo & {
+  documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>;
+  files?: ScheduleFileIo;
+  /** 멈춘 실행의 마지막 답변이 이어 갈 수 있는 기록이면 그 id(0074) — 없으면 자동 이어 실행을 하지 않는다 */
+  resumableMessage?(conversationId: string, userId: string): Promise<string | null>;
+};
+
+/** 대화의 마지막 답변(그 직원의 대화)이 이어 갈 진행을 남겼으면 그 id */
+export async function findResumableMessage(conversationId: string, userId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from('messages').select('id, source_references, conversation:conversations!inner(user_id)')
+    .eq('conversation_id', conversationId).eq('role', 'assistant').eq('conversation.user_id', userId)
+    .order('created_at', { ascending: false }).limit(1);
+  if (error) throw new Error(`messages: ${error.message}`);
+  const last = (data ?? [])[0] as { id: string; source_references: unknown } | undefined;
+  return last && hasResumableProgress(last.source_references) ? last.id : null;
+}
+
+/** 이 예약을 자동으로 이어 갈 수 있나 — 입력만 쓰는 예약만(올린 파일·고른 문서가 있으면 대화 실행기가 이어 실행을 받지 않는다) */
+export function canAutoResume(row: AppScheduleRow): boolean {
+  return !row.document_ids?.length && !scheduleFilesOf(row.files).length && (row.resume_count ?? 0) < SCHEDULE_MAX_RESUMES;
+}
 
 
 /**
@@ -193,6 +245,20 @@ export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId
  * 그 밖(한도 429·검사 400·모델 오류)은 '실패'. 스트림의 `error` 이벤트가 하나라도 오면 실패다 — 저장은 실행기가 이미 했다
  */
 export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defaultRunAsIo(), deadlineAt?: number): Promise<ScheduleOutcome> {
+  // 멈춘 실행 이어 가기(0074) — 입력만 쓰는 예약이라 문서·파일을 붙이지 않는다
+  if (row.resume_message_id) {
+    const resumed = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, resumeMessageId: row.resume_message_id, ...(deadlineAt !== undefined ? { deadlineAt } : {}) }, SCHEDULE_TITLE_PREFIX, io);
+    switch (resumed.kind) {
+      case 'completed': return { kind: 'completed', conversationId: resumed.conversationId };
+      case 'user_unavailable': return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
+      case 'department_changed': return { kind: 'pause', reason: PAUSED_DEPARTMENT_CHANGED };
+      // 403·404(앱을 쓸 수 없음)는 처음부터 해도 같다. 그 밖(기록이 지워짐·입력·판이 다름 409·한도)은 곧 처음부터 — 앱이 바뀌었으면 그때 멈춘다
+      case 'rejected':
+        if (resumed.status === 403 || resumed.status === 404 && !/중단 기록/.test(resumed.message)) return { kind: 'pause', reason: PAUSED_APP_UNAVAILABLE };
+        return { kind: 'failed', error: RESUME_REJECTED(resumed.message), restartSoon: true };
+      case 'failed': return await resumeOrFail(row, io, resumed.error, resumed.conversationId);
+    }
+  }
   // 고른 문서(0062) — 지금 근거로 쓸 판으로 맞춘다. 문서 행을 못 읽으면 던져 '실패'(다음 차례에 다시)
   let documentIds: string[] | undefined;
   let followed = false;
@@ -222,8 +288,19 @@ export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defau
       if (outcome.status === 409) return { kind: 'pause', reason: PAUSED_APP_CHANGED };
       if (outcome.status === 403 || outcome.status === 404) return { kind: 'pause', reason: PAUSED_APP_UNAVAILABLE };
       return { kind: 'failed', error: outcome.message };
-    case 'failed': return { kind: 'failed', error: outcome.error, conversationId: outcome.conversationId };
+    case 'failed': return await resumeOrFail(row, io, outcome.error, outcome.conversationId);
   }
+}
+
+/** 시작했지만 멈춘 실행 — 이어 갈 진행이 남았고 이 예약이 이어 갈 수 있으면 '이어 감', 아니면 평소 실패 */
+async function resumeOrFail(row: AppScheduleRow, io: ExecuteIo, error: string, conversationId: string | null): Promise<ScheduleOutcome> {
+  if (conversationId && io.resumableMessage && canAutoResume(row)) {
+    try {
+      const messageId = await io.resumableMessage(conversationId, row.user_id);
+      if (messageId) return { kind: 'resume', messageId, conversationId, error };
+    } catch { /* 기록을 못 읽으면 평소 실패로 센다 */ }
+  }
+  return { kind: 'failed', error, conversationId };
 }
 
 export function scheduleDeps(): ScheduleDeps {
@@ -245,7 +322,7 @@ export function scheduleDeps(): ScheduleDeps {
       if (error) throw new Error(`app_schedules claim: ${error.message}`);
       return (data ?? []).length === 1;
     },
-    execute: (row, deadlineAt) => executeSchedule(row, undefined, deadlineAt),
+    execute: (row, deadlineAt) => executeSchedule(row, { ...defaultRunAsIo(), resumableMessage: findResumableMessage }, deadlineAt),
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_schedules').update(patch).eq('id', id);
       if (error) throw new Error(`app_schedules finish: ${error.message}`);

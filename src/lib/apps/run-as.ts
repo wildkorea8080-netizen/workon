@@ -10,6 +10,8 @@ import type { PrepareOutcome, PreparedTurn, SendEvent } from '@/lib/assistant/ty
 
 export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string>; /** 문서함에서 고른 문서(예약 0062) */ documentIds?: string[];
   /** 이번 실행에 붙일 첨부(예약의 올린 파일을 새로 올린 것, 0073) */ attachmentIds?: string[];
+  /** 멈춘 실행을 이어 간다(0074) — 손 '이어 실행'과 같은 `resume_message_id`. 대화 실행기가 그 직원의 기록인지·같은 입력·같은 판인지 다시 본다 */
+  resumeMessageId?: string;
   /** 새 모델 호출을 시작하지 않을 마감 시각(ms) — 예약 실행기가 그 호출 전체의 마감을 넘긴다(streamTurn `deadlineAt`) */
   deadlineAt?: number };
 export type RunAsUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
@@ -43,7 +45,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
     user: { id: user.id, email: user.email ?? undefined, role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: user.department_id },
     expires: new Date(Date.now() + 5 * 60_000).toISOString(),
   } as Session;
-  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}), ...(input.attachmentIds?.length ? { attachment_ids: input.attachmentIds } : {}) });
+  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}), ...(input.attachmentIds?.length ? { attachment_ids: input.attachmentIds } : {}), ...(input.resumeMessageId ? { resume_message_id: input.resumeMessageId } : {}) });
   if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message };
   let conversationId: string | null = null; let error: string | null = null; let done = false;
   try {

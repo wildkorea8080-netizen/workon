@@ -65,6 +65,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     app_version: appVersion, inputs, document_ids: documentIds, files: [...kept, ...copied.files], ...specColumns(spec), notify_on_success: notifyOnSuccess, export_hwpx: exportHwpx, ...editedStatus(current),
     department_id: actor.departmentId, organization_id: actor.organizationId,
     claimed_at: null, next_run_at: nextRunAt(spec, now).toISOString(), updated_at: nowIso,
+    // 입력을 고쳤으니 멈춘 실행을 이어 가지 않는다(0074)
+    resume_message_id: null, resume_count: 0,
   }).eq('id', params.id).eq('user_id', session.user.id).is('admin_paused_at', null).or(`claimed_at.is.null,claimed_at.lt.${stale}`)
     .select(SCHEDULE_COLUMNS).maybeSingle();
   if (updateError || !updated) await removeScheduleFileObjects(copied.files, '예약 고치기 실패 뒤 정리');
@@ -92,7 +94,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const now = Date.now();
   const patch = action === 'pause'
     ? { status: 'paused', paused_reason: PAUSED_BY_USER, updated_at: new Date(now).toISOString() }
-    : { status: 'active', paused_reason: null, consecutive_failures: 0, claimed_at: null, next_run_at: nextRunAt(specOfRow(row as AppScheduleRowLike), now).toISOString(), updated_at: new Date(now).toISOString() };
+    : { status: 'active', paused_reason: null, consecutive_failures: 0, claimed_at: null, next_run_at: nextRunAt(specOfRow(row as AppScheduleRowLike), now).toISOString(), updated_at: new Date(now).toISOString(), resume_message_id: null, resume_count: 0 };
   const { data: updated, error: updateError } = await supabaseAdmin.from('app_schedules').update(patch)
     .eq('id', params.id).eq('user_id', session.user.id).is('admin_paused_at', null).select(SCHEDULE_COLUMNS).maybeSingle();
   if (updateError) return fail('예약을 바꾸지 못했습니다.', 503);

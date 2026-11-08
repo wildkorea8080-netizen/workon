@@ -107,7 +107,7 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
     const rows = [row({ id: 's1' }), row({ id: 's2', consecutive_failures: 2 }), row({ id: 's3' })];
     const { deps } = fakeDeps(rows, { s1: { kind: 'completed', conversationId: 'c1' }, s2: { kind: 'failed', error: '모델 오류' }, s3: { kind: 'pause', reason: PAUSED_APP_CHANGED } });
     const result = await runDueSchedules(deps);
-    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 2, skipped: 0, held: 0, partial: false });
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 2, skipped: 0, held: 0, partial: false, continued: 0 });
     expect(deps.due).toHaveBeenCalledWith(expect.any(Number), SCHEDULE_BATCH);
     expect(deps.finish).toHaveBeenCalledTimes(3);
     expect(deps.finish.mock.calls[0]).toEqual(['s1', expect.objectContaining({ last_status: 'completed', last_conversation_id: 'c1' })]);
@@ -126,7 +126,7 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
       notifyFailure: vi.fn(async () => { throw new Error('메일 실패'); }),
     });
     const result = await runDueSchedules(deps);
-    expect(result).toEqual({ checked: 3, completed: 1, failed: 1, paused: 0, skipped: 1, held: 0, partial: false });
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 1, paused: 0, skipped: 1, held: 0, partial: false, continued: 0 });
     expect(deps.execute).toHaveBeenCalledTimes(2);
     expect(deps.finish.mock.calls[0]).toEqual(['s2', expect.objectContaining({ last_status: 'failed', last_error: 'DB 끊김', consecutive_failures: 1 })]);
     const messages = deps.log.mock.calls.map(c => c[1]);
@@ -152,7 +152,7 @@ describe('기관 전체 예약 스위치(0070) — 꺼 둔 기관의 차례는 �
     const rows = [row({ id: 's1', organization_id: 'off' }), row({ id: 's2', organization_id: 'on' }), row({ id: 's3', organization_id: 'off', consecutive_failures: 2 })];
     const { deps } = fakeDeps(rows, { s2: { kind: 'completed', conversationId: 'c2' } }, { orgDisabled: vi.fn(async (org: string) => org === 'off') });
     const result = await runDueSchedules(deps);
-    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 0, skipped: 0, held: 2, partial: false });
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 0, skipped: 0, held: 2, partial: false, continued: 0 });
     expect(deps.execute).toHaveBeenCalledTimes(1);
     expect(deps.orgDisabled).toHaveBeenCalledTimes(2);
     expect(deps.claim).toHaveBeenCalledTimes(3);
