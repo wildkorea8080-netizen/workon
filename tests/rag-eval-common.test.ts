@@ -60,7 +60,7 @@ describe('searchLikeChat — 대화와 같은 찾기', () => {
   });
   it('평가 라우트가 이 찾기를 쓴다(예전 searchAgentDocuments는 공통 자료실을 몰랐다)', () => {
     const route = readFileSync('src/app/api/admin/rag-eval/route.ts', 'utf8');
-    expect(route).toContain('await searchLikeChat({ agentId: agent.id, organizationId: orgId, query: row.question })');
+    expect(route).toContain('prepare: (query) => prepareLikeChat({ agentId: agent.id, organizationId: orgId, query })'); // 2026-11-08 — 같은 찾기 + 대화 프롬프트 글
     expect(route).not.toContain('searchAgentDocuments');
     expect(route).toContain("summarizeRagEval(results, 'chat')");
   });

@@ -641,6 +641,18 @@ export async function searchLikeChat(
   input: { agentId: string; organizationId: string; query: string },
   deps: DocSearchDeps = defaultDeps
 ): Promise<RetrievedChunk[] | null> {
+  const out = await prepareLikeChat(input, deps);
+  return out ? out.chunks : null;
+}
+
+/**
+ * `searchLikeChat`과 같은 찾기에 **대화 시스템 프롬프트에 붙을 글**(참고 자료·인용 규칙, 근거 없음 안내)까지 — 문서 찾기 평가의
+ * '답변까지 평가'(2026-11-08)가 대화와 같은 프롬프트로 답을 만들 때 쓴다. 찾기 실패(대화라면 503)면 null
+ */
+export async function prepareLikeChat(
+  input: { agentId: string; organizationId: string; query: string },
+  deps: DocSearchDeps = defaultDeps
+): Promise<{ chunks: RetrievedChunk[]; systemAddendum?: string } | null> {
   const cap = createDocSearch(deps);
   const pre = await cap.preflight!({ organizationId: input.organizationId, agentId: input.agentId, message: input.query, skipDocuments: false });
   if (!pre.ok) return null;
@@ -659,7 +671,7 @@ export async function searchLikeChat(
     skipDocuments: false,
   } as TurnContext;
   const out = await cap.prepare!(ctx);
-  return out.chunks ?? [];
+  return { chunks: out.chunks ?? [], ...(out.systemAddendum ? { systemAddendum: out.systemAddendum } : {}) };
 }
 
 /** 이어지는 질문으로 볼 만큼 짧은 질문(공백 뺀 글자 수) — 긴 질문은 혼자서 뜻이 선다 */

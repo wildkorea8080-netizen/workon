@@ -59,6 +59,7 @@ export default function StatsDashboard() {
       work_generate: '업무 파일 만들기(AI)',
       work_revise: '업무 문서 AI 수정',
       prompt_enhance: '프롬프트 다듬기',
+      rag_eval_answer: '문서 찾기 평가 답변(AI)',
     };
     return labels[action] || action;
   };

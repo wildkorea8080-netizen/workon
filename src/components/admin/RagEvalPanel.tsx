@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import type { Agent } from '@/lib/db';
 import {
-  RAG_EVAL_MAX_QUESTIONS, RAG_EVAL_VERDICT_LABELS, compareRagEvalRuns, parseRagEvalSet, ragEvalCsv, ragEvalSetText, scopeChangeNote,
+  RAG_EVAL_MAX_QUESTIONS, RAG_EVAL_VERDICT_LABELS, answerNote, compareRagEvalRuns, parseRagEvalSet, ragEvalCsv, ragEvalSetText, scopeChangeNote,
   type RagEvalResult, type RagEvalSummary,
 } from '@/lib/rag-eval';
+import { RAG_EVAL_ANSWER_MAX_QUESTIONS, compareAnswers } from '@/lib/rag-eval-answer';
 
 type RunRow = { id: string; agent_id: string; agent_version: number; created_at: string; question_count: number; status: 'done' | 'partial'; summary: RagEvalSummary; results?: RagEvalResult[] };
 
@@ -34,12 +35,21 @@ export function summaryLine(s: RagEvalSummary): string {
   if (s.errors) parts.push(`찾기 실패 ${s.errors}`);
   if (s.commonEvidenceQuestions) parts.push(`공통 자료 근거 ${s.commonEvidenceQuestions}개 질문`);
   if (!s.searchScope) parts.push('비서 문서만 찾음');
+  const a = s.answers;
+  if (a) {
+    parts.push(`답변 맞음 ${a.passed}/${a.evaluated} (${pct(a.passRate)})`);
+    if (a.expected) parts.push(`기대 문서 인용 ${a.grounded}/${a.expected}`);
+    if (a.keywordRows) parts.push(`핵심어 ${a.keywordPasses}/${a.keywordRows}`);
+    if (a.numberIssues) parts.push(`확인 안 된 숫자가 있는 답 ${a.numberIssues}`);
+    if (a.errors) parts.push(`답 못 만듦 ${a.errors}`);
+    parts.push(`AI 사용 ${a.costKrw.toLocaleString('ko-KR')}원`);
+  }
   return parts.join(' · ');
 }
 
 /**
  * 배치 문서 찾기 평가(0054) — 관리자 문서 화면. 질문·기대 문서·기대 쪽 세트를 붙여 넣으면 대화와 같은 규칙으로 찾아 판정하고,
- * 실행을 남겨 지난번과 비교한다. 검색만 잰다(AI 답변 없음).
+ * 실행을 남겨 지난번과 비교한다. 기본은 검색만 잰다 — 'AI 답변까지 평가'(2026-11-08)를 고르면 답도 한 번 만들어 프로그램이 판정한다.
  */
 export default function RagEvalPanel() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -54,7 +64,9 @@ export default function RagEvalPanel() {
   const [setId, setSetId] = useState('');
   const [setName, setSetName] = useState('');
   const [setNotice, setSetNotice] = useState<string | null>(null);
-  const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number; note: string | null } | null>(null);
+  const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number; note: string | null; answerImproved: RagEvalResult[]; answerRegressed: RagEvalResult[] } | null>(null);
+  // 답변까지 평가(2026-11-08) — 질문마다 대화와 같은 프롬프트로 답을 한 번 만든다(모델 사용량)
+  const [withAnswers, setWithAnswers] = useState(false);
 
   useEffect(() => {
     void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { if (r.ok) setSets(r.data); });
@@ -71,11 +83,12 @@ export default function RagEvalPanel() {
   }, [agentId]);
 
   const preview = set.trim() ? parseRagEvalSet(set) : null;
+  const tooManyForAnswers = withAnswers && Boolean(preview?.ok && preview.rows.length > RAG_EVAL_ANSWER_MAX_QUESTIONS);
 
   async function evaluate() {
-    if (!agentId || running || !preview?.ok) return;
+    if (!agentId || running || !preview?.ok || tooManyForAnswers) return;
     setRunning(true); setError(null); setCompare(null);
-    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set }) });
+    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set, ...(withAnswers ? { answers: true } : {}) }) });
     if (r.ok) { setRun(r.data); setHistory((h) => [{ ...r.data, results: undefined }, ...h].slice(0, 20)); }
     else setError(r.message);
     setRunning(false);
@@ -112,7 +125,8 @@ export default function RagEvalPanel() {
     if (!run?.results) return;
     const r = await call<RunRow>(`/api/admin/rag-eval?id=${encodeURIComponent(base.id)}`);
     if (!r.ok || !r.data.results) { setError(r.ok ? '비교할 기록을 불러오지 못했습니다.' : r.message); return; }
-    setCompare({ base: r.data, ...compareRagEvalRuns(r.data.results, run.results), note: scopeChangeNote(r.data.summary, run.summary) });
+    const answersCompared = compareAnswers(r.data.results, run.results);
+    setCompare({ base: r.data, ...compareRagEvalRuns(r.data.results, run.results), note: scopeChangeNote(r.data.summary, run.summary), answerImproved: answersCompared.improved, answerRegressed: answersCompared.regressed });
   }
   /** 지난 평가의 질문·기대 문서·기대 쪽을 세트 칸에 다시 채운다(문서를 바꾼 뒤 같은 세트로 다시 재기) */
   async function reuseSet(row: RunRow) {
@@ -136,8 +150,8 @@ export default function RagEvalPanel() {
       <div>
         <h2 className="text-lg font-semibold text-slate-900">문서 찾기 일괄 평가</h2>
         <p className="mt-1 text-sm leading-6 text-slate-600">
-          질문마다 기대하는 문서를 적어 두면, 대화와 같은 규칙(비서 문서 + 기관 유형의 공통 자료실)으로 찾아 맞았는지 한 번에 봅니다. 공통 자료는 상위 문서에 [공통]으로 보입니다. AI 답변은 만들지 않습니다(모델 사용량 없음).
-          한 줄에 <strong>질문 · 기대 문서 이름(일부만 적어도 됨) · 기대 쪽(선택)</strong>을 탭이나 쉼표로 적습니다. 엑셀에서 세 칸을 복사해 붙여도 됩니다.
+          질문마다 기대하는 문서를 적어 두면, 대화와 같은 규칙(비서 문서 + 기관 유형의 공통 자료실)으로 찾아 맞았는지 한 번에 봅니다. 공통 자료는 상위 문서에 [공통]으로 보입니다. 기본은 찾기만 잽니다(모델 사용량 없음).
+          한 줄에 <strong>질문 · 기대 문서 이름(일부만 적어도 됨) · 기대 쪽(선택) · 기대 답 핵심어(선택, ;로 나눔)</strong>를 탭이나 쉼표로 적습니다. 엑셀에서 칸을 복사해 붙여도 됩니다.
           기대 문서를 비운 줄은 <strong>근거가 없어야 맞는 질문</strong>(엉뚱한 질문)입니다. 한 번에 {RAG_EVAL_MAX_QUESTIONS}개까지 평가합니다.
         </p>
       </div>
@@ -159,7 +173,15 @@ export default function RagEvalPanel() {
       {preview && (preview.ok
         ? <p className="text-xs text-slate-600">질문 {preview.rows.length}개 — 기대 문서 있음 {preview.rows.filter((r) => r.expected).length} · 엉뚱한 질문 {preview.rows.filter((r) => !r.expected).length}</p>
         : <ul role="alert" className="list-disc pl-5 text-xs text-red-700">{preview.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
-      <button type="button" disabled={!agentId || running || !preview?.ok} onClick={() => void evaluate()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? '평가 중… (질문당 몇 초)' : '평가 실행'}</button>
+      <label className="flex items-start gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={withAnswers} onChange={(e) => setWithAnswers(e.target.checked)} className="mt-1" />
+        <span>
+          <strong>AI 답변까지 평가</strong> — 질문마다 대화와 같은 지시문·참고 자료로 답을 한 번 만들고, 기대 문서를 [번호]로 인용했는지·답의 숫자가 근거에 있는지·기대 답 핵심어가 모두 들었는지를 프로그램이 봅니다(엉뚱한 질문은 문서를 인용하지 않아야 맞음).
+          <span className="block text-xs text-slate-500">질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지 · 질문마다 AI를 한 번 불러 사용량(기관 한도)이 듭니다 · 공공 데이터 조회 같은 도구·첨부·앱 단계는 쓰지 않습니다 · 답이 맞는 말인지까지는 모릅니다 — 핵심어를 적어 두면 그만큼 더 봅니다.</span>
+        </span>
+      </label>
+      {tooManyForAnswers && <p role="alert" className="text-xs text-red-700">답변까지 평가할 때는 질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지입니다(지금 {preview?.ok ? preview.rows.length : 0}개).</p>}
+      <button type="button" disabled={!agentId || running || !preview?.ok || tooManyForAnswers} onClick={() => void evaluate()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? (withAnswers ? '평가 중… (질문당 십여 초)' : '평가 중… (질문당 몇 초)') : '평가 실행'}</button>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
       {run?.results && (
@@ -170,7 +192,7 @@ export default function RagEvalPanel() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-slate-500"><tr><th className="py-1 pr-2">질문</th><th className="pr-2">기대</th><th className="pr-2">판정</th><th className="pr-2">순위</th><th className="pr-2">쪽</th><th>상위 문서</th></tr></thead>
+              <thead className="text-slate-500"><tr><th className="py-1 pr-2">질문</th><th className="pr-2">기대</th><th className="pr-2">판정</th><th className="pr-2">순위</th><th className="pr-2">쪽</th><th className="pr-2">상위 문서</th>{run.results.some((r) => r.answer) && <th>답변</th>}</tr></thead>
               <tbody>{run.results.map((r) => (
                 <tr key={r.line} className="border-t border-slate-100 align-top">
                   <td className="py-1 pr-2">{r.question}</td>
@@ -178,7 +200,13 @@ export default function RagEvalPanel() {
                   <td className={`pr-2 font-semibold ${r.verdict === 'hit' || r.verdict === 'correct_empty' ? 'text-emerald-700' : 'text-red-700'}`}>{RAG_EVAL_VERDICT_LABELS[r.verdict]}</td>
                   <td className="pr-2">{r.rank ?? '—'}</td>
                   <td className="pr-2">{r.pageMatch === null ? '—' : r.pageMatch ? '맞음' : '다름'}</td>
-                  <td>{r.topDocuments.join(' · ') || '—'}{r.topSimilarity !== null ? ` (${(r.topSimilarity * 100).toFixed(0)}%)` : ''}</td>
+                  <td className="pr-2">{r.topDocuments.join(' · ') || '—'}{r.topSimilarity !== null ? ` (${(r.topSimilarity * 100).toFixed(0)}%)` : ''}</td>
+                  {run.results!.some((x) => x.answer) && <td className="min-w-[16rem]">{r.answer ? <>
+                    <p className={`font-semibold ${r.answer.passed ? 'text-emerald-700' : 'text-red-700'}`}>{answerNote(r.answer)}</p>
+                    {r.keywords?.length ? <p className="text-slate-500">핵심어: {r.keywords.join(', ')}</p> : null}
+                    {r.answer.cited.length > 0 && <p className="text-slate-500">인용: {r.answer.cited.join(' · ')}</p>}
+                    {r.answer.text && <details><summary className="cursor-pointer text-[#003087]">답 보기</summary><p className="mt-1 whitespace-pre-wrap text-slate-700">{r.answer.text}</p></details>}
+                  </> : '—'}</td>}
                 </tr>))}</tbody>
             </table>
           </div>
@@ -191,6 +219,9 @@ export default function RagEvalPanel() {
           {compare.note && <p className="text-amber-700">{compare.note}</p>}
           {compare.regressed.map((r) => <p key={`r${r.line}`} className="text-red-700">나빠짐: {r.question} → {RAG_EVAL_VERDICT_LABELS[r.verdict]}</p>)}
           {compare.improved.map((r) => <p key={`i${r.line}`} className="text-emerald-700">좋아짐: {r.question} → {RAG_EVAL_VERDICT_LABELS[r.verdict]}</p>)}
+          {(compare.answerImproved.length > 0 || compare.answerRegressed.length > 0) && <p className="font-semibold">답변 — 좋아짐 {compare.answerImproved.length} · 나빠짐 {compare.answerRegressed.length}</p>}
+          {compare.answerRegressed.map((r) => <p key={`ar${r.line}`} className="text-red-700">답변 나빠짐: {r.question} → {r.answer ? answerNote(r.answer) : ''}</p>)}
+          {compare.answerImproved.map((r) => <p key={`ai${r.line}`} className="text-emerald-700">답변 좋아짐: {r.question}</p>)}
         </div>
       )}
 

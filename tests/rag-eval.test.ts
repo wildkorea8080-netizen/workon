@@ -18,7 +18,8 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/auth', () => ({ getServerAuthSession: async () => ({ user: { id: 'u1' } }), isAdminSession: () => state.admin }));
 vi.mock('@/lib/actor-scope', () => ({ getActorScope: async () => ({ userId: 'u1', departmentId: 'd1', organizationId: 'o1', managedDepartmentIds: ['d1'] }) }));
 vi.mock('@/lib/agent-store', () => ({ loadAgentAccess: async () => state.agent }));
-vi.mock('@/lib/capabilities/doc-search', () => ({ searchLikeChat: (...a: unknown[]) => state.search(...a) }));
+// 라우트는 대화 프롬프트 글까지 주는 prepareLikeChat을 쓴다(2026-11-08) — 근거만 보는 시험이라 근거를 그 꼴로 감싼다
+vi.mock('@/lib/capabilities/doc-search', () => ({ prepareLikeChat: async (...a: unknown[]) => { const c = await state.search(...a); return c === null ? null : { chunks: c }; } }));
 vi.mock('@/lib/logger', () => ({ logSystem: async (e: unknown) => { state.logs.push(e); } }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {

@@ -72,6 +72,7 @@ const ACTION_LABEL: Record<string, string> = {
   work_revise: '업무 문서 AI 수정',
   prompt_enhance: '프롬프트 다듬기',
   document_tag_suggest: '문서 태그 초안(AI)',
+  rag_eval_answer: '문서 찾기 평가 답변(AI)',
   create_agent: '비서 생성',
   add_forbidden_word: '금지어 추가',
   delete_forbidden_word: '금지어 삭제',
