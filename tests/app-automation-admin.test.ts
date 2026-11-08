@@ -9,7 +9,7 @@ type Result = { data?: unknown; error?: { message: string } | null };
 const state = vi.hoisted(() => ({
   session: 'admin' as 'admin' | 'user' | 'impersonating' | null,
   managed: ['dept'] as string[],
-  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][], healthScope: null as unknown, healthFails: false,
+  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][], notices: [] as Record<string, unknown>[], healthScope: null as unknown, healthFails: false,
 }));
 vi.mock('@/lib/auth', () => ({
   getServerAuthSession: async () => (state.session ? { user: { id: 'adm', role: state.session === 'user' ? 'USER' : 'ADMIN', departmentId: 'dept', ...(state.session === 'impersonating' ? { isImpersonating: true } : {}) } } : null),
@@ -19,6 +19,7 @@ vi.mock('@/lib/actor-scope', () => ({
   getActorScope: async () => ({ userId: 'adm', isAdmin: true, organizationId: 'org', departmentId: 'dept', visibleDepartmentIds: ['dept'], managedDepartmentIds: state.managed, managesWholeOrganization: false }),
 }));
 vi.mock('@/lib/filter', () => ({ logSecurityEvent: async (...args: unknown[]) => { state.security.push(args); } }));
+vi.mock('@/lib/apps/automation-notice', () => ({ notifyAutomationOwner: async (n: Record<string, unknown>) => { state.notices.push(n); } }));
 vi.mock('@/lib/apps/schedule-health', () => ({
   readScheduleHealth: async (_now: number, scope: unknown) => { state.healthScope = scope; if (state.healthFails) throw new Error('down'); return { runnerAlive: false, runnerLastRunAt: '2026-11-02T00:00:00Z', activeCount: 2, overdueCount: 1, stuckClaimCount: 0, problems: ['예약 실행기가 30분 넘게 불리지 않았습니다.'] }; },
 }));
@@ -59,7 +60,7 @@ const scheduleRow = (patch: Record<string, unknown> = {}) => ({
   department_id: 'dept', agent: { name: '주간 보고 앱', tier: 'department' }, owner: { full_name: '이주무관', deleted_at: null }, ...patch,
 });
 
-beforeEach(() => { state.session = 'admin'; state.managed = ['dept']; state.results = {}; state.calls = []; state.security = []; state.healthScope = null; state.healthFails = false; });
+beforeEach(() => { state.session = 'admin'; state.managed = ['dept']; state.results = {}; state.calls = []; state.security = []; state.notices = []; state.healthScope = null; state.healthFails = false; });
 const json = async (res: Response) => ({ status: res.status, body: await res.json() });
 const patchHook = (body: unknown, id = HOOK) => PATCH_HOOK(new NextRequest(`http://localhost/api/admin/app-automations/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), { params: { id } });
 const patchSchedule = (body: unknown, id = SCHEDULE) => PATCH_SCHEDULE(new NextRequest(`http://localhost/api/admin/app-automations/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), { params: { id } });
@@ -134,11 +135,13 @@ describe('PATCH 연동 회수', () => {
     expect(state.calls).toContainEqual(['app_webhooks', 'eq', 'status', 'active']);
     expect(state.calls).toContainEqual(['app_webhooks', 'in', 'department_id', ['dept']]);
     expect(state.security).toEqual([['dept', 'adm', 'app_webhook_revoked', { webhook_id: HOOK, owner_user_id: 'u1', agent_id: 'a1', reason: '퇴사 예정자', impersonating: true }, 'medium']]);
+    // 주인 직원에게 알림(2026-11-08) — 바뀐 때만
+    expect(state.notices).toEqual([{ kind: 'webhook_revoked', organizationId: 'org', userId: 'u1', agentId: 'a1', targetId: HOOK, reason: '퇴사 예정자', at: expect.any(Date) }]);
   });
   it('이미 회수된 연동은 바꾸지도 기록하지도 않고, 범위 밖이면 404, 사유·할 일·id가 틀리면 400, 관리자가 아니면 403', async () => {
     state.results = { app_webhooks: [{ data: { id: HOOK, user_id: 'u1', agent_id: 'a1', status: 'revoked' } }, { data: hookRow({ status: 'revoked', revoked_at: '2026-11-02T00:00:00Z' }) }] };
     expect((await patchHook({ action: 'revoke', reason: '퇴사 예정자' })).status).toBe(200);
-    expect(state.calls.some(c => c[1] === 'update')).toBe(false); expect(state.security).toHaveLength(0);
+    expect(state.calls.some(c => c[1] === 'update')).toBe(false); expect(state.security).toHaveLength(0); expect(state.notices).toHaveLength(0);
     state.results = { app_webhooks: [{ data: null }] };
     expect((await patchHook({ action: 'revoke', reason: '퇴사 예정자' })).status).toBe(404);
     expect((await patchHook({ action: 'revoke', reason: '짧음' })).status).toBe(400);
@@ -161,9 +164,10 @@ describe('PATCH 예약 멈춤·잠금 풀기', () => {
     expect(pausePatch).toMatchObject({ status: 'paused', paused_reason: '관리자가 멈췄습니다 — 비용 점검 중' });
     expect(typeof pausePatch.admin_paused_at).toBe('string');
     expect(state.calls).toContainEqual(['app_schedules', 'is', 'admin_paused_at', null]);
+    expect(state.notices).toEqual([expect.objectContaining({ kind: 'schedule_paused', userId: 'u1', targetId: SCHEDULE, reason: '비용 점검 중' })]);
     expect(state.security[0]).toEqual(['dept', 'adm', 'app_schedule_paused', expect.objectContaining({ schedule_id: SCHEDULE, owner_user_id: 'u1', reason: '비용 점검 중', impersonating: false }), 'medium']);
 
-    state.calls = []; state.security = [];
+    state.calls = []; state.security = []; state.notices = [];
     state.results = {
       app_schedules: [{ data: { id: SCHEDULE, user_id: 'u1', agent_id: 'a1', admin_paused_at: '2026-11-03T00:00:00Z' } }, { data: [{ id: SCHEDULE }] }, { data: scheduleRow({ status: 'paused', paused_reason: ADMIN_UNLOCKED_REASON }) }],
       departments: [{ data: { name: '총무과' } }],
@@ -174,13 +178,14 @@ describe('PATCH 예약 멈춤·잠금 풀기', () => {
     expect(unlockPatch).toEqual(expect.objectContaining({ admin_paused_at: null, paused_reason: ADMIN_UNLOCKED_REASON }));
     expect(unlockPatch).not.toHaveProperty('status');
     expect(state.security[0][2]).toBe('app_schedule_unlocked');
+    expect(state.notices).toEqual([expect.objectContaining({ kind: 'schedule_unlocked', reason: '점검 끝났습니다' })]);
   });
   it('이미 잠긴 예약을 또 멈추거나 잠기지 않은 예약을 풀면 바꾸지 않는다. 범위 밖 404, 할 일·사유 틀리면 400', async () => {
     state.results = { app_schedules: [{ data: { id: SCHEDULE, user_id: 'u1', agent_id: 'a1', admin_paused_at: '2026-11-03T00:00:00Z' } }, { data: scheduleRow({ status: 'paused', admin_paused_at: '2026-11-03T00:00:00Z' }) }] };
     expect((await patchSchedule({ action: 'pause', reason: '비용 점검 중' })).status).toBe(200);
     state.results = { app_schedules: [{ data: { id: SCHEDULE, user_id: 'u1', agent_id: 'a1', admin_paused_at: null } }, { data: scheduleRow() }] };
     expect((await patchSchedule({ action: 'unlock', reason: '점검 끝났습니다' })).status).toBe(200);
-    expect(state.calls.some(c => c[1] === 'update')).toBe(false); expect(state.security).toHaveLength(0);
+    expect(state.calls.some(c => c[1] === 'update')).toBe(false); expect(state.security).toHaveLength(0); expect(state.notices).toHaveLength(0);
     state.results = { app_schedules: [{ data: null }] };
     expect((await patchSchedule({ action: 'pause', reason: '비용 점검 중' })).status).toBe(404);
     expect((await patchSchedule({ action: 'resume', reason: '비용 점검 중' })).status).toBe(400);

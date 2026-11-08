@@ -311,6 +311,47 @@ export function sendScheduleSuccessEmail(to: string, mail: { subject: string; ht
   return sendMail(to, mail.subject, mail.html);
 }
 
+export type AutomationNoticeKind = 'webhook_revoked' | 'schedule_paused' | 'schedule_unlocked';
+
+/**
+ * 관리자 조치 알림(2026-11-08) — 기관 관리자가 직원의 앱 연동을 회수하거나 예약을 멈추·잠금을 풀었을 때 그 직원에게.
+ * 무엇이·어떻게·언제·관리자가 적은 사유·할 일만. 관리자 이름·입력값·결과·토큰은 싣지 않는다
+ */
+export function automationAdminNoticeMail(params: {
+  kind: AutomationNoticeKind;
+  appName: string;
+  target: string;
+  reason: string;
+  at: Date;
+  url: string;
+}): { subject: string; html: string } {
+  const { kind, appName, target, reason, at, url } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const what = kind === 'webhook_revoked' ? '앱 연동을 회수했습니다' : kind === 'schedule_paused' ? '앱 예약을 멈췄습니다' : '앱 예약의 잠금을 풀었습니다';
+  const next = kind === 'webhook_revoked'
+    ? '이 연동 토큰으로는 더 이상 앱을 실행할 수 없습니다(되돌릴 수 없음). 계속 연동해야 하면 사유를 확인한 뒤 새 연동을 만들거나 기관 관리자에게 문의하세요.'
+    : kind === 'schedule_paused'
+      ? '이 예약은 관리자가 잠가 직원이 다시 켤 수 없습니다. 다시 써야 하면 기관 관리자에게 문의하세요. 예약을 지우는 것은 할 수 있습니다.'
+      : '예약은 멈춘 채로 있습니다. 앱 예약 화면에서 다시 켜거나 고칠 수 있습니다.';
+  const rows: Array<[string, string]> = [['앱', appName], ['대상', target], ['시각', `${kst(at)} (한국 시간)`], ['관리자가 적은 사유', reason]];
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  return {
+    subject: `[${APP_NAME}] 기관 관리자가 ${what} — ${appName}`,
+    html: layout(
+      `기관 관리자가 ${what}`,
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:15px;line-height:1.7">${escapeHtml(next)}</p>
+       ${button(url, kind === 'webhook_revoked' ? '앱 연동 보기' : '앱 예약 보기')}`
+    ),
+  };
+}
+
+export function sendAutomationAdminNoticeEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}
+
 /** 앱 예약 실행기 점검 안내의 글(슈퍼관리자에게) — 숫자·시각·조치만, 직원·입력값은 싣지 않는다 */
 export function scheduleRunnerAlertMail(params: {
   problems: string[];

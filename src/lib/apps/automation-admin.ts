@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSecurityEvent } from '@/lib/filter';
 import { readScheduleHealth } from '@/lib/apps/schedule-health';
 import { readWebhookSwitch, webhookSwitchView } from '@/lib/apps/webhook-switch';
+import { notifyAutomationOwner } from '@/lib/apps/automation-notice';
 import {
   ADMIN_AUTOMATION_LIMIT, ADMIN_UNLOCKED_REASON, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
   type AdminAutomationList, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
@@ -84,7 +85,10 @@ export async function revokeWebhookByAdmin(admin: AdminActor, id: string, reason
       .update({ status: 'revoked', revoked_at: now, revoked_reason: adminRevokedReason(reason), updated_at: now })
       .eq('id', id).eq('organization_id', actor.organizationId).eq('status', 'active').select('id');
     if (error) return { ok: false, status: 503, message: '연동을 회수하지 못했습니다.' };
-    if (changed?.length) await audit(admin, 'app_webhook_revoked', { webhook_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+    if (changed?.length) {
+      await audit(admin, 'app_webhook_revoked', { webhook_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+      await notifyAutomationOwner({ kind: 'webhook_revoked', organizationId: actor.organizationId, userId: target.user_id, agentId: target.agent_id, targetId: id, reason, at: new Date(nowMs) });
+    }
   }
   return readWebhook(actor, id, nowMs);
 }
@@ -125,7 +129,10 @@ export async function pauseScheduleByAdmin(admin: AdminActor, id: string, reason
       .update({ status: 'paused', paused_reason: adminPausedReason(reason), admin_paused_at: now, updated_at: now })
       .eq('id', id).eq('organization_id', actor.organizationId).is('admin_paused_at', null).select('id');
     if (error) return { ok: false, status: 503, message: '예약을 멈추지 못했습니다.' };
-    if (changed?.length) await audit(admin, 'app_schedule_paused', { schedule_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+    if (changed?.length) {
+      await audit(admin, 'app_schedule_paused', { schedule_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+      await notifyAutomationOwner({ kind: 'schedule_paused', organizationId: actor.organizationId, userId: target.user_id, agentId: target.agent_id, targetId: id, reason, at: new Date(nowMs) });
+    }
   }
   return readSchedule(actor, id);
 }
@@ -144,7 +151,10 @@ export async function unlockScheduleByAdmin(admin: AdminActor, id: string, reaso
       .update({ admin_paused_at: null, paused_reason: ADMIN_UNLOCKED_REASON, updated_at: now })
       .eq('id', id).eq('organization_id', actor.organizationId).not('admin_paused_at', 'is', null).select('id');
     if (error) return { ok: false, status: 503, message: '잠금을 풀지 못했습니다.' };
-    if (changed?.length) await audit(admin, 'app_schedule_unlocked', { schedule_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+    if (changed?.length) {
+      await audit(admin, 'app_schedule_unlocked', { schedule_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+      await notifyAutomationOwner({ kind: 'schedule_unlocked', organizationId: actor.organizationId, userId: target.user_id, agentId: target.agent_id, targetId: id, reason, at: new Date(nowMs) });
+    }
   }
   return readSchedule(actor, id);
 }
