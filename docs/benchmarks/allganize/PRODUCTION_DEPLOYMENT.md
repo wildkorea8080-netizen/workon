@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-08(오후): 기관 예약 스위치(0070)·예약 결과 한글 파일(0071)·지방공기업 유형(0072)·결과물 파일 찾기·결과 양식 기본값·예약의 올린 파일(0073)·연동으로 파일 보내기
+
+- 2026-11-08 16:08 KST 배포 `dpl_7khjzWeMjGZxuB83vNdY9GwA1R16`(커밋 `c11b472`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_EnripJvXGWr7bCDfHMmHoZUJDKi7`(bab42b8)로 promote한다(0070~0073 칸은 옛 코드가 읽지 않고, 0072는 값만 넓힘).
+- **마이그레이션 0070·0071·0072·0073 운영 적용**(코드 전, `npm run db:migrate -- 00NN`): `organizations.app_schedules_disabled_at`·`app_schedules_disabled_reason`과 `organizations_app_schedules_switch_check`, `app_schedules.export_hwpx`(boolean NOT NULL DEFAULT false)·`files`(jsonb NOT NULL DEFAULT '[]')와 `app_schedules_files_shape`, `common_documents_org_type_check` 일곱 값('지방공기업' 포함)을 읽기 전용으로 확인. 기관 2곳 모두 예약 켜짐, 운영 예약 0개.
+- 들어간 커밋: `5829303`(직전 배포 기록), `d8bb239` 결과물 '대화에서 만든 파일' 이름 찾기(`GET /api/files?q=`), `1461a6b` 기관 유형 '지방공기업'(0072 — 공통 보관함 `workon-c-lpe`), `c11b472` 기관 전체 앱 예약 스위치(0070 — [관리자 통제](APP_AUTOMATION_ADMIN.md))·예약 결과 한글 파일(0071)·앱 결과 한글 파일 기본 양식(`exportTemplateId` — [결과 내보내기](APP_RESULT_EXPORT.md))·예약의 올린 파일(0073 — [앱 예약](APP_SCHEDULES.md))·연동 호출의 `files`(마이그레이션 없음 — [앱 연동](APP_WEBHOOKS.md)).
+- **배포 전**: 가지 Preview(`c11b472`, `workon-pap81f65f`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 시험 DB를 띄운 전체 시험 204파일 3,053개 통과·tsc 0, 0070~0073은 시험 DB에 두 번씩 적용).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/schedules`·`/apps/run`·`/apps/builder`·`/files`·`/api/system/maintenance` 200, `/admin/app-automations` 307(로그인으로), `GET /api/files?q=`·`GET /api/apps/schedules`·`PUT /api/apps/schedules/[id]`·`PUT /api/admin/app-automations/schedule-switch` 401, 토큰 없는·무효 토큰(`files` 포함) `POST /api/apps/webhook` 401, 운영 주소가 새 배포를 가리킴. 배포 뒤 첫 앱 예약 실행기 호출(pg_cron, 16:10 KST) 200·heartbeat 갱신.
+- **확인하지 못한 것**(사용자 몫): 로그인한 관리자 '앱 예약·연동'에서 기관 전체 예약 끄기·켜기, 예약 '한글 파일로도 만들기'·'저장한 파일'로 실제 예약이 돌아 파일·메일이 오는지, 빌더 '결과 한글 파일 양식' 고르기, 외부 시스템이 `files`를 담아 연동을 부르는 실제 호출(브라우저·실호출로 보지 않음 — 개발 서버가 운영 DB를 씀). **지방공기업 기관이 있으면 슈퍼관리자가 기관 화면에서 유형을 '지방공기업'으로 고치고, 그 공통 문서는 공통 자료실 '지방공기업' 탭에 새로 올린다**(기존 기관 유형은 바꾸지 않았다).
+
 ## 2026-11-08(오전 2): 관리자 조치 알림 메일
 
 - 2026-11-08 10:30 KST 배포 `dpl_EnripJvXGWr7bCDfHMmHoZUJDKi7`(커밋 `bab42b8`, `main` fast-forward — GitHub 연동). 사용자 선택("운영 반영"). 되돌릴 때는 직전 `dpl_3BimxgmcjMWRufsk8PjJsV9QZLy4`(a7dee35)로 promote한다. 마이그레이션 없음.
