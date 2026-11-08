@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, formatBytes, formatDateTime, PREVIEW_STATUS_LABEL } from '@/lib/work/client';
 import type { ArtifactDto } from '@/components/work/types';
@@ -73,9 +73,18 @@ function ConversationFiles() {
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const load = async (cursor: string | null) => {
+  // 파일 이름 찾기(2026-11-08) — 입력 중인 글과 지금 목록에 건 글을 따로 둔다('더 보기'는 건 글로 이어 읽는다)
+  const [draft, setDraft] = useState('');
+  const [query, setQuery] = useState('');
+  const latest = useRef(0);
+  const load = async (cursor: string | null, q: string = query) => {
+    const seq = ++latest.current;
     setLoading(true);
-    const r = await api<{ files: MyGeneratedFile[]; next: string | null }>(`/api/files${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (q) params.set('q', q);
+    const r = await api<{ files: MyGeneratedFile[]; next: string | null }>(`/api/files${params.toString() ? `?${params.toString()}` : ''}`);
+    if (seq !== latest.current) return; // 늦게 온 옛 응답은 버린다
     setLoading(false);
     if (!r.ok) { setError(r.error.message); return; }
     setError(null);
@@ -87,10 +96,16 @@ function ConversationFiles() {
     <section aria-label="대화에서 만든 파일" className="mt-8">
       <h2 className="text-[17px] font-semibold text-slate-900">대화에서 만든 파일</h2>
       <p className="mt-1 mb-3 text-[13px] text-slate-500">AI 대화에서 비서가 만들어 준 파일입니다(양식 채우기·표 합치기·앱 결과 내보내기). 대화를 지우면 함께 지워집니다.</p>
+      <form role="search" className="mb-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); const q = draft.trim(); setQuery(q); void load(null, q); }}>
+        <input aria-label="파일 이름으로 찾기" value={draft} maxLength={60} onChange={(e) => setDraft(e.target.value)} placeholder="파일 이름으로 찾기"
+          className="min-w-[220px] flex-1 rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px]" />
+        <button type="submit" disabled={loading} className="rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px] disabled:opacity-50">찾기</button>
+        {query && <button type="button" onClick={() => { setDraft(''); setQuery(''); void load(null, ''); }} className="px-2 text-[14px] text-slate-500">전체 보기</button>}
+      </form>
       <ErrorNote message={error} />
       <Card className="p-0 overflow-x-auto">
         {files && files.length === 0 ? (
-          <div className="p-6 text-[15px] text-slate-600">대화에서 만든 파일이 없습니다.</div>
+          <div className="p-6 text-[15px] text-slate-600">{query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : '대화에서 만든 파일이 없습니다.'}</div>
         ) : (
           <table className="w-full min-w-[720px] text-left text-[15px]">
             <thead className="border-b border-[#DCE3EC] text-[13px] text-slate-500">

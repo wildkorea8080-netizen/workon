@@ -6,6 +6,20 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { decodeHistoryCursor, encodeHistoryCursor } from '@/lib/apps/history';
 
 export const MY_FILES_PAGE = 50;
+/** 파일 이름 찾기 글 상한(2026-11-08) */
+export const MY_FILES_QUERY_MAX = 60;
+
+/** 찾기 글 다듬기 — 제어·서식 글자를 빼고 공백을 하나로 접어 60자까지. 비면 null(찾지 않음) */
+export function normalizeFileQuery(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const text = Array.from(raw.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, MY_FILES_QUERY_MAX).join('').trim();
+  return text || null;
+}
+
+/** 이름에 그 글이 들어 있는 파일 — LIKE의 `%`·`_`·`\\`는 글자 그대로 찾도록 막는다(대소문자 무시) */
+export function fileNamePattern(query: string): string {
+  return `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
 
 export type MyGeneratedFile = {
   id: string;
@@ -41,17 +55,18 @@ export function toMyFile(row: Row): MyGeneratedFile {
   };
 }
 
-/** 최근 것부터 한 쪽(50개). 한 개 더 읽어 다음 쪽이 있는지 안다 */
-export async function listMyGeneratedFiles(userId: string, cursor: { at: string; id: string } | null): Promise<{ files: MyGeneratedFile[]; next: string | null }> {
-  let query = supabaseAdmin
+/** 최근 것부터 한 쪽(50개). 한 개 더 읽어 다음 쪽이 있는지 안다. `query`가 있으면 이름에 그 글이 든 파일만(쪽 넘기기도 같은 조건) */
+export async function listMyGeneratedFiles(userId: string, cursor: { at: string; id: string } | null, query: string | null = null): Promise<{ files: MyGeneratedFile[]; next: string | null }> {
+  let dbQuery = supabaseAdmin
     .from('generated_files')
     .select('id, file_name, size_bytes, created_at, template_name, conversation_id, conversation:conversations(title)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(MY_FILES_PAGE + 1);
-  if (cursor) query = query.or(`created_at.lt.${cursor.at},and(created_at.eq.${cursor.at},id.lt.${cursor.id})`);
-  const { data, error } = await query;
+  if (query) dbQuery = dbQuery.ilike('file_name', fileNamePattern(query));
+  if (cursor) dbQuery = dbQuery.or(`created_at.lt.${cursor.at},and(created_at.eq.${cursor.at},id.lt.${cursor.id})`);
+  const { data, error } = await dbQuery;
   if (error) throw new Error(`generated_files: ${error.message}`);
   const rows = (data ?? []) as unknown as Row[];
   const files = rows.slice(0, MY_FILES_PAGE).map(toMyFile);

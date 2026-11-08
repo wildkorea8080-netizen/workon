@@ -12,13 +12,13 @@ const state = {
 vi.mock('@/lib/auth', () => ({ getServerAuthSession: async () => state.session }));
 vi.mock('@/lib/supabaseAdmin', () => {
   const chain: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'order', 'limit', 'or']) chain[m] = (...args: unknown[]) => { state.calls.push([m, ...args]); return chain; };
+  for (const m of ['select', 'eq', 'order', 'limit', 'or', 'ilike']) chain[m] = (...args: unknown[]) => { state.calls.push([m, ...args]); return chain; };
   chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve({ data: state.rows, error: state.error }).then(resolve);
   return { supabaseAdmin: { from: (table: string) => { state.calls.push(['from', table]); return chain; } } };
 });
 
 import { GET } from '@/app/api/files/route';
-import { MY_FILES_PAGE, parseCursor, toMyFile } from '@/lib/my-generated-files';
+import { MY_FILES_PAGE, fileNamePattern, normalizeFileQuery, parseCursor, toMyFile } from '@/lib/my-generated-files';
 import { encodeHistoryCursor } from '@/lib/apps/history';
 import { fileBadge } from '@/lib/file-badge';
 
@@ -65,6 +65,29 @@ describe('목록', () => {
     expect(state.calls).toEqual([]);
   });
 
+  it('파일 이름 찾기(2026-11-08) — ?q=는 다듬어 이름에 든 파일만, 쪽 넘기기도 같은 조건, 비면 전체', async () => {
+    state.rows = [row(1)];
+    await get(`?q=${encodeURIComponent('  주간\n보고 ')}`);
+    expect(state.calls).toContainEqual(['ilike', 'file_name', '%주간 보고%']);
+    expect(state.calls).toContainEqual(['eq', 'user_id', 'u-me']);
+    state.calls = [];
+    const at = '2026-11-05T00:00:00.000Z'; const id = '11111111-2222-3333-4444-555555555555';
+    await get(`?q=${encodeURIComponent('보고')}&cursor=${encodeURIComponent(encodeHistoryCursor(at, id))}`);
+    expect(state.calls).toContainEqual(['ilike', 'file_name', '%보고%']);
+    expect(state.calls.some(c => c[0] === 'or')).toBe(true);
+    state.calls = [];
+    await get('?q=%20%20');
+    expect(state.calls.some(c => c[0] === 'ilike')).toBe(false);
+  });
+
+  it('찾기 글 — LIKE 특수 글자는 글자 그대로, 제어·서식 글자 제거, 60자', () => {
+    expect(fileNamePattern('50%_달성\\')).toBe('%50\\%\\_달성\\\\%');
+    expect(normalizeFileQuery('‮보고​서\t 2026')).toBe('보고 서 2026');
+    expect(normalizeFileQuery('가'.repeat(80))).toHaveLength(60);
+    expect(normalizeFileQuery('   ')).toBeNull();
+    expect(normalizeFileQuery(null)).toBeNull();
+  });
+
   it('조회 실패는 503', async () => {
     state.error = { message: 'down' };
     expect((await get()).status).toBe(503);
@@ -87,6 +110,10 @@ describe('화면', () => {
     // 서버 모듈(supabaseAdmin)은 꼴만 가져온다 — 값을 가져오면 화면 묶음에 서버 코드가 들어간다
     expect(page).toContain("import type { MyGeneratedFile } from '@/lib/my-generated-files';");
     expect(page).not.toMatch(/^import (?!type ).*my-generated-files/m);
+    // 이름 찾기 — '더 보기'는 건 글로 이어 읽고, 늦게 온 옛 응답은 버린다
+    expect(page).toContain('aria-label="파일 이름으로 찾기"');
+    expect(page).toContain("if (q) params.set('q', q);");
+    expect(page).toContain('if (seq !== latest.current) return;');
   });
 
   it('배지 — HWP·DOC·XLS', () => {
