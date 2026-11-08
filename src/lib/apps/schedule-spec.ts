@@ -93,6 +93,10 @@ export function specColumns(spec: AppScheduleSpec) {
   return { frequency: spec.frequency, weekday: spec.weekday, month_day: spec.monthDay, run_hour: spec.hour, run_minute: spec.minute };
 }
 
+/** 기관 전체 관리자가 예약 실행을 꺼 두었을 때(0070) — 직원 목록 안내와 새 예약 거절 */
+export const SCHEDULE_ORG_DISABLED = '기관 관리자가 앱 예약 실행을 꺼 두었습니다. 다시 켤 때까지 예약이 실행되지 않고 다음 차례로 넘어갑니다.';
+export const SCHEDULE_ORG_DISABLED_CREATE = '기관 관리자가 앱 예약 실행을 꺼 두어 새 예약을 만들 수 없습니다.';
+
 /** 실행기가 차지한 동안(실행 중)에는 고치지 않는다 — 끝난 실행이 고친 시각·입력을 옛 값으로 덮는다 */
 export const SCHEDULE_BUSY_MESSAGE = '지금 실행 중인 예약입니다. 몇 분 뒤 실행이 끝나면 다시 고쳐 주세요.';
 
@@ -106,7 +110,7 @@ export function editedStatus(row: Pick<AppScheduleRowLike, 'status' | 'paused_re
 }
 
 /** 직원 화면이 읽는 칸 — 목록·만들기·멈추기 라우트가 함께 쓴다 */
-export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at, notify_on_success';
+export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at, notify_on_success, export_hwpx, files';
 
 /** DB 행 중 화면이 보는 칸. 실행 조건·사용자 id·부서는 내보내지 않는다 */
 export type AppScheduleRowLike = {
@@ -119,6 +123,10 @@ export type AppScheduleRowLike = {
   consecutive_failures: number; run_count: number; created_at: string;
   /** 실행을 마치면 메일로 알림(0069) */
   notify_on_success?: boolean | null;
+  /** 결과를 한글 파일로도 만들기(0071) */
+  export_hwpx?: boolean | null;
+  /** 예약이 가진 올린 파일 사본(0073) — [{id,name,size,path}], 읽기는 schedule-file-spec.ts */
+  files?: unknown;
 };
 
 export type AppScheduleView = {
@@ -134,7 +142,22 @@ export type AppScheduleView = {
   lastConversationId: string | null; consecutiveFailures: number; runCount: number; overdue: boolean; createdAt: string;
   /** 실행을 마치면 메일로 알림(0069) — 결과 글은 메일에 싣지 않고 링크만 */
   notifyOnSuccess: boolean;
+  /** 켜진 예약인데 기관이 예약 실행을 꺼 두어 돌지 않는다(0070) */
+  heldByOrg: boolean;
+  /** 결과를 표준 보고서 한글 파일로도 만든다(0071) */
+  exportHwpx: boolean;
+  /** 예약에 저장한 올린 파일(0073) — 이름·크기만(저장소 경로는 내보내지 않는다) */
+  files: { id: string; name: string; size: number }[];
 };
+
+/** 예약 파일 칸 → 화면 목록(경로를 뗀다). 꼴이 틀린 원소는 버린다 */
+function fileViews(raw: unknown): { id: string; name: string; size: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((f) => {
+    const { id, name, size } = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+    return typeof id === 'string' && typeof name === 'string' && typeof size === 'number' ? [{ id, name, size }] : [];
+  });
+}
 
 export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' | 'month_day' | 'run_hour' | 'run_minute'>): AppScheduleSpec {
   const parsed = parseScheduleSpec({ frequency: row.frequency, weekday: row.weekday, month_day: row.month_day, hour: row.run_hour, minute: row.run_minute });
@@ -142,7 +165,7 @@ export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' 
   return parsed.value;
 }
 
-export function scheduleView(row: AppScheduleRowLike, appName: string | null, nowMs: number): AppScheduleView {
+export function scheduleView(row: AppScheduleRowLike, appName: string | null, nowMs: number, orgDisabled = false): AppScheduleView {
   const spec = specOfRow(row);
   const status = row.status === 'paused' ? 'paused' : 'active';
   return {
@@ -153,8 +176,9 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,
     lastError: row.last_error, lastConversationId: row.last_conversation_id,
     consecutiveFailures: row.consecutive_failures, runCount: row.run_count,
-    overdue: status === 'active' && Date.parse(row.next_run_at) < nowMs - SCHEDULE_OVERDUE_MS,
-    createdAt: row.created_at, notifyOnSuccess: row.notify_on_success === true,
+    overdue: status === 'active' && !orgDisabled && Date.parse(row.next_run_at) < nowMs - SCHEDULE_OVERDUE_MS,
+    createdAt: row.created_at, notifyOnSuccess: row.notify_on_success === true, heldByOrg: status === 'active' && orgDisabled, exportHwpx: row.export_hwpx === true,
+    files: fileViews(row.files),
   };
 }
 
@@ -162,6 +186,7 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
 export function scheduleBadge(s: AppScheduleView): { label: string; tone: 'neutral' | 'warn' | 'ok' | 'busy' | 'bad' } {
   if (s.adminPaused) return { label: '관리자가 멈춤', tone: 'bad' };
   if (s.status === 'paused') return { label: '멈춤', tone: 'warn' };
+  if (s.heldByOrg) return { label: '기관이 멈춤', tone: 'bad' };
   if (s.overdue) return { label: '실행 지연', tone: 'bad' };
   if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, tone: 'warn' };
   return { label: '예약 중', tone: 'ok' };

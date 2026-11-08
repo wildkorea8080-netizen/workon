@@ -9,6 +9,7 @@ import { streamTurn } from '@/lib/assistant/stream';
 import type { PrepareOutcome, PreparedTurn, SendEvent } from '@/lib/assistant/types';
 
 export type RunAsInput = { userId: string; departmentId: string; agentId: string; appVersion: number; inputs: Record<string, string>; /** 문서함에서 고른 문서(예약 0062) */ documentIds?: string[];
+  /** 이번 실행에 붙일 첨부(예약의 올린 파일을 새로 올린 것, 0073) */ attachmentIds?: string[];
   /** 새 모델 호출을 시작하지 않을 마감 시각(ms) — 예약 실행기가 그 호출 전체의 마감을 넘긴다(streamTurn `deadlineAt`) */
   deadlineAt?: number };
 export type RunAsUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
@@ -42,7 +43,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
     user: { id: user.id, email: user.email ?? undefined, role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: user.department_id },
     expires: new Date(Date.now() + 5 * 60_000).toISOString(),
   } as Session;
-  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}) });
+  const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}), ...(input.attachmentIds?.length ? { attachment_ids: input.attachmentIds } : {}) });
   if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message };
   let conversationId: string | null = null; let error: string | null = null; let done = false;
   try {

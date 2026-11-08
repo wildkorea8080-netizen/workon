@@ -5,6 +5,7 @@ import { listUserAttachmentPaths, removeUserAttachmentObjects } from '@/lib/atta
 import { softDeleteAgent } from '@/lib/agent-store';
 import { logSystem } from '@/lib/logger';
 import { WITHDRAWAL_REVOKED_REASON } from '@/lib/apps/automation-admin-spec';
+import { removeScheduleFileObjects, scheduleFilesOf, type ScheduleFile } from '@/lib/apps/schedule-files';
 
 /**
  * 사용자 탈퇴 처리 — 슈퍼관리자 '계정 삭제'의 실제 동작 (0047).
@@ -81,8 +82,10 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   const { error: attachError } = await supabaseAdmin.from('chat_attachments').delete().eq('user_id', userId);
   if (attachError) return dbFailure('첨부 삭제', userId, attachError);
   // 앱 예약 — 저장한 입력값이 개인 내용이라 지운다. 앱 연동 — 외부 시스템이 더 부르지 못하게 회수한다(실행 때도 계정 검사가 막지만 '쓰는 중'으로 남지 않게)
-  const { error: scheduleError } = await supabaseAdmin.from('app_schedules').delete().eq('user_id', userId);
+  // 예약의 올린 파일 사본(0073)은 지운 행에서 경로를 받아 ⑤에서 지운다
+  const { data: removedSchedules, error: scheduleError } = await supabaseAdmin.from('app_schedules').delete().eq('user_id', userId).select('files');
   if (scheduleError) return dbFailure('앱 예약 삭제', userId, scheduleError);
+  const scheduleFiles: ScheduleFile[] = ((removedSchedules ?? []) as { files?: unknown }[]).flatMap((s) => scheduleFilesOf(s.files));
   const revokedAt = new Date().toISOString();
   const { error: webhookError } = await supabaseAdmin.from('app_webhooks')
     .update({ status: 'revoked', revoked_at: revokedAt, revoked_reason: WITHDRAWAL_REVOKED_REASON, updated_at: revokedAt })
@@ -129,6 +132,7 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   // ⑤ 저장소 (실패는 시스템 로그에 남기고 계속) — 생성 파일과 첨부 원본·읽은 내용
   await removeUserFiles(userId, filePaths);
   await removeUserAttachmentObjects(userId, attachmentPaths);
+  await removeScheduleFileObjects(scheduleFiles, '사용자 탈퇴 뒤 예약 파일');
 
   // ⑥ 로그인 계정
   const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);

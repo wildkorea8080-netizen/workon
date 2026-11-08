@@ -91,17 +91,31 @@ export async function reuseFile(actor: Actor, kind: unknown, id: unknown): Promi
   const source = await findSource(actor.userId, kind, id.toLowerCase());
   if (source === 'error') return { ok: false, status: 503, message: MSG_RETRY };
   if (!source) return { ok: false, status: 404, message: MSG_NOT_FOUND };
+  return attachStoredObject(actor, source);
+}
 
+/**
+ * 저장소에 있는 파일 하나를 새 첨부로 올린다 — 지난 파일 다시 붙이기와 앱 예약의 올린 파일(0073)이 함께 쓴다.
+ * 발급(형식·크기·보내지 않은 첨부 상한) → 서버가 바이트를 올림 → 확인(읽기·사용 기록). 원본을 못 받으면 404
+ */
+export async function attachStoredObject(actor: Actor, source: { storage_path: string; file_name: string }): Promise<{ ok: true; attachment: AttachmentRow } | Failure> {
   const bucket = supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET);
   const { data: blob, error: downloadError } = await bucket.download(source.storage_path);
   if (downloadError || !blob) return { ok: false, status: 404, message: '원본 파일이 더 남아 있지 않습니다.' };
-  const bytes = Buffer.from(await blob.arrayBuffer());
+  return attachBytes(actor, source.file_name, Buffer.from(await blob.arrayBuffer()), blob.type);
+}
 
+/**
+ * 서버가 가진 바이트를 새 첨부로 올린다 — 위의 저장소 복사와 외부 연동이 보낸 파일(2026-11-08)이 함께 쓴다.
+ * 직접 올리기와 같은 발급(형식·크기·보내지 않은 첨부 상한) → 올림 → 확인(읽기·사용 기록)
+ */
+export async function attachBytes(actor: Actor, fileName: string, bytes: Buffer, contentType?: string): Promise<{ ok: true; attachment: AttachmentRow } | Failure> {
+  const bucket = supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET);
   // 발급 — 형식·크기(실제 바이트 길이로)·보내지 않은 첨부 상한을 직접 올리기와 같은 규칙으로 본다
-  const issued = await createUpload(actor, { fileName: source.file_name, size: bytes.length });
+  const issued = await createUpload(actor, { fileName, size: bytes.length });
   if (!issued.ok) return issued;
 
-  const { error: uploadError } = await bucket.upload(issued.path, bytes, { contentType: blob.type || 'application/octet-stream', upsert: false });
+  const { error: uploadError } = await bucket.upload(issued.path, bytes, { contentType: contentType || 'application/octet-stream', upsert: false });
   if (uploadError) {
     // 묘비로 남긴다(지운 첨부와 같은 꼴) — 객체가 기록 없이 남지 않게
     await deleteAttachment(actor.userId, issued.id);

@@ -95,7 +95,7 @@ function fakeDeps(rows: AppScheduleRow[], outcomes: Record<string, ScheduleOutco
   const deps = {
     due: vi.fn(async () => rows), claim: vi.fn(async () => true),
     execute: vi.fn(async (r: AppScheduleRow) => { const o = outcomes[r.id]; if (o instanceof Error) throw o; return o; }),
-    finish: vi.fn(async () => {}), notifyFailure: vi.fn(async () => {}), notifySuccess: vi.fn(async () => {}), log: vi.fn(async () => {}),
+    finish: vi.fn(async () => {}), notifyFailure: vi.fn(async () => {}), notifySuccess: vi.fn(async () => {}), exportResult: vi.fn(async () => 'f1'), orgDisabled: vi.fn(async () => false), log: vi.fn(async () => {}),
     now: vi.fn(() => clock), ...patch,
   };
   // 덮어쓴 칸도 vi.fn이다 — 모두 모의 함수로 본다(덮어쓰기가 Partial<ScheduleDeps>라 그냥 두면 .mock 타입을 잃는다)
@@ -107,7 +107,7 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
     const rows = [row({ id: 's1' }), row({ id: 's2', consecutive_failures: 2 }), row({ id: 's3' })];
     const { deps } = fakeDeps(rows, { s1: { kind: 'completed', conversationId: 'c1' }, s2: { kind: 'failed', error: '모델 오류' }, s3: { kind: 'pause', reason: PAUSED_APP_CHANGED } });
     const result = await runDueSchedules(deps);
-    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 2, skipped: 0, partial: false });
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 2, skipped: 0, held: 0, partial: false });
     expect(deps.due).toHaveBeenCalledWith(expect.any(Number), SCHEDULE_BATCH);
     expect(deps.finish).toHaveBeenCalledTimes(3);
     expect(deps.finish.mock.calls[0]).toEqual(['s1', expect.objectContaining({ last_status: 'completed', last_conversation_id: 'c1' })]);
@@ -126,7 +126,7 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
       notifyFailure: vi.fn(async () => { throw new Error('메일 실패'); }),
     });
     const result = await runDueSchedules(deps);
-    expect(result).toEqual({ checked: 3, completed: 1, failed: 1, paused: 0, skipped: 1, partial: false });
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 1, paused: 0, skipped: 1, held: 0, partial: false });
     expect(deps.execute).toHaveBeenCalledTimes(2);
     expect(deps.finish.mock.calls[0]).toEqual(['s2', expect.objectContaining({ last_status: 'failed', last_error: 'DB 끊김', consecutive_failures: 1 })]);
     const messages = deps.log.mock.calls.map(c => c[1]);
@@ -147,19 +147,59 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
   });
 });
 
+describe('기관 전체 예약 스위치(0070) — 꺼 둔 기관의 차례는 실행하지 않고 다음 차례로만 넘긴다', () => {
+  it('꺼 둔 기관의 예약은 차지 뒤 다음 시각만 미루고(실패·실행 횟수 그대로) 실행·알림이 없다 — 기관마다 한 번만 읽는다', async () => {
+    const rows = [row({ id: 's1', organization_id: 'off' }), row({ id: 's2', organization_id: 'on' }), row({ id: 's3', organization_id: 'off', consecutive_failures: 2 })];
+    const { deps } = fakeDeps(rows, { s2: { kind: 'completed', conversationId: 'c2' } }, { orgDisabled: vi.fn(async (org: string) => org === 'off') });
+    const result = await runDueSchedules(deps);
+    expect(result).toEqual({ checked: 3, completed: 1, failed: 0, paused: 0, skipped: 0, held: 2, partial: false });
+    expect(deps.execute).toHaveBeenCalledTimes(1);
+    expect(deps.orgDisabled).toHaveBeenCalledTimes(2);
+    expect(deps.claim).toHaveBeenCalledTimes(3);
+    const held = deps.finish.mock.calls.find(c => c[0] === 's3')?.[1];
+    expect(held).toEqual({ claimed_at: null, updated_at: expect.any(String), next_run_at: '2026-11-04T00:00:00.000Z' });
+    expect(deps.notifyFailure).not.toHaveBeenCalled(); expect(deps.notifySuccess).not.toHaveBeenCalled();
+  });
+  it('스위치를 읽지 못하면 차지·실행·넘기기를 하지 않고(다음 호출에 다시) 경고만, 다른 실행기가 잡았으면 건너뛴다', async () => {
+    const { deps } = fakeDeps([row({ id: 's1' })], {}, { orgDisabled: vi.fn(async () => { throw new Error('column does not exist'); }) });
+    expect(await runDueSchedules(deps)).toMatchObject({ checked: 1, skipped: 1, held: 0 });
+    expect(deps.claim).not.toHaveBeenCalled(); expect(deps.finish).not.toHaveBeenCalled(); expect(deps.execute).not.toHaveBeenCalled();
+    expect(deps.log.mock.calls[0][1]).toBe('기관 예약 스위치를 읽지 못함');
+    const other = fakeDeps([row({ id: 's1' })], {}, { orgDisabled: vi.fn(async () => true), claim: vi.fn(async () => false) });
+    expect(await runDueSchedules(other.deps)).toMatchObject({ skipped: 1, held: 0 });
+    expect(other.deps.finish).not.toHaveBeenCalled();
+  });
+});
+
 describe('완료 메일(0069) — 직원이 고른 예약만, 결과 글 없이 링크만', () => {
   it('완료한 예약 중 notify_on_success가 참인 것만 알리고, 실패·멈춤에는 완료 알림이 없다', async () => {
     const rows = [row({ id: 's1', notify_on_success: true }), row({ id: 's2' }), row({ id: 's3', notify_on_success: true })];
     const { deps } = fakeDeps(rows, { s1: { kind: 'completed', conversationId: 'c1' }, s2: { kind: 'completed', conversationId: 'c2' }, s3: { kind: 'failed', error: '모델 오류' } });
     await runDueSchedules(deps);
     expect(deps.notifySuccess).toHaveBeenCalledTimes(1);
-    expect(deps.notifySuccess.mock.calls[0]).toEqual([rows[0], { conversationId: 'c1', nextRunAt: '2026-11-04T00:00:00.000Z' }]);
+    expect(deps.notifySuccess.mock.calls[0]).toEqual([rows[0], { conversationId: 'c1', nextRunAt: '2026-11-04T00:00:00.000Z', fileId: null }]);
+    expect(deps.exportResult).not.toHaveBeenCalled();
     expect(deps.notifyFailure).toHaveBeenCalledTimes(1);
   });
   it('완료 알림이 실패해도 실행 결과는 그대로(완료로 셈)이고 경고만 남긴다', async () => {
     const { deps } = fakeDeps([row({ id: 's1', notify_on_success: true })], { s1: { kind: 'completed', conversationId: 'c1' } }, { notifySuccess: vi.fn(async () => { throw new Error('메일 실패'); }) });
     expect(await runDueSchedules(deps)).toMatchObject({ completed: 1, failed: 0 });
     expect(deps.log.mock.calls.find(c => c[1] === '앱 예약 완료 알림을 보내지 못함')?.[0]).toBe('warning');
+  });
+  it('한글 파일로도 만들기(0071) — 고른 예약만 만들고 파일 id를 완료 메일에 넘긴다, 만들기 실패는 경고만(완료 그대로)', async () => {
+    const rows = [row({ id: 's1', export_hwpx: true, notify_on_success: true }), row({ id: 's2', export_hwpx: true }), row({ id: 's3', export_hwpx: true })];
+    const { deps } = fakeDeps(rows, { s1: { kind: 'completed', conversationId: 'c1' }, s2: { kind: 'completed', conversationId: 'c2' }, s3: { kind: 'completed', conversationId: null } }, {
+      exportResult: vi.fn(async (_r: AppScheduleRow, conv: string) => { if (conv === 'c2') throw new Error('저장소 오류'); return 'f1'; }),
+    });
+    expect(await runDueSchedules(deps)).toMatchObject({ completed: 3, failed: 0 });
+    expect(deps.exportResult.mock.calls.map(c => c[1])).toEqual(['c1', 'c2']); // 대화 id가 없으면 만들지 않는다
+    expect(deps.notifySuccess.mock.calls[0][1]).toMatchObject({ fileId: 'f1' });
+    expect(deps.log.mock.calls.find(c => c[1] === '앱 예약 결과 한글 파일을 만들지 못함')?.[0]).toBe('warning');
+  });
+  it('완료 메일에 파일 받기 단추는 파일이 있을 때만', () => {
+    const base = { appName: '앱', description: '평일 09:00', nextRunAt: null, finishedAt: new Date('2026-11-03T00:05:00Z'), resultUrl: 'https://w.example/chat?conv=c1', schedulesUrl: 'https://w.example/apps/schedules' };
+    expect(scheduleSuccessMail({ ...base, fileUrl: 'https://w.example/api/files/f1' }).html).toContain('https://w.example/api/files/f1');
+    expect(scheduleSuccessMail(base).html).not.toContain('한글 파일 받기');
   });
   it('메일 글에는 앱·예약·시각·결과 보기 링크만 — 결과 글·입력값이 없다', () => {
     const mail = scheduleSuccessMail({ appName: '주간 <보고> 앱', description: '평일 09:00', nextRunAt: '2026-11-04T00:00:00.000Z', finishedAt: new Date('2026-11-03T00:05:00Z'), resultUrl: 'https://w.example/chat?conv=c1', schedulesUrl: 'https://w.example/apps/schedules' });

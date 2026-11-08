@@ -62,7 +62,7 @@ describe('handleWebhookCall — 상태 가르기', () => {
     const res = await call(d, { inputs: { title: '주간 보고', count: 3, urgent: true, memo: null } });
     expect(res).toEqual({ status: 200, body: { ok: true, data: { status: 'completed', conversation_id: 'c1' } } });
     expect(d.claim).toHaveBeenCalledWith(token.hash, expect.any(Number), undefined);
-    expect(d.execute).toHaveBeenCalledWith(claimed, { title: '주간 보고', count: '3', urgent: 'true', memo: '' });
+    expect(d.execute).toHaveBeenCalledWith(claimed, { title: '주간 보고', count: '3', urgent: 'true', memo: '' }, []);
     expect(d.finish).toHaveBeenCalledWith('w1', expect.objectContaining({ last_status: 'completed', last_error: null, last_conversation_id: 'c1' }));
     expect(d.log).not.toHaveBeenCalled();
     expect(WEBHOOK_TITLE_PREFIX).toBe('[연동] ');
@@ -71,13 +71,14 @@ describe('handleWebhookCall — 상태 가르기', () => {
     const d = deps();
     expect((await call(d, undefined, null)).status).toBe(401);
     expect((await call(d, undefined, 'Bearer nope')).body).toMatchObject({ error: { message: WEBHOOK_INVALID_TOKEN } });
-    expect((await call(d, 'x'.repeat(WEBHOOK_MAX_BODY_BYTES + 1))).status).toBe(413);
+    expect((await call(d, { inputs: { a: 'x'.repeat(WEBHOOK_MAX_BODY_BYTES) } })).status).toBe(413);
+    expect((await call(d, 'x'.repeat(4_300_001))).status).toBe(413);
     expect((await call(d, '{not json')).status).toBe(400);
     for (const inputs of [[1], 'x', { a: { nested: 1 } }, { a: [1] }]) expect((await call(d, { inputs })).status).toBe(400);
     expect(d.claim).not.toHaveBeenCalled();
     // 본문이 비면 빈 입력으로 — 필수 항목 검사는 실행기가 앱 판으로 한다
     await call(d, '');
-    expect(d.execute).toHaveBeenCalledWith(claimed, {});
+    expect(d.execute).toHaveBeenCalledWith(claimed, {}, []);
   });
   it('차지 거절: 무효는 401(사유를 가르지 않음), 60초 안은 429 + Retry-After, 하루 상한은 429 — 실행하지 않는다', async () => {
     const invalid = deps(undefined, { ok: false, reason: 'invalid' });

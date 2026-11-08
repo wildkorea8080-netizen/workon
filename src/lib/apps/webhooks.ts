@@ -14,6 +14,9 @@
 // - 기관 전체 관리자가 외부 연동을 끄면(0068, `webhook-switch.ts`) 호출은 차지 전에 403 — 토큰은 그대로라 다시 켜면 쓴다.
 // - 문서함에서 고른 문서(0063)는 연동에 저장하고 호출마다 지금 근거 판으로 읽는다(`executeWebhook` — 예약과 같은 `currentEditionIds`).
 //   쓸 판이 없으면 422로 거절한다(문서 없이 돌지 않는다). 외부 시스템은 문서를 고르지 않는다.
+// - 외부 시스템은 본문 `files`(`[{ name, content_base64 }]`, 3개·풀어서 3MB까지)로 파일을 함께 보낼 수 있다(2026-11-08). 차지한 뒤
+//   그 직원의 새 첨부로 올려(`attachBytes` — 직접 올리기와 같은 형식·크기·읽기·사용 기록) 그 실행의 대화에 붙인다. 읽지 못하면 422.
+//   파일 내용은 따로 저장하지 않고(대화 첨부로만 남는다) `Idempotency-Key`의 요청 해시에 이름·SHA-256만 넣는다.
 import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
@@ -21,10 +24,13 @@ import { defaultRunAsIo, runAppAs, type RunAsInput, type RunAsOutcome } from './
 import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
 import { agentDocumentRows } from './app-document-choice';
 import {
-  WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
+  WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MAX_BODY_WITH_FILES_BYTES, WEBHOOK_MAX_FILES, WEBHOOK_MAX_FILE_TOTAL_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
   IDEMPOTENCY_HEADER, WEBHOOK_ORG_DISABLED, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
 } from './webhook-spec';
 import { tokenOrgWebhooksDisabled } from './webhook-switch';
+import { attachBytes } from '@/lib/attachments/reuse';
+import { deleteAttachment } from '@/lib/attachments/store';
+import { attachmentExtension } from '@/lib/attachments/limits';
 
 export function hashWebhookToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
@@ -53,7 +59,7 @@ export interface WebhookDeps {
   claim(tokenHash: string, nowMs: number, idempotency?: { key: string; requestHash: string }): Promise<ClaimResult>;
   /** 키 있는 호출의 결과를 남긴다(null이면 지워 같은 키로 다시 시도할 수 있게 — 서버 쪽 실패) */
   recordCall(callId: string, record: CallRecord | null): Promise<void>;
-  execute(webhook: ClaimedWebhook, inputs: Record<string, string>): Promise<RunAsOutcome>;
+  execute(webhook: ClaimedWebhook, inputs: Record<string, string>, files: WebhookFile[]): Promise<RunAsOutcome>;
   finish(id: string, patch: { last_status: 'completed' | 'failed'; last_error: string | null; last_conversation_id: string | null; updated_at: string }): Promise<void>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string | null): Promise<void>;
   now(): number;
@@ -70,6 +76,73 @@ export const REPLAYED_HEADER = 'Idempotent-Replayed';
 export const WEBHOOK_DEPARTMENT_CHANGED = '연동을 만든 직원의 소속 부서가 바뀌었습니다. 연동을 다시 만들어 주세요.';
 export const WEBHOOK_DOCUMENTS_UNAVAILABLE = '연동에 고른 문서를 더 쓸 수 없습니다(지움·읽기 실패·지난 판). 앱 화면에서 문서를 다시 골라 연동을 새로 만들어 주세요.';
 
+/** 외부 시스템이 보낸 파일 하나(풀어 둔 바이트) */
+export type WebhookFile = { name: string; bytes: Buffer };
+export const WEBHOOK_FILES_FORMAT = 'files는 [{ "name": "파일 이름.xlsx", "content_base64": "..." }] 꼴이어야 합니다.';
+export const WEBHOOK_FILE_UNREADABLE = (name: string, reason: string | null) => `보낸 파일 '${name}'을 읽지 못했습니다${reason ? `(${reason})` : ''}.`;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** 본문의 files 읽기(순수) — 꼴·base64·첨부 형식·개수·합계 크기. 없으면 빈 목록 */
+export function parseWebhookFiles(raw: unknown): { ok: true; files: WebhookFile[] } | { ok: false; status: number; message: string } {
+  if (raw === undefined || raw === null) return { ok: true, files: [] };
+  if (!Array.isArray(raw)) return { ok: false, status: 400, message: WEBHOOK_FILES_FORMAT };
+  if (raw.length > WEBHOOK_MAX_FILES) return { ok: false, status: 400, message: `파일은 한 번에 ${WEBHOOK_MAX_FILES}개까지 보낼 수 있습니다.` };
+  const files: WebhookFile[] = [];
+  let total = 0;
+  for (const item of raw) {
+    const { name, content_base64: content } = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    if (typeof name !== 'string' || !name.trim() || name.length > 200 || typeof content !== 'string' || content.length % 4 !== 0 || !BASE64.test(content)) {
+      return { ok: false, status: 400, message: WEBHOOK_FILES_FORMAT };
+    }
+    if (!attachmentExtension(name)) return { ok: false, status: 400, message: `보낼 수 없는 파일 형식입니다: ${name.slice(0, 80)}` };
+    const bytes = Buffer.from(content, 'base64');
+    if (!bytes.length) return { ok: false, status: 400, message: `빈 파일은 보낼 수 없습니다: ${name.slice(0, 80)}` };
+    total += bytes.length;
+    if (total > WEBHOOK_MAX_FILE_TOTAL_BYTES) return { ok: false, status: 413, message: '보내는 파일이 너무 큽니다(합계 3MB까지).' };
+    files.push({ name, bytes });
+  }
+  return { ok: true, files };
+}
+
+export interface WebhookFileIo {
+  attach(actor: { userId: string; departmentId: string; organizationId: string }, file: WebhookFile): ReturnType<typeof attachBytes>;
+  discard(userId: string, attachmentId: string): Promise<unknown>;
+}
+const defaultWebhookFileIo: WebhookFileIo = {
+  attach: (actor, file) => attachBytes(actor, file.name, file.bytes),
+  discard: (userId, id) => deleteAttachment(userId, id),
+};
+
+/** 보낸 파일마다 그 직원의 새 첨부를 올린다. 하나라도 못 하면 만든 첨부를 묘비로 지우고 거절(읽지 못함 422, 그 밖은 발급 상태 그대로) */
+async function attachWebhookFiles(
+  actor: { userId: string; departmentId: string; organizationId: string }, files: WebhookFile[], io: WebhookFileIo
+): Promise<{ ok: true; ids: string[] } | { ok: false; status: number; message: string }> {
+  const ids: string[] = [];
+  for (const file of files) {
+    let failure: { status: number; message: string } | null = null;
+    try {
+      const result = await io.attach(actor, file);
+      if (!result.ok) failure = { status: result.status, message: result.message };
+      else {
+        ids.push(result.attachment.id);
+        if (result.attachment.status !== 'ready') failure = { status: 422, message: WEBHOOK_FILE_UNREADABLE(file.name.slice(0, 80), result.attachment.error) };
+      }
+    } catch {
+      failure = { status: 500, message: '보낸 파일을 올리지 못했습니다. 잠시 뒤 다시 보내 주세요.' };
+    }
+    if (failure) {
+      await discardAll(actor.userId, ids, io);
+      return { ok: false, ...failure };
+    }
+  }
+  return { ok: true, ids };
+}
+
+/** 대화에 묶이지 못한 첨부를 묘비로(묶인 것은 `deleteAttachment`가 건드리지 않는다) */
+async function discardAll(userId: string, ids: string[], io: WebhookFileIo): Promise<void> {
+  for (const id of ids) { try { await io.discard(userId, id); } catch { /* 24시간 정리가 치운다 */ } }
+}
+
 export interface ExecuteWebhookIo {
   /** 연동에 저장한 문서 id */
   documentIdsOf(webhookId: string): Promise<string[]>;
@@ -77,10 +150,15 @@ export interface ExecuteWebhookIo {
   /** 새 판으로 따라갔으면 다음 호출부터 그 id로 */
   saveDocumentIds(webhookId: string, ids: string[]): Promise<void>;
   run(input: RunAsInput): Promise<RunAsOutcome>;
+  /** 보낸 파일 올리기·지우기 — 시험이 바꿔 끼운다 */
+  files?: WebhookFileIo;
 }
 
-/** 연동 한 번 실행 — 고른 문서를 지금 근거 판으로 맞춰 그 직원으로 앱을 돌린다. 쓸 판이 없으면 앱을 돌리지 않고 422 */
-export async function executeWebhook(w: ClaimedWebhook, inputs: Record<string, string>, io: ExecuteWebhookIo): Promise<RunAsOutcome> {
+/**
+ * 연동 한 번 실행 — 고른 문서를 지금 근거 판으로 맞추고, 보낸 파일을 새 첨부로 올려 그 직원으로 앱을 돌린다.
+ * 쓸 판이 없거나 파일을 읽지 못하면 앱을 돌리지 않고 422. 실행이 시작 전에 거절되면 올린 첨부를 묘비로 지운다
+ */
+export async function executeWebhook(w: ClaimedWebhook, inputs: Record<string, string>, io: ExecuteWebhookIo, files: WebhookFile[] = []): Promise<RunAsOutcome> {
   const stored = await io.documentIdsOf(w.id);
   let documentIds: string[] | undefined;
   let followed = false;
@@ -90,7 +168,15 @@ export async function executeWebhook(w: ClaimedWebhook, inputs: Record<string, s
     documentIds = resolved.ids;
     followed = resolved.changed;
   }
-  const outcome = await io.run({ userId: w.user_id, departmentId: w.department_id, agentId: w.agent_id, appVersion: w.app_version, inputs, documentIds });
+  const fileIo = io.files ?? defaultWebhookFileIo;
+  let attachmentIds: string[] | undefined;
+  if (files.length) {
+    const attached = await attachWebhookFiles({ userId: w.user_id, departmentId: w.department_id, organizationId: w.organization_id }, files, fileIo);
+    if (!attached.ok) return { kind: 'rejected', status: attached.status, message: attached.message };
+    attachmentIds = attached.ids;
+  }
+  const outcome = await io.run({ userId: w.user_id, departmentId: w.department_id, agentId: w.agent_id, appVersion: w.app_version, inputs, documentIds, ...(attachmentIds ? { attachmentIds } : {}) });
+  if (attachmentIds && outcome.kind !== 'completed' && outcome.kind !== 'failed') await discardAll(w.user_id, attachmentIds, fileIo);
   if (outcome.kind === 'completed' && followed && documentIds) {
     try { await io.saveDocumentIds(w.id, documentIds); } catch { /* 다음 호출이 다시 따라간다 */ }
   }
@@ -120,14 +206,23 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   if (!token) return fail(401, WEBHOOK_INVALID_TOKEN);
   const idem = parseIdempotencyKey(request.idempotencyKey ?? null);
   if (!idem.ok) return fail(400, idem.message);
-  if (Buffer.byteLength(request.bodyText, 'utf8') > WEBHOOK_MAX_BODY_BYTES) return fail(413, '보내는 내용이 너무 큽니다(64KB까지).');
+  const bodyBytes = Buffer.byteLength(request.bodyText, 'utf8');
+  if (bodyBytes > WEBHOOK_MAX_BODY_WITH_FILES_BYTES) return fail(413, '보내는 내용이 너무 큽니다(파일 합계 3MB·입력 64KB까지).');
   let parsed: unknown;
   try { parsed = request.bodyText ? JSON.parse(request.bodyText) : {}; } catch { return fail(400, '본문은 JSON이어야 합니다 — { "inputs": { "항목 키": "값" } }'); }
-  const inputs = readInputs((parsed as { inputs?: unknown } | null)?.inputs ?? {});
+  const rawInputs = (parsed as { inputs?: unknown } | null)?.inputs ?? {};
+  const parsedFiles = parseWebhookFiles((parsed as { files?: unknown } | null)?.files);
+  if (!parsedFiles.ok) return fail(parsedFiles.status, parsedFiles.message);
+  const files = parsedFiles.files;
+  // 파일이 없는 호출은 예전처럼 본문 64KB, 있으면 입력 부분만 64KB
+  if ((files.length ? Buffer.byteLength(JSON.stringify(rawInputs), 'utf8') : bodyBytes) > WEBHOOK_MAX_BODY_BYTES) return fail(413, '보내는 내용이 너무 큽니다(64KB까지).');
+  const inputs = readInputs(rawInputs);
   if (!inputs) return fail(400, 'inputs는 항목 키와 글·숫자 값의 객체여야 합니다.');
 
   if (await deps.orgDisabled(hashWebhookToken(token), deps.now())) return fail(403, WEBHOOK_ORG_DISABLED);
-  const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs), 'utf8').digest('hex') } : undefined;
+  // 파일은 이름·SHA-256만 해시에 넣는다(파일이 없으면 예전과 같은 해시)
+  const fileDigest = files.map((f) => `\n${f.name}:${createHash('sha256').update(f.bytes).digest('hex')}`).join('');
+  const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs) + fileDigest, 'utf8').digest('hex') } : undefined;
   const claim = await deps.claim(hashWebhookToken(token), deps.now(), idempotency);
   if (!claim.ok) {
     if (claim.reason === 'replay') return replayResponse(claim.call);
@@ -140,7 +235,7 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   const webhook = claim.webhook;
 
   let outcome: RunAsOutcome;
-  try { outcome = await deps.execute(webhook, inputs); }
+  try { outcome = await deps.execute(webhook, inputs, files); }
   catch (error) { outcome = { kind: 'failed', error: '실행 중 오류가 났습니다.', conversationId: null }; await deps.log('error', '앱 연동 실행 오류', { webhook_id: webhook.id, error: errorText(error) }, webhook.organization_id); }
 
   let response: WebhookResponse;
@@ -192,7 +287,7 @@ export function webhookDeps(): WebhookDeps {
       if (error) throw new Error(`app_webhook_claim: ${error.message}`);
       return data as ClaimResult;
     },
-    execute: (w, inputs) => executeWebhook(w, inputs, {
+    execute: (w, inputs, files) => executeWebhook(w, inputs, {
       async documentIdsOf(id) {
         const { data, error } = await supabaseAdmin.from('app_webhooks').select('document_ids').eq('id', id).maybeSingle();
         if (error) throw new Error(`app_webhooks documents: ${error.message}`);
@@ -204,7 +299,7 @@ export function webhookDeps(): WebhookDeps {
         if (error) throw new Error(`app_webhooks documents save: ${error.message}`);
       },
       run: (input) => runAppAs(input, WEBHOOK_TITLE_PREFIX, defaultRunAsIo()),
-    }),
+    }, files),
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_webhooks').update(patch).eq('id', id);
       if (error) throw new Error(`app_webhooks finish: ${error.message}`);

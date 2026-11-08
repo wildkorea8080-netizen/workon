@@ -283,8 +283,10 @@ export function scheduleSuccessMail(params: {
   finishedAt: Date;
   resultUrl: string;
   schedulesUrl: string;
+  /** 결과 한글 파일(0071) — 있으면 '한글 파일 받기' 단추(로그인한 주인만 받는다) */
+  fileUrl?: string;
 }): { subject: string; html: string } {
-  const { appName, description, nextRunAt, finishedAt, resultUrl, schedulesUrl } = params;
+  const { appName, description, nextRunAt, finishedAt, resultUrl, schedulesUrl, fileUrl } = params;
   const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
   const rows: Array<[string, string]> = [
     ['앱', appName],
@@ -302,6 +304,7 @@ export function scheduleSuccessMail(params: {
       `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
        <p style="font-size:15px;line-height:1.7">AI가 작성한 결과입니다. 로그인해 내용을 검토한 뒤 사용해 주세요. 결과 글은 메일에 싣지 않습니다.</p>
        ${button(resultUrl, '결과 보기')}
+       ${fileUrl ? button(fileUrl, '한글 파일 받기') : ''}
        <p style="font-size:13px;line-height:1.7;color:#64748b">이 메일을 그만 받으려면 <a href="${escapeHtml(schedulesUrl)}">앱 예약</a>에서 예약을 고쳐 '완료 메일 받기'를 끄세요.</p>`
     ),
   };

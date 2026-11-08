@@ -8,7 +8,8 @@
 //   차지가 15분 넘게 남아 있으면(함수가 죽음) 멈춘 차지로 보고 다시 잡는다. 같은 시각이 두 번 돌지 않게 다음 시각은 '지금 뒤'로 센다.
 // - **멈춤**: 앱 설정이 바뀌었거나(판 다름) 앱을 쓸 수 없거나(권한·삭제) 직원 계정을 쓸 수 없으면 예약을 멈추고 이유를 적는다. 그 밖의 실패(한도·모델 오류)는
 //   다음 차례에 다시 하고, 연속 3회 실패하면 멈춘다. 실패·멈춤은 예약한 직원에게 메일로 알린다(메일이 설정돼 있을 때 — 주소는 기록에 남기지 않는다).
-// - 올린 파일은 예약할 수 없다(첨부는 한 대화에 묶이고 서명 주소가 짧다). 문서함에서 고른 문서(0062)는 id로 저장하고 실행 때마다 다시 읽으며,
+// - 올린 파일(0073)은 예약이 사본을 따로 갖고 실행 때마다 새 첨부로 다시 올려 붙인다(`schedule-files.ts` — 못 올리면 '실패').
+//   문서함에서 고른 문서(0062)는 id로 저장하고 실행 때마다 다시 읽으며,
 //   새 판이 근거가 되면 새 판을 쓴다(`currentEditionIds`). 쓸 판이 없으면 예약을 멈춘다. 실행기는 `/api/cron/app-schedules`(CRON_SECRET)이고 pg_cron이 5분마다 부른다.
 //   Vercel Hobby 예약 작업은 하루 한 번·2개까지라 쓰지 않는다 — docs/benchmarks/allganize/APP_SCHEDULES.md.
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -19,6 +20,9 @@ import { defaultRunAsIo, runAppAs, type RunAsIo } from './run-as';
 import { SCHEDULE_CLAIM_STALE_MS, describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
 import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
 import { agentDocumentRows } from './app-document-choice';
+import { readScheduleSwitch } from './webhook-switch';
+import { saveScheduledResultFile } from './schedule-result-file';
+import { attachScheduleFiles, discardAttachments, scheduleFilesOf, type ScheduleFileIo } from './schedule-files';
 
 export const SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
 export { SCHEDULE_CLAIM_STALE_MS } from './schedule-spec';
@@ -59,8 +63,12 @@ export interface ScheduleDeps {
   execute(row: AppScheduleRow, deadlineAt: number): Promise<ScheduleOutcome>;
   finish(id: string, patch: SchedulePatch): Promise<void>;
   notifyFailure(row: AppScheduleRow, info: { error: string; paused: boolean; nextRunAt: string | null }): Promise<void>;
+  /** 기관 전체 관리자가 예약 실행을 꺼 두었는가(0070) — 읽지 못하면 던진다 */
+  orgDisabled(organizationId: string): Promise<boolean>;
   /** 실행을 마쳤을 때 — 직원이 '완료 메일'을 고른 예약만(0069). 결과 글은 싣지 않고 결과 보기 링크만 */
-  notifySuccess(row: AppScheduleRow, info: { conversationId: string | null; nextRunAt: string | null }): Promise<void>;
+  notifySuccess(row: AppScheduleRow, info: { conversationId: string | null; nextRunAt: string | null; fileId: string | null }): Promise<void>;
+  /** 결과를 한글 파일로도 만든다(0071) — 직원이 고른 예약만. 만든 파일 id(만들 수 없는 결과면 null), DB·저장 오류는 던진다 */
+  exportResult(row: AppScheduleRow, conversationId: string): Promise<string | null>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string): Promise<void>;
   now(): number;
 }
@@ -72,8 +80,10 @@ export interface ScheduleRun {
   failed: number;
   /** 이번 실행으로 멈춘 예약 수(실패 누적·앱 변경 등) */
   paused: number;
-  /** 다른 실행기가 먼저 차지해 건너뜀 */
+  /** 다른 실행기가 먼저 차지했거나 기관 스위치를 읽지 못해 건너뜀(다음 호출에 다시 본다) */
   skipped: number;
+  /** 기관이 예약 실행을 꺼 두어 실행하지 않고 다음 차례로 넘김(0070) — 실패로 세지 않는다 */
+  held: number;
   /** 시간 예산에 닿아 남은 예약을 다음 호출에 넘겼다 */
   partial: boolean;
 }
@@ -100,14 +110,41 @@ export function finishPatch(row: AppScheduleRow, outcome: ScheduleOutcome, nowMs
   };
 }
 
+/** 기관이 예약 실행을 꺼 둔 차례 — 실행하지 않고 다음 차례로만 넘긴다(실행 횟수·결과·실패 수는 그대로) */
+export function heldPatch(row: AppScheduleRow, nowMs: number): SchedulePatch {
+  const now = new Date(nowMs).toISOString();
+  return { claimed_at: null, updated_at: now, next_run_at: nextRunAt(specOfRow(row), nowMs).toISOString() };
+}
+
 /** 차례가 된 예약을 차지해 하나씩 실행한다. 한 예약의 실패가 다른 예약을 막지 않는다 */
 export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> {
   const started = deps.now();
-  const result: ScheduleRun = { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, partial: false };
+  const result: ScheduleRun = { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, held: 0, partial: false };
   const rows = await deps.due(started, SCHEDULE_BATCH);
+  // 기관 스위치(0070)는 한 번 불릴 때 기관마다 한 번만 읽는다
+  const switches = new Map<string, Promise<boolean>>();
   for (const row of rows) {
     if (deps.now() - started > SCHEDULE_RUN_BUDGET_MS) { result.partial = true; break; }
     result.checked++;
+    let orgDisabled: boolean;
+    try {
+      let pending = switches.get(row.organization_id);
+      if (!pending) { pending = deps.orgDisabled(row.organization_id); switches.set(row.organization_id, pending); }
+      orgDisabled = await pending;
+    } catch (error) {
+      // 읽지 못하면 실행도 넘기기도 하지 않는다 — 차지하지 않아 다음 호출(5분 뒤)에 다시 본다
+      await deps.log('warning', '기관 예약 스위치를 읽지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id);
+      result.skipped++; continue;
+    }
+    if (orgDisabled) {
+      let claimedHeld = false;
+      try { claimedHeld = await deps.claim(row.id, deps.now()); }
+      catch (error) { await deps.log('warning', '앱 예약을 차지하지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id); continue; }
+      if (!claimedHeld) { result.skipped++; continue; }
+      try { await deps.finish(row.id, heldPatch(row, deps.now())); result.held++; }
+      catch (error) { await deps.log('error', '앱 예약을 다음 차례로 넘기지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id); }
+      continue;
+    }
     let claimed = false;
     try { claimed = await deps.claim(row.id, deps.now()); }
     catch (error) { await deps.log('warning', '앱 예약을 차지하지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id); continue; }
@@ -126,8 +163,13 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
 
     if (outcome.kind === 'completed') {
       result.completed++;
+      let fileId: string | null = null;
+      if (row.export_hwpx === true && outcome.conversationId) {
+        try { fileId = await deps.exportResult(row, outcome.conversationId); }
+        catch (exportError) { await deps.log('warning', '앱 예약 결과 한글 파일을 만들지 못함', { schedule_id: row.id, error: errorText(exportError) }, row.organization_id); }
+      }
       if (row.notify_on_success === true) {
-        try { await deps.notifySuccess(row, { conversationId: outcome.conversationId ?? null, nextRunAt: patch.next_run_at ?? null }); }
+        try { await deps.notifySuccess(row, { conversationId: outcome.conversationId ?? null, nextRunAt: patch.next_run_at ?? null, fileId }); }
         catch (notifyError) { await deps.log('warning', '앱 예약 완료 알림을 보내지 못함', { schedule_id: row.id, error: errorText(notifyError) }, row.organization_id); }
       }
       continue;
@@ -143,7 +185,7 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
 }
 
 /** 예약 실행의 바깥 입출력 — 공용 `runAppAs`와 같고, 고른 문서가 있으면 그 비서의 문서 행을 읽는다(시험이 바꿔 끼운다) */
-export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]> };
+export type ExecuteIo = RunAsIo & { documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>; files?: ScheduleFileIo };
 
 
 /**
@@ -161,7 +203,17 @@ export async function executeSchedule(row: AppScheduleRow, io: ExecuteIo = defau
     documentIds = resolved.ids;
     followed = resolved.changed;
   }
-  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, documentIds, ...(deadlineAt !== undefined ? { deadlineAt } : {}) }, SCHEDULE_TITLE_PREFIX, io);
+  // 올린 파일(0073) — 사본마다 새 첨부를 올린다. 못 하면 '실패'(다음 차례에 다시, 연속 3회면 멈춤)
+  let attachmentIds: string[] | undefined;
+  const files = scheduleFilesOf(row.files);
+  if (files.length) {
+    const attached = await attachScheduleFiles({ userId: row.user_id, departmentId: row.department_id, organizationId: row.organization_id }, files, io.files);
+    if (!attached.ok) return { kind: 'failed', error: attached.error };
+    attachmentIds = attached.ids;
+  }
+  const outcome = await runAppAs({ userId: row.user_id, departmentId: row.department_id, agentId: row.agent_id, appVersion: row.app_version, inputs: row.inputs, documentIds, attachmentIds, ...(deadlineAt !== undefined ? { deadlineAt } : {}) }, SCHEDULE_TITLE_PREFIX, io);
+  // 시작 전에 끝났으면 올린 첨부가 대화에 묶이지 않았다 — 묘비로 지운다(묶인 것은 건드리지 않음)
+  if (attachmentIds?.length && outcome.kind !== 'completed' && outcome.kind !== 'failed') await discardAttachments(row.user_id, attachmentIds, io.files);
   switch (outcome.kind) {
     case 'completed': return { kind: 'completed', conversationId: outcome.conversationId, ...(followed ? { documentIds } : {}) };
     case 'user_unavailable': return { kind: 'pause', reason: PAUSED_USER_UNAVAILABLE };
@@ -213,6 +265,10 @@ export function scheduleDeps(): ScheduleDeps {
       const sent = await sendScheduleFailureEmail(to, mail);
       if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
     },
+    exportResult: (row, conversationId) => saveScheduledResultFile(row, conversationId),
+    async orgDisabled(organizationId) {
+      return (await readScheduleSwitch(organizationId)).disabled;
+    },
     async notifySuccess(row, info) {
       if (!isMailConfigured()) return;
       const [{ data: user }, { data: agent }] = await Promise.all([
@@ -225,6 +281,7 @@ export function scheduleDeps(): ScheduleDeps {
         appName: agent?.name ?? '입력형 앱', description: describeSchedule(specOfRow(row)), nextRunAt: info.nextRunAt, finishedAt: new Date(),
         resultUrl: info.conversationId ? `${APP_URL}/chat?conv=${encodeURIComponent(info.conversationId)}` : `${APP_URL}/apps/history?agent=${encodeURIComponent(row.agent_id)}`,
         schedulesUrl: `${APP_URL}/apps/schedules`,
+        ...(info.fileId ? { fileUrl: `${APP_URL}/api/files/${encodeURIComponent(info.fileId)}` } : {}),
       });
       const sent = await sendScheduleSuccessEmail(to, mail);
       if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');

@@ -6,25 +6,25 @@ import { APP_MAX_FILES, type AppDefinition } from '@/lib/apps/definition';
 import { LIBRARY_DOCUMENT_COLUMNS, parseLibraryIds, selectableLibraryDocuments, type LibraryDocumentRow } from '@/lib/apps/library-documents';
 
 /**
- * 요청의 문서 고르기 검사(순수) — 꼴, 앱이 문서 고르기를 받는지, 파일이 필수인 앱이면 문서가 있는지, 3개 상한.
- * `noun`은 안내 글의 '예약'·'연동'
+ * 요청의 문서 고르기 검사(순수) — 꼴, 앱이 문서 고르기를 받는지, 파일이 필수인 앱이면(예약만) 문서나 올린 파일이 있는지, 합쳐 3개 상한.
+ * 연동은 파일이 필수인 앱도 만들 수 있다 — 외부 시스템이 호출마다 `files`로 보낸다(2026-11-08).
+ * `noun`은 안내 글의 '예약'·'연동'. `fileCount`는 예약이 함께 저장할 올린 파일 수(0073 — 연동은 언제나 0)
  */
 export function appDocumentChoice(
   attachments: AppDefinition['attachments'],
   raw: unknown,
-  noun: '예약' | '연동'
+  noun: '예약' | '연동',
+  fileCount = 0
 ): { ok: true; ids: string[] } | { ok: false; message: string } {
   const ids = parseLibraryIds(raw);
   if (ids === null) return { ok: false, message: '고른 문서를 확인해 주세요.' };
   const library = attachments?.library === true;
   if (ids.length && !library) return { ok: false, message: '이 앱은 문서함에서 문서를 고를 수 없습니다.' };
-  if (attachments?.required && !ids.length) {
-    return {
-      ok: false,
-      message: library
-        ? `파일이 필요한 앱은 문서함에서 문서를 골라야 ${noun}할 수 있습니다(올린 파일은 ${noun}에 쓸 수 없습니다).`
-        : `파일 첨부가 필수인 앱은 ${noun}할 수 없습니다.`,
-    };
+  if (fileCount && !attachments) return { ok: false, message: '이 앱은 파일 입력을 받지 않습니다.' };
+  if (fileCount && fileCount + ids.length > APP_MAX_FILES) return { ok: false, message: `${noun}에는 파일·문서를 합쳐 ${APP_MAX_FILES}개까지 저장할 수 있습니다.` };
+  if (attachments?.required && !ids.length && !fileCount) {
+    // 연동은 외부 시스템이 호출마다 파일을 보낼 수 있다(2026-11-08) — 보내지 않으면 실행기가 그 호출을 400으로 거절한다
+    if (noun === '예약') return { ok: false, message: library ? '파일이 필요한 앱은 파일을 붙이거나 문서함에서 문서를 골라야 예약할 수 있습니다.' : '파일이 필요한 앱은 파일을 붙여야 예약할 수 있습니다.' };
   }
   if (ids.length > APP_MAX_FILES) return { ok: false, message: `${noun}에는 문서를 ${APP_MAX_FILES}개까지 고를 수 있습니다.` };
   return { ok: true, ids };

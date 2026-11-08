@@ -59,8 +59,8 @@ export type AdminScheduleView = {
 };
 /** 예약 실행기 상태(`schedule-health.ts`) — 실행기 도장은 서비스 전체, 숫자는 관리 범위 안 예약만. 읽지 못하면 null */
 export type AdminRunnerStatus = { alive: boolean; lastRunAt: string | null; overdueCount: number; stuckClaimCount: number; problems: string[] };
-/** `webhookSwitch` — 기관 전체 외부 연동 스위치(0068). 읽지 못하면 null(목록은 보인다) */
-export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null };
+/** `webhookSwitch`·`scheduleSwitch` — 기관 전체 외부 연동(0068)·예약(0070) 스위치. 읽지 못하면 null(목록은 보인다) */
+export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null; scheduleSwitch: WebhookSwitchView | null };
 
 const appLabel = (agent: AgentJoin | null) => (!agent ? '삭제된 앱' : agent.tier === 'personal' ? PERSONAL_APP_LABEL : agent.name);
 const ownerLabel = (owner: UserJoin | null) => (!owner ? '알 수 없음' : owner.deleted_at ? `${owner.full_name ?? '이름 없음'}(탈퇴)` : owner.full_name ?? '이름 없음');

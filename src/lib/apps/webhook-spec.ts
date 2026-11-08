@@ -14,6 +14,11 @@ export const WEBHOOK_DAILY_LIMIT = 100;
 export const WEBHOOK_EXPIRY_DAYS = [30, 90, 365] as const;
 /** 호출 본문 상한 — 입력 전체 16,000자(renderAppInput)에 JSON 여유를 둔다 */
 export const WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
+/** 외부 시스템이 함께 보내는 파일(2026-11-08) — 3개까지, 풀어서 합계 3MB(base64로 4MB, 서버리스 요청 본문 상한 4.5MB 안) */
+export const WEBHOOK_MAX_FILES = 3;
+export const WEBHOOK_MAX_FILE_TOTAL_BYTES = 3 * 1024 * 1024;
+/** 파일이 있는 호출의 본문 상한 — base64(4/3) + 입력 64KB + JSON 여유 */
+export const WEBHOOK_MAX_BODY_WITH_FILES_BYTES = 4_300_000;
 export const WEBHOOK_TITLE_PREFIX = '[연동] ';
 /** 기관 전체 외부 연동 스위치(0068)가 꺼져 있을 때 — 외부 호출 403·새 연동 거절·직원 목록 안내에 같은 문구 */
 export const WEBHOOK_ORG_DISABLED = '기관 관리자가 외부 연동(Webhook)을 꺼 두었습니다. 다시 켤 때까지 연동으로 앱을 실행할 수 없습니다.';
@@ -96,7 +101,7 @@ export function webhookView(row: AppWebhookRowLike, appName: string | null, nowM
 }
 
 /** 화면에 보일 호출 예시(토큰은 만든 직후 한 번만 보인다) */
-export function webhookCurlExample(origin: string, token: string, inputs: Record<string, string>): string {
-  const body = JSON.stringify({ inputs }).replace(/'/g, "'\\''");
+export function webhookCurlExample(origin: string, token: string, inputs: Record<string, string>, withFile = false): string {
+  const body = JSON.stringify(withFile ? { inputs, files: [{ name: '자료.xlsx', content_base64: '파일을 base64로' }] } : { inputs }).replace(/'/g, "'\\''");
   return `curl -X POST '${origin}/api/apps/webhook' \\\n  -H 'Authorization: Bearer ${token}' \\\n  -H 'Content-Type: application/json' \\\n  -H '${IDEMPOTENCY_HEADER}: 요청마다-다른-값' \\\n  -d '${body}'`;
 }

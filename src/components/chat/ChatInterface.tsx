@@ -713,7 +713,7 @@ export default function ChatInterface({
             {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && <AnswerFeedback messageId={msg.savedId} initial={msg.feedback ?? null} />}
             {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
             {conversationId && msg.role === 'assistant' && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
-            {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} />}
+            {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} defaultTemplateId={(selectedAgent.app_definition as { exportTemplateId?: string } | null | undefined)?.exportTemplateId} />}
             </div>
           ))
         )}

@@ -15,7 +15,9 @@ export type SecurityEventType =
   | 'app_schedule_paused'
   | 'app_schedule_unlocked'
   | 'app_webhooks_org_disabled'
-  | 'app_webhooks_org_enabled';
+  | 'app_webhooks_org_enabled'
+  | 'app_schedules_org_disabled'
+  | 'app_schedules_org_enabled';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(

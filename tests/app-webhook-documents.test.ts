@@ -48,8 +48,14 @@ describe('문서 고르기 검사(appDocumentChoice — 예약·연동 공용)',
     expect(appDocumentChoice({ required: false, library: true }, [A.toUpperCase()], '연동')).toEqual({ ok: true, ids: [A] });
     expect(appDocumentChoice(undefined, undefined, '연동')).toEqual({ ok: true, ids: [] });
     expect(appDocumentChoice({ required: false }, [A], '연동')).toMatchObject({ ok: false, message: '이 앱은 문서함에서 문서를 고를 수 없습니다.' });
-    expect(appDocumentChoice({ required: true, library: true }, [], '연동')).toMatchObject({ ok: false, message: expect.stringContaining('연동할 수 있습니다') });
-    expect(appDocumentChoice({ required: true }, [], '예약')).toMatchObject({ ok: false, message: '파일 첨부가 필수인 앱은 예약할 수 없습니다.' });
+    // 연동은 파일이 필요한 앱도 만든다 — 외부 시스템이 호출마다 files로 보낸다(2026-11-08)
+    expect(appDocumentChoice({ required: true, library: true }, [], '연동')).toEqual({ ok: true, ids: [] });
+    expect(appDocumentChoice({ required: true }, [], '연동')).toEqual({ ok: true, ids: [] });
+    // 예약은 올린 파일 사본을 가질 수 있다(0073) — 파일 수를 함께 센다
+    expect(appDocumentChoice({ required: true }, [], '예약')).toMatchObject({ ok: false, message: '파일이 필요한 앱은 파일을 붙여야 예약할 수 있습니다.' });
+    expect(appDocumentChoice({ required: true }, [], '예약', 1)).toEqual({ ok: true, ids: [] });
+    expect(appDocumentChoice({ required: true, library: true }, [A, B], '예약', 2)).toMatchObject({ ok: false, message: '예약에는 파일·문서를 합쳐 3개까지 저장할 수 있습니다.' });
+    expect(appDocumentChoice(undefined, [], '예약', 1)).toMatchObject({ ok: false, message: '이 앱은 파일 입력을 받지 않습니다.' });
     expect(appDocumentChoice({ required: false, library: true }, [A, B, '11111111-0000-4000-8000-00000000000c', '11111111-0000-4000-8000-00000000000d'], '연동').ok).toBe(false);
     expect(appDocumentChoice({ required: false, library: true }, [A, A], '연동').ok).toBe(false);
   });
@@ -113,14 +119,10 @@ describe('POST /api/apps/webhooks — 고른 문서', () => {
     expect(inserted.document_ids).toEqual([A]);
   });
 
-  it('거절: 문서 없이 필수 앱, 고를 수 없는 문서, 파일 필수 비문서함 앱은 예전 문구', async () => {
-    state.results.agents = [{ data: agentRow({ required: true, library: true }) }];
-    expect((await post({})).status).toBe(400);
+  it('거절: 고를 수 없는 문서 — 파일이 필요한 앱은 문서 없이도 만든다(호출마다 파일을 보냄)', async () => {
     state.results.agents = [{ data: agentRow({ required: false, library: true }) }];
     state.results.documents = [{ data: [doc({ id: A, visibility: 'department', department_id: 'secret' })] }];
     expect((await post({ document_ids: [A] })).status).toBe(400);
-    state.results.agents = [{ data: agentRow({ required: true }) }];
-    expect((await (await post({})).json()).error.message).toBe('파일 첨부가 필수인 앱은 연동할 수 없습니다.');
     expect(state.calls.some(c => c[0] === 'app_webhooks' && c[1] === 'insert')).toBe(false);
   });
 });
@@ -132,7 +134,7 @@ describe('연결 (원본)', () => {
     expect(readFileSync('src/app/apps/webhooks/page.tsx', 'utf8')).toContain('w.documentCount > 0');
     expect(readFileSync('src/lib/apps/webhook-spec.ts', 'utf8')).toContain('app_version, document_ids, name');
     // 예약 만들기·고치기는 같은 검사 함수를 거친다(2026-11-08)
-    expect(readFileSync('src/lib/apps/schedule-request.ts', 'utf8')).toContain("appDocumentChoice(definition.value.attachments, body.document_ids, '예약')");
+    expect(readFileSync('src/lib/apps/schedule-request.ts', 'utf8')).toContain("appDocumentChoice(definition.value.attachments, body.document_ids, '예약', keptFileCount + attachmentIds.length)");
     for (const route of ['src/app/api/apps/schedules/route.ts', 'src/app/api/apps/schedules/[id]/route.ts']) expect(readFileSync(route, 'utf8')).toContain('checkScheduleRequest(');
   });
 });

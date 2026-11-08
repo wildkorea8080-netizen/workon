@@ -78,7 +78,8 @@ export function repeatsFiles(repeat: AppRepeat | undefined): repeat is { files: 
 }
 export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify; repeat?: AppRepeat };
 /** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
-export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean } };
+/** `exportTemplateId`(2026-11-08) — 결과 한글 파일의 기본 양식: 이 앱 비서에 올린 HWPX 양식 id. 쓸 때 그 앱의 지금 양식인지 다시 보고, 아니면 표준 보고서 */
+export type AppDefinition = { schemaVersion: 1; fields: AppField[]; output: 'paragraphs' | 'bullets' | 'checklist'; steps?: AppStep[]; attachments?: { required: boolean; library?: boolean }; exportTemplateId?: string };
 export const APP_MAX_FILES = 3;
 export const APP_MAX_RULES = 3;
 export const APP_MAX_BRANCHES = 3;
@@ -248,6 +249,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
   if (raw === null) return { ok: true, value: null };
   if (!object(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.fields) || raw.fields.length < 1 || raw.fields.length > 8 || !['paragraphs', 'bullets', 'checklist'].includes(String(raw.output))) return { ok: false, message: '입력 항목은 1~8개이며 지원하는 응답 형식을 선택해야 합니다.' };
   if (raw.attachments !== undefined && (!object(raw.attachments) || typeof raw.attachments.required !== 'boolean' || (raw.attachments.library !== undefined && typeof raw.attachments.library !== 'boolean'))) return { ok: false, message: '파일 첨부 설정을 확인해 주세요.' };
+  if (raw.exportTemplateId !== undefined && (typeof raw.exportTemplateId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw.exportTemplateId))) return { ok: false, message: '결과 한글 파일 양식을 확인해 주세요.' };
   const fields: AppField[] = [];
   for (const f of raw.fields) {
     if (!object(f) || typeof f.key !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(f.key) || fields.some(x => x.key === f.key) || typeof f.label !== 'string' || !f.label.trim() || fields.some(x => x.label === (f.label as string).trim()) || f.label.length > 60 || /[\r\n]/.test(f.label) || !['text', 'textarea', 'number', 'date', 'select'].includes(String(f.type)) || typeof f.required !== 'boolean') return { ok: false, message: '입력 항목의 이름·종류·필수 여부를 확인해 주세요.' };
@@ -353,7 +355,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
     if (steps[steps.length - 1].repeat) return { ok: false, message: '마지막 결과 작성 단계는 반복할 수 없습니다. 반복은 앞 단계에 두세요.' };
     if (steps[steps.length - 1].classify) return { ok: false, message: '마지막 결과 작성 단계는 분류 단계로 둘 수 없습니다. 분류는 앞 단계에 두세요.' };
   }
-  return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}) } };
+  return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}), ...(typeof raw.exportTemplateId === 'string' ? { exportTemplateId: raw.exportTemplateId.toLowerCase() } : {}) } };
 }
 
 export function renderAppInput(def: AppDefinition, raw: unknown): { ok: true; message: string; inputs: Record<string, string> } | { ok: false; message: string } {

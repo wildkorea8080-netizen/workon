@@ -29,15 +29,29 @@ function askReason(question: string): string | null {
   return parsed.reason;
 }
 
+const SWITCH_TEXT = {
+  webhooks: {
+    name: '외부 연동', subject: '외부 연동이', on: '외부 연동: 켜짐',
+    offDetail: '외부 호출은 모두 거절되고 새 연동을 만들 수 없습니다. 토큰은 그대로라 다시 켜면 이어 씁니다.',
+    onDetail: '보안 점검·사고 대응 때 기관의 모든 외부 호출을 한 번에 막을 수 있습니다(토큰은 회수하지 않음). 하나씩 영구히 막으려면 아래에서 회수하세요.',
+  },
+  schedules: {
+    name: '앱 예약', subject: '앱 예약 실행이', on: '앱 예약 실행: 켜짐',
+    offDetail: '예약은 실행되지 않고 다음 차례로 넘어갑니다(실패로 세지 않음). 새 예약은 만들 수 없습니다. 직원의 예약 설정은 그대로라 다시 켜면 다음 차례부터 돕니다.',
+    onDetail: '비용 점검·모델 장애·사고 대응 때 기관의 모든 예약 실행을 한 번에 멈출 수 있습니다(예약은 지우지 않음). 하나씩 멈추려면 아래 목록에서 멈추세요.',
+  },
+} as const;
+
 /**
- * 기관 전체 외부 연동 스위치(0068) — 켜짐·꺼짐(끈 때·사유)을 보이고, 기관 전체를 관리하는 관리자만 끄고 켠다(서버가 다시 본다).
- * 꺼도 토큰은 회수하지 않는다
+ * 기관 전체 자동 실행 스위치 — 외부 연동(0068)·앱 예약(0070). 켜짐·꺼짐(끈 때·사유)을 보이고, 기관 전체를 관리하는 관리자만 끄고 켠다(서버가 다시 본다).
+ * 꺼도 토큰·예약은 지우지 않는다
  */
-export function OrgWebhookSwitch({ view, busy, onToggle }: { view: WebhookSwitchView; busy: boolean; onToggle: (enable: boolean) => void }) {
+export function OrgAutomationSwitch({ kind, view, busy, onToggle }: { kind: 'webhooks' | 'schedules'; view: WebhookSwitchView; busy: boolean; onToggle: (enable: boolean) => void }) {
+  const t = SWITCH_TEXT[kind];
   return (
-    <div role="group" aria-label="기관 전체 외부 연동" className={`mb-4 rounded-xl border p-4 text-sm ${view.disabled ? 'border-red-200 bg-red-50 text-red-900' : 'border-slate-200 bg-white text-slate-700'}`}>
+    <div role="group" aria-label={`기관 전체 ${t.name}`} className={`mb-4 rounded-xl border p-4 text-sm ${view.disabled ? 'border-red-200 bg-red-50 text-red-900' : 'border-slate-200 bg-white text-slate-700'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="font-semibold">{view.disabled ? '기관 전체 외부 연동이 꺼져 있습니다' : '기관 전체 외부 연동: 켜짐'}</p>
+        <p className="font-semibold">{view.disabled ? `기관 전체 ${t.subject} 꺼져 있습니다` : `기관 전체 ${t.on}`}</p>
         {view.canChange && (
           <button type="button" disabled={busy} onClick={() => onToggle(view.disabled)}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${view.disabled ? 'bg-[#003087] text-white' : 'border border-red-300 text-red-700'}`}>
@@ -46,11 +60,16 @@ export function OrgWebhookSwitch({ view, busy, onToggle }: { view: WebhookSwitch
         )}
       </div>
       {view.disabled
-        ? <p className="mt-1 text-xs leading-5">{kst(view.disabledAt)}에 껐습니다 — {view.reason ?? '사유 없음'}. 외부 호출은 모두 거절되고 새 연동을 만들 수 없습니다. 토큰은 그대로라 다시 켜면 이어 씁니다.</p>
-        : <p className="mt-1 text-xs leading-5 text-slate-500">보안 점검·사고 대응 때 기관의 모든 외부 호출을 한 번에 막을 수 있습니다(토큰은 회수하지 않음). 하나씩 영구히 막으려면 아래에서 회수하세요.</p>}
+        ? <p className="mt-1 text-xs leading-5">{kst(view.disabledAt)}에 껐습니다 — {view.reason ?? '사유 없음'}. {t.offDetail}</p>
+        : <p className="mt-1 text-xs leading-5 text-slate-500">{t.onDetail}</p>}
       {!view.canChange && <p className="mt-1 text-xs text-slate-500">끄고 켜기는 기관 전체를 관리하는 관리자(최상위 부서 소속)만 할 수 있습니다.</p>}
     </div>
   );
+}
+
+/** 기관 전체 외부 연동 스위치(0068) — `OrgAutomationSwitch`의 연동 쪽 */
+export function OrgWebhookSwitch(props: { view: WebhookSwitchView; busy: boolean; onToggle: (enable: boolean) => void }) {
+  return <OrgAutomationSwitch kind="webhooks" {...props} />;
 }
 
 /** 관리자용 앱 예약·연동 현황 — 회수·멈춤·잠금 풀기 */
@@ -82,17 +101,21 @@ export default function AppAutomationAdmin() {
     setBusy(null);
   }
 
-  async function toggleOrgWebhooks(enable: boolean) {
-    const reason = askReason(enable
-      ? '기관 전체 외부 연동(Webhook)을 다시 켤까요? 쓰는 중인 연동 토큰이 곧바로 다시 실행됩니다.'
-      : '기관 전체 외부 연동(Webhook)을 끌까요? 모든 외부 호출이 거절되고 새 연동도 만들 수 없습니다. 토큰은 회수하지 않아 다시 켜면 그대로 씁니다.');
+  async function toggleOrgSwitch(kind: 'webhooks' | 'schedules', enable: boolean) {
+    const reason = askReason(kind === 'webhooks'
+      ? (enable
+        ? '기관 전체 외부 연동(Webhook)을 다시 켤까요? 쓰는 중인 연동 토큰이 곧바로 다시 실행됩니다.'
+        : '기관 전체 외부 연동(Webhook)을 끌까요? 모든 외부 호출이 거절되고 새 연동도 만들 수 없습니다. 토큰은 회수하지 않아 다시 켜면 그대로 씁니다.')
+      : (enable
+        ? '기관 전체 앱 예약 실행을 다시 켤까요? 켜진 예약이 다음 차례부터 다시 돕니다.'
+        : '기관 전체 앱 예약 실행을 끌까요? 모든 예약이 실행되지 않고 다음 차례로 넘어가며 새 예약도 만들 수 없습니다. 예약은 지우지 않습니다.'));
     if (!reason) return;
-    setBusy('org-webhooks'); setError(null);
+    setBusy(`org-${kind}`); setError(null);
     try {
-      const res = await fetch('/api/admin/app-automations/webhook-switch', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enable, reason }) });
+      const res = await fetch(`/api/admin/app-automations/${kind === 'webhooks' ? 'webhook' : 'schedule'}-switch`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enable, reason }) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) setError(body?.error?.message ?? '처리하지 못했습니다.');
-      else setData((d) => (d ? { ...d, webhookSwitch: body.data } : d));
+      else setData((d) => (d ? { ...d, [kind === 'webhooks' ? 'webhookSwitch' : 'scheduleSwitch']: body.data } : d));
     } catch { setError('처리하지 못했습니다.'); }
     setBusy(null);
   }
@@ -141,7 +164,7 @@ export default function AppAutomationAdmin() {
       <div>
         <h2 className="text-lg font-semibold text-slate-900">외부 시스템 연동(Webhook)</h2>
         <p className="text-sm text-slate-500 mt-0.5 mb-3">외부 시스템이 이 토큰으로 직원 권한으로 앱을 실행합니다. 퇴사·유출·용도 종료 때 회수하세요.</p>
-        {data.webhookSwitch && <OrgWebhookSwitch view={data.webhookSwitch} busy={busy === 'org-webhooks'} onToggle={(enable) => void toggleOrgWebhooks(enable)} />}
+        {data.webhookSwitch && <OrgAutomationSwitch kind="webhooks" view={data.webhookSwitch} busy={busy === 'org-webhooks'} onToggle={(enable) => void toggleOrgSwitch('webhooks', enable)} />}
         {webhooks.length ? (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="min-w-full text-sm">
@@ -177,6 +200,7 @@ export default function AppAutomationAdmin() {
       <div>
         <h2 className="text-lg font-semibold text-slate-900">앱 예약</h2>
         <p className="text-sm text-slate-500 mt-0.5 mb-3">직원이 저장한 입력으로 정해진 시각에 앱이 돕니다. 관리자가 멈추면 직원은 다시 켜지 못하고, 잠금을 풀면 직원이 다시 켤 수 있습니다.</p>
+        {data.scheduleSwitch && <OrgAutomationSwitch kind="schedules" view={data.scheduleSwitch} busy={busy === 'org-schedules'} onToggle={(enable) => void toggleOrgSwitch('schedules', enable)} />}
         {schedules.length ? (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table className="min-w-full text-sm">

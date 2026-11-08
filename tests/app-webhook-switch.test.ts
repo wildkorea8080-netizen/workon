@@ -29,10 +29,11 @@ vi.mock('@/lib/actor-scope', () => ({
   getActorScope: async () => ({ userId: 'me', isAdmin: true, organizationId: 'org', departmentId: 'top', visibleDepartmentIds: ['top'], managedDepartmentIds: ['top', 'sub'], managesWholeOrganization: true }),
 }));
 
-import { readWebhookSwitch, setWebhookSwitch, tokenOrgWebhooksDisabled, webhookSwitchView } from '@/lib/apps/webhook-switch';
+import { readScheduleSwitch, readWebhookSwitch, setOrgSwitch, setWebhookSwitch, tokenOrgWebhooksDisabled, webhookSwitchView } from '@/lib/apps/webhook-switch';
 import { webhookView } from '@/lib/apps/webhook-spec';
-import { OrgWebhookSwitch } from '@/components/admin/AppAutomationAdmin';
+import { OrgAutomationSwitch, OrgWebhookSwitch } from '@/components/admin/AppAutomationAdmin';
 import { PUT } from '@/app/api/admin/app-automations/webhook-switch/route';
+import { PUT as PUT_SCHEDULES } from '@/app/api/admin/app-automations/schedule-switch/route';
 import { NextRequest } from 'next/server';
 import type { ActorScope } from '@/lib/agent-permissions';
 
@@ -71,6 +72,45 @@ describe('setWebhookSwitch', () => {
     state.results.organizations = [{ error: { message: 'x' } }];
     expect(await setWebhookSwitch(admin(), false, '보안 점검 중', NOW)).toMatchObject({ ok: false, status: 503 });
     expect(state.logged).toEqual([]);
+  });
+});
+
+describe('기관 전체 예약 스위치(0070) — 같은 규칙, 예약 칸·예약 사건', () => {
+  const SCHED_OFF = { app_schedules_disabled_at: '2026-11-08T00:00:00.000Z', app_schedules_disabled_reason: '비용 점검 중' };
+  it('끄기·켜기는 예약 칸만 조건부로 바꾸고 예약 사건으로 기록한다 — 연동 칸은 건드리지 않는다', async () => {
+    state.results.organizations = [{ data: [{ id: 'org' }] }, { data: SCHED_OFF }];
+    expect(await setOrgSwitch('schedules', admin(), false, '비용 점검 중', NOW)).toEqual({ ok: true, data: { disabled: true, disabledAt: SCHED_OFF.app_schedules_disabled_at, reason: '비용 점검 중', canChange: true } });
+    expect(state.calls).toContainEqual(['organizations', 'update', { app_schedules_disabled_at: new Date(NOW).toISOString(), app_schedules_disabled_reason: '비용 점검 중' }]);
+    expect(state.calls).toContainEqual(['organizations', 'is', 'app_schedules_disabled_at', null]);
+    expect(JSON.stringify(state.calls)).not.toContain('app_webhooks_disabled');
+    expect(state.logged.map(l => l[2])).toEqual(['app_schedules_org_disabled']);
+    state.results.organizations = [{ data: [{ id: 'org' }] }, { data: { app_schedules_disabled_at: null, app_schedules_disabled_reason: null } }];
+    await setOrgSwitch('schedules', admin(), true, '점검 끝남', NOW);
+    expect(state.logged.map(l => l[2])).toEqual(['app_schedules_org_disabled', 'app_schedules_org_enabled']);
+    expect(await setOrgSwitch('schedules', admin({ managesWholeOrganization: false }), false, '비용 점검 중', NOW)).toMatchObject({ ok: false, status: 403, message: expect.stringContaining('앱 예약') });
+    state.results.organizations = [{ data: SCHED_OFF }, { error: { message: 'column does not exist' } }];
+    expect(await readScheduleSwitch('org')).toMatchObject({ disabled: true, reason: '비용 점검 중' });
+    await expect(readScheduleSwitch('org')).rejects.toThrow('column does not exist');
+  });
+  it('PUT schedule-switch — 401·403·400, 맞으면 예약 스위치를 바꾼다', async () => {
+    const put = (body: unknown) => PUT_SCHEDULES(new NextRequest('http://localhost/api/admin/app-automations/schedule-switch', { method: 'PUT', body: JSON.stringify(body) }));
+    state.session = null; expect((await put({ enabled: false, reason: '비용 점검 중' })).status).toBe(401);
+    state.session = 'user'; expect((await put({ enabled: false, reason: '비용 점검 중' })).status).toBe(403);
+    state.session = 'admin'; expect((await put({ enabled: false, reason: '짧음' })).status).toBe(400);
+    expect(state.calls).toEqual([]);
+    state.results.organizations = [{ data: [{ id: 'org' }] }, { data: SCHED_OFF }];
+    expect((await (await put({ enabled: false, reason: '비용 점검 중' })).json()).data).toMatchObject({ disabled: true });
+    expect(state.logged[0][2]).toBe('app_schedules_org_disabled');
+  });
+  it('관리자 화면 — 예약 스위치 글, 0070 마이그레이션·감사 이름', () => {
+    const html = renderToStaticMarkup(createElement(OrgAutomationSwitch, { kind: 'schedules', view: { disabled: true, disabledAt: SCHED_OFF.app_schedules_disabled_at, reason: '비용 점검 중', canChange: true }, busy: false, onToggle: () => {} }));
+    expect(html).toContain('기관 전체 앱 예약 실행이 꺼져 있습니다'); expect(html).toContain('다음 차례로 넘어갑니다'); expect(html).toContain('다시 켜기');
+    const sql = readFileSync('supabase/migrations/0070_org_schedule_switch.sql', 'utf8');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS app_schedules_disabled_at timestamptz');
+    expect(sql).toContain('(app_schedules_disabled_at IS NULL) = (app_schedules_disabled_reason IS NULL)');
+    const audit = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');
+    expect(audit).toContain("app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)'");
+    expect(readFileSync('src/components/admin/AppAutomationAdmin.tsx', 'utf8')).toContain('<OrgAutomationSwitch kind="schedules"');
   });
 });
 

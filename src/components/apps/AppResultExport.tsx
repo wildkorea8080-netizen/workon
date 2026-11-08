@@ -20,7 +20,7 @@ function loadTemplates(conversationId: string): Promise<TemplateOption[]> {
 
 const STANDARD = '';
 
-export default function AppResultExport({ conversationId, messageId, content }: { conversationId: string; messageId?: string; content: string }) {
+export default function AppResultExport({ conversationId, messageId, content, defaultTemplateId }: { conversationId: string; messageId?: string; content: string; /** 앱 설정의 결과 한글 파일 양식 — 목록에 있으면 먼저 골라 둔다 */ defaultTemplateId?: string }) {
   const [files, setFiles] = useState<Record<string, FileRef>>({}); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateOption[]>([]); const [choice, setChoice] = useState(STANDARD);
   const pending = useRef(false);
@@ -28,9 +28,9 @@ export default function AppResultExport({ conversationId, messageId, content }: 
   useEffect(() => {
     let live = true;
     setTemplates([]); setChoice(STANDARD);
-    void loadTemplates(conversationId).then(list => { if (live) setTemplates(list); });
+    void loadTemplates(conversationId).then(list => { if (!live) return; setTemplates(list); if (defaultTemplateId && list.some(t => t.id === defaultTemplateId)) setChoice(defaultTemplateId); });
     return () => { live = false; };
-  }, [conversationId]);
+  }, [conversationId, defaultTemplateId]);
   const file = files[choice];
   async function create() {
     if (pending.current) return;

@@ -156,10 +156,10 @@ describe('POST /api/apps/schedules — 고른 문서', () => {
     expect(state.calls.some(c => c[0] === 'app_schedules' && c[1] === 'insert')).toBe(false);
   });
 
-  it('파일 필수이고 문서함을 안 받는 앱은 지금처럼 예약할 수 없다', async () => {
+  it('파일 필수이고 문서함을 안 받는 앱은 파일을 붙여야 예약할 수 있다(0073)', async () => {
     state.results.agents = [{ data: agentRow({ required: true }) }];
     const res = await post({});
-    expect((await res.json()).error.message).toBe('파일 첨부가 필수인 앱은 예약할 수 없습니다.');
+    expect((await res.json()).error.message).toBe('파일이 필요한 앱은 파일을 붙여야 예약할 수 있습니다.');
   });
 });
 

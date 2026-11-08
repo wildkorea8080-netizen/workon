@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, formatDateTime } from '@/lib/work/client';
-import { APP_MAX_SCHEDULES_PER_USER, scheduleBadge, type AppScheduleView } from '@/lib/apps/schedule-spec';
+import { APP_MAX_SCHEDULES_PER_USER, SCHEDULE_ORG_DISABLED, scheduleBadge, type AppScheduleView } from '@/lib/apps/schedule-spec';
 
 function Schedules() {
   const [items, setItems] = useState<AppScheduleView[]>([]); const [loading, setLoading] = useState(true);
@@ -31,7 +31,8 @@ function Schedules() {
     <ErrorNote message={error} />
     <div className="my-5 flex justify-end"><button type="button" disabled={loading} onClick={() => void load()} className="text-sm text-ws-accent-text disabled:opacity-40">새로고침</button></div>
     {loading ? <p role="status" className="py-10 text-center text-slate-500">예약을 불러오는 중…</p> : items.length ? <div className="space-y-4">{items.map(s => { const badge = scheduleBadge(s); return <Card key={s.id}>
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-ws-accent-text">{s.appName} · 앱 판 {s.appVersion}</p><h2 className="font-semibold">{s.description}</h2><p className="mt-2 text-xs text-slate-500">다음 실행 {s.status === 'active' ? formatDateTime(s.nextRunAt) : '—'} · 실행 {s.runCount}회{s.lastRunAt ? ` · 마지막 ${formatDateTime(s.lastRunAt)}` : ''}{s.notifyOnSuccess ? ' · 완료 메일 받음' : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-ws-accent-text">{s.appName} · 앱 판 {s.appVersion}</p><h2 className="font-semibold">{s.description}</h2><p className="mt-2 text-xs text-slate-500">다음 실행 {s.status === 'active' ? formatDateTime(s.nextRunAt) : '—'} · 실행 {s.runCount}회{s.lastRunAt ? ` · 마지막 ${formatDateTime(s.lastRunAt)}` : ''}{s.notifyOnSuccess ? ' · 완료 메일 받음' : ''}{s.exportHwpx ? ' · 한글 파일도 만듦' : ''}{s.files.length ? ` · 저장한 파일 ${s.files.length}개` : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
+      {s.heldByOrg && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-900">{SCHEDULE_ORG_DISABLED}</p>}
       {s.status === 'paused' && s.pausedReason && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">{s.pausedReason}</p>}
       {s.overdue && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-900">예정 시각이 1시간 넘게 지났는데 실행되지 않았습니다. 실행기가 멈춘 것일 수 있으니 기관 관리자에게 알려 주세요.</p>}
       {s.lastStatus === 'failed' && s.lastError && <p className="mt-3 text-xs leading-5 text-slate-600">마지막 실패 이유: {s.lastError}</p>}

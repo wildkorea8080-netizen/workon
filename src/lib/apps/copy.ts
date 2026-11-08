@@ -15,6 +15,7 @@ export function appCopyDraft(source: Agent): AppCopyDraft {
     description: (source.description ?? '').slice(0, 500),
     category: (source.category || '문서 작성·정리').slice(0, 40),
     instructions,
-    definition: definition.value,
+    // 결과 한글 파일 양식은 원래 앱 비서의 양식 id라 새 앱으로 가져가지 않는다(새 앱에는 그 양식이 없다)
+    definition: (({ exportTemplateId: _template, ...rest }) => { void _template; return rest; })(definition.value),
   };
 }

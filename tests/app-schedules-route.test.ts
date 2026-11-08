@@ -26,7 +26,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/apps/schedules/route';
 import { DELETE, GET as GET_ONE, PATCH, PUT } from '@/app/api/apps/schedules/[id]/route';
-import { PAUSED_BY_USER, SCHEDULE_BUSY_MESSAGE, editedStatus } from '@/lib/apps/schedule-spec';
+import { PAUSED_BY_USER, SCHEDULE_BUSY_MESSAGE, SCHEDULE_ORG_DISABLED_CREATE, editedStatus } from '@/lib/apps/schedule-spec';
 import { PAUSED_APP_CHANGED } from '@/lib/apps/schedules';
 import { ADMIN_LOCKED_MESSAGE } from '@/lib/apps/automation-admin-spec';
 
@@ -86,7 +86,7 @@ describe('POST /api/apps/schedules', () => {
     state.results.agents = [{ data: agentRow({ app_definition: null }) }];
     expect(await json(await post(valid))).toMatchObject({ status: 400, body: { error: { message: '입력형 앱만 예약할 수 있습니다.' } } });
     state.results.agents = [{ data: agentRow({ app_definition: { ...definition, attachments: { required: true } } }) }];
-    expect(await json(await post(valid))).toMatchObject({ status: 400, body: { error: { message: expect.stringContaining('파일 첨부가 필수') } } });
+    expect(await json(await post(valid))).toMatchObject({ status: 400, body: { error: { message: expect.stringContaining('파일을 붙여야 예약') } } });
     state.results.agents = [{ data: agentRow({ version: 4 }) }];
     expect(await json(await post(valid))).toMatchObject({ status: 409, body: { error: { message: expect.stringContaining('앱 설정이 변경') } } });
     state.results.agents = [{ data: agentRow() }];
@@ -160,6 +160,28 @@ describe('예약 고치기 — GET·PUT /api/apps/schedules/[id]', () => {
   });
 });
 
+describe('기관 전체 예약 스위치(0070) — 직원 쪽', () => {
+  it('꺼 두었으면 새 예약은 403(만들지 않음), 스위치를 읽지 못하면 503 — 목록은 켜진 예약에 기관이 멈춤을 표시한다', async () => {
+    state.results.agents = [{ data: agentRow() }];
+    state.results.organizations = [{ data: { app_schedules_disabled_at: '2026-11-08T00:00:00Z', app_schedules_disabled_reason: '비용 점검' } }];
+    expect(await json(await post(valid))).toMatchObject({ status: 403, body: { error: { message: SCHEDULE_ORG_DISABLED_CREATE } } });
+    state.results.agents = [{ data: agentRow() }];
+    state.results.organizations = [{ error: { message: 'column does not exist' } }];
+    expect((await post(valid)).status).toBe(503);
+    expect(state.calls.some(c => c[0] === 'app_schedules' && c[1] === 'insert')).toBe(false);
+
+    state.results.app_schedules = [{ data: [{ ...scheduleRow(), next_run_at: '2026-01-01T00:00:00.000Z', agent: { name: '앱' } }, { ...scheduleRow({ id: 'x', status: 'paused', paused_reason: PAUSED_BY_USER }), agent: { name: '앱' } }] }];
+    state.results.organizations = [{ data: { app_schedules_disabled_at: '2026-11-08T00:00:00Z', app_schedules_disabled_reason: '비용 점검' } }];
+    const listed = (await json(await GET())).body.data;
+    expect(listed.map((s: { heldByOrg: boolean }) => s.heldByOrg)).toEqual([true, false]);
+    expect(listed[0].overdue).toBe(false); // 기관이 멈춘 동안 '실행 지연'으로 보이지 않는다
+    state.results.app_schedules = [{ data: [{ ...scheduleRow(), agent: { name: '앱' } }] }];
+    state.results.organizations = [{ error: { message: 'down' } }];
+    const again = await json(await GET());
+    expect(again.status).toBe(200); expect(again.body.data[0].heldByOrg).toBe(false);
+  });
+});
+
 describe('완료 메일 받기(0069)', () => {
   it('만들기·고치기가 notify_on_success를 저장하고(보내지 않으면 거짓), 참·거짓이 아니면 400 — 목록 보기에 실린다', async () => {
     state.results.agents = [{ data: agentRow() }];
@@ -173,6 +195,11 @@ describe('완료 메일 받기(0069)', () => {
     expect((await json(await post(valid))).body.data.notifyOnSuccess).toBe(false);
     expect(state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'insert')?.[2]).toMatchObject({ notify_on_success: false });
     expect((await post({ ...valid, notify_on_success: 'yes' })).status).toBe(400);
+    expect((await post({ ...valid, export_hwpx: 1 })).status).toBe(400);
+    state.results.agents = [{ data: agentRow() }];
+    state.results.app_schedules = [{ count: 0 }, { data: scheduleRow({ export_hwpx: true }) }];
+    expect((await json(await post({ ...valid, export_hwpx: true }))).body.data.exportHwpx).toBe(true);
+    expect(state.calls.filter(c => c[0] === 'app_schedules' && c[1] === 'insert').at(-1)?.[2]).toMatchObject({ export_hwpx: true, notify_on_success: false });
     state.calls = [];
     state.results.app_schedules = [{ data: current() }, { data: scheduleRow({ notify_on_success: true }) }];
     state.results.agents = [{ data: agentRow() }];
