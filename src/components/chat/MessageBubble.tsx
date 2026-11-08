@@ -13,6 +13,7 @@ import { linkCitations, citationNumber, sourceNumber } from './source-label';
 import type { RetrievedChunk } from '@/lib/db';
 import { formatFileSize } from '@/lib/file-size';
 import { NUMBER_CHECK_NOTE } from '@/lib/assistant/number-check';
+import { NUMBER_RECHECK_NOTE, type RecheckedNumber } from '@/lib/assistant/number-research';
 
 interface ToolLink {
   title: string;
@@ -39,8 +40,12 @@ interface MessageBubbleProps {
   files?: GeneratedFile[];
   /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자(답변 글은 그대로 둔다) */
   numberCheck?: string[];
+  /** 답변 근거에는 없었지만 문서를 다시 찾아 확인한 숫자(2026-11-08) — 확인되지 않은 숫자 안내와 따로 */
+  numberRechecked?: RecheckedNumber[];
   /** 참고 문서 없이 일반 답변으로 받은 응답 — 말풍선 위에 작게 알린다 */
   documentsSkipped?: boolean;
+  /** 말풍선 위 작은 이름표(예: '근거로 고쳐 쓴 답', 2026-11-08) */
+  badge?: string;
   /** 참고 문서를 불러오지 못해 거절된 안내 — 오류가 아니라 안내로 그리고 단추를 붙인다 */
   refusal?: boolean;
   /** 응답을 기다리는 동안 단추를 막는다 */
@@ -53,8 +58,8 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({
-  role, content, imagePreviews, attachments, sources, links, files, numberCheck,
-  documentsSkipped, refusal, refusalDisabled, onRetry, onSkipDocuments, onOpenSource, error,
+  role, content, imagePreviews, attachments, sources, links, files, numberCheck, numberRechecked,
+  documentsSkipped, badge, refusal, refusalDisabled, onRetry, onSkipDocuments, onOpenSource, error,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
@@ -85,6 +90,9 @@ export default function MessageBubble({
         {/* 참고 문서 없이 답함 — 근거 자료 없이 일반 지식으로 답한 응답임을 알린다 */}
         {!isUser && !error && documentsSkipped && (
           <span className="mb-1 text-[11px] text-slate-500">참고 문서 없이 답함</span>
+        )}
+        {!isUser && !error && badge && (
+          <span className="mb-1 text-[11px] font-semibold text-ws-accent-text">{badge}</span>
         )}
         <div
           className={`px-4 py-3 text-sm leading-relaxed ${
@@ -243,6 +251,13 @@ export default function MessageBubble({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
             <span className="break-words">{NUMBER_CHECK_NOTE(numberCheck)}</span>
+          </div>
+        )}
+
+        {/* 숫자 근거 다시 찾기(2026-11-08) — 모델이 본 근거에는 없었고 다시 찾은 문서에서 나온 숫자. 맥락은 사람이 본다 */}
+        {!isUser && !error && numberRechecked && numberRechecked.length > 0 && (
+          <div role="note" aria-label="다시 찾아 확인한 숫자" className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+            <span className="break-words">{NUMBER_RECHECK_NOTE(numberRechecked)}</span>
           </div>
         )}
 

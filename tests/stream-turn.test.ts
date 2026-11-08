@@ -364,8 +364,11 @@ describe('streamTurn — 문서 근거 턴의 숫자 확인(S4-b, 판정 R1)', (
 
   it('문서 근거가 있는 턴이면 첨부 도구가 없어도 숫자를 대조한다', async () => {
     setLlmAdapterForTests(answering('예산은 12,345천원이고 총액 98,765천원'));
-    const events = await run(turn({ chunks: [chunk], systemPrompt: 'S\n참고 자료:\n[1] 예산서\n예산 12,345천원' }));
+    const searchDocs = vi.fn(async () => [] as never[]);
+    const events = await run(turn({ chunks: [chunk], systemPrompt: 'S\n참고 자료:\n[1] 예산서\n예산 12,345천원' }), undefined, { searchDocs });
     expect(numberCheck(events)).toEqual({ unverified: ['98,765'] });
+    // 확인되지 않은 숫자가 든 문장으로 한 번 다시 찾았지만 없었다 — 그대로 '확인되지 않음'
+    expect(searchDocs).toHaveBeenCalledTimes(1);
     const rows = inserted('messages');
     expect((rows[1].source_references as Record<string, unknown>).number_check).toEqual({ unverified: ['98,765'] });
     expect(keySet(rows[0])).toBe(keySet(rows[1]));
@@ -405,6 +408,52 @@ describe('streamTurn — 문서 근거 턴의 숫자 확인(S4-b, 판정 R1)', (
     const events = await run(turn({ chunks: [], systemPrompt: 'S' }));
     expect(numberCheck(events)).toBeNull();
     expect(inserted('messages')[1].source_references).not.toHaveProperty('number_check');
+  });
+});
+
+describe('streamTurn — 숫자 근거 다시 찾기(2026-11-08)', () => {
+  const chunk = { documentId: 'd1', documentTitle: '예산서', chunkIndex: 0, n: 1, text: '예산 12,345천원', similarity: 0.9 };
+  const found = { documentId: 'd2', documentTitle: '집행 계획', chunkIndex: 0, n: 1, text: '총액은 98,765천원으로 정한다', similarity: 0.85, page: 4 };
+  const done = (events: TurnEvent[]) => (events.find((e) => e.event === 'done') as { data: { number_check: unknown } }).data.number_check;
+  const answering = (answer: string) => adapter({
+    stream: async function* () {
+      yield { type: 'text', text: answer };
+      yield { type: 'done', stopReason: 'end_turn', usage: { model: 'IGNORED', input_tokens: 1, output_tokens: 1 } };
+    },
+  });
+  const base = () => turn({ chunks: [chunk], systemPrompt: 'S\n참고 자료:\n[1] 예산서\n예산 12,345천원' });
+
+  it('다시 찾은 근거에 그 숫자가 있으면 확인되지 않음에서 빼고 출처와 함께 따로 남긴다(답변은 그대로)', async () => {
+    setLlmAdapterForTests(answering('예산은 12,345천원입니다.\n사업 총액은 98,765천원입니다.'));
+    const searchDocs = vi.fn(async () => [found]);
+    const events = await run(base(), undefined, { searchDocs });
+    expect(searchDocs).toHaveBeenCalledWith('사업 총액은 98,765천원입니다.');
+    const check = { unverified: [], rechecked: [{ value: '98,765', source: '집행 계획 p.4' }] };
+    expect(done(events)).toEqual(check);
+    const rows = inserted('messages');
+    expect((rows[1].source_references as Record<string, unknown>).number_check).toEqual(check);
+    expect(keySet(rows[0])).toBe(keySet(rows[1]));
+    expect(rows[1].content).toBe('예산은 12,345천원입니다.\n사업 총액은 98,765천원입니다.');
+    // 다시 찾은 근거는 답변 근거 목록에 섞지 않는다
+    expect((rows[1].source_references as { chunks: unknown[] }).chunks).toHaveLength(1);
+  });
+
+  it('찾기가 실패하거나 근거에 숫자가 없으면 지금처럼 확인되지 않음', async () => {
+    setLlmAdapterForTests(answering('사업 총액은 98,765천원입니다.'));
+    expect(done(await run(base(), undefined, { searchDocs: async () => null }))).toEqual({ unverified: ['98,765'] });
+    setLlmAdapterForTests(answering('사업 총액은 98,765천원입니다.'));
+    expect(done(await run(base(), undefined, { searchDocs: async () => { throw new Error('noda'); } }))).toEqual({ unverified: ['98,765'] });
+    setLlmAdapterForTests(answering('사업 총액은 98,765천원입니다.'));
+    expect(done(await run(base(), undefined, { searchDocs: async () => [{ ...found, text: '총액은 따로 정한다' }] }))).toEqual({ unverified: ['98,765'] });
+  });
+
+  it('문서 없이 답한 턴·근거가 없는 턴에서는 다시 찾지 않는다', async () => {
+    const searchDocs = vi.fn(async () => [found]);
+    setLlmAdapterForTests(answering('사업 총액은 98,765천원입니다.'));
+    await run({ ...base(), documentsSkipped: true }, undefined, { searchDocs });
+    setLlmAdapterForTests(answering('사업 총액은 98,765천원입니다.'));
+    await run(turn({ chunks: [], systemPrompt: 'S' }), undefined, { searchDocs });
+    expect(searchDocs).not.toHaveBeenCalled();
   });
 });
 

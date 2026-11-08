@@ -11,6 +11,10 @@ import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUs
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
+import { researchNumbers } from './number-research';
+import { searchLikeChat } from '@/lib/capabilities/doc-search';
+import type { RetrievedChunk } from '@/lib/db';
+import type { NumberCheck } from './persist';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
@@ -40,6 +44,8 @@ export interface StreamTurnDeps {
    * 턴의 시간 예산(시작 + `APP_STEP_TIME_BUDGET_MS`)과 둘 중 이른 쪽
    */
   deadlineAt?: number;
+  /** 숫자 근거 다시 찾기(2026-11-08)가 부르는 문서 찾기 — 기본은 대화와 같은 `searchLikeChat`. 시험이 바꿔 끼운다 */
+  searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
 }
 
 /**
@@ -424,13 +430,20 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   // 숫자 확인(설계 5.4, S4-b 판정 R1) — 첨부 도구가 성공했거나 문서 근거가 있었던 턴만. 시스템 프롬프트(첨부 개요의
   // 행 수·NODA 근거 묶음)와 직원의 질문에 적힌 숫자, 도구가 보여 준 숫자(법령·통계 포함)가 AI가 본 숫자다 — 그 합집합에
   // 없는 숫자만 '확인되지 않음'. 답변 글은 고치지 않는다
-  let numberCheck: { unverified: string[] } | null = null;
+  let numberCheck: NumberCheck | null = null;
   if (result.attachmentToolSucceeded || turn.chunks.length > 0 || appRecords.length > 0) {
     // 앱의 공공 데이터 조회 결과도 AI가 본 자료다(모델이 쓴 중간 결과는 아니다 — 그 숫자를 옮기면 확인되지 않음으로 남긴다)
     const looked = appRecords.flatMap(step => step.kind === 'lookup' && step.status === 'completed' && step.output ? numbersIn(step.output) : []);
     const shown = result.shownValues.concat(numbersIn(turn.systemPrompt), numbersIn(turn.ctx.message), looked);
     const unverified = checkNumbers(result.text, shown);
     if (unverified.length > 0) numberCheck = { unverified };
+  }
+  // 숫자 근거 다시 찾기(2026-11-08) — 문서 근거로 답한 대화 턴에서 확인되지 않은 숫자가 든 문장으로 같은 문서 찾기를 한 번 더(모델 호출 없음, 5초까지).
+  // 다시 찾은 근거 글에 그 숫자가 있으면 '다시 찾아 확인'으로 옮긴다. 답변은 고치지 않는다
+  if (numberCheck && turn.chunks.length > 0 && !turn.documentsSkipped && appRecords.length === 0) {
+    const search = deps.searchDocs ?? ((query: string) => searchLikeChat({ agentId: turn.ctx.agentId, organizationId: turn.ctx.organizationId, query }));
+    const research = await researchNumbers({ answer: result.text, unverified: numberCheck.unverified, search });
+    if (research.rechecked.length) numberCheck = { unverified: research.unverified, rechecked: research.rechecked };
   }
 
   // NODA 답변 검증 — 저장 전에 불러 결과를 함께 저장한다(감사 기록). 화면 목록에는 더하지 않는다(판정 R1)

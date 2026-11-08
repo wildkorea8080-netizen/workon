@@ -40,10 +40,35 @@ export interface MessageRowInput {
 /** 답변 숫자 중 이번 턴에 도구가 보여 준 값에서 못 찾은 것(설계 5.4) */
 export interface NumberCheck {
   unverified: string[];
+  /** 답변 근거에는 없었지만 문서를 다시 찾아 그 숫자가 든 근거를 찾은 것(2026-11-08) — 숫자와 출처 글 */
+  rechecked?: { value: string; source: string }[];
 }
 
 export function dedupeLinks(links: ToolSource[]): ToolSource[] {
   return links.filter((link, index, all) => all.findIndex((other) => other.url === link.url) === index);
+}
+
+/** 답변 행에 싣는 근거 조각 꼴 — 답변 행과 '근거로 고쳐 쓴 답'(2026-11-08)이 같은 꼴로 저장한다 */
+export function toStoredChunk(c: RetrievedChunk): Record<string, unknown> {
+  return {
+    documentId: c.documentId,
+    documentTitle: c.documentTitle,
+    chunkIndex: c.chunkIndex,
+    similarity: c.similarity,
+    // 근거 창(2026-10-23) — 답변 속 [n]과 잇는 번호, 창에 보일 원문(근거마다 최대 2,000자). 없으면 JSON에서 빠진다
+    n: c.n,
+    ...(c.text ? { text: c.text } : {}),
+    // NODA 근거의 위치(S4-a). 옛 조각에는 없어 JSON에서 빠진다
+    page: c.page,
+    cellRange: c.cellRange,
+    section: c.section,
+    ocr: c.ocr,
+    // 공통 자료실 조각(S5) — 화면이 '[공통]'과 기준 연도를 보인다. 비서 조각에는 없어 JSON에서 빠진다
+    scope: c.scope,
+    editionYear: c.editionYear,
+    // 비서 문서의 시행일(0055) — 어느 판을 근거로 답했는지. 없으면 JSON에서 빠진다
+    effectiveFrom: c.effectiveFrom,
+  };
 }
 
 /**
@@ -81,29 +106,13 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
         ...(input.appDraftSavedAt ? { app_draft: { saved_at: input.appDraftSavedAt } } : {}),
         ...(input.appMaterial ? { app_material: input.appMaterial } : {}),
         ...(input.appDocuments?.length ? { app_documents: input.appDocuments } : {}),
-        chunks: input.chunks.map((c) => ({
-          documentId: c.documentId,
-          documentTitle: c.documentTitle,
-          chunkIndex: c.chunkIndex,
-          similarity: c.similarity,
-          // 근거 창(2026-10-23) — 답변 속 [n]과 잇는 번호, 창에 보일 원문(근거마다 최대 2,000자). 없으면 JSON에서 빠진다
-          n: c.n,
-          ...(c.text ? { text: c.text } : {}),
-          // NODA 근거의 위치(S4-a). 옛 조각에는 없어 JSON에서 빠진다
-          page: c.page,
-          cellRange: c.cellRange,
-          section: c.section,
-          ocr: c.ocr,
-          // 공통 자료실 조각(S5) — 화면이 '[공통]'과 기준 연도를 보인다. 비서 조각에는 없어 JSON에서 빠진다
-          scope: c.scope,
-          editionYear: c.editionYear,
-          // 비서 문서의 시행일(0055) — 어느 판을 근거로 답했는지. 없으면 JSON에서 빠진다
-          effectiveFrom: c.effectiveFrom,
-        })),
+        chunks: input.chunks.map(toStoredChunk),
         links: dedupeLinks(input.links),
         files: input.files,
         // source_references 안의 키라 두 행의 칸 집합은 그대로다. 없으면 키를 두지 않는다
-        ...(input.numberCheck?.unverified.length ? { number_check: { unverified: input.numberCheck.unverified } } : {}),
+        ...(input.numberCheck && (input.numberCheck.unverified.length || input.numberCheck.rechecked?.length)
+          ? { number_check: { unverified: input.numberCheck.unverified, ...(input.numberCheck.rechecked?.length ? { rechecked: input.numberCheck.rechecked } : {}) } }
+          : {}),
         ...(input.documentsSkipped ? { documents_skipped: true } : {}),
         ...(input.verify
           ? {

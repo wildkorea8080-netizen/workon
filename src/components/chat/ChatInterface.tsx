@@ -27,6 +27,9 @@ import { connectorIdsOf } from '@/lib/agent-form';
 import { acceptsChatImages, acceptsChatFiles } from '@/lib/capabilities/settings';
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_SEND } from '@/lib/attachments/limits';
 import { isImeComposing } from '@/lib/ime';
+import { readRechecked, type RecheckedNumber } from '@/lib/assistant/number-research';
+import { readRevision, revisionEligibility, type RevisionView } from '@/lib/assistant/answer-revise-spec';
+import AnswerRevision from './AnswerRevision';
 
 interface ToolLink {
   title: string;
@@ -50,6 +53,8 @@ interface Message {
   files?: { id: string; file_name: string; size_bytes: number }[];
   /** 숫자 확인 — 원본·계산 결과에서 확인되지 않은 숫자 */
   numberCheck?: string[];
+  /** 답변 근거에는 없었지만 문서를 다시 찾아 확인한 숫자(2026-11-08) */
+  numberRechecked?: RecheckedNumber[];
   /** 참고 문서 없이 답함 — 문서를 못 불러와 일반 답변으로 받은 응답 */
   documentsSkipped?: boolean;
   /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
@@ -59,6 +64,8 @@ interface Message {
   savedId?: string;
   /** 내가 남긴 평가(0064) */
   feedback?: MessageFeedback | null;
+  /** 근거로 고쳐 쓴 답(2026-11-08) — 원래 답변과 따로 */
+  revision?: RevisionView | null;
 }
 
 /** 보낸 요청 그대로 — 거절 뒤 '다시 묻기'가 똑같이 다시 보낸다 */
@@ -214,8 +221,9 @@ export default function ChatInterface({
                 links?: ToolLink[];
                 files?: { id: string; file_name: string; size_bytes: number }[];
                 attachments?: { id: string; file_name: string }[];
-                number_check?: { unverified?: string[] };
+                number_check?: { unverified?: string[]; rechecked?: unknown };
                 documents_skipped?: boolean;
+                revision?: unknown;
               };
             }) => ({
               id: m.id,
@@ -235,9 +243,13 @@ export default function ChatInterface({
               numberCheck: m.role === 'assistant' && m.source_references?.number_check?.unverified?.length
                 ? m.source_references.number_check.unverified
                 : undefined,
+              numberRechecked: m.role === 'assistant' && readRechecked(m.source_references?.number_check?.rechecked).length
+                ? readRechecked(m.source_references?.number_check?.rechecked)
+                : undefined,
               documentsSkipped: m.role === 'assistant' && m.source_references?.documents_skipped === true
                 ? true
                 : undefined,
+              revision: m.role === 'assistant' ? readRevision(m.source_references?.revision) : undefined,
             })
           )
         );
@@ -518,6 +530,9 @@ export default function ChatInterface({
             if (bubbleShown && Array.isArray(unverified) && unverified.length > 0) {
               patchAssistant({ numberCheck: unverified.map(String) });
             }
+            // 문서를 다시 찾아 확인한 숫자(2026-11-08)
+            const rechecked = readRechecked(payload.number_check?.rechecked);
+            if (bubbleShown && rechecked.length > 0) patchAssistant({ numberRechecked: rechecked });
           } else if (name === 'error') {
             if (!bubbleShown) {
               setIsLoading(false);
@@ -691,7 +706,7 @@ export default function ChatInterface({
             </div>
           </div>
         ) : (
-          messages.map(msg => (
+          messages.map((msg, index) => (
             <div key={msg.id}>
             <MessageBubble
               role={msg.role}
@@ -702,6 +717,7 @@ export default function ChatInterface({
               links={msg.links}
               files={msg.files}
               numberCheck={msg.numberCheck}
+              numberRechecked={msg.numberRechecked}
               documentsSkipped={msg.documentsSkipped}
               refusal={msg.refusal}
               refusalDisabled={isLoading}
@@ -711,6 +727,19 @@ export default function ChatInterface({
               error={msg.error}
             />
             {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && <AnswerFeedback messageId={msg.savedId} initial={msg.feedback ?? null} />}
+            {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && (
+              <AnswerRevision
+                key={`revise-${msg.savedId}`}
+                messageId={msg.savedId}
+                initial={msg.revision ?? null}
+                eligible={revisionEligibility(
+                  { number_check: { unverified: msg.numberCheck }, chunks: msg.sources, links: msg.links, documents_skipped: msg.documentsSkipped, app_steps: msg.appSteps },
+                  { attachments: messages[index - 1]?.role === 'user' ? messages[index - 1].attachments : undefined }
+                ).ok}
+                onOpenSource={setOpenSource}
+                onRevised={(revision) => setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, revision } : m)))}
+              />
+            )}
             {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
             {conversationId && msg.role === 'assistant' && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
             {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} defaultTemplateId={(selectedAgent.app_definition as { exportTemplateId?: string } | null | undefined)?.exportTemplateId} />}
