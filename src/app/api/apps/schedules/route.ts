@@ -2,14 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
-import { renderAppInput, validateAppDefinition } from '@/lib/apps/definition';
-import { appDocumentChoice, CHOSEN_DOCUMENTS_UNAVAILABLE, verifyChosenDocuments } from '@/lib/apps/app-document-choice';
-import { APP_MAX_SCHEDULES_PER_USER, nextRunAt, parseScheduleSpec, scheduleView, type AppScheduleRowLike, SCHEDULE_COLUMNS } from '@/lib/apps/schedule-spec';
+import { checkScheduleRequest } from '@/lib/apps/schedule-request';
+import { APP_MAX_SCHEDULES_PER_USER, nextRunAt, scheduleView, specColumns, type AppScheduleRowLike, SCHEDULE_COLUMNS } from '@/lib/apps/schedule-spec';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type ScheduleRow = AppScheduleRowLike & { agent: { name: string } | { name: string }[] | null };
 const agentName = (row: ScheduleRow) => (Array.isArray(row.agent) ? row.agent[0]?.name : row.agent?.name) ?? null;
 
@@ -37,28 +34,9 @@ export async function POST(request: NextRequest) {
   if (!actor?.organizationId) return fail('기관 소속을 확인할 수 없습니다.', 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || typeof body !== 'object') return fail('요청 본문을 확인해 주세요.', 400);
-  const { agent_id, app_version, inputs } = body;
-  if (typeof agent_id !== 'string' || !UUID.test(agent_id)) return fail('앱을 확인해 주세요.', 400);
-  if (typeof app_version !== 'number' || !Number.isInteger(app_version)) return fail('앱 판을 확인해 주세요.', 400);
-  const spec = parseScheduleSpec(body);
-  if (!spec.ok) return fail(spec.message, 400);
-
-  const { data: agent, error: agentError } = await supabaseAdmin.from('agents')
-    .select(`${AGENT_ACCESS_COLUMNS}, name, app_definition`).eq('id', agent_id).is('deleted_at', null).maybeSingle();
-  if (agentError) return fail('앱을 불러오지 못했습니다.', 503);
-  const row = agent as (AgentAccessInfo & { name: string; app_definition: unknown }) | null;
-  if (!row || !canUseAgent(row, actor)) return fail('이 앱을 사용할 수 없습니다.', 404);
-  const definition = validateAppDefinition(row.app_definition);
-  if (!definition.ok || !definition.value) return fail('입력형 앱만 예약할 수 있습니다.', 400);
-  const choice = appDocumentChoice(definition.value.attachments, body.document_ids, '예약');
-  if (!choice.ok) return fail(choice.message, 400);
-  const documentIds = choice.ids;
-  if (row.version !== app_version) return fail('앱 설정이 변경됐습니다. 앱을 새로 열어 입력 항목을 확인해 주세요.', 409);
-  const input = renderAppInput(definition.value, inputs);
-  if (!input.ok) return fail(input.message, 400);
-  const verified = await verifyChosenDocuments(agent_id, actor, documentIds);
-  if (verified === 'error') return fail('고른 문서를 확인하지 못했습니다.', 503);
-  if (verified === 'unavailable') return fail(CHOSEN_DOCUMENTS_UNAVAILABLE, 400);
+  const checked = await checkScheduleRequest(body, actor);
+  if (!checked.ok) return fail(checked.message, checked.status);
+  const { agentId, agentName, appVersion, inputs, documentIds, spec, notifyOnSuccess } = checked.value;
 
   const { count, error: countError } = await supabaseAdmin.from('app_schedules').select('id', { count: 'exact', head: true }).eq('user_id', session.user.id);
   if (countError) return fail('예약을 확인하지 못했습니다.', 503);
@@ -66,11 +44,10 @@ export async function POST(request: NextRequest) {
 
   const now = Date.now();
   const { data: created, error } = await supabaseAdmin.from('app_schedules').insert({
-    agent_id, user_id: session.user.id, department_id: actor.departmentId, organization_id: actor.organizationId,
-    app_version, inputs: input.inputs, document_ids: documentIds,
-    frequency: spec.value.frequency, weekday: spec.value.weekday, month_day: spec.value.monthDay, run_hour: spec.value.hour, run_minute: spec.value.minute,
-    status: 'active', next_run_at: nextRunAt(spec.value, now).toISOString(),
+    agent_id: agentId, user_id: session.user.id, department_id: actor.departmentId, organization_id: actor.organizationId,
+    app_version: appVersion, inputs, document_ids: documentIds, ...specColumns(spec), notify_on_success: notifyOnSuccess,
+    status: 'active', next_run_at: nextRunAt(spec, now).toISOString(),
   }).select(SCHEDULE_COLUMNS).single();
   if (error || !created) return fail('예약을 저장하지 못했습니다.', 503);
-  return NextResponse.json({ ok: true, data: scheduleView(created as AppScheduleRowLike, row.name, now) }, { status: 201 });
+  return NextResponse.json({ ok: true, data: scheduleView(created as AppScheduleRowLike, agentName, now) }, { status: 201 });
 }

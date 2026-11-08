@@ -13,6 +13,8 @@ export type AppScheduleSpec = {
   minute: 0 | 30;
 };
 
+/** 차지(실행 중 표시)가 이보다 오래되면 실행기가 죽은 것으로 보고 다시 잡는다 */
+export const SCHEDULE_CLAIM_STALE_MS = 15 * 60 * 1000;
 /** 한 사람이 둘 수 있는 예약 수(멈춘 것 포함). 예약마다 실행마다 모델을 부르므로 상한을 둔다 */
 export const APP_MAX_SCHEDULES_PER_USER = 5;
 /** 활성 예약의 다음 실행 시각이 이만큼 지났는데 실행되지 않았으면 화면에 '지연'을 보인다(실행기가 안 도는 신호) */
@@ -86,8 +88,25 @@ export function describeSchedule(spec: AppScheduleSpec): string {
   }
 }
 
+/** 예약 규칙 → DB 칸(만들기·고치기가 함께 쓴다) */
+export function specColumns(spec: AppScheduleSpec) {
+  return { frequency: spec.frequency, weekday: spec.weekday, month_day: spec.monthDay, run_hour: spec.hour, run_minute: spec.minute };
+}
+
+/** 실행기가 차지한 동안(실행 중)에는 고치지 않는다 — 끝난 실행이 고친 시각·입력을 옛 값으로 덮는다 */
+export const SCHEDULE_BUSY_MESSAGE = '지금 실행 중인 예약입니다. 몇 분 뒤 실행이 끝나면 다시 고쳐 주세요.';
+
+/**
+ * 고친 뒤의 상태 — 직원이 멈춘 예약은 멈춘 채로 고친다(다시 켜기는 따로). 실행기가 멈춘 예약(앱 설정 바뀜·문서 못 씀·부서 바뀜·연속 실패)은
+ * 고친 것이 곧 해결이므로 다시 켜고 실패 수를 지운다. 관리자가 멈춘 예약(0050)은 라우트가 고치기 전에 막는다
+ */
+export function editedStatus(row: Pick<AppScheduleRowLike, 'status' | 'paused_reason' | 'consecutive_failures'>): { status: 'active' | 'paused'; paused_reason: string | null; consecutive_failures: number } {
+  if (row.status === 'paused' && row.paused_reason === PAUSED_BY_USER) return { status: 'paused', paused_reason: PAUSED_BY_USER, consecutive_failures: row.consecutive_failures };
+  return { status: 'active', paused_reason: null, consecutive_failures: 0 };
+}
+
 /** 직원 화면이 읽는 칸 — 목록·만들기·멈추기 라우트가 함께 쓴다 */
-export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at';
+export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at, notify_on_success';
 
 /** DB 행 중 화면이 보는 칸. 실행 조건·사용자 id·부서는 내보내지 않는다 */
 export type AppScheduleRowLike = {
@@ -98,17 +117,23 @@ export type AppScheduleRowLike = {
   status: string; paused_reason: string | null; admin_paused_at?: string | null; next_run_at: string; last_run_at: string | null;
   last_status: string | null; last_error: string | null; last_conversation_id: string | null;
   consecutive_failures: number; run_count: number; created_at: string;
+  /** 실행을 마치면 메일로 알림(0069) */
+  notify_on_success?: boolean | null;
 };
 
 export type AppScheduleView = {
   id: string; agentId: string; appName: string; appVersion: number; inputs: Record<string, string>;
   /** 문서함에서 고른 문서 수(0062) — 이름은 실행 결과의 근거 문서에서 본다 */
   documentCount: number;
+  /** 고른 문서 id — 예약 고치기 화면이 미리 골라 둔다(내 예약만 보인다) */
+  documentIds: string[];
   spec: AppScheduleSpec; description: string; status: 'active' | 'paused'; pausedReason: string | null;
   /** 관리자가 멈춘 예약(0050) — 직원이 다시 켜지 못한다 */
   adminPaused: boolean;
   nextRunAt: string; lastRunAt: string | null; lastStatus: 'completed' | 'failed' | null; lastError: string | null;
   lastConversationId: string | null; consecutiveFailures: number; runCount: number; overdue: boolean; createdAt: string;
+  /** 실행을 마치면 메일로 알림(0069) — 결과 글은 메일에 싣지 않고 링크만 */
+  notifyOnSuccess: boolean;
 };
 
 export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' | 'month_day' | 'run_hour' | 'run_minute'>): AppScheduleSpec {
@@ -122,14 +147,14 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
   const status = row.status === 'paused' ? 'paused' : 'active';
   return {
     id: row.id, agentId: row.agent_id, appName: appName ?? '삭제된 앱', appVersion: row.app_version, inputs: row.inputs ?? {},
-    documentCount: row.document_ids?.length ?? 0,
+    documentCount: row.document_ids?.length ?? 0, documentIds: row.document_ids ?? [],
     spec, description: describeSchedule(spec), status, pausedReason: row.paused_reason, adminPaused: Boolean(row.admin_paused_at),
     nextRunAt: row.next_run_at, lastRunAt: row.last_run_at,
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,
     lastError: row.last_error, lastConversationId: row.last_conversation_id,
     consecutiveFailures: row.consecutive_failures, runCount: row.run_count,
     overdue: status === 'active' && Date.parse(row.next_run_at) < nowMs - SCHEDULE_OVERDUE_MS,
-    createdAt: row.created_at,
+    createdAt: row.created_at, notifyOnSuccess: row.notify_on_success === true,
   };
 }
 

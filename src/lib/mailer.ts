@@ -272,6 +272,45 @@ export function sendScheduleFailureEmail(to: string, mail: { subject: string; ht
   return sendMail(to, mail.subject, mail.html);
 }
 
+/**
+ * 앱 예약 실행을 마쳤다는 알림(직원이 '완료 메일'을 고른 예약만, 0069) — 앱·예약·시각·다음 실행·결과 보기 링크만.
+ * **결과 글·입력값은 싣지 않는다** — 메일은 기관 밖 메일함으로 갈 수 있고, 결과는 로그인해 본다
+ */
+export function scheduleSuccessMail(params: {
+  appName: string;
+  description: string;
+  nextRunAt: string | null;
+  finishedAt: Date;
+  resultUrl: string;
+  schedulesUrl: string;
+}): { subject: string; html: string } {
+  const { appName, description, nextRunAt, finishedAt, resultUrl, schedulesUrl } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const rows: Array<[string, string]> = [
+    ['앱', appName],
+    ['예약', description],
+    ['마친 시각', `${kst(finishedAt)} (한국 시간)`],
+  ];
+  if (nextRunAt) rows.push(['다음 실행', `${kst(new Date(nextRunAt))} (한국 시간)`]);
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  return {
+    subject: `[${APP_NAME}] 앱 예약 실행을 마쳤습니다 — ${appName}`,
+    html: layout(
+      `${appName} 예약 실행을 마쳤습니다`,
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:15px;line-height:1.7">AI가 작성한 결과입니다. 로그인해 내용을 검토한 뒤 사용해 주세요. 결과 글은 메일에 싣지 않습니다.</p>
+       ${button(resultUrl, '결과 보기')}
+       <p style="font-size:13px;line-height:1.7;color:#64748b">이 메일을 그만 받으려면 <a href="${escapeHtml(schedulesUrl)}">앱 예약</a>에서 예약을 고쳐 '완료 메일 받기'를 끄세요.</p>`
+    ),
+  };
+}
+
+export function sendScheduleSuccessEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}
+
 /** 앱 예약 실행기 점검 안내의 글(슈퍼관리자에게) — 숫자·시각·조치만, 직원·입력값은 싣지 않는다 */
 export function scheduleRunnerAlertMail(params: {
   problems: string[];

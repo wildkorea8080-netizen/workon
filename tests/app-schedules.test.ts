@@ -8,7 +8,7 @@ import {
   SCHEDULE_BATCH, SCHEDULE_MAX_CONSECUTIVE_FAILURES, SCHEDULE_RUN_BUDGET_MS, SCHEDULE_TITLE_PREFIX, SCHEDULE_TURN_DEADLINE_MS,
   executeSchedule, finishPatch, runDueSchedules, type AppScheduleRow, type ExecuteIo, type ScheduleDeps, type ScheduleOutcome,
 } from '@/lib/apps/schedules';
-import { scheduleFailureMail } from '@/lib/mailer';
+import { scheduleFailureMail, scheduleSuccessMail } from '@/lib/mailer';
 import type { PreparedTurn, TurnEvent } from '@/lib/assistant/types';
 
 /** 입력형 앱 예약 실행(0048) — 다음 시각(KST)·실행 결과 반영·차지·멈춤·알림 */
@@ -95,7 +95,7 @@ function fakeDeps(rows: AppScheduleRow[], outcomes: Record<string, ScheduleOutco
   const deps = {
     due: vi.fn(async () => rows), claim: vi.fn(async () => true),
     execute: vi.fn(async (r: AppScheduleRow) => { const o = outcomes[r.id]; if (o instanceof Error) throw o; return o; }),
-    finish: vi.fn(async () => {}), notifyFailure: vi.fn(async () => {}), log: vi.fn(async () => {}),
+    finish: vi.fn(async () => {}), notifyFailure: vi.fn(async () => {}), notifySuccess: vi.fn(async () => {}), log: vi.fn(async () => {}),
     now: vi.fn(() => clock), ...patch,
   };
   // 덮어쓴 칸도 vi.fn이다 — 모두 모의 함수로 본다(덮어쓰기가 Partial<ScheduleDeps>라 그냥 두면 .mock 타입을 잃는다)
@@ -144,6 +144,31 @@ describe('runDueSchedules — 차지한 예약만 하나씩, 한 예약의 실�
     expect(result).toMatchObject({ checked: 2, completed: 1, partial: true });
     expect(deps.execute).toHaveBeenCalledTimes(1);
     expect(deps.log.mock.calls[0][1]).toBe('앱 예약을 차지하지 못함');
+  });
+});
+
+describe('완료 메일(0069) — 직원이 고른 예약만, 결과 글 없이 링크만', () => {
+  it('완료한 예약 중 notify_on_success가 참인 것만 알리고, 실패·멈춤에는 완료 알림이 없다', async () => {
+    const rows = [row({ id: 's1', notify_on_success: true }), row({ id: 's2' }), row({ id: 's3', notify_on_success: true })];
+    const { deps } = fakeDeps(rows, { s1: { kind: 'completed', conversationId: 'c1' }, s2: { kind: 'completed', conversationId: 'c2' }, s3: { kind: 'failed', error: '모델 오류' } });
+    await runDueSchedules(deps);
+    expect(deps.notifySuccess).toHaveBeenCalledTimes(1);
+    expect(deps.notifySuccess.mock.calls[0]).toEqual([rows[0], { conversationId: 'c1', nextRunAt: '2026-11-04T00:00:00.000Z' }]);
+    expect(deps.notifyFailure).toHaveBeenCalledTimes(1);
+  });
+  it('완료 알림이 실패해도 실행 결과는 그대로(완료로 셈)이고 경고만 남긴다', async () => {
+    const { deps } = fakeDeps([row({ id: 's1', notify_on_success: true })], { s1: { kind: 'completed', conversationId: 'c1' } }, { notifySuccess: vi.fn(async () => { throw new Error('메일 실패'); }) });
+    expect(await runDueSchedules(deps)).toMatchObject({ completed: 1, failed: 0 });
+    expect(deps.log.mock.calls.find(c => c[1] === '앱 예약 완료 알림을 보내지 못함')?.[0]).toBe('warning');
+  });
+  it('메일 글에는 앱·예약·시각·결과 보기 링크만 — 결과 글·입력값이 없다', () => {
+    const mail = scheduleSuccessMail({ appName: '주간 <보고> 앱', description: '평일 09:00', nextRunAt: '2026-11-04T00:00:00.000Z', finishedAt: new Date('2026-11-03T00:05:00Z'), resultUrl: 'https://w.example/chat?conv=c1', schedulesUrl: 'https://w.example/apps/schedules' });
+    expect(mail.subject).toContain('주간 <보고> 앱');
+    expect(mail.html).toContain('주간 &lt;보고&gt; 앱');
+    expect(mail.html).toContain('https://w.example/chat?conv=c1');
+    expect(mail.html).toContain('2026-11-03 09:05');
+    expect(mail.html).toContain('2026-11-04 09:00');
+    expect(mail.html).toContain('결과 글은 메일에 싣지 않습니다');
   });
 });
 

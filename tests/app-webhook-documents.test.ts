@@ -131,7 +131,9 @@ describe('연결 (원본)', () => {
     expect(readFileSync('src/components/apps/AppWebhookForm.tsx', 'utf8')).toContain('document_ids: documentIds');
     expect(readFileSync('src/app/apps/webhooks/page.tsx', 'utf8')).toContain('w.documentCount > 0');
     expect(readFileSync('src/lib/apps/webhook-spec.ts', 'utf8')).toContain('app_version, document_ids, name');
-    expect(readFileSync('src/app/api/apps/schedules/route.ts', 'utf8')).toContain("appDocumentChoice(definition.value.attachments, body.document_ids, '예약')");
+    // 예약 만들기·고치기는 같은 검사 함수를 거친다(2026-11-08)
+    expect(readFileSync('src/lib/apps/schedule-request.ts', 'utf8')).toContain("appDocumentChoice(definition.value.attachments, body.document_ids, '예약')");
+    for (const route of ['src/app/api/apps/schedules/route.ts', 'src/app/api/apps/schedules/[id]/route.ts']) expect(readFileSync(route, 'utf8')).toContain('checkScheduleRequest(');
   });
 });
 

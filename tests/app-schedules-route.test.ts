@@ -25,8 +25,9 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 
 import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/apps/schedules/route';
-import { DELETE, PATCH } from '@/app/api/apps/schedules/[id]/route';
-import { PAUSED_BY_USER } from '@/lib/apps/schedule-spec';
+import { DELETE, GET as GET_ONE, PATCH, PUT } from '@/app/api/apps/schedules/[id]/route';
+import { PAUSED_BY_USER, SCHEDULE_BUSY_MESSAGE, editedStatus } from '@/lib/apps/schedule-spec';
+import { PAUSED_APP_CHANGED } from '@/lib/apps/schedules';
 import { ADMIN_LOCKED_MESSAGE } from '@/lib/apps/automation-admin-spec';
 
 beforeEach(() => { state.session = true; state.actor = true; state.results = {}; state.calls = []; });
@@ -93,6 +94,90 @@ describe('POST /api/apps/schedules', () => {
     state.results.agents = [{ data: agentRow() }]; state.results.app_schedules = [{ count: 5 }];
     expect(await json(await post(valid))).toMatchObject({ status: 400, body: { error: { message: expect.stringContaining('5개까지') } } });
     expect(state.calls.filter(c => c[0] === 'app_schedules' && c[1] === 'insert')).toHaveLength(0);
+  });
+});
+
+const putReq = (id: string, body: unknown) => PUT(new NextRequest(`http://localhost/api/apps/schedules/${id}`, { method: 'PUT', body: JSON.stringify(body) }), { params: { id } });
+const current = (patch: Record<string, unknown> = {}) => ({ id: SCHEDULE, agent_id: AGENT, status: 'active', paused_reason: null, consecutive_failures: 0, admin_paused_at: null, claimed_at: null, ...patch });
+const edit = { ...valid, inputs: { title: '월간 보고' }, frequency: 'weekly', weekday: 2, hour: 14, minute: 30 };
+
+describe('예약 고치기 — GET·PUT /api/apps/schedules/[id]', () => {
+  it('GET은 내 예약 하나를 저장한 입력·문서 id와 함께 돌려준다', async () => {
+    state.results.app_schedules = [{ data: { ...scheduleRow({ document_ids: ['d1'] }), agent: { name: '주간 보고 앱' } } }];
+    const res = await json(await GET_ONE(new NextRequest(`http://localhost/api/apps/schedules/${SCHEDULE}`), { params: { id: SCHEDULE } }));
+    expect(res).toMatchObject({ status: 200, body: { data: { inputs: { title: '주간 보고' }, documentIds: ['d1'], appName: '주간 보고 앱' } } });
+    expect(state.calls).toContainEqual(['app_schedules', 'eq', 'user_id', 'me']);
+    state.results.app_schedules = [{ data: null }];
+    expect((await GET_ONE(new NextRequest(`http://localhost/api/apps/schedules/${SCHEDULE}`), { params: { id: SCHEDULE } })).status).toBe(404);
+    state.session = false;
+    expect((await GET_ONE(new NextRequest(`http://localhost/api/apps/schedules/${SCHEDULE}`), { params: { id: SCHEDULE } })).status).toBe(401);
+  });
+
+  it('지금 앱 판으로 입력·시각을 고치고, 앱 설정이 바뀌어 멈춘 예약은 다시 켠다 — 지금 부서로 적고 다음 시각은 지금부터, 조건은 내 것·잠금 없음·실행 중 아님', async () => {
+    state.results.app_schedules = [{ data: current({ status: 'paused', paused_reason: PAUSED_APP_CHANGED, consecutive_failures: 1 }) }, { data: scheduleRow({ inputs: { title: '월간 보고' }, frequency: 'weekly', weekday: 2, run_hour: 14, run_minute: 30 }) }];
+    state.results.agents = [{ data: agentRow() }];
+    const res = await json(await putReq(SCHEDULE, edit));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ description: '매주 화요일 14:30' });
+    const patch = state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'update')?.[2] as Record<string, unknown>;
+    expect(patch).toMatchObject({ app_version: 3, inputs: { title: '월간 보고' }, document_ids: [], frequency: 'weekly', weekday: 2, run_hour: 14, run_minute: 30, status: 'active', paused_reason: null, consecutive_failures: 0, department_id: 'dept', organization_id: 'org', claimed_at: null });
+    expect(Date.parse(patch.next_run_at as string)).toBeGreaterThan(Date.now());
+    expect(state.calls).toContainEqual(['app_schedules', 'is', 'admin_paused_at', null]);
+    expect(state.calls.some(c => c[0] === 'app_schedules' && c[1] === 'or' && String(c[2]).startsWith('claimed_at.is.null,claimed_at.lt.'))).toBe(true);
+    expect(state.calls.filter(c => c[0] === 'app_schedules' && c[1] === 'eq' && c[2] === 'user_id')).toHaveLength(2);
+  });
+
+  it('직원이 멈춘 예약은 멈춘 채로 고친다(다시 켜기는 따로)', async () => {
+    expect(editedStatus({ status: 'paused', paused_reason: PAUSED_BY_USER, consecutive_failures: 2 })).toEqual({ status: 'paused', paused_reason: PAUSED_BY_USER, consecutive_failures: 2 });
+    expect(editedStatus({ status: 'paused', paused_reason: '연속 3회 실패', consecutive_failures: 3 })).toEqual({ status: 'active', paused_reason: null, consecutive_failures: 0 });
+    expect(editedStatus({ status: 'active', paused_reason: null, consecutive_failures: 1 })).toEqual({ status: 'active', paused_reason: null, consecutive_failures: 0 });
+    state.results.app_schedules = [{ data: current({ status: 'paused', paused_reason: PAUSED_BY_USER }) }, { data: scheduleRow({ status: 'paused', paused_reason: PAUSED_BY_USER }) }];
+    state.results.agents = [{ data: agentRow() }];
+    expect((await putReq(SCHEDULE, edit)).status).toBe(200);
+    expect(state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'update')?.[2]).toMatchObject({ status: 'paused', paused_reason: PAUSED_BY_USER });
+  });
+
+  it('거절 — 관리자가 멈춤 403·실행 중 409·다른 앱으로 바꾸기 400·판 다름 409·필수 입력 빠짐 400·없음 404·그 사이 바뀜 409, 거절이면 고치지 않는다', async () => {
+    const noUpdate = () => expect(state.calls.some(c => c[0] === 'app_schedules' && c[1] === 'update')).toBe(false);
+    state.results.app_schedules = [{ data: current({ admin_paused_at: '2026-11-03T00:00:00Z' }) }];
+    expect(await json(await putReq(SCHEDULE, edit))).toMatchObject({ status: 403, body: { error: { message: ADMIN_LOCKED_MESSAGE } } });
+    state.results.app_schedules = [{ data: current({ claimed_at: new Date(Date.now() - 60_000).toISOString() }) }];
+    expect(await json(await putReq(SCHEDULE, edit))).toMatchObject({ status: 409, body: { error: { message: SCHEDULE_BUSY_MESSAGE } } });
+    state.results.app_schedules = [{ data: current() }];
+    expect((await putReq(SCHEDULE, { ...edit, agent_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })).status).toBe(400);
+    state.results.app_schedules = [{ data: current() }]; state.results.agents = [{ data: agentRow({ version: 4 }) }];
+    expect((await putReq(SCHEDULE, edit)).status).toBe(409);
+    state.results.app_schedules = [{ data: current() }]; state.results.agents = [{ data: agentRow() }];
+    expect((await putReq(SCHEDULE, { ...edit, inputs: {} })).status).toBe(400);
+    state.results.app_schedules = [{ data: null }];
+    expect((await putReq(SCHEDULE, edit)).status).toBe(404);
+    noUpdate();
+    // 오래된 차지(15분 넘음)는 실행기가 죽은 것 — 고칠 수 있다. 조건부 바꾸기가 0행이면 409
+    state.results.app_schedules = [{ data: current({ claimed_at: new Date(Date.now() - 20 * 60_000).toISOString() }) }, { data: null }];
+    state.results.agents = [{ data: agentRow() }];
+    expect((await putReq(SCHEDULE, edit)).status).toBe(409);
+    state.session = false; expect((await putReq(SCHEDULE, edit)).status).toBe(401);
+  });
+});
+
+describe('완료 메일 받기(0069)', () => {
+  it('만들기·고치기가 notify_on_success를 저장하고(보내지 않으면 거짓), 참·거짓이 아니면 400 — 목록 보기에 실린다', async () => {
+    state.results.agents = [{ data: agentRow() }];
+    state.results.app_schedules = [{ count: 0 }, { data: scheduleRow({ notify_on_success: true }) }];
+    const created = await json(await post({ ...valid, notify_on_success: true }));
+    expect(created.body.data.notifyOnSuccess).toBe(true);
+    expect(state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'insert')?.[2]).toMatchObject({ notify_on_success: true });
+    state.calls = [];
+    state.results.agents = [{ data: agentRow() }];
+    state.results.app_schedules = [{ count: 0 }, { data: scheduleRow() }];
+    expect((await json(await post(valid))).body.data.notifyOnSuccess).toBe(false);
+    expect(state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'insert')?.[2]).toMatchObject({ notify_on_success: false });
+    expect((await post({ ...valid, notify_on_success: 'yes' })).status).toBe(400);
+    state.calls = [];
+    state.results.app_schedules = [{ data: current() }, { data: scheduleRow({ notify_on_success: true }) }];
+    state.results.agents = [{ data: agentRow() }];
+    expect((await putReq(SCHEDULE, { ...edit, notify_on_success: true })).status).toBe(200);
+    expect(state.calls.find(c => c[0] === 'app_schedules' && c[1] === 'update')?.[2]).toMatchObject({ notify_on_success: true });
   });
 });
 

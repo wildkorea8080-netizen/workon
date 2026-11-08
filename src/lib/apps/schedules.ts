@@ -14,14 +14,14 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
-import { isMailConfigured, scheduleFailureMail, sendScheduleFailureEmail } from '@/lib/mailer';
+import { isMailConfigured, scheduleFailureMail, scheduleSuccessMail, sendScheduleFailureEmail, sendScheduleSuccessEmail } from '@/lib/mailer';
 import { defaultRunAsIo, runAppAs, type RunAsIo } from './run-as';
-import { describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
+import { SCHEDULE_CLAIM_STALE_MS, describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
 import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
 import { agentDocumentRows } from './app-document-choice';
 
 export const SCHEDULE_MAX_CONSECUTIVE_FAILURES = 3;
-export const SCHEDULE_CLAIM_STALE_MS = 15 * 60 * 1000;
+export { SCHEDULE_CLAIM_STALE_MS } from './schedule-spec';
 /** 한 번 불릴 때 쓰는 시간 예산 — 라우트 `maxDuration` 300초 안에서 실행 하나(단계 3개 + 최종, 최대 수 분)가 끝날 여유를 둔다 */
 export const SCHEDULE_RUN_BUDGET_MS = 180_000;
 export const SCHEDULE_BATCH = 3;
@@ -31,11 +31,11 @@ export const SCHEDULE_BATCH = 3;
  */
 export const SCHEDULE_TURN_DEADLINE_MS = 200_000;
 export const PAUSED_AFTER_FAILURES = `연속 ${SCHEDULE_MAX_CONSECUTIVE_FAILURES}회 실패해 예약을 멈췄습니다. 입력과 앱 설정을 확인한 뒤 다시 켜 주세요.`;
-export const PAUSED_APP_CHANGED = '앱 설정이 바뀌어 예약을 멈췄습니다. 앱을 다시 열어 새로 예약해 주세요.';
+export const PAUSED_APP_CHANGED = `앱 설정이 바뀌어 예약을 멈췄습니다. 앱 예약 목록에서 '고치기'로 입력을 확인해 저장하면 다시 켜집니다.`;
 export const PAUSED_APP_UNAVAILABLE = '앱을 쓸 수 없어(권한 없음 또는 삭제됨) 예약을 멈췄습니다.';
 export const PAUSED_USER_UNAVAILABLE = '예약한 직원의 계정을 쓸 수 없어 예약을 멈췄습니다.';
-export const PAUSED_DEPARTMENT_CHANGED = '소속 부서가 바뀌어 예약을 멈췄습니다. 예약을 다시 만들어 주세요.';
-export const PAUSED_DOCUMENTS_UNAVAILABLE = '고른 문서를 더 쓸 수 없어(지움·읽기 실패·지난 판) 예약을 멈췄습니다. 앱에서 문서를 다시 골라 새로 예약해 주세요.';
+export const PAUSED_DEPARTMENT_CHANGED = `소속 부서가 바뀌어 예약을 멈췄습니다. 앱 예약 목록에서 '고치기'로 저장하면 지금 부서로 다시 켜집니다.`;
+export const PAUSED_DOCUMENTS_UNAVAILABLE = `고른 문서를 더 쓸 수 없어(지움·읽기 실패·지난 판) 예약을 멈췄습니다. 앱 예약 목록에서 '고치기'로 문서를 다시 골라 저장해 주세요.`;
 export const SCHEDULE_TITLE_PREFIX = '[예약] ';
 
 export type AppScheduleRow = AppScheduleRowLike & {
@@ -59,6 +59,8 @@ export interface ScheduleDeps {
   execute(row: AppScheduleRow, deadlineAt: number): Promise<ScheduleOutcome>;
   finish(id: string, patch: SchedulePatch): Promise<void>;
   notifyFailure(row: AppScheduleRow, info: { error: string; paused: boolean; nextRunAt: string | null }): Promise<void>;
+  /** 실행을 마쳤을 때 — 직원이 '완료 메일'을 고른 예약만(0069). 결과 글은 싣지 않고 결과 보기 링크만 */
+  notifySuccess(row: AppScheduleRow, info: { conversationId: string | null; nextRunAt: string | null }): Promise<void>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string): Promise<void>;
   now(): number;
 }
@@ -122,7 +124,14 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
       await deps.log('error', '앱 예약 실행 결과를 저장하지 못함', { schedule_id: row.id, outcome: outcome.kind, error: errorText(error) }, row.organization_id);
     }
 
-    if (outcome.kind === 'completed') { result.completed++; continue; }
+    if (outcome.kind === 'completed') {
+      result.completed++;
+      if (row.notify_on_success === true) {
+        try { await deps.notifySuccess(row, { conversationId: outcome.conversationId ?? null, nextRunAt: patch.next_run_at ?? null }); }
+        catch (notifyError) { await deps.log('warning', '앱 예약 완료 알림을 보내지 못함', { schedule_id: row.id, error: errorText(notifyError) }, row.organization_id); }
+      }
+      continue;
+    }
     const paused = patch.status === 'paused';
     if (paused) result.paused++; else result.failed++;
     const error = outcome.kind === 'pause' ? outcome.reason : outcome.error;
@@ -202,6 +211,22 @@ export function scheduleDeps(): ScheduleDeps {
         nextRunAt: info.nextRunAt, schedulesUrl: `${APP_URL}/apps/schedules`, failedAt: new Date(),
       });
       const sent = await sendScheduleFailureEmail(to, mail);
+      if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
+    },
+    async notifySuccess(row, info) {
+      if (!isMailConfigured()) return;
+      const [{ data: user }, { data: agent }] = await Promise.all([
+        supabaseAdmin.from('users').select('email').eq('id', row.user_id).maybeSingle(),
+        supabaseAdmin.from('agents').select('name').eq('id', row.agent_id).maybeSingle(),
+      ]);
+      const to = typeof user?.email === 'string' ? user.email.trim() : '';
+      if (!to) return;
+      const mail = scheduleSuccessMail({
+        appName: agent?.name ?? '입력형 앱', description: describeSchedule(specOfRow(row)), nextRunAt: info.nextRunAt, finishedAt: new Date(),
+        resultUrl: info.conversationId ? `${APP_URL}/chat?conv=${encodeURIComponent(info.conversationId)}` : `${APP_URL}/apps/history?agent=${encodeURIComponent(row.agent_id)}`,
+        schedulesUrl: `${APP_URL}/apps/schedules`,
+      });
+      const sent = await sendScheduleSuccessEmail(to, mail);
       if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
     },
     log: (level, message, details, organizationId) => logSystem({ level, category: 'api', message, details, orgId: organizationId }),

@@ -143,7 +143,13 @@ describe('라우트·화면', () => {
   it('대화 입력에 지난 파일 단추(파일 받는 비서만), 화면은 서버 모듈을 가져오지 않는다', () => {
     const chat = readFileSync('src/components/chat/ChatInterface.tsx', 'utf8');
     expect(chat).toContain('{canAttachFiles && <ReusableFilePicker disabled={isLoading} onPick={fileAttach.addReused} />}');
+    // 입력형 앱 실행 화면도 같은 고르기·같은 다시 붙이기 길(2026-11-08) — 앱 첨부 상한(APP_MAX_FILES)은 훅이 센다
+    const run = readFileSync('src/app/apps/run/page.tsx', 'utf8');
+    expect(run).toContain('<ReusableFilePicker placement="down"');
+    expect(run).toContain('onPick={files.addReused}');
+    expect(run).toContain('useFileAttachments(Boolean(definition?.attachments), APP_MAX_FILES)');
     const picker = readFileSync('src/components/chat/ReusableFilePicker.tsx', 'utf8');
+    expect(picker).toContain("placement === 'down' ? 'top-10' : 'bottom-10'");
     expect(picker).toContain("from '@/lib/attachments/reuse-types'");
     expect(picker).not.toMatch(/attachments\/reuse'/);
     expect(readFileSync('src/components/chat/useFileAttachments.ts', 'utf8')).toContain("'/api/attachments/reuse'");

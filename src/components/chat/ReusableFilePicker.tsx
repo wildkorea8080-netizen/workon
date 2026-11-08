@@ -13,7 +13,13 @@ function sizeLabel(bytes: number): string {
  * 지난 파일 다시 붙이기(2026-11-05) — 최근 90일 안에 내가 대화에 붙였던 파일과 비서가 만들어 준 파일.
  * 고르면 서버가 새 첨부로 복사해 읽는다(옛 대화를 지워도 새 첨부는 남는다)
  */
-export default function ReusableFilePicker({ disabled, onPick }: { disabled: boolean; onPick: (file: ReusableFile) => void }) {
+export default function ReusableFilePicker({ disabled, onPick, placement = 'up', note = '고른 파일은 새 첨부로 복사돼 이 대화에 붙습니다.' }: {
+  disabled: boolean; onPick: (file: ReusableFile) => void;
+  /** 목록을 단추 위(대화 입력창)로 펼칠지 아래(입력형 앱 실행 화면 — 2026-11-08)로 펼칠지 */
+  placement?: 'up' | 'down';
+  /** 목록 아래 안내 — 고른 파일이 어디에 붙는지 */
+  note?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<ReusableFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +61,7 @@ export default function ReusableFilePicker({ disabled, onPick }: { disabled: boo
         지난 파일
       </button>
       {open && (
-        <div role="dialog" aria-label="지난 파일" className="absolute bottom-10 left-0 z-30 w-80 max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+        <div role="dialog" aria-label="지난 파일" className={`absolute ${placement === 'down' ? 'top-10' : 'bottom-10'} left-0 z-30 w-80 max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl`}>
           <div className="flex items-center justify-between px-2 py-1">
             <span className="text-xs font-semibold text-slate-700">지난 파일 (최근 90일)</span>
             <button type="button" onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-700">닫기</button>
@@ -84,7 +90,7 @@ export default function ReusableFilePicker({ disabled, onPick }: { disabled: boo
               ))}
             </ul>
           )}
-          <p className="px-2 pt-1 text-[11px] leading-4 text-slate-400">고른 파일은 새 첨부로 복사돼 이 대화에 붙습니다.</p>
+          <p className="px-2 pt-1 text-[11px] leading-4 text-slate-400">{note}</p>
         </div>
       )}
     </div>
