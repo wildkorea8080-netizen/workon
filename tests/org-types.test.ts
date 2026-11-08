@@ -19,9 +19,16 @@ describe('org-types', () => {
     expect(orgTypeFromCommonTenant('workon-a11111111222243338444555555555555')).toBeNull();
   });
 
-  it('유형 표 — 여섯 유형과 열쇠, 판별', () => {
-    expect(ORG_TYPES).toEqual(['중앙행정기관', '지방자치단체', '공공기관', '교육기관', '협회단체', '일반기업']);
-    expect(ORG_TYPES.map(t => ORG_TYPE_KEYS[t])).toEqual(['central', 'local', 'public', 'edu', 'assoc', 'company']);
+  it('유형 표 — 일곱 유형과 열쇠(지방공기업 0072), 판별', () => {
+    expect(ORG_TYPES).toEqual(['중앙행정기관', '지방자치단체', '공공기관', '지방공기업', '교육기관', '협회단체', '일반기업']);
+    expect(ORG_TYPES.map(t => ORG_TYPE_KEYS[t])).toEqual(['central', 'local', 'public', 'lpe', 'edu', 'assoc', 'company']);
+    // 지방공기업은 공공기관과 다른 공통 보관함이다 — 두 쪽 정부 기준 문서가 섞이지 않는다
+    expect(commonTenant('지방공기업')).toBe('workon-c-lpe');
+    expect(orgTypeFromCommonTenant('workon-c-lpe')).toBe('지방공기업');
+    expect(commonTenant('지방공기업')).not.toBe(commonTenant('공공기관'));
+    // DB CHECK(0072)가 코드 표와 같은 값이다
+    const sql = readFileSync('supabase/migrations/0072_org_type_local_public_enterprise.sql', 'utf8');
+    for (const t of ORG_TYPES) expect(sql).toContain(`'${t}'`);
     expect(isOrgType('공공기관')).toBe(true);
     expect(isOrgType('민간')).toBe(false);
     expect(isOrgType(undefined)).toBe(false);

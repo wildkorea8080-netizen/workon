@@ -5,7 +5,8 @@
  * 유형은 기관(`organizations.type`)에 한글 그대로 저장되고, 공통 문서(`common_documents.org_type`)도 같은 글이다.
  */
 
-export const ORG_TYPES = ['중앙행정기관', '지방자치단체', '공공기관', '교육기관', '협회단체', '일반기업'] as const;
+// '지방공기업'(2026-11-08, 0072) — 지방공기업법을 따르는 공사·공단은 예산편성기준·회계기준·경영평가 편람이 공공기관(공운법)과 달라 따로 둔다
+export const ORG_TYPES = ['중앙행정기관', '지방자치단체', '공공기관', '지방공기업', '교육기관', '협회단체', '일반기업'] as const;
 export type OrgType = (typeof ORG_TYPES)[number];
 
 /** 보관함 이름·저장소 경로에 쓰는 영문 열쇠 */
@@ -13,6 +14,7 @@ export const ORG_TYPE_KEYS: Record<OrgType, string> = {
   중앙행정기관: 'central',
   지방자치단체: 'local',
   공공기관: 'public',
+  지방공기업: 'lpe',
   교육기관: 'edu',
   협회단체: 'assoc',
   일반기업: 'company',
