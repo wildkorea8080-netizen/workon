@@ -104,15 +104,16 @@ describe('목록', () => {
 describe('화면', () => {
   it('결과물 화면에 대화 파일 묶음 — 내려받기는 주인만 받는 /api/files/[id], 대화로 가는 링크', () => {
     const page = readFileSync('src/app/files/page.tsx', 'utf8');
-    expect(page).toContain('<ConversationFiles />');
-    expect(page).toContain('href={`/api/files/${f.id}`}');
+    expect(page).toContain('endpoint="/api/files"');
+    expect(page).toContain('downloadHref={(id) => `/api/files/${id}`}');
+    expect(page).toContain('href={downloadHref(f.id)}');
     expect(page).toContain('/chat?conv=${encodeURIComponent(f.conversation_id)}');
     // 서버 모듈(supabaseAdmin)은 꼴만 가져온다 — 값을 가져오면 화면 묶음에 서버 코드가 들어간다
     expect(page).toContain("import type { MyGeneratedFile } from '@/lib/my-generated-files';");
     expect(page).not.toMatch(/^import (?!type ).*my-generated-files/m);
     // 이름 찾기 — '더 보기'는 건 글로 이어 읽고, 늦게 온 옛 응답은 버린다
-    expect(page).toContain('aria-label="파일 이름으로 찾기"');
-    expect(page).toContain("if (q) params.set('q', q);");
+    expect(page).toContain('aria-label="파일 이름으로 내 파일 찾기"');
+    expect(page).toContain("if (query) params.set('q', query);");
     expect(page).toContain('if (seq !== latest.current) return;');
   });
 

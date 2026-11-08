@@ -4,22 +4,11 @@
 // 화면에는 저장소 경로를 내보내지 않는다
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { decodeHistoryCursor, encodeHistoryCursor } from '@/lib/apps/history';
+import { fileNamePattern } from '@/lib/file-search';
 
 export const MY_FILES_PAGE = 50;
-/** 파일 이름 찾기 글 상한(2026-11-08) */
-export const MY_FILES_QUERY_MAX = 60;
-
-/** 찾기 글 다듬기 — 제어·서식 글자를 빼고 공백을 하나로 접어 60자까지. 비면 null(찾지 않음) */
-export function normalizeFileQuery(raw: string | null | undefined): string | null {
-  if (typeof raw !== 'string') return null;
-  const text = Array.from(raw.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, MY_FILES_QUERY_MAX).join('').trim();
-  return text || null;
-}
-
-/** 이름에 그 글이 들어 있는 파일 — LIKE의 `%`·`_`·`\\`는 글자 그대로 찾도록 막는다(대소문자 무시) */
-export function fileNamePattern(query: string): string {
-  return `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
+// 찾기 규칙은 화면과 함께 쓰는 잎 파일에 있다(2026-11-08 — 결과물 화면 통합 찾기)
+export { MY_FILES_QUERY_MAX, fileNamePattern, normalizeFileQuery } from '@/lib/file-search';
 
 export type MyGeneratedFile = {
   id: string;
