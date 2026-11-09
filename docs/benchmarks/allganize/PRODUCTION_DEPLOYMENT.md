@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오전): 문서 참조 관계의 거꾸로 목록('이 문서를 인용하는 문서')·참조 색인
+
+- 2026-11-09 10:23 KST 배포 `dpl_2BooX7TA3UQytXToAKUnrdmwS7QC`(커밋 `cb225fe`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 `dpl_DaGEJQJ61yPuCeMrzh9NBgUjqwbK`(91a3ae7)로 promote한다. **마이그레이션 없음** — 참조 색인은 기존 `documents.metadata` jsonb 안 `references` 칸이라 옛 코드는 읽지 않는다.
+- 들어간 커밋: `7bfbaaa`(직전 배포 기록), `004c12d` 이 문서를 인용하는 문서(문서마다 인용 이름 열쇠를 `metadata.references`에 색인, 같은 이름 열쇠로 거꾸로 찾기, 색인 범위 표시, 관리자 '색인 만들기' — [참조 관계](DOCUMENT_REFERENCES.md)), `f7a8999` 문서, `cb225fe` 색인 만들기 주소 고침.
+- **한 번 고쳐 다시 배포했다**: 처음 배포 `dpl_6euvL7fPfdSxpkNVEeYs1VpU7Pch`(`f7a8999`, 10:16 KST)에서 색인 만들기 라우트가 `/api/documents/references/index`였는데, **Next.js는 `/index`로 끝나는 주소를 위 경로(`/api/documents/references`)로 308 돌려보내** 로그인 없는 점검에서 401 대신 308이 나왔다(단추가 운영에서 닿지 않음). 라우트 폴더를 `build`로 바꾸고(`POST /api/documents/references/build`) `tests/route-exports.test.ts`가 라우트·화면 폴더 이름 `index`를 막는다. 첫 배포는 7분 동안 운영이었고 그 사이 단추는 실패만 했다(데이터 변화 없음).
+- **배포 전**: 가지 Preview(`f7a8999` `workon-jpndl1wf2`, `cb225fe` `workon-kwffk3u9y`) Ready를 확인한 뒤 `main`에 올렸다. 그 전에 시험 DB를 띄운 전체 시험 212파일 3,167개 통과·tsc 0(`f7a8999` 작업 트리). 고침 커밋은 관련 시험 3파일 29개만 돌렸고 tsc는 이 PC 메모리 부족으로 못 돌려 Vercel 빌드(타입 검사 포함)로 확인했다.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login` 200, `GET /api/documents/[id]/references`·`POST /api/documents/references/build` 401(옛 `/references/index`는 308 — 쓰지 않음). pg_cron 호출 200(10:21~10:24 KST), 앱 예약 실행기 heartbeat 10:20 KST.
+- **확인하지 못한 것**(사용자 몫): 관리자 문서 화면 '참조 문서' 창에서 거꾸로 목록·색인 범위·'색인 만들기'를 실제 문서로 눌러 보기(브라우저로 보지 않음 — 개발 서버가 운영 DB를 씀). 운영 문서는 아직 색인이 없어 처음 열면 '…개만 색인했습니다'가 보이는 것이 정상이다.
+
 ## 2026-11-09(자정): 숫자 근거 다시 찾기·근거로 고쳐 쓰기·결과물 '대화에 올린 파일'·통합 찾기·문서 참조 관계
 
 - 2026-11-09 00:23 KST 배포 `dpl_DaGEJQJ61yPuCeMrzh9NBgUjqwbK`(커밋 `91a3ae7`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_CVjVDhtAMJz6hjbaMeQmJLBMDWpa`(9695353)로 promote한다. **마이그레이션 없음** — 고쳐 쓴 답은 기존 `messages.source_references` jsonb 안 `revision` 칸이라 옛 코드는 읽지 않는다(되돌리면 고쳐 쓴 답이 화면에서만 안 보인다).
