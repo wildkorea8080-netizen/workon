@@ -7,6 +7,7 @@ import {
   type RagEvalResult, type RagEvalSummary,
 } from '@/lib/rag-eval';
 import { RAG_EVAL_ANSWER_MAX_QUESTIONS, compareAnswers } from '@/lib/rag-eval-answer';
+import { judgeNote } from '@/lib/rag-eval-judge';
 
 type RunRow = { id: string; agent_id: string; agent_version: number; created_at: string; question_count: number; status: 'done' | 'partial'; summary: RagEvalSummary; results?: RagEvalResult[] };
 
@@ -42,7 +43,11 @@ export function summaryLine(s: RagEvalSummary): string {
     if (a.keywordRows) parts.push(`핵심어 ${a.keywordPasses}/${a.keywordRows}`);
     if (a.numberIssues) parts.push(`확인 안 된 숫자가 있는 답 ${a.numberIssues}`);
     if (a.errors) parts.push(`답 못 만듦 ${a.errors}`);
-    parts.push(`AI 사용 ${a.costKrw.toLocaleString('ko-KR')}원`);
+    if (a.judge) {
+      parts.push(`AI 채점(참고) 맞음 ${a.judge.correct} · 일부 ${a.judge.partial} · 틀림 ${a.judge.incorrect}${a.judge.unfaithful ? ` · 근거 밖 내용 ${a.judge.unfaithful}` : ''}${a.judge.errors ? ` · 채점 못 함 ${a.judge.errors}` : ''}`);
+    }
+    const cost = Math.round((a.costKrw + (a.judge?.costKrw ?? 0)) * 100) / 100;
+    parts.push(`AI 사용 ${cost.toLocaleString('ko-KR')}원`);
   }
   return parts.join(' · ');
 }
@@ -67,6 +72,8 @@ export default function RagEvalPanel() {
   const [compare, setCompare] = useState<{ base: RunRow; improved: RagEvalResult[]; regressed: RagEvalResult[]; unmatched: number; note: string | null; answerImproved: RagEvalResult[]; answerRegressed: RagEvalResult[] } | null>(null);
   // 답변까지 평가(2026-11-08) — 질문마다 대화와 같은 프롬프트로 답을 한 번 만든다(모델 사용량)
   const [withAnswers, setWithAnswers] = useState(false);
+  // AI 채점(2026-11-09, 참고) — 답변까지 평가할 때만, 기대 문서가 있는 질문의 답마다 AI를 한 번 더 부른다
+  const [withJudge, setWithJudge] = useState(false);
 
   useEffect(() => {
     void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { if (r.ok) setSets(r.data); });
@@ -88,7 +95,7 @@ export default function RagEvalPanel() {
   async function evaluate() {
     if (!agentId || running || !preview?.ok || tooManyForAnswers) return;
     setRunning(true); setError(null); setCompare(null);
-    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set, ...(withAnswers ? { answers: true } : {}) }) });
+    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set, ...(withAnswers ? { answers: true, ...(withJudge ? { judge: true } : {}) } : {}) }) });
     if (r.ok) { setRun(r.data); setHistory((h) => [{ ...r.data, results: undefined }, ...h].slice(0, 20)); }
     else setError(r.message);
     setRunning(false);
@@ -180,6 +187,15 @@ export default function RagEvalPanel() {
           <span className="block text-xs text-slate-500">질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지 · 질문마다 AI를 한 번 불러 사용량(기관 한도)이 듭니다 · 공공 데이터 조회 같은 도구·첨부·앱 단계는 쓰지 않습니다 · 답이 맞는 말인지까지는 모릅니다 — 핵심어를 적어 두면 그만큼 더 봅니다.</span>
         </span>
       </label>
+      {withAnswers && (
+        <label className="ml-6 flex items-start gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={withJudge} onChange={(e) => setWithJudge(e.target.checked)} className="mt-1" />
+          <span>
+            <strong>AI 채점도(참고)</strong> — 기대 문서가 있는 질문의 답마다 AI가 근거 글과 맞대 맞음·일부 맞음·틀림과 근거 밖 내용이 있는지를 한두 문장 이유와 함께 적습니다.
+            <span className="block text-xs text-slate-500">채점하는 AI도 틀릴 수 있어 '답변 맞음'(프로그램 판정)은 바꾸지 않고 따로 보입니다 · 질문마다 AI를 한 번 더 불러 사용량이 늘어납니다.</span>
+          </span>
+        </label>
+      )}
       {tooManyForAnswers && <p role="alert" className="text-xs text-red-700">답변까지 평가할 때는 질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지입니다(지금 {preview?.ok ? preview.rows.length : 0}개).</p>}
       <button type="button" disabled={!agentId || running || !preview?.ok || tooManyForAnswers} onClick={() => void evaluate()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? (withAnswers ? '평가 중… (질문당 십여 초)' : '평가 중… (질문당 몇 초)') : '평가 실행'}</button>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
@@ -205,6 +221,7 @@ export default function RagEvalPanel() {
                     <p className={`font-semibold ${r.answer.passed ? 'text-emerald-700' : 'text-red-700'}`}>{answerNote(r.answer)}</p>
                     {r.keywords?.length ? <p className="text-slate-500">핵심어: {r.keywords.join(', ')}</p> : null}
                     {r.answer.cited.length > 0 && <p className="text-slate-500">인용: {r.answer.cited.join(' · ')}</p>}
+                    {r.answer.judge && <p className={r.answer.judge.grade === 'correct' && r.answer.judge.faithful !== false ? 'text-emerald-700' : 'text-amber-700'}>AI 채점(참고): {judgeNote(r.answer.judge)}{r.answer.judge.reason ? ` — ${r.answer.judge.reason}` : ''}</p>}
                     {r.answer.text && <details><summary className="cursor-pointer text-[#003087]">답 보기</summary><p className="mt-1 whitespace-pre-wrap text-slate-700">{r.answer.text}</p></details>}
                   </> : '—'}</td>}
                 </tr>))}</tbody>

@@ -2,7 +2,7 @@
 // 문서 찾기 평가의 '답변까지 평가'(2026-11-08) — 순수 규칙. 화면과 라우트가 함께 쓴다(서버 모듈을 가져오지 않는다).
 //
 // 질문마다 대화와 같은 찾기·같은 시스템 프롬프트(비서 지시문 + 참고 자료·인용 규칙)로 답을 한 번 만들고, **프로그램이** 판정한다 —
-// AI 채점자를 쓰지 않는다(채점자도 틀릴 수 있고 비용이 두 배다). 보는 것:
+// 판정에 AI 채점자를 쓰지 않는다(채점자도 틀릴 수 있고 비용이 두 배다). 'AI 채점도'(2026-11-09, rag-eval-judge.ts)는 고를 때만, 참고로 따로 적는다. 보는 것:
 //  ① 답이 기대 문서를 [n]으로 인용했나(인용 번호 → 그 번호의 근거 조각 문서 이름)
 //  ② 답의 숫자가 그 턴에 AI가 본 숫자(시스템 프롬프트·질문)에 있나 — 대화의 '숫자 확인'과 같은 규칙
 //  ③ 사람이 적어 둔 '기대 답 핵심어'가 모두 들어 있나(선택)
@@ -11,6 +11,7 @@
 
 import { checkNumbers } from '@/lib/assistant/number-check';
 import { matchesExpected, type RagEvalResult } from '@/lib/rag-eval';
+import { summarizeJudges, type RagEvalJudge, type RagEvalJudgeSummary } from '@/lib/rag-eval-judge';
 
 /** 답변까지 평가할 때 한 번에 재는 질문 수 — 질문마다 모델을 한 번 부른다 */
 export const RAG_EVAL_ANSWER_MAX_QUESTIONS = 20;
@@ -45,6 +46,8 @@ export interface RagEvalAnswer {
   costKrw?: number;
   /** error일 때 사람이 읽을 이유 */
   error?: string;
+  /** 'AI 채점도'를 고른 실행의 기대 문서 있는 질문에만(2026-11-09, rag-eval-judge.ts) — 참고, `passed`를 바꾸지 않는다 */
+  judge?: RagEvalJudge;
 }
 
 export interface RagEvalAnswerSummary {
@@ -71,6 +74,8 @@ export interface RagEvalAnswerSummary {
   outputTokens: number;
   costKrw: number;
   models: string[];
+  /** AI 채점을 한 실행에만 — 토큰·원가는 위 합계와 따로 센다 */
+  judge?: RagEvalJudgeSummary;
 }
 
 /** 근거 조각 중 인용 판정에 쓰는 것 — 대화의 `RetrievedChunk`와 같은 칸 */
@@ -174,6 +179,7 @@ export function summarizeAnswers(results: Array<Pick<RagEvalResult, 'expected' |
   const grounded = expectedRows.filter((r) => r.answer!.verdict === 'grounded').length;
   const keywordPasses = keywordRows.filter((r) => !r.answer!.keywordsMissing!.length).length;
   const offTopicDeclined = offTopic.filter((r) => r.answer!.verdict === 'correct_decline').length;
+  const judge = summarizeJudges(rows.map((r) => r.answer!.judge));
   return {
     evaluated: done.length,
     errors: rows.length - done.length,
@@ -193,6 +199,7 @@ export function summarizeAnswers(results: Array<Pick<RagEvalResult, 'expected' |
     outputTokens: sum((a) => a.outputTokens),
     costKrw: Math.round(sum((a) => a.costKrw) * 100) / 100,
     models,
+    ...(judge ? { judge } : {}),
   };
 }
 

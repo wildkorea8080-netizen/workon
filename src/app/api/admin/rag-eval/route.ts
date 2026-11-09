@@ -24,6 +24,8 @@ export const maxDuration = 300;
  *   기본은 검색만 — AI 답변을 만들지 않는다. `answers: true`(2026-11-08)면 질문마다 대화와 같은 시스템 프롬프트(비서 지시문 + 참고 자료·인용 규칙)·
  *   비서 모델(기관 정책)로 답을 한 번 만들어 프로그램이 판정한다(인용·숫자·기대 답 핵심어 — `rag-eval-answer.ts`). 질문 20개까지, 한도를 먼저 보고,
  *   답마다 사용 기록(`rag_eval_answer` — 모델·토큰·원가, 요청한 관리자 부서)을 남긴다. 도구(공공 데이터 등)·첨부·앱 단계는 쓰지 않는다.
+ *   `judge: true`(2026-11-09, `answers`와 함께만)면 기대 문서가 있는 질문의 답마다 같은 모델로 AI 채점을 한 번 더(`rag-eval-judge.ts` — 참고,
+ *   프로그램 판정은 그대로), 사용 기록 `rag_eval_judge`.
  *   한 질문의 NODA 실패는 그 질문만 '찾기 실패'로 두고, 모두 실패면 저장하지 않고 503.
  * - GET `?agentId=`: 그 비서의 지난 실행 20개(요약만). `?id=`: 실행 하나(결과 포함).
  * - 비서는 요청자 기관이고, 공식 비서이거나 요청자가 관리하는 부서의 비서여야 한다(아니면 없는 것처럼 404).
@@ -52,18 +54,19 @@ export async function POST(request: NextRequest) {
     const actor = await getActorScope(session!);
     if (!actor?.organizationId) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
 
-    const body = (await request.json().catch(() => ({}))) as { agentId?: unknown; set?: unknown; answers?: unknown };
+    const body = (await request.json().catch(() => ({}))) as { agentId?: unknown; set?: unknown; answers?: unknown; judge?: unknown };
     const agent = await evaluableAgent(body.agentId, actor);
     if (!agent) return jsonError('비서를 찾을 수 없습니다.', 404);
     const parsed = parseRagEvalSet(typeof body.set === 'string' ? body.set : '');
     if (!parsed.ok) return NextResponse.json({ ok: false, error: { message: parsed.errors[0], details: { errors: parsed.errors } } }, { status: 400 });
     const withAnswers = body.answers === true;
+    if (body.judge === true && !withAnswers) return jsonError('AI 채점은 답변까지 평가할 때만 고를 수 있습니다.', 400);
     if (withAnswers && parsed.rows.length > RAG_EVAL_ANSWER_MAX_QUESTIONS) {
       return jsonError(`답변까지 평가할 때는 한 번에 ${RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지 평가합니다(지금 ${parsed.rows.length}개).`, 400);
     }
 
     const orgId = actor.organizationId;
-    let answers: { systemPrompt: string | null; model: string } | undefined;
+    let answers: { systemPrompt: string | null; model: string; judge?: boolean } | undefined;
     if (withAnswers) {
       // 모델을 부르므로 대화처럼 한도를 먼저 본다(요청한 관리자 기준)
       const limit = await checkTokenLimit(actor.departmentId, actor.userId);
@@ -71,7 +74,8 @@ export async function POST(request: NextRequest) {
       const { data: settings, error: settingsError } = await supabaseAdmin.from('agents').select('system_prompt, model_id').eq('id', agent.id).maybeSingle();
       if (settingsError || !settings) return jsonError('비서 설정을 불러오지 못했습니다.', 500);
       const { modelId } = resolveModel(settings.model_id as string | null, await getAllowedModelIds(orgId));
-      answers = { systemPrompt: (settings.system_prompt as string | null) ?? null, model: modelId };
+      // AI 채점도 답과 같은 모델 — 기관 허용 목록을 그대로 따른다
+      answers = { systemPrompt: (settings.system_prompt as string | null) ?? null, model: modelId, ...(body.judge === true ? { judge: true } : {}) };
     }
 
     const { results, nodaFailures } = await runRagEval({ rows: parsed.rows, answers, concurrency: CONCURRENCY, budgetMs: BUDGET_MS }, {
@@ -80,6 +84,10 @@ export async function POST(request: NextRequest) {
       complete,
       logUsage: (usage) => writeUsageLog({
         departmentId: actor.departmentId, userId: actor.userId, action: 'rag_eval_answer', resourceType: 'agent', resourceId: agent.id,
+        details: buildUsageDetails(usage, { agent_id: agent.id }),
+      }),
+      logJudgeUsage: (usage) => writeUsageLog({
+        departmentId: actor.departmentId, userId: actor.userId, action: 'rag_eval_judge', resourceType: 'agent', resourceId: agent.id,
         details: buildUsageDetails(usage, { agent_id: agent.id }),
       }),
       logFailure: (message, details) => logSystem({ level: 'warning', category: 'api', message, details: { agent_id: agent.id, ...details }, orgId }),

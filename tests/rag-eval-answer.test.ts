@@ -196,7 +196,7 @@ describe('라우트·화면 (원본)', () => {
   it('화면 — 답변까지 평가 고르기·20개 넘으면 막기·답 칸', () => {
     const panel = readFileSync('src/components/admin/RagEvalPanel.tsx', 'utf8');
     expect(panel).toContain('AI 답변까지 평가');
-    expect(panel).toContain('...(withAnswers ? { answers: true } : {})');
+    expect(panel).toContain('...(withAnswers ? { answers: true, ...(withJudge ? { judge: true } : {}) } : {})');
     expect(panel).toContain('disabled={!agentId || running || !preview?.ok || tooManyForAnswers}');
   });
 });
