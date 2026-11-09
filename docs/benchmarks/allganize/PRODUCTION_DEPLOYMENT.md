@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오후 5): 문서 찾기 단계 — 태그로 좁히기
+
+- 2026-11-09 16:33 KST 배포 `dpl_85qLp1c679hs95tcZzXbFRVLhM97`(커밋 `b107d93`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_5CJnQv4LSUEZ7sGWXUs8ckvFfmmB`(e1b258d)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사는 `lookup.tags`를 모르는 칸으로 떨구고(정의를 다시 저장하면 태그 거르기가 빠진 채 저장됨) 실행기는 문서함 전체의 근거를 넘긴다.
+- 들어간 커밋: `4223b7b`(직전 배포 기록), `72b6fa9` 태그로 좁히기(`lookup.tags` — 찾은 근거 중 태그 하나라도 붙은 이 기관 문서의 것만, 공통 기준은 빠짐, 태그를 못 읽으면 멈춤, 남는 것 없으면 정보 공백 — [조회 단계](APP_LOOKUP_STEPS.md)), `b107d93` 문서.
+- **배포 전**: 가지 Preview(`b107d93`, `workon-nsdryjj9h`) Ready를 확인한 뒤 `main`에 올렸다(이번에는 웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 222파일 3,277개 통과(빠진 파일 없음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/builder`·`/apps/run`·`/chat` 200, `GET /api/agents`·`POST /api/chat` 401, `PATCH /api/admin/rag-eval` 403. pg_cron 호출 200(16:33~16:35 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 문서에 태그를 붙여 두고, 문서 찾기 단계에 '이 태그 문서만'을 둔 앱을 저장·실행해 그 태그 문서의 근거만 남는지, 단계 결과의 '태그: …', 맞는 문서가 없을 때 정보 공백으로 넘어가는지 보기(실제 NODA·모델 — 브라우저로 보지 않음).
+
 ## 2026-11-09(오후 4): 사람 판정 — AI 채점자 정확도 재기
 
 - 2026-11-09 15:40 KST 배포 `dpl_5CJnQv4LSUEZ7sGWXUs8ckvFfmmB`(커밋 `e1b258d`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_9bM495WLAWfzyKbpVehGKCyw7scK`(513c9f5)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드에는 PATCH가 없어 사람 판정을 매기지 못하지만, 이미 매긴 판정(`results[].answer.human`·`summary.answers.agreement`·`summary.labelRevision`)은 기록에 그대로 남고 옛 화면은 그 칸을 읽지 않는다.
