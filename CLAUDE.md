@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-09 낮) 입력형 앱의 문서 찾기 조회 단계(`29c0232`, 마이그레이션 없음)를 `dpl_2ErKz3L1fWK6tREPvB7sr5wGYRCK`로 배포했다.
 - (2026-11-09 오전 3) 기관 통계 읽기 API — 범위 제한 키(`4f62099`, 0075 운영 적용)를 `dpl_8xMkn7BckbeFnxieWYg38uLFbW8n`로 배포했다.
 - (2026-11-09 오전 2) 문서 찾기 평가의 AI 채점(선택·참고, `7f831ba`, 마이그레이션 없음)을 `dpl_4SbeNkzGpWV2Mb668tosMBgpgvmo`로 배포했다.
 - (2026-11-09 오전) 문서 참조 관계의 거꾸로 목록·참조 색인(`cb225fe`, 마이그레이션 없음 — 색인 만들기 주소 `/references/index`가 Next.js 308에 걸려 `/references/build`로 고쳐 다시 배포)을 `dpl_2BooX7TA3UQytXToAKUnrdmwS7QC`로 배포했다.
