@@ -118,14 +118,17 @@ export async function runAppIntermediateSteps(args: {
       // 공공 데이터 조회 — 모델을 부르지 않는다(사용량 없음). 실패 글은 직원이 고칠 수 있게 그대로 보인다(AppInputError)
       const record = args.records[index];
       delete record.branch;
-      const query = renderLookupQuery(lookup.query, args.inputs);
+      // 앞 단계 결과({{@N}}, 보완 조사) — 이번 실행에서 끝난 AI 단계(처리·분류)의 결과만
+      const stepOutputs: Record<string, string> = {};
+      args.records.forEach((r, i) => { if (i < index && r.status === 'completed' && r.kind !== 'lookup' && typeof r.output === 'string') stepOutputs[`@${i + 1}`] = r.output; });
+      const query = renderLookupQuery(lookup.query, args.inputs, stepOutputs);
       const article = lookup.article ? lookupArticleNumber(renderLookupQuery(lookup.article, args.inputs)) : '';
       record.kind = 'lookup'; record.query = query; if (article) record.article = article; else delete record.article;
       const docLookup = APP_LOOKUP_TOOLS[lookup.tool].capability === 'doc_search';
       if (docLookup) record.docSearch = true; else delete record.docSearch;
       delete record.gap;
       record.status = 'running'; args.update(index);
-      if (!query) throw new AppInputError(`${args.steps[index].name}: 조회어가 비어 있습니다. 조회어에 넣은 입력 항목을 채우거나 단계 실행 조건을 두세요.`);
+      if (!query) throw new AppInputError(`${args.steps[index].name}: 조회어가 비어 있습니다. 조회어에 넣은 입력 항목을 채우거나(앞 단계 결과를 넣었으면 그 단계가 조회어를 썼는지 보세요) 단계 실행 조건을 두세요.`);
       if (article === null) throw new AppInputError(`${args.steps[index].name}: 조문 번호는 15 또는 제15조처럼 숫자로 입력해 주세요.`);
       if (!args.lookup) throw new AppInputError(`${args.steps[index].name}: 이 실행에서는 공공 데이터 조회를 쓸 수 없습니다.`);
       const found = await args.lookup(lookup.tool, query, article || undefined);

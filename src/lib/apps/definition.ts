@@ -60,13 +60,34 @@ export const APP_LOOKUP_QUERY_MAX = 200;
 export const APP_LOOKUP_OUTPUT_MAX = 6000;
 export const isLookupTool = (v: unknown): v is AppLookupTool => typeof v === 'string' && Object.prototype.hasOwnProperty.call(APP_LOOKUP_TOOLS, v);
 const PLACEHOLDER = /\{\{([a-z][a-z0-9_]{0,31})\}\}/g;
-/** 조회어의 `{{키}}`를 입력값으로 — 줄바꿈·연속 공백은 하나로, 200자에서 자른다. 입력이 비면 그 자리는 빈 글 */
-export function renderLookupQuery(template: string, inputs: Record<string, string> | undefined): string {
-  return template.replace(PLACEHOLDER, (_, key: string) => inputs?.[key] ?? '').replace(/\s+/g, ' ').trim().slice(0, APP_LOOKUP_QUERY_MAX);
+/**
+ * 조회어의 앞 단계 결과 자리(2026-11-09, 보완 조사) — `{{@N}}` = N번째(1부터) 앞선 **AI 단계**(처리·분류)의 결과 첫 줄.
+ * 앞 단계 AI가 '다음에 찾을 조회어'를 한 줄로 쓰게 하면, 그 글로 문서 찾기·공공 데이터 조회를 한 번 더 한다(조회 결과를 보고 보완 조사)
+ */
+const STEP_REF = /\{\{@([1-9])\}\}/g;
+/** 앞 단계 결과 → 조회어로 쓸 한 줄 — 첫 줄(빈 줄·머리 기호·'조회어:' 꼬리표·따옴표 뗌), 공백 하나로, 200자 */
+export function stepQueryText(output: string | undefined): string {
+  const line = (output ?? '').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-*•·>#]+|\d+[.)])\s*/, '').replace(/^\s*(?:\*\*)?(?:조회어|검색어|다음 조회어)\s*[:：]\s*(?:\*\*)?/, '').trim()).find(Boolean) ?? '';
+  return line.replace(/^["'“‘「『]+|["'”’」』]+$/g, '').replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, APP_LOOKUP_QUERY_MAX);
 }
-/** 화면 보기용 — `{{키}}`를 `{{항목 이름}}`으로 */
+/** 조회어의 `{{키}}`를 입력값으로, `{{@N}}`을 앞 단계 결과로 — 줄바꿈·연속 공백은 하나로, 200자에서 자른다. 비면 그 자리는 빈 글 */
+export function renderLookupQuery(template: string, inputs: Record<string, string> | undefined, stepOutputs?: Record<string, string>): string {
+  // 한 번에 바꾼다 — 넣은 값(입력·앞 단계 결과) 속의 `{{…}}`가 다시 자리로 읽히지 않게
+  return template
+    .replace(LOOKUP_SLOT, (_, key: string) => (key.startsWith('@') ? stepQueryText(stepOutputs?.[key]) : inputs?.[key] ?? ''))
+    .replace(/\s+/g, ' ').trim().slice(0, APP_LOOKUP_QUERY_MAX);
+}
+const LOOKUP_SLOT = /\{\{(@[1-9]|[a-z][a-z0-9_]{0,31})\}\}/g;
+/** 화면 보기용 — `{{키}}`를 `{{항목 이름}}`으로, `{{@N}}`을 `{{N단계 결과}}`로 */
 export function describeLookupQuery(template: string, fields: AppField[]): string {
-  return template.replace(PLACEHOLDER, (whole, key: string) => { const f = fields.find(x => x.key === key); return f ? `{{${f.label}}}` : whole; });
+  return template.replace(LOOKUP_SLOT, (whole, key: string) => {
+    if (key.startsWith('@')) return `{{${key.slice(1)}단계 결과}}`;
+    const f = fields.find(x => x.key === key); return f ? `{{${f.label}}}` : whole;
+  });
+}
+/** 조회어가 쓰는 앞 단계 번호(1부터) */
+export function lookupStepRefs(template: string): number[] {
+  return [...template.matchAll(STEP_REF)].map(m => Number(m[1]));
 }
 /** 정의가 조회 단계에 쓰는 커넥터 — 빌더가 앱 능력(public_data)에 넣고, 저장 검사가 능력과 맞춰 본다 */
 export function appLookupConnectors(def: AppDefinition | null | undefined): string[] {
@@ -308,7 +329,10 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         if (!object(lookup) || !isLookupTool(lookup.tool)) return { ok: false, message: '공공 데이터 조회 단계의 도구를 확인해 주세요.' };
         if (typeof lookup.query !== 'string' || !lookup.query.trim() || lookup.query.length > APP_LOOKUP_QUERY_MAX || /[\r\n]/.test(lookup.query)) return { ok: false, message: `조회어는 ${APP_LOOKUP_QUERY_MAX}자 이내 한 줄로 입력해 주세요.` };
         const keys = [...lookup.query.matchAll(PLACEHOLDER)].map(m => m[1]);
-        if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목만 넣을 수 있습니다.' };
+        // 앞 단계 결과({{@N}}, 보완 조사) — 이 단계보다 앞의 AI 단계(처리·분류)만. 조회 단계의 결과는 조회어로 쓰지 않는다
+        const refs = lookupStepRefs(lookup.query);
+        if (refs.some(n => n > steps.length || Boolean(steps[n - 1]?.lookup))) return { ok: false, message: `${step.name.trim()}: 조회어의 앞 단계 결과는 이 단계보다 앞의 AI 단계(처리·분류)만 쓸 수 있습니다.` };
+        if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(STEP_REF, '').replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목과 앞선 AI 단계의 결과만 넣을 수 있습니다.' };
         if (step.branches !== undefined) return { ok: false, message: '공공 데이터 조회 단계에는 갈래를 둘 수 없습니다.' };
         normalized.lookup = { tool: lookup.tool, query: lookup.query.trim() };
         if (lookup.article !== undefined && lookup.article !== '') {
