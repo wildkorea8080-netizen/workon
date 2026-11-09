@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -156,6 +156,17 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
               : <p className="text-xs leading-5 text-slate-500">앞 단계 결과는 그 단계 답의 <strong>첫 줄</strong>만 조회어로 씁니다 — 그 단계 지시에 ‘다음에 찾을 조회어를 첫 줄에 한 줄로 쓰세요’처럼 적어 두세요(보완 조사). 그 단계가 건너뛰어지거나 비면 그 자리는 빈 글입니다.</p>}
             {!APP_LOOKUP_TOOLS[step.lookup.tool].article && <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={Boolean(step.lookup.each && lookupStepRefs(step.lookup.query).includes(step.lookup.each))} onChange={e => { const { each: _each, ...rest } = step.lookup!; changeStep(index, { lookup: e.target.checked ? { ...rest, each: lookupStepRefs(step.lookup!.query)[0] } : rest }); }} />{lookupStepRefs(step.lookup.query)[0]}단계 결과의 줄마다 찾기(최대 {APP_LOOKUP_EACH_MAX}줄 — 조사 계획)</label>}
           </>}
+          {/* 더 찾기(2026-11-09) — AI가 조회 결과를 보고 빠진 부분의 새 조회어로 다시 찾는다(검색 도구만) */}
+          {!APP_LOOKUP_TOOLS[step.lookup.tool].article && <div className="space-y-2 border-t border-slate-100 pt-2">
+            <label className="block text-xs text-slate-600">더 찾기<select aria-label={`단계 ${index + 1} 더 찾기`} className={`${input} mt-1`} value={step.lookup.refine ?? 0} onChange={e => { const n = Number(e.target.value); const { refine: _refine, ...rest } = step.lookup!; changeStep(index, { lookup: n ? { ...rest, refine: n } : rest }); }}>
+              <option value={0}>하지 않음</option>
+              {Array.from({ length: APP_LOOKUP_REFINE_MAX }, (_, i) => i + 1).map(n => <option key={n} value={n}>AI가 빠진 부분을 보고 {n}번까지 더 찾기</option>)}
+            </select></label>
+            {step.lookup.refine ? <>
+              <textarea className={input} rows={2} maxLength={2000} aria-label={`단계 ${index + 1} 더 찾기 기준`} value={step.instruction} placeholder="무엇이 빠졌는지 볼 기준(선택) — 예: 지급 대상·금액·절차·예외가 모두 근거로 나왔는지 보세요" onChange={e => changeStep(index, { instruction: e.target.value })} />
+              <p className="text-xs leading-5 text-slate-500">조회를 마친 뒤 AI가 결과를 보고 빠진 부분을 찾을 새 조회어를 쓰면 그 조회어로 다시 찾습니다(한 번에 {APP_LOOKUP_EACH_MAX}개, 이 단계 조회어 합쳐 {APP_LOOKUP_REFINE_TOTAL}개까지). AI가 ‘없음’이라고 하면 멈춥니다. 더 찾기 한 번마다 AI 사용량이 듭니다.</p>
+            </> : null}
+          </div>}
           {APP_LOOKUP_TOOLS[step.lookup.tool].article && <div className="space-y-2">
             <input className={input} aria-label={`단계 ${index + 1} 조문 번호`} maxLength={APP_LOOKUP_ARTICLE_MAX} value={step.lookup.article ?? ''} placeholder="조문 번호(선택) — 예: 15 또는 제15조. 비우면 앞 조문부터" onChange={e => changeStep(index, { lookup: { ...step.lookup!, article: e.target.value || undefined } })} />
             <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-ws-accent-text" onClick={() => changeStep(index, { lookup: { ...step.lookup!, article: `{{${f.key}}}` } })}>조문 번호 = {f.label}</button>)}</div>

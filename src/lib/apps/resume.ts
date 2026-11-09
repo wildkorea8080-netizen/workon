@@ -14,13 +14,14 @@ function reusedLookup(saved: Record<string, unknown>, docSearch: boolean): Parti
   return {
     kind: 'lookup',
     ...(typeof saved.query === 'string' ? { query: saved.query.slice(0, 1100) } : {}),
-    ...(Array.isArray(saved.queries) ? { queries: saved.queries.filter((q): q is string => typeof q === 'string').slice(0, 5).map((q) => q.slice(0, 200)) } : {}),
+    ...(Array.isArray(saved.queries) ? { queries: saved.queries.filter((q): q is string => typeof q === 'string').slice(0, 10).map((q) => q.slice(0, 200)) } : {}),
+    ...(typeof saved.refined === 'number' && Number.isInteger(saved.refined) && saved.refined >= 0 && saved.refined <= 2 ? { refined: saved.refined } : {}),
     ...(typeof saved.article === 'string' && /^\d{1,4}$/.test(saved.article) ? { article: saved.article } : {}),
     ...(sources.length ? { sources } : {}),
     ...(docSearch ? {
       docSearch: true as const,
       ...(saved.gap === true ? { gap: true as const } : {}),
-      ...(Array.isArray(saved.gapQueries) ? { gapQueries: saved.gapQueries.filter((q): q is string => typeof q === 'string').slice(0, 5).map((q) => q.slice(0, 200)) } : {}),
+      ...(Array.isArray(saved.gapQueries) ? { gapQueries: saved.gapQueries.filter((q): q is string => typeof q === 'string').slice(0, 10).map((q) => q.slice(0, 200)) } : {}),
     } : {}),
   };
 }

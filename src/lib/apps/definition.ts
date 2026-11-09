@@ -35,9 +35,33 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
 export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
 /** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
 /** `agent`(2026-11-09) — 문서 찾기가 이 앱 비서 대신 찾을 **다른 비서**(그 비서의 문서함·공통 기준). 실행 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */
-export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string };
+/**
+ * `refine`(2026-11-09, 더 찾기) — 조회를 마친 뒤 AI가 결과를 보고 **빠진 부분을 찾을 새 조회어**를 쓰면 그 조회어로 한 번 더 찾는다(1~2번).
+ * AI가 '없음'이라고 하면 멈춘다. 단계 지시(비워도 됨)가 무엇이 빠졌는지 가늠하는 기준이다. 조문 칸을 받는 본문 도구에는 없다
+ */
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string; refine?: number };
 /** 줄마다 조회의 최대 줄 수 — 조회 한 번은 모델을 부르지 않지만 바깥 호출이라 상한을 둔다 */
 export const APP_LOOKUP_EACH_MAX = 5;
+/** 더 찾기의 최대 횟수(AI 호출 수)와 한 단계가 보내는 조회어 전체 상한 */
+export const APP_LOOKUP_REFINE_MAX = 2;
+export const APP_LOOKUP_REFINE_TOTAL = 10;
+/** 더 찾기 답이 '찾을 것 없음'인가 — 첫 줄이 없음·충분·끝 따위면 멈춘다 */
+const REFINE_DONE = /^(없음|없습니다|충분(함|합니다)?|더\s*찾을\s*(것|조회어)\s*없음|끝|none|done)[.。!]?$/i;
+/** 더 찾기 답 → 새 조회어(줄마다 다듬기·이미 보낸 조회어·빈 줄 빼고, 남은 자리까지). '없음'이면 빈 목록 */
+export function refineQueryLines(text: string | undefined, sent: readonly string[], room: number): string[] {
+  const first = (text ?? '').split(/\r?\n/).map(line => stepQueryText(line)).find(Boolean) ?? '';
+  const bare = (q: string) => q.replace(/[*_`"'“”‘’]/g, '').replace(/\s+/g, ' ').trim();
+  if (!first || REFINE_DONE.test(bare(first)) || room <= 0) return [];
+  const seen = new Set(sent.map(q => q.trim()));
+  const out: string[] = [];
+  for (const line of stepQueryLines(text)) {
+    const q = line.slice(0, APP_LOOKUP_QUERY_MAX).trim();
+    if (!q || seen.has(q) || REFINE_DONE.test(bare(q))) continue;
+    seen.add(q); out.push(q);
+    if (out.length >= room) break;
+  }
+  return out;
+}
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
 export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true; capability?: 'doc_search' }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
@@ -366,6 +390,11 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           if (typeof lookup.each !== 'number' || !Number.isInteger(lookup.each) || !refs.includes(lookup.each)) return { ok: false, message: `${step.name.trim()}: 줄마다 찾기는 조회어에 넣은 앞 단계 결과 하나를 골라야 합니다.` };
           if (lookup.article !== undefined && lookup.article !== '') return { ok: false, message: `${step.name.trim()}: 줄마다 찾기에는 조문 번호를 둘 수 없습니다.` };
           normalized.lookup.each = lookup.each;
+        }
+        if (lookup.refine !== undefined && lookup.refine !== null && lookup.refine !== 0) {
+          // 더 찾기 — 검색 도구만(조문 칸을 받는 본문 도구는 아님), 1~2번
+          if (APP_LOOKUP_TOOLS[lookup.tool].article || typeof lookup.refine !== 'number' || !Number.isInteger(lookup.refine) || lookup.refine < 1 || lookup.refine > APP_LOOKUP_REFINE_MAX) return { ok: false, message: `${step.name.trim()}: 더 찾기는 검색 단계에서 1~${APP_LOOKUP_REFINE_MAX}번만 둘 수 있습니다.` };
+          normalized.lookup.refine = lookup.refine;
         }
         if (lookup.article !== undefined && lookup.article !== '') {
           // 조문 칸 — 본문 도구만, 한 줄·40자, {{키}}는 지금 항목만. 고정 값이면 지금 조 번호 꼴이어야 한다

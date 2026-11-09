@@ -106,7 +106,7 @@ describe('이어 실행·화면', () => {
       { name: '줄마다 찾기', status: 'completed', kind: 'lookup', docSearch: true, query: 'a / b / c', queries: ['a', 'b', 'c'], gapQueries: ['c'], output: '근거', sources: [{ title: '여비', url: DOC(1) }] },
       { name: '보고서', status: 'completed', output: '끝' },
     ] }));
-    expect(html).toContain('줄마다 3번');
+    expect(html).toContain('조회어 3개');
     expect(html).toContain('근거 없는 조회어 1개(정보 공백)');
     const editor = (steps: AppStep[]) => renderToStaticMarkup(createElement(AppStepEditor, { definition: { schemaVersion: 1, fields, output: 'bullets', steps }, onChange: () => {}, lookupTools: ['doc_search', 'law_article'] }));
     expect(editor([plan, each(), finalStep])).toContain('1단계 결과의 줄마다 찾기');

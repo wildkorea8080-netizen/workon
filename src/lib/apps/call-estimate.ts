@@ -29,13 +29,15 @@ export function estimateAppCalls(def: AppDefinition, inputs: Record<string, stri
     const last = index === steps.length - 1;
     const calls = last ? 1 : step.lookup ? 0 : step.repeat ? (repeatsFiles(step.repeat) ? fileCount : repeatItems(inputs[step.repeat.field]).length) : 1;
     const lookup = !last && step.lookup ? 1 : 0;
+    // 더 찾기(2026-11-09) — AI가 '없음'이라고 하면 덜 부르므로 '많으면'에만 센다
+    const refines = !last && step.lookup?.refine ? step.lookup.refine : 0;
     let surely: boolean;
     if (!step.when || last) surely = !maybeSkipped.has(index) || last;
-    else if (onClassify(step.when)) { max += calls; lookups += lookup; surely = false; markJumps(false); return; }
+    else if (onClassify(step.when)) { max += calls + refines; lookups += lookup; surely = false; markJumps(false); return; }
     else if (conditionHolds(step.when, inputs)) surely = !maybeSkipped.has(index);
     else return;
     if (surely) min += calls;
-    max += calls; lookups += lookup;
+    max += calls + refines; lookups += lookup;
     markJumps(surely);
 
     function markJumps(runs: boolean) {
