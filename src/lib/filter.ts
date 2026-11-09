@@ -17,7 +17,10 @@ export type SecurityEventType =
   | 'app_webhooks_org_disabled'
   | 'app_webhooks_org_enabled'
   | 'app_schedules_org_disabled'
-  | 'app_schedules_org_enabled';
+  | 'app_schedules_org_enabled'
+  /** 기관 전체 관리자가 기관 통계 API 키를 만듦 / 회수함 (0075) */
+  | 'org_api_key_created'
+  | 'org_api_key_revoked';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(

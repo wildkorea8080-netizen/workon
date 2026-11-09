@@ -44,6 +44,9 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/cron/budget-alerts', 'Vercel 예약 작업이 부르는 곳(하루 한 번 기관 예산 알림 메일). CRON_SECRET Bearer 상수 시간 비교가 자격이고, 하는 일은 사용률을 보고 기관 관리자에게 기준마다 한 번 메일을 보내는 것뿐'],
   ['/apps/webhook', '입력형 앱 외부 연동 호출 — 외부 시스템이 부른다. 연동 토큰(Bearer, DB에는 SHA-256만)이 유일한 자격이고 차지 함수가 유효·60초 간격·하루 100번을 원자적으로 본다. 그 토큰을 만든 직원의 권한으로 앱을 한 번 실행하고 상태와 대화 id만 돌려준다(결과 글은 싣지 않음)'],
   ['/cron/app-schedules', '입력형 앱 예약 실행기 — Supabase pg_cron이 5분마다 부른다. WORK_WORKER_SECRET(pg_cron이 Vault로 싣는 업무 작업자 비밀값) 또는 CRON_SECRET Bearer 상수 시간 비교가 자격이고(둘 다 없으면 503), 하는 일은 DB에 이미 있는 차례가 된 예약을 조건부로 차지해 그 직원의 권한으로 실행하는 것뿐(요청값으로 대상을 고르지 않음)'],
+  ['/v1/adoption-report', '기관 통계 읽기 API(0075) — 기관의 다른 시스템이 부른다. 기관 API 키(Bearer, DB에는 SHA-256만)가 유일한 자격이고 차지 함수가 유효·하루 상한을 원자적으로 본 뒤 기관 접속 허용 IP·키 범위·키를 만든 관리자가 아직 기관 전체 관리자인지를 다시 본다. 숫자만 돌려준다(직원·원문 없음)'],
+  ['/v1/adoption-report/departments', '위와 같은 기관 통계 읽기 API(부서별 도입 현황) — 같은 확인(handleOrgApiCall)'],
+  ['/v1/usage-summary', '위와 같은 기관 통계 읽기 API(비서별·부서별 이용통계, 직원별은 거절) — 같은 확인(handleOrgApiCall)'],
   ['/cron/noda-events', 'Vercel 예약 작업이 부르는 곳(하루 한 번 놓친 NODA 웹훅 다시 받기). CRON_SECRET Bearer 상수 시간 비교가 자격이고, 하는 일은 NODA 일 장부를 웹훅과 같은 조건부 처리로 반영하는 것뿐'],
 ]);
 

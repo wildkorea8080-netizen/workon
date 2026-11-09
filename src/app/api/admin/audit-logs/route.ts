@@ -91,6 +91,8 @@ const SECURITY_LABEL: Record<string, string> = {
   app_webhooks_org_enabled: '기관 외부 연동 켜기(관리자)',
   app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)',
   app_schedules_org_enabled: '기관 앱 예약 켜기(관리자)',
+  org_api_key_created: '기관 통계 API 키 만들기(관리자)',
+  org_api_key_revoked: '기관 통계 API 키 회수(관리자)',
   forbidden_word: '금지어 감지',
   personal_info: '개인정보 패턴 감지',
   blocked_upload: '업로드 차단',
