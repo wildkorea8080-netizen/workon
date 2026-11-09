@@ -33,7 +33,10 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
  * 대화와 같은 찾기(비서 문서 + 기관 유형의 공통 자료실)를 조회어로 한 번 하고, 근거가 없으면 멈추지 않고 '정보 공백'으로 다음 단계에 넘긴다
  */
 export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
-export type AppLookup = { tool: AppLookupTool; query: string; article?: string };
+/** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number };
+/** 줄마다 조회의 최대 줄 수 — 조회 한 번은 모델을 부르지 않지만 바깥 호출이라 상한을 둔다 */
+export const APP_LOOKUP_EACH_MAX = 5;
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
 export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true; capability?: 'doc_search' }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
@@ -84,6 +87,16 @@ export function describeLookupQuery(template: string, fields: AppField[]): strin
     if (key.startsWith('@')) return `{{${key.slice(1)}단계 결과}}`;
     const f = fields.find(x => x.key === key); return f ? `{{${f.label}}}` : whole;
   });
+}
+/** 줄마다 조회(each)의 조회어 줄 — 앞 단계 결과의 줄마다 `stepQueryText`로 다듬고, 빈 줄·같은 줄은 빼고, 앞에서부터 최대 5줄 */
+export function stepQueryLines(output: string | undefined): string[] {
+  const out: string[] = [];
+  for (const line of (output ?? '').split(/\r?\n/)) {
+    const q = stepQueryText(line);
+    if (q && !out.includes(q)) out.push(q);
+    if (out.length >= APP_LOOKUP_EACH_MAX) break;
+  }
+  return out;
 }
 /** 조회어가 쓰는 앞 단계 번호(1부터) */
 export function lookupStepRefs(template: string): number[] {
@@ -335,6 +348,12 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(STEP_REF, '').replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목과 앞선 AI 단계의 결과만 넣을 수 있습니다.' };
         if (step.branches !== undefined) return { ok: false, message: '공공 데이터 조회 단계에는 갈래를 둘 수 없습니다.' };
         normalized.lookup = { tool: lookup.tool, query: lookup.query.trim() };
+        if (lookup.each !== undefined && lookup.each !== null) {
+          // 줄마다 조회 — 조회어에 넣은 앞 AI 단계 하나를 골라 그 결과의 줄마다(조문 칸과 함께 쓰지 않음)
+          if (typeof lookup.each !== 'number' || !Number.isInteger(lookup.each) || !refs.includes(lookup.each)) return { ok: false, message: `${step.name.trim()}: 줄마다 찾기는 조회어에 넣은 앞 단계 결과 하나를 골라야 합니다.` };
+          if (lookup.article !== undefined && lookup.article !== '') return { ok: false, message: `${step.name.trim()}: 줄마다 찾기에는 조문 번호를 둘 수 없습니다.` };
+          normalized.lookup.each = lookup.each;
+        }
         if (lookup.article !== undefined && lookup.article !== '') {
           // 조문 칸 — 본문 도구만, 한 줄·40자, {{키}}는 지금 항목만. 고정 값이면 지금 조 번호 꼴이어야 한다
           if (!APP_LOOKUP_TOOLS[lookup.tool].article || typeof lookup.article !== 'string' || lookup.article.length > APP_LOOKUP_ARTICLE_MAX || /[\r\n]/.test(lookup.article)) return { ok: false, message: '조문 번호는 법령·자치법규 본문 조회에만, 한 줄로 입력해 주세요.' };
