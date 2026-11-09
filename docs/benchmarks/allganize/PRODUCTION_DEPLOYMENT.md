@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오후 4): 사람 판정 — AI 채점자 정확도 재기
+
+- 2026-11-09 15:40 KST 배포 `dpl_5CJnQv4LSUEZ7sGWXUs8ckvFfmmB`(커밋 `e1b258d`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_9bM495WLAWfzyKbpVehGKCyw7scK`(513c9f5)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드에는 PATCH가 없어 사람 판정을 매기지 못하지만, 이미 매긴 판정(`results[].answer.human`·`summary.answers.agreement`·`summary.labelRevision`)은 기록에 그대로 남고 옛 화면은 그 칸을 읽지 않는다.
+- 들어간 커밋: `6568fc4`(직전 배포 기록), `01f5409` 사람 판정(`PATCH /api/admin/rag-eval { id, line, grade }` — 답마다 맞음·일부·틀림, 요약에 AI 채점 일치율·후하게/짜게 본 답·3×3 표, `summary.labelRevision` 조건부 저장 — [일괄 평가](RAG_EVAL.md)), `b352682` 문서, `e1b258d` 빈 커밋.
+- **배포 길에서 또 생긴 일**: 이번에는 가지 푸시(`b352682`)의 Preview(`workon-5cpl0yvgq`)는 Ready였는데, `main`을 같은 커밋으로 올린 푸시에 **Production 빌드가 생기지 않았다**(원격 `main` = b352682 확인, 9분 넘게 운영 배포 목록에 없음, GitHub 커밋 상태는 Preview의 것뿐). 빈 커밋 `e1b258d`를 가지에 푸시해 Preview(`workon-jylzivg5l`) Ready를 본 뒤 `main`에 다시 올리자 Production이 1분 만에 Ready. 오늘 두 번째 웹훅 누락이다(첫째는 오후 3 배포의 가지 푸시).
+- **배포 전**: 시험 DB를 띄운 전체 시험에서 이 PC 메모리 부족으로 15개 파일이 빠져 하나씩 다시 돌렸고(마지막 한 파일은 사용자가 메모리를 비운 뒤), 합쳐 3,271개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/chat`·`/apps/run` 200, `/admin/documents` 307(로그인으로), `GET`·`PATCH /api/admin/rag-eval` 403, `GET /api/agents`·`POST /api/chat` 401. pg_cron 호출 200(15:39~15:41 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 'AI 채점도'를 고른 답변까지 평가를 한 번 돌리고, 답마다 사람 판정을 매겨 요약 줄의 일치율·후하게 본 답과 'AI 채점과 같음/다름', CSV의 '사람 판정' 칸 보기(실제 NODA·모델 — 브라우저로 보지 않음).
+
 ## 2026-11-09(오후 3): 더 찾기 — 조회 단계 안에서 AI가 빠진 부분을 다시 찾기
 
 - 2026-11-09 14:33 KST 배포 `dpl_9bM495WLAWfzyKbpVehGKCyw7scK`(커밋 `513c9f5`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_BTH78Ue1SAqHdwRe7DnMxDDUzrdw`(7581b6a)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사는 `lookup.refine`을 모르는 칸으로 떨구고(정의를 다시 저장하면 더 찾기가 꺼진 채 저장됨) 실행기는 정해 둔 조회어로만 찾는다.
