@@ -7,7 +7,7 @@
 
 import Papa from 'papaparse';
 import type { RagEvalAnswer, RagEvalAnswerSummary, RagEvalAnswerVerdict } from '@/lib/rag-eval-answer';
-import { judgeNote } from '@/lib/rag-eval-judge';
+import { RAG_EVAL_JUDGE_LABELS, judgeNote } from '@/lib/rag-eval-judge';
 
 export const RAG_EVAL_MAX_QUESTIONS = 50;
 export const RAG_EVAL_QUESTION_MAX = 500;
@@ -269,11 +269,14 @@ export function ragEvalCsv(results: RagEvalResult[]): string {
   const withAnswers = results.some((r) => r.answer);
   // AI 채점을 한 실행만 채점 두 칸을 더한다(2026-11-09)
   const withJudge = results.some((r) => r.answer?.judge);
-  const head = ['줄', '질문', '기대 문서', '기대 쪽', '판정', '순위', '쪽 맞음', '근거 수', '최고 유사도', '상위 문서', ...(withAnswers ? ['기대 답 핵심어', '답변 판정', '답변 맞음', '인용한 문서', '답변'] : []), ...(withJudge ? ['AI 채점(참고)', 'AI 채점 이유'] : [])];
+  // 사람 판정을 남긴 실행만 한 칸 더(2026-11-09)
+  const withHuman = results.some((r) => r.answer?.human);
+  const head = ['줄', '질문', '기대 문서', '기대 쪽', '판정', '순위', '쪽 맞음', '근거 수', '최고 유사도', '상위 문서', ...(withAnswers ? ['기대 답 핵심어', '답변 판정', '답변 맞음', '인용한 문서', '답변'] : []), ...(withJudge ? ['AI 채점(참고)', 'AI 채점 이유'] : []), ...(withHuman ? ['사람 판정'] : [])];
   const lines = results.map((r) => [
     r.line, r.question, r.expected, r.page, RAG_EVAL_VERDICT_LABELS[r.verdict], r.rank, r.pageMatch === null ? '' : r.pageMatch ? '예' : '아니오', r.chunkCount, r.topSimilarity === null ? '' : r.topSimilarity.toFixed(3), r.topDocuments.join(' · '),
     ...(withAnswers ? [(r.keywords ?? []).join('; '), r.answer ? answerNote(r.answer) : '', r.answer ? (r.answer.passed ? '예' : '아니오') : '', r.answer?.cited.join(' · ') ?? '', r.answer?.text ?? ''] : []),
     ...(withJudge ? [r.answer?.judge ? judgeNote(r.answer.judge) : '', r.answer?.judge?.reason ?? ''] : []),
+    ...(withHuman ? [r.answer?.human ? RAG_EVAL_JUDGE_LABELS[r.answer.human.grade] ?? '' : ''] : []),
   ].map(cell).join(','));
   return `﻿${[head.join(','), ...lines].join('\n')}`;
 }

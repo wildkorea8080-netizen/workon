@@ -7,7 +7,7 @@ import {
   type RagEvalResult, type RagEvalSummary,
 } from '@/lib/rag-eval';
 import { RAG_EVAL_ANSWER_MAX_QUESTIONS, compareAnswers } from '@/lib/rag-eval-answer';
-import { judgeNote } from '@/lib/rag-eval-judge';
+import { RAG_EVAL_GRADES, RAG_EVAL_JUDGE_LABELS, agreementNote, isJudgeGrade, judgeNote, type RagEvalJudgeGrade } from '@/lib/rag-eval-judge';
 
 type RunRow = { id: string; agent_id: string; agent_version: number; created_at: string; question_count: number; status: 'done' | 'partial'; summary: RagEvalSummary; results?: RagEvalResult[] };
 
@@ -46,6 +46,7 @@ export function summaryLine(s: RagEvalSummary): string {
     if (a.judge) {
       parts.push(`AI 채점(참고) 맞음 ${a.judge.correct} · 일부 ${a.judge.partial} · 틀림 ${a.judge.incorrect}${a.judge.unfaithful ? ` · 근거 밖 내용 ${a.judge.unfaithful}` : ''}${a.judge.errors ? ` · 채점 못 함 ${a.judge.errors}` : ''}`);
     }
+    if (a.agreement) parts.push(agreementNote(a.agreement));
     const cost = Math.round((a.costKrw + (a.judge?.costKrw ?? 0)) * 100) / 100;
     parts.push(`AI 사용 ${cost.toLocaleString('ko-KR')}원`);
   }
@@ -99,6 +100,16 @@ export default function RagEvalPanel() {
     if (r.ok) { setRun(r.data); setHistory((h) => [{ ...r.data, results: undefined }, ...h].slice(0, 20)); }
     else setError(r.message);
     setRunning(false);
+  }
+  // 사람 판정(2026-11-09) — 답 한 줄을 맞음·일부·틀림으로 매겨 AI 채점과 맞대 본다(모델 호출 없음)
+  const [labeling, setLabeling] = useState<number | null>(null);
+  async function labelAnswer(line: number, grade: RagEvalJudgeGrade | null) {
+    if (!run || labeling !== null) return;
+    setLabeling(line); setError(null);
+    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: run.id, line, grade }) });
+    if (r.ok) { setRun(r.data); setHistory((h) => h.map((x) => (x.id === r.data.id ? { ...r.data, results: undefined } : x))); }
+    else setError(r.message);
+    setLabeling(null);
   }
   /** 세트 칸의 글을 이름 붙여 저장 — 같은 이름이 있으면 덮어쓸지 묻는다 */
   async function saveSet(overwrite = false) {
@@ -192,7 +203,7 @@ export default function RagEvalPanel() {
           <input type="checkbox" checked={withJudge} onChange={(e) => setWithJudge(e.target.checked)} className="mt-1" />
           <span>
             <strong>AI 채점도(참고)</strong> — 기대 문서가 있는 질문의 답마다 AI가 근거 글과 맞대 맞음·일부 맞음·틀림과 근거 밖 내용이 있는지를 한두 문장 이유와 함께 적습니다.
-            <span className="block text-xs text-slate-500">채점하는 AI도 틀릴 수 있어 '답변 맞음'(프로그램 판정)은 바꾸지 않고 따로 보입니다 · 질문마다 AI를 한 번 더 불러 사용량이 늘어납니다.</span>
+            <span className="block text-xs text-slate-500">채점하는 AI도 틀릴 수 있어 '답변 맞음'(프로그램 판정)은 바꾸지 않고 따로 보입니다 · 질문마다 AI를 한 번 더 불러 사용량이 늘어납니다 · 평가 뒤 답마다 '사람 판정'을 매기면 AI 채점이 사람과 얼마나 맞는지(일치율·후하게 본 답)를 셉니다.</span>
           </span>
         </label>
       )}
@@ -222,6 +233,10 @@ export default function RagEvalPanel() {
                     {r.keywords?.length ? <p className="text-slate-500">핵심어: {r.keywords.join(', ')}</p> : null}
                     {r.answer.cited.length > 0 && <p className="text-slate-500">인용: {r.answer.cited.join(' · ')}</p>}
                     {r.answer.judge && <p className={r.answer.judge.grade === 'correct' && r.answer.judge.faithful !== false ? 'text-emerald-700' : 'text-amber-700'}>AI 채점(참고): {judgeNote(r.answer.judge)}{r.answer.judge.reason ? ` — ${r.answer.judge.reason}` : ''}</p>}
+                    {r.answer.text && !r.answer.error && <label className="mt-1 flex items-center gap-2 text-slate-600">사람 판정<select aria-label={`${r.line}번 질문 사람 판정`} disabled={labeling !== null} value={r.answer.human?.grade ?? ''} onChange={(e) => void labelAnswer(r.line, isJudgeGrade(e.target.value) ? e.target.value : null)} className="rounded border border-slate-200 px-1 py-0.5 text-xs">
+                      <option value="">—</option>
+                      {RAG_EVAL_GRADES.map((g) => <option key={g} value={g}>{RAG_EVAL_JUDGE_LABELS[g]}</option>)}
+                    </select>{r.answer.human && r.answer.judge?.grade && (r.answer.human.grade === r.answer.judge.grade ? <span className="text-emerald-700">AI 채점과 같음</span> : <span className="text-amber-700">AI 채점과 다름</span>)}</label>}
                     {r.answer.text && <details><summary className="cursor-pointer text-[#003087]">답 보기</summary><p className="mt-1 whitespace-pre-wrap text-slate-700">{r.answer.text}</p></details>}
                   </> : '—'}</td>}
                 </tr>))}</tbody>

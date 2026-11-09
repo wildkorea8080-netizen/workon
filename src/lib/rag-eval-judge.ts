@@ -138,6 +138,76 @@ export function judgeNote(j: RagEvalJudge): string {
 
 const rate = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 1000 : null);
 
+// ── 사람 판정과 채점자 맞대기(2026-11-09) ──────────────────────────────
+// AI 채점은 참고다 — 채점자를 얼마나 믿을지 재려면 사람이 같은 답을 맞음·일부·틀림으로 매겨 맞대 본다.
+// 사람 판정은 실행 기록(`results[].answer.human`)에 남고, 요약(`summary.answers.agreement`)은 기록을 다시 읽어 센다.
+
+export interface RagEvalHumanLabel {
+  grade: RagEvalJudgeGrade;
+  /** 매긴 때(ISO) */
+  at: string;
+}
+
+export interface RagEvalJudgeAgreement {
+  /** 사람이 매긴 답 수 */
+  labeled: number;
+  /** 그중 AI 채점도 있는 답(맞대 본 수) */
+  compared: number;
+  agree: number;
+  agreeRate: number | null;
+  /** AI가 사람보다 후하게 본 답(예: 사람 '틀림'·AI '맞음') — 채점자를 믿기 어려운 쪽 */
+  lenient: number;
+  /** AI가 사람보다 짜게 본 답 */
+  strict: number;
+  /** 사람 판정 → AI 판정 → 수 (맞대 본 답만) */
+  matrix: Record<RagEvalJudgeGrade, Record<RagEvalJudgeGrade, number>>;
+}
+
+export const RAG_EVAL_GRADES: RagEvalJudgeGrade[] = ['correct', 'partial', 'incorrect'];
+const GRADE_RANK: Record<RagEvalJudgeGrade, number> = { incorrect: 0, partial: 1, correct: 2 };
+export const isJudgeGrade = (v: unknown): v is RagEvalJudgeGrade => typeof v === 'string' && (RAG_EVAL_GRADES as string[]).includes(v);
+
+/** 사람 판정과 AI 채점 맞대기 — 사람 판정이 하나도 없으면 undefined */
+export function judgeAgreement(answers: Array<{ judge?: RagEvalJudge; human?: RagEvalHumanLabel } | undefined>): RagEvalJudgeAgreement | undefined {
+  const labeled = answers.filter((a): a is { judge?: RagEvalJudge; human: RagEvalHumanLabel } => Boolean(a?.human && isJudgeGrade(a.human.grade)));
+  if (!labeled.length) return undefined;
+  const matrix = Object.fromEntries(RAG_EVAL_GRADES.map((h) => [h, Object.fromEntries(RAG_EVAL_GRADES.map((g) => [g, 0]))])) as RagEvalJudgeAgreement['matrix'];
+  let compared = 0; let agree = 0; let lenient = 0; let strict = 0;
+  for (const a of labeled) {
+    const ai = a.judge?.grade;
+    if (!ai || !isJudgeGrade(ai)) continue;
+    compared++;
+    matrix[a.human.grade][ai]++;
+    if (ai === a.human.grade) agree++;
+    else if (GRADE_RANK[ai] > GRADE_RANK[a.human.grade]) lenient++;
+    else strict++;
+  }
+  return { labeled: labeled.length, compared, agree, agreeRate: rate(agree, compared), lenient, strict, matrix };
+}
+
+/** 맞대기 한 줄 — 화면 요약과 같다 */
+export function agreementNote(a: RagEvalJudgeAgreement): string {
+  if (!a.compared) return `사람 판정 ${a.labeled}개(AI 채점과 맞대 본 답 없음)`;
+  return `사람 판정 ${a.labeled}개 · AI 채점 일치 ${a.agree}/${a.compared}(${Math.round((a.agreeRate ?? 0) * 100)}%)${a.lenient ? ` · AI가 후하게 본 답 ${a.lenient}` : ''}${a.strict ? ` · AI가 짜게 본 답 ${a.strict}` : ''}`;
+}
+
+/**
+ * 실행 기록의 한 줄에 사람 판정을 남기거나(`grade`) 지운다(null). 답을 만든 질문만(답 글이 있고 오류가 아님).
+ * 입력을 바꾸지 않고 새 배열을 돌려준다
+ */
+export function applyHumanLabel<T extends { line: number; answer?: { text?: string; error?: string; human?: RagEvalHumanLabel } }>(
+  results: T[], line: number, grade: RagEvalJudgeGrade | null, at: string,
+): { ok: true; results: T[] } | { ok: false; message: string } {
+  const index = results.findIndex((r) => r.line === line);
+  if (index < 0) return { ok: false, message: '그 질문을 평가 기록에서 찾을 수 없습니다.' };
+  const answer = results[index].answer;
+  if (!answer || answer.error || !answer.text?.trim()) return { ok: false, message: '이 질문은 답을 만들지 않아 사람 판정을 남길 수 없습니다.' };
+  const { human: _drop, ...rest } = answer;
+  void _drop;
+  const next = { ...results[index], answer: grade ? { ...rest, human: { grade, at } } : rest };
+  return { ok: true, results: results.map((r, i) => (i === index ? next : r)) };
+}
+
 /** AI 채점 요약 — 채점 칸이 하나도 없으면 undefined */
 export function summarizeJudges(judges: Array<RagEvalJudge | undefined>): RagEvalJudgeSummary | undefined {
   const rows = judges.filter((j): j is RagEvalJudge => Boolean(j));

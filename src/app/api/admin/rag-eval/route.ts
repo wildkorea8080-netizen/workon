@@ -8,6 +8,8 @@ import { prepareLikeChat } from '@/lib/capabilities/doc-search';
 import { logSystem } from '@/lib/logger';
 import { parseRagEvalSet, summarizeRagEval } from '@/lib/rag-eval';
 import { RAG_EVAL_ANSWER_MAX_QUESTIONS, summarizeAnswers } from '@/lib/rag-eval-answer';
+import { applyHumanLabel, isJudgeGrade } from '@/lib/rag-eval-judge';
+import type { RagEvalResult } from '@/lib/rag-eval';
 import { runRagEval } from '@/lib/rag-eval-run';
 import { complete } from '@/lib/llm';
 import { getAllowedModelIds, resolveModel } from '@/lib/model-policy';
@@ -28,6 +30,9 @@ export const maxDuration = 300;
  *   프로그램 판정은 그대로), 사용 기록 `rag_eval_judge`.
  *   한 질문의 NODA 실패는 그 질문만 '찾기 실패'로 두고, 모두 실패면 저장하지 않고 503.
  * - GET `?agentId=`: 그 비서의 지난 실행 20개(요약만). `?id=`: 실행 하나(결과 포함).
+ * - PATCH `{ id, line, grade }`(2026-11-09): 실행 하나의 답 한 줄에 **사람 판정**(correct·partial·incorrect, null이면 지움)을 남기고
+ *   요약의 맞대기(`summary.answers.agreement` — AI 채점 일치율·후하게/짜게 본 수)를 다시 센다. 답을 만든 질문만. 모델을 부르지 않는다.
+ *   두 관리자가 동시에 매겨도 서로 지우지 않게 `summary.labelRevision`으로 조건부 저장(어긋나면 다시 읽어 최대 3번).
  * - 비서는 요청자 기관이고, 공식 비서이거나 요청자가 관리하는 부서의 비서여야 한다(아니면 없는 것처럼 404).
  */
 
@@ -112,6 +117,46 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[rag-eval POST]', error);
     return jsonError('평가 중 오류가 발생했습니다.', 500);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const session = await getServerAuthSession();
+    if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
+    const actor = await getActorScope(session!);
+    if (!actor?.organizationId) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+    const body = await request.json().catch(() => null) as { id?: unknown; line?: unknown; grade?: unknown } | null;
+    if (!body || typeof body.id !== 'string' || !UUID.test(body.id) || typeof body.line !== 'number' || !Number.isInteger(body.line) || body.line < 1) return jsonError('고칠 평가 기록과 줄을 골라 주세요.', 400);
+    if (body.grade !== null && !isJudgeGrade(body.grade)) return jsonError('사람 판정은 맞음·일부 맞음·틀림 중 하나여야 합니다.', 400);
+    const grade = body.grade === null ? null : body.grade as Parameters<typeof applyHumanLabel>[2];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: run } = await supabaseAdmin
+        .from('rag_eval_runs')
+        .select('id, agent_id, summary, results')
+        .eq('id', body.id)
+        .eq('organization_id', actor.organizationId)
+        .maybeSingle();
+      // 기록의 비서도 지금 볼 수 있어야 한다(GET과 같은 판단)
+      if (!run || !(await evaluableAgent(run.agent_id, actor))) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
+      const results = (Array.isArray(run.results) ? run.results : []) as RagEvalResult[];
+      const applied = applyHumanLabel(results, body.line, grade, new Date().toISOString());
+      if (!applied.ok) return jsonError(applied.message, 400);
+      const summary = (run.summary ?? {}) as Record<string, unknown>;
+      const revision = typeof summary.labelRevision === 'number' ? summary.labelRevision : 0;
+      const nextSummary = { ...summary, answers: summarizeAnswers(applied.results), labelRevision: revision + 1 };
+      let update = supabaseAdmin.from('rag_eval_runs').update({ summary: nextSummary, results: applied.results }).eq('id', run.id).eq('organization_id', actor.organizationId);
+      update = revision ? update.eq('summary->>labelRevision', String(revision)) : update.is('summary->labelRevision', null);
+      const { data: saved, error } = await update.select('id, agent_id, agent_version, created_at, question_count, status, summary, results');
+      if (error) return jsonError('사람 판정을 저장하지 못했습니다.', 500);
+      if (saved && saved.length) return NextResponse.json({ ok: true, data: saved[0] });
+      // 그 사이 다른 관리자가 매겼다 — 다시 읽어 그 판정 위에 얹는다
+    }
+    return jsonError('다른 관리자가 같은 기록을 고치는 중입니다. 잠시 뒤 다시 해 주세요.', 409);
+  } catch (error) {
+    console.error('[rag-eval PATCH]', error);
+    return jsonError('사람 판정을 저장하지 못했습니다.', 500);
   }
 }
 

@@ -11,7 +11,7 @@
 
 import { checkNumbers } from '@/lib/assistant/number-check';
 import { matchesExpected, type RagEvalResult } from '@/lib/rag-eval';
-import { summarizeJudges, type RagEvalJudge, type RagEvalJudgeSummary } from '@/lib/rag-eval-judge';
+import { judgeAgreement, summarizeJudges, type RagEvalHumanLabel, type RagEvalJudge, type RagEvalJudgeAgreement, type RagEvalJudgeSummary } from '@/lib/rag-eval-judge';
 
 /** 답변까지 평가할 때 한 번에 재는 질문 수 — 질문마다 모델을 한 번 부른다 */
 export const RAG_EVAL_ANSWER_MAX_QUESTIONS = 20;
@@ -48,6 +48,8 @@ export interface RagEvalAnswer {
   error?: string;
   /** 'AI 채점도'를 고른 실행의 기대 문서 있는 질문에만(2026-11-09, rag-eval-judge.ts) — 참고, `passed`를 바꾸지 않는다 */
   judge?: RagEvalJudge;
+  /** 관리자가 평가 뒤에 매긴 사람 판정(2026-11-09) — AI 채점과 맞대 채점자를 잰다. `passed`를 바꾸지 않는다 */
+  human?: RagEvalHumanLabel;
 }
 
 export interface RagEvalAnswerSummary {
@@ -76,6 +78,8 @@ export interface RagEvalAnswerSummary {
   models: string[];
   /** AI 채점을 한 실행에만 — 토큰·원가는 위 합계와 따로 센다 */
   judge?: RagEvalJudgeSummary;
+  /** 사람 판정이 있을 때만 — 사람 판정과 AI 채점 맞대기 */
+  agreement?: RagEvalJudgeAgreement;
 }
 
 /** 근거 조각 중 인용 판정에 쓰는 것 — 대화의 `RetrievedChunk`와 같은 칸 */
@@ -180,6 +184,7 @@ export function summarizeAnswers(results: Array<Pick<RagEvalResult, 'expected' |
   const keywordPasses = keywordRows.filter((r) => !r.answer!.keywordsMissing!.length).length;
   const offTopicDeclined = offTopic.filter((r) => r.answer!.verdict === 'correct_decline').length;
   const judge = summarizeJudges(rows.map((r) => r.answer!.judge));
+  const agreement = judgeAgreement(rows.map((r) => r.answer));
   return {
     evaluated: done.length,
     errors: rows.length - done.length,
@@ -200,6 +205,7 @@ export function summarizeAnswers(results: Array<Pick<RagEvalResult, 'expected' |
     costKrw: Math.round(sum((a) => a.costKrw) * 100) / 100,
     models,
     ...(judge ? { judge } : {}),
+    ...(agreement ? { agreement } : {}),
   };
 }
 
