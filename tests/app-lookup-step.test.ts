@@ -143,7 +143,7 @@ describe('실행 때 권한(appLookupRunner)', () => {
   });
   it('채팅 실행기가 조회기를 넘기고 조회 숫자·출처를 답변에 잇는다(원본 확인)', () => {
     const stream = readFileSync('src/lib/assistant/stream.ts', 'utf8');
-    expect(stream).toContain('lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup)');
+    expect(stream).toContain('lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx,');
     expect(stream).toMatch(/step\.kind === 'lookup' && step\.status === 'completed' && step\.output \? numbersIn\(step\.output\)/);
     expect(stream).toMatch(/links: dedupeLinks\(\[\.\.\.result\.links, \.\.\.appRecords\.flatMap/);
   });

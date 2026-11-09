@@ -17,6 +17,7 @@ import type { RetrievedChunk } from '@/lib/db';
 import type { NumberCheck } from './persist';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
+import { appDocSearchRunner } from '@/lib/apps/app-doc-lookup';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
 import { APP_TIME_BUDGET_CODE } from '@/lib/apps/stream';
@@ -44,7 +45,7 @@ export interface StreamTurnDeps {
    * 턴의 시간 예산(시작 + `APP_STEP_TIME_BUDGET_MS`)과 둘 중 이른 쪽
    */
   deadlineAt?: number;
-  /** 숫자 근거 다시 찾기(2026-11-08)가 부르는 문서 찾기 — 기본은 대화와 같은 `searchLikeChat`. 시험이 바꿔 끼운다 */
+  /** 숫자 근거 다시 찾기(2026-11-08)와 앱의 문서 찾기 조회 단계(2026-11-09)가 부르는 문서 찾기 — 기본은 대화와 같은 `searchLikeChat`. 시험이 바꿔 끼운다 */
   searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
 }
 
@@ -369,7 +370,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       inputs: turn.appStepInputs,
       files: turn.appFileNames,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
-      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup),
+      // 문서 찾기 조회 단계(2026-11-09)는 이 턴의 비서·기관으로 대화와 같은 찾기 — 시험은 searchDocs로 바꿔 끼운다
+      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined)),
     }) : null;
     result = await runToolLoop(
       {

@@ -29,17 +29,26 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
  * 도구는 이 표의 것뿐이고, 쓸 수 있는지는 앱의 `public_data` 능력(직원 범위 검사 포함)이 정한다.
  * `appOnly` 도구(법령·자치법규 본문)는 대화 도구 목록에 없는 앱 전용 — 검색해 이름이 같은(없으면 첫) 결과의 본문을 읽는다(`connectors/index.ts` `executeAppLookup`).
  * `article`은 그 둘만 — 조문 번호(입력 항목을 넣을 수 있음), 비우면 앞 조문부터
+ * `doc_search`(2026-11-09)는 공공 데이터가 아니라 **이 앱 비서의 문서 찾기** — 커넥터가 없고(`connector: null`) 앱의 `doc_search` 능력이 켜져 있어야 돈다.
+ * 대화와 같은 찾기(비서 문서 + 기관 유형의 공통 자료실)를 조회어로 한 번 하고, 근거가 없으면 멈추지 않고 '정보 공백'으로 다음 단계에 넘긴다
  */
-export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids';
+export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
 export type AppLookup = { tool: AppLookupTool; query: string; article?: string };
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
-export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b'; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true }> = {
+export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true; capability?: 'doc_search' }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
   law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
   ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
   kosis_search_tables: { connector: 'kosis', label: '통계표 검색(국가통계포털)', param: 'query' },
   g2b_search_bids: { connector: 'g2b', label: '입찰공고 검색(나라장터)', param: 'keyword' },
+  doc_search: { connector: null, label: '문서 찾기(이 앱 비서의 문서함·공통 기준)', param: 'query', appOnly: true, capability: 'doc_search' },
 };
+/** 문서 원본 주소 — 문서 찾기 조회의 출처는 바깥 링크가 아니라 이 꼴만 받는다(권한은 원본 라우트가 다시 본다) */
+export const APP_DOC_SOURCE_PATH = /^\/api\/(?:documents|common-documents)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/original(?:\?page=\d{1,6})?$/;
+/** 문서 찾기 조회 단계를 쓰는가 — 빌더가 앱 능력에 `doc_search`를 켜고, 저장 검사가 능력과 맞춰 본다 */
+export function appUsesDocSearchLookup(def: AppDefinition | null | undefined): boolean {
+  return (def?.steps ?? []).some(step => step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search');
+}
 export const APP_LOOKUP_ARTICLE_MAX = 40;
 /** 입력값이 들어간 조문 칸 → 조 번호(숫자 1~4자리). '제15조'·'15조'·'15'를 받고, 비면 ''(앞 조문부터), 그 밖은 null(멈춤) */
 export function lookupArticleNumber(rendered: string): string | null {
@@ -61,7 +70,7 @@ export function describeLookupQuery(template: string, fields: AppField[]): strin
 }
 /** 정의가 조회 단계에 쓰는 커넥터 — 빌더가 앱 능력(public_data)에 넣고, 저장 검사가 능력과 맞춰 본다 */
 export function appLookupConnectors(def: AppDefinition | null | undefined): string[] {
-  return [...new Set((def?.steps ?? []).flatMap(step => step.lookup ? [APP_LOOKUP_TOOLS[step.lookup.tool].connector] : []))];
+  return [...new Set((def?.steps ?? []).flatMap(step => { const connector = step.lookup ? APP_LOOKUP_TOOLS[step.lookup.tool].connector : null; return connector ? [connector] : []; }))];
 }
 /**
  * 분류 단계(2026-11-05) — 중간 단계의 AI가 정해 둔 선택지 **하나만** 고른다(지시 = 고르는 기준). 고른 값은 기록에 남고,

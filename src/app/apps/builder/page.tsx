@@ -6,7 +6,7 @@ import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShe
 import AppFields from '@/components/apps/AppFields';
 import AppStepEditor, { RequiredWhenEditor } from '@/components/apps/AppStepEditor';
 import { api } from '@/lib/work/client';
-import { APP_LOOKUP_TOOLS, appLookupConnectors, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppField, type AppLookupTool } from '@/lib/apps/definition';
+import { APP_LOOKUP_TOOLS, appLookupConnectors, appUsesDocSearchLookup, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppField, type AppLookupTool } from '@/lib/apps/definition';
 import { lookupCapability } from '@/lib/apps/lookup-capability';
 import { readAppDraft, savesAsDraft, type AppDraft } from '@/lib/apps/draft';
 import AppDraftPanel, { kstTime } from '@/components/apps/AppDraftPanel';
@@ -39,7 +39,8 @@ function Builder() {
     void api<Array<{ id: string; allowedForPersonal: boolean }>>('/api/connectors').then(result => {
       if (!active || !result.ok) return;
       const allowed = new Set(result.data.filter(c => c.allowedForPersonal).map(c => c.id));
-      setLookupTools((Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).filter(tool => allowed.has(APP_LOOKUP_TOOLS[tool].connector)));
+      // 문서 찾기(커넥터 없음)는 언제나 고를 수 있다 — 이 앱 비서의 문서함을 찾는다
+      setLookupTools((Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).filter(tool => { const connector = APP_LOOKUP_TOOLS[tool].connector; return connector === null || allowed.has(connector); }));
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -104,6 +105,8 @@ function Builder() {
     const enabled = (capabilities.public_data as { connectors?: unknown } | undefined)?.connectors;
     const connectors = lookupCapability(Array.isArray(enabled) ? enabled.filter((id): id is string => typeof id === 'string') : [],appLookupConnectors(before?.app_definition ?? null), appLookupConnectors(checked.value));
     if (connectors.length) capabilities.public_data = { connectors }; else delete capabilities.public_data;
+    // 문서 찾기 조회 단계(2026-11-09) — 쓰면 문서 찾기 능력을 켠다(단계를 지워도 끄지 않는다 — 올린 문서로 답하는 데도 쓰는 능력이다)
+    if (appUsesDocSearchLookup(checked.value)) capabilities.doc_search = {};
     const settings = { capabilities, name: name.trim(), description: description.trim(), category: category.trim() || '기타', system_prompt: instructions.trim(), app_definition: checked.value };
     if (agent && savesAsDraft(agent.tier)) {
       // 부서·공식 앱은 시험 판으로 — 지금 판(부서 사람들의 실행·예약·연동)은 배포 전까지 그대로

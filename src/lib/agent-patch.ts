@@ -1,7 +1,7 @@
 // src/lib/agent-patch.ts
 import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabilities/settings';
-import { appLookupConnectors, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
+import { appLookupConnectors, appUsesDocSearchLookup, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
 
 /**
  * 비서 수정 요청을 두 갈래로 나눈다.
@@ -106,6 +106,10 @@ export function splitAgentBody(
     const enabled = result.settings.capabilities.public_data?.connectors ?? [];
     if (appLookupConnectors(result.settings.app_definition).some((id) => !enabled.includes(id))) {
       return fail('공공 데이터 조회 단계에 쓰는 도구를 앱 능력(공공 데이터)에서 켜 주세요.');
+    }
+    // 문서 찾기 조회 단계(2026-11-09)는 앱의 문서 찾기 능력이 켜져 있어야 돈다
+    if (appUsesDocSearchLookup(result.settings.app_definition) && !result.settings.capabilities.doc_search) {
+      return fail('문서 찾기 단계를 쓰려면 앱 능력의 문서 찾기를 켜 주세요.');
     }
   }
 

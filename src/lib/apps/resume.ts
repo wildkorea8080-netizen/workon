@@ -1,5 +1,24 @@
-import { branchJumpIndex, chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
-import type { AppStepRecord } from './pipeline';
+import { APP_DOC_SOURCE_PATH, APP_LOOKUP_TOOLS, branchJumpIndex, chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
+import type { AppStepRecord, AppStepSource } from './pipeline';
+
+/**
+ * 이어 실행에서 다시 쓰는 조회 단계(2026-11-09) — 조회 단계로 남긴다(그래야 다음 단계에 '조회 자료'로 가고, 문서 찾기는 정보 공백이 이어진다).
+ * 저장된 출처는 믿지 않고 꼴(공공 데이터는 http·https, 문서 찾기는 문서 원본 주소)만 다시 거른다
+ */
+function reusedLookup(saved: Record<string, unknown>, docSearch: boolean): Partial<AppStepRecord> {
+  if (saved.kind !== 'lookup') return {};
+  const ok = (url: unknown) => typeof url === 'string' && (docSearch ? APP_DOC_SOURCE_PATH.test(url) : /^https?:\/\//.test(url));
+  const sources: AppStepSource[] = Array.isArray(saved.sources)
+    ? saved.sources.filter((s): s is { title?: unknown; url: string } => Boolean(s) && typeof s === 'object' && ok((s as { url?: unknown }).url)).slice(0, 10).map((s) => ({ title: String(s.title ?? '').slice(0, 200), url: s.url }))
+    : [];
+  return {
+    kind: 'lookup',
+    ...(typeof saved.query === 'string' ? { query: saved.query.slice(0, 200) } : {}),
+    ...(typeof saved.article === 'string' && /^\d{1,4}$/.test(saved.article) ? { article: saved.article } : {}),
+    ...(sources.length ? { sources } : {}),
+    ...(docSearch ? { docSearch: true as const, ...(saved.gap === true ? { gap: true as const } : {}) } : {}),
+  };
+}
 
 /**
  * 멈춘 줄마다 반복 단계의 끝난 줄(2026-11-07) — 지금 입력의 줄보다 적고, 글이 비지 않았고, 합쳐 12,000자 안이고,
@@ -47,7 +66,7 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
       // 기록의 갈래가 지금 정의·입력으로 고를 갈래와 다르면(갈래를 고쳤거나 없앴음) 다른 지시로 만든 결과라 재사용하지 않는다
       const branch = chooseBranch(step, judged)?.name;
       if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
-      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}) }); completed++;
+      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}), ...(step.lookup ? reusedLookup(saved as Record<string, unknown>, APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search') : {}) }); completed++;
       const target = branchJumpIndex(index, step.branches?.find(b => b.name === branch), steps.length);
       if (target !== null) skipUntil = Math.max(skipUntil, target);
     } else if (!failed && saved.status === 'skipped') {
