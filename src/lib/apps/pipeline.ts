@@ -18,9 +18,9 @@ export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'com
  * 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호.
  * `gap`은 문서 찾기가 근거를 찾지 못했다는 표시(실패가 아니다 — 내용은 '근거 없음' 안내 글)
  */
-export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
+export type AppLookupRunner = (tool: AppLookupTool, query: string, article?: string, agent?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
 /** 문서 찾기 조회(2026-11-09) — 실행기가 이번 턴의 비서·기관으로 대화와 같은 찾기를 한다(`app-doc-lookup.ts`) */
-export type AppDocSearchRunner = (query: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
+export type AppDocSearchRunner = (query: string, agent?: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
 
 /**
@@ -32,12 +32,13 @@ export function appLookupRunner(
   run: (toolName: string, input: Record<string, unknown>) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean }>,
   docSearch?: AppDocSearchRunner,
 ): AppLookupRunner {
-  return async (tool, query, article) => {
+  return async (tool, query, article, agent) => {
     const spec = APP_LOOKUP_TOOLS[tool];
-    // 문서 찾기 — 커넥터가 아니라 이 앱 비서의 doc_search 능력(실행 때 다시 본다 — 그 사이 꺼졌을 수 있다)
+    // 문서 찾기 — 커넥터가 아니라 이 앱 비서의 doc_search 능력(실행 때 다시 본다 — 그 사이 꺼졌을 수 있다).
+    // 다른 비서의 문서함(`agent`)이면 그 비서의 권한·능력을 실행기가 실행 전에 본 목록으로만 찾는다(docSearch가 거른다)
     if (spec.capability === 'doc_search') {
-      if (!ctx.capabilities.doc_search || !docSearch) return { content: '이 앱 비서에 문서 찾기가 꺼져 있습니다. 앱 설정을 다시 저장하거나 관리자에게 문의하세요.', sources: [], isError: true };
-      return docSearch(query);
+      if (!docSearch || (!agent && !ctx.capabilities.doc_search)) return { content: '이 앱 비서에 문서 찾기가 꺼져 있습니다. 앱 설정을 다시 저장하거나 관리자에게 문의하세요.', sources: [], isError: true };
+      return docSearch(query, agent);
     }
     if (!spec.connector || !(ctx.capabilities.public_data?.connectors ?? []).includes(spec.connector)) {
       return { content: '이 앱에 켜진 공공 데이터가 아닙니다. 앱 설정을 다시 저장하거나 관리자에게 문의하세요.', sources: [], isError: true };
@@ -142,7 +143,7 @@ export async function runAppIntermediateSteps(args: {
       const linkOk = (url: string) => (docLookup ? APP_DOC_SOURCE_PATH.test(url) : /^https?:\/\//.test(url));
       const blocks: string[] = []; const sources: AppStepSource[] = []; const gapQueries: string[] = [];
       for (const [i, q] of queries.entries()) {
-        const found = await args.lookup(lookup.tool, q, article || undefined);
+        const found = await (lookup.agent ? args.lookup(lookup.tool, q, article || undefined, lookup.agent) : args.lookup(lookup.tool, q, article || undefined));
         if (found.isError || !found.content.trim()) throw new AppInputError(`${args.steps[index].name}: ${APP_LOOKUP_TOOLS[lookup.tool].label}에 실패했습니다${queries.length > 1 ? `(조회어 '${q}')` : ''} — ${(found.content.trim() || '결과가 없습니다').slice(0, 200)}`);
         blocks.push(queries.length > 1 ? `[조회 ${i + 1}] ${q}\n${found.content.trim()}` : found.content.trim());
         for (const s of found.sources) if (s && typeof s.url === 'string' && linkOk(s.url) && !sources.some(x => x.url === s.url)) sources.push({ title: String(s.title ?? '').slice(0, 200), url: s.url });

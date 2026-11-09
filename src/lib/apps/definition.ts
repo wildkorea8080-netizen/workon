@@ -34,7 +34,8 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
  */
 export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
 /** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
-export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number };
+/** `agent`(2026-11-09) — 문서 찾기가 이 앱 비서 대신 찾을 **다른 비서**(그 비서의 문서함·공통 기준). 실행 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string };
 /** 줄마다 조회의 최대 줄 수 — 조회 한 번은 모델을 부르지 않지만 바깥 호출이라 상한을 둔다 */
 export const APP_LOOKUP_EACH_MAX = 5;
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
@@ -50,8 +51,15 @@ export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis
 export const APP_DOC_SOURCE_PATH = /^\/api\/(?:documents|common-documents)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/original(?:\?page=\d{1,6})?$/;
 /** 문서 찾기 조회 단계를 쓰는가 — 빌더가 앱 능력에 `doc_search`를 켜고, 저장 검사가 능력과 맞춰 본다 */
 export function appUsesDocSearchLookup(def: AppDefinition | null | undefined): boolean {
-  return (def?.steps ?? []).some(step => step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search');
+  // 다른 비서의 문서함을 찾는 단계(`agent`)는 이 앱의 문서 찾기 능력이 필요 없다 — 그 비서의 능력을 실행 때 본다
+  return (def?.steps ?? []).some(step => step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' && !step.lookup.agent);
 }
+/** 문서 찾기 단계가 찾을 다른 비서들(이 앱 비서는 빼고, 중복 없이) — 실행 전에 권한을 한 번에 본다 */
+export function appLookupAgentIds(steps: AppStep[] | null | undefined, ownAgentId: string): string[] {
+  const own = ownAgentId.toLowerCase();
+  return [...new Set((steps ?? []).flatMap(step => (step.lookup?.agent && step.lookup.agent !== own ? [step.lookup.agent] : [])))];
+}
+const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export const APP_LOOKUP_ARTICLE_MAX = 40;
 /** 입력값이 들어간 조문 칸 → 조 번호(숫자 1~4자리). '제15조'·'15조'·'15'를 받고, 비면 ''(앞 조문부터), 그 밖은 null(멈춤) */
 export function lookupArticleNumber(rendered: string): string | null {
@@ -348,6 +356,11 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(STEP_REF, '').replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목과 앞선 AI 단계의 결과만 넣을 수 있습니다.' };
         if (step.branches !== undefined) return { ok: false, message: '공공 데이터 조회 단계에는 갈래를 둘 수 없습니다.' };
         normalized.lookup = { tool: lookup.tool, query: lookup.query.trim() };
+        if (lookup.agent !== undefined && lookup.agent !== null && lookup.agent !== '') {
+          // 다른 비서의 문서함 — 문서 찾기 단계만, 비서 id 꼴만(쓸 수 있는지는 실행 때 서버가 본다)
+          if (APP_LOOKUP_TOOLS[lookup.tool].capability !== 'doc_search' || typeof lookup.agent !== 'string' || !AGENT_ID.test(lookup.agent.toLowerCase())) return { ok: false, message: `${step.name.trim()}: 찾을 비서는 문서 찾기 단계에서만, 목록에서 골라 주세요.` };
+          normalized.lookup.agent = lookup.agent.toLowerCase();
+        }
         if (lookup.each !== undefined && lookup.each !== null) {
           // 줄마다 조회 — 조회어에 넣은 앞 AI 단계 하나를 골라 그 결과의 줄마다(조문 칸과 함께 쓰지 않음)
           if (typeof lookup.each !== 'number' || !Number.isInteger(lookup.each) || !refs.includes(lookup.each)) return { ok: false, message: `${step.name.trim()}: 줄마다 찾기는 조회어에 넣은 앞 단계 결과 하나를 골라야 합니다.` };

@@ -111,13 +111,23 @@ export function stepRefChoices(steps: AppStep[] | undefined, index: number): num
   return (steps ?? []).slice(0, index).flatMap((s, i) => (s.lookup ? [] : [i + 1]));
 }
 
-export default function AppStepEditor({ definition, onChange, lookupTools = [] }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[] }) {
+/** 문서 찾기 단계가 찾을 수 있는 다른 비서(2026-11-09) — 내가 쓸 수 있고 문서 찾기가 켜진 비서(링크형·이 앱 비서 빼고) */
+export interface LookupAgentChoice { id: string; name: string; tier?: string | null }
+export function lookupAgentChoices(agents: Array<{ id: string; name: string; tier?: string | null; agent_type?: string | null; capabilities?: Record<string, unknown> | null }>, ownAgentId: string | null): LookupAgentChoice[] {
+  const own = ownAgentId?.toLowerCase() ?? null;
+  const seen = new Set<string>();
+  return agents.filter(a => a.agent_type !== 'link' && a.capabilities && typeof a.capabilities === 'object' && 'doc_search' in a.capabilities && a.id.toLowerCase() !== own)
+    .filter(a => (seen.has(a.id) ? false : (seen.add(a.id), true)))
+    .map(a => ({ id: a.id.toLowerCase(), name: a.name, tier: a.tier ?? null }));
+}
+
+export default function AppStepEditor({ definition, onChange, lookupTools = [], lookupAgents = [] }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[]; lookupAgents?: LookupAgentChoice[] }) {
   const fields = definition.fields;
   function changeStep(index: number, patch: Partial<AppStep>) { onChange(d => ({ ...d, steps: d.steps?.map((step, i) => i === index ? { ...step, ...patch } : step) })); }
   function changeRules(index: number, rules: AppRule[], mode: AppConditionMode) { changeStep(index, { when: rules.length ? makeCondition(mode, rules) : undefined }); }
   function changeBranches(index: number, branches: AppBranch[]) { changeStep(index, { branches: branches.length ? branches : undefined }); }
   return <section className="space-y-4 border-t pt-5"><h2 className="font-semibold">4. 단계별 처리 (선택)</h2>
-    <p className="text-xs leading-5 text-slate-500">최대 {APP_MAX_STEPS}단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 갈래마다 처리한 뒤 뒤쪽 단계로 건너가게 할 수 있습니다(앞으로만 — 사이 단계는 건너뛰고, 여러 갈래가 같은 단계로 가면 거기서 합쳐집니다). 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). ‘문서 찾기’로 바꾸면 이 앱 비서의 문서함을 정해 둔 조회어로 찾습니다(근거가 없으면 정보 공백으로 넘김). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
+    <p className="text-xs leading-5 text-slate-500">최대 {APP_MAX_STEPS}단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 갈래마다 처리한 뒤 뒤쪽 단계로 건너가게 할 수 있습니다(앞으로만 — 사이 단계는 건너뛰고, 여러 갈래가 같은 단계로 가면 거기서 합쳐집니다). 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). ‘문서 찾기’로 바꾸면 이 앱 비서(또는 고른 다른 비서)의 문서함을 정해 둔 조회어로 찾습니다(근거가 없으면 정보 공백으로 넘김). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
     {!definition.steps?.length && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [{ name: '자료 정리', instruction: '원문에 있는 사실과 요구 사항을 정리하세요.' }, { name: '초안 작성', instruction: '원문과 앞 단계의 정리 결과를 바탕으로 업무 초안을 작성하세요.' }, { name: '검토·보완', instruction: '원문과 초안을 대조해 근거 없는 표현을 고치고 최종 초안을 작성하세요.' }] }))}>정리 → 초안 → 검토 구성 추가</button>}
     {definition.steps?.map((step, index) => {
       const last = index === definition.steps!.length - 1;
@@ -150,7 +160,17 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [] }
             <input className={input} aria-label={`단계 ${index + 1} 조문 번호`} maxLength={APP_LOOKUP_ARTICLE_MAX} value={step.lookup.article ?? ''} placeholder="조문 번호(선택) — 예: 15 또는 제15조. 비우면 앞 조문부터" onChange={e => changeStep(index, { lookup: { ...step.lookup!, article: e.target.value || undefined } })} />
             <div className="flex flex-wrap gap-2">{fields.map(f => <button key={f.key} type="button" className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-ws-accent-text" onClick={() => changeStep(index, { lookup: { ...step.lookup!, article: `{{${f.key}}}` } })}>조문 번호 = {f.label}</button>)}</div>
           </div>}
-          {APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' ? <p className="text-xs leading-5 text-slate-500">찾을 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'} — AI를 부르지 않고 이 앱 비서에 올린 문서(기관 유형의 공통 기준 포함)를 대화와 같은 규칙으로 찾습니다. 찾은 근거(문서 이름·쪽)는 다음 단계의 자료가 되고, <strong>근거가 없으면 멈추지 않고 ‘정보 공백’으로 넘겨</strong> 결과에 확인 필요로 밝히게 합니다. 조회어를 다르게 한 문서 찾기 단계를 여럿 두면 주제마다 따로 찾습니다. 저장하면 앱의 문서 찾기가 켜집니다 — 앱 비서에 문서를 올려 두세요.</p> : <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 법령을 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>}
+          {APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' && <div className="space-y-1">
+            {/* 다른 비서의 문서함(2026-11-09) — 실행할 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */}
+            <label className="block text-xs text-slate-600">찾을 문서함<select aria-label={`단계 ${index + 1} 찾을 문서함`} className={`${input} mt-1`} value={step.lookup.agent ?? ''} onChange={e => { const { agent: _agent, ...rest } = step.lookup!; changeStep(index, { lookup: e.target.value ? { ...rest, agent: e.target.value } : rest }); }}>
+              <option value="">이 앱 비서의 문서함</option>
+              {lookupAgents.map(a => <option key={a.id} value={a.id}>{a.name}{a.tier === 'personal' ? ' (나만의 비서 — 나만 실행 가능)' : ''}</option>)}
+              {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <option value={step.lookup.agent}>(지금 쓸 수 없는 비서)</option>}
+            </select></label>
+            {step.lookup.agent && <p className="text-xs leading-5 text-slate-500">고른 비서의 문서함(그 비서의 문서 + 기관 유형의 공통 기준)을 찾습니다. 앱을 실행하는 사람이 그 비서를 쓸 수 없거나 그 비서의 문서 찾기가 꺼지면 실행 전에 막힙니다 — 부서·기관에 내놓을 앱이면 공식·부서 비서를 고르세요.</p>}
+            {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <p role="alert" className="text-xs text-red-700">고른 비서를 지금 쓸 수 없거나 문서 찾기가 꺼져 있습니다. 다른 문서함을 고르세요.</p>}
+          </div>}
+          {APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' ? <p className="text-xs leading-5 text-slate-500">찾을 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'} — AI를 부르지 않고 {step.lookup.agent ? '고른 비서' : '이 앱 비서'}에 올린 문서(기관 유형의 공통 기준 포함)를 대화와 같은 규칙으로 찾습니다. 찾은 근거(문서 이름·쪽)는 다음 단계의 자료가 되고, <strong>근거가 없으면 멈추지 않고 ‘정보 공백’으로 넘겨</strong> 결과에 확인 필요로 밝히게 합니다. 조회어를 다르게 한 문서 찾기 단계를 여럿 두면 주제마다 따로 찾습니다. {step.lookup.agent ? '' : '저장하면 앱의 문서 찾기가 켜집니다 — 앱 비서에 문서를 올려 두세요.'}</p> : <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 법령을 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>}
           {!lookupTools.includes(step.lookup.tool) && <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>}
           {last && <p role="alert" className="text-xs text-red-700">마지막 결과 작성 단계는 AI 처리여야 합니다. 조회 단계를 위로 옮겨 주세요.</p>}
         </div>

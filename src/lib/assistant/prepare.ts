@@ -24,7 +24,8 @@ import { attachmentRequestError, toTurnAttachments } from './attachments';
 import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
 import { loadHistory } from './history';
-import { validateAppDefinition, renderAppInput, appOutputInstruction, APP_MAX_FILES } from '@/lib/apps/definition';
+import { validateAppDefinition, renderAppInput, appOutputInstruction, appLookupAgentIds, APP_MAX_FILES } from '@/lib/apps/definition';
+import { checkLookupAgents } from '@/lib/apps/app-doc-lookup';
 import { appAttachmentMaterial } from '@/lib/apps/attachment-context';
 import type { AttachmentExtract } from '@/lib/attachments/types';
 import { LIBRARY_DOCUMENT_COLUMNS, loadLibraryDocuments, parseLibraryIds, type LibraryDocumentRow } from '@/lib/apps/library-documents';
@@ -197,6 +198,12 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     if (sentIds.length && !definition.value?.attachments) return reject('이 앱은 파일 입력을 받지 않습니다.', 400);
     if (sentIds.length + libraryIds.length > APP_MAX_FILES) return reject(libraryIds.length ? '앱에는 올린 파일과 고른 문서를 합쳐 최대 3개까지 넣을 수 있습니다.' : '앱에는 파일을 최대 3개 첨부할 수 있습니다.', 400);
     if (definition.value?.attachments?.required && !sentIds.length && !libraryIds.length) return reject(definition.value.attachments.library ? '이 앱은 파일을 첨부하거나 문서함에서 문서를 골라야 합니다.' : '이 앱은 파일 첨부가 필요합니다.', 400);
+  }
+  // 문서 찾기 단계가 찾을 다른 비서(2026-11-09) — 실행하는 사람이 그 비서를 쓸 수 있는지 대화를 만들기 전에 본다(하나라도 아니면 거절)
+  const appLookupAgents = appStepInputs ? appLookupAgentIds(definition.value?.steps, agent_id) : [];
+  if (appLookupAgents.length) {
+    const checked = await checkLookupAgents(appLookupAgents, actor);
+    if (!checked.ok) return reject(checked.message, 403);
   }
 
   const filterResult = await filterUserInput(actor.departmentId, message);
@@ -378,6 +385,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     turn: {
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       appStepInputs,
+      ...(appLookupAgents.length ? { appLookupAgents } : {}),
       appMaterialPieces,
       ...(appFileNames?.length ? { appFileNames } : {}),
       ...(libraryRefs.length ? { appDocuments: libraryRefs } : {}),

@@ -7,6 +7,8 @@
 // - 근거가 없으면 **멈추지 않고** '근거 없음' 안내와 `gap`으로 넘긴다 — 다음 단계가 결과에 '정보 공백(확인 필요)'으로 밝힌다(조사 앱의 공백 확인).
 // - 문서를 지금 불러오지 못하면(NODA 장애) 실패 — 근거 없는 답을 근거 있는 답처럼 내지 않는다(대화의 503과 같은 판단).
 import type { RetrievedChunk } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { AGENT_ACCESS_COLUMNS, canUseAgent, type ActorScope, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { searchLikeChat } from '@/lib/capabilities/doc-search';
 import { sourceLocationLabel, sourceOriginalHref, sourceTitleLabel } from '@/components/chat/source-label';
 import { APP_LOOKUP_SOURCES_MAX, type AppDocSearchRunner, type AppStepSource } from './pipeline';
@@ -31,18 +33,58 @@ export function docLookupResult(chunks: RetrievedChunk[]): { content: string; so
   return { content: blocks.join('\n\n'), sources };
 }
 
-/** 이번 턴의 비서·기관으로 찾는 실행기 — 비서·기관은 서버가 채운 턴 정보에서만(조회어 말고는 입력을 받지 않는다) */
+export const APP_DOC_LOOKUP_AGENT_DENIED = '이 단계가 찾을 비서의 문서함을 지금 쓸 수 없습니다.';
+
+/**
+ * 이번 턴의 비서·기관으로 찾는 실행기 — 비서·기관은 서버가 채운 턴 정보에서만(조회어 말고는 입력을 받지 않는다).
+ * 다른 비서(`agent`)는 실행 전에 권한을 확인한 목록(`allowedAgents` — `checkLookupAgents`)에 있을 때만 그 비서로 찾는다
+ */
 export function appDocSearchRunner(
-  ctx: { agentId: string; organizationId: string },
+  ctx: { agentId: string; organizationId: string; capabilities?: { doc_search?: object } },
   search: (input: { agentId: string; organizationId: string; query: string }) => Promise<RetrievedChunk[] | null> = searchLikeChat,
+  allowedAgents: readonly string[] = [],
 ): AppDocSearchRunner {
-  return async (query) => {
+  return async (query, agent) => {
+    const target = agent && agent !== ctx.agentId.toLowerCase() ? agent : ctx.agentId;
+    if (target !== ctx.agentId && !allowedAgents.includes(target)) return { content: APP_DOC_LOOKUP_AGENT_DENIED, sources: [], isError: true };
+    // 이 앱 비서 자신을 '다른 비서'로 적어 둔 단계 — 이 앱의 문서 찾기 능력을 그대로 본다(능력 확인을 건너뛰는 길이 되지 않게)
+    if (target === ctx.agentId && agent && ctx.capabilities && !ctx.capabilities.doc_search) return { content: '이 앱 비서에 문서 찾기가 꺼져 있습니다. 앱 설정을 다시 저장하거나 관리자에게 문의하세요.', sources: [], isError: true };
     try {
-      const chunks = await search({ agentId: ctx.agentId, organizationId: ctx.organizationId, query });
+      const chunks = await search({ agentId: target, organizationId: ctx.organizationId, query });
       if (!chunks) return { content: APP_DOC_LOOKUP_UNAVAILABLE, sources: [], isError: true };
       return docLookupResult(chunks);
     } catch {
       return { content: APP_DOC_LOOKUP_UNAVAILABLE, sources: [], isError: true };
     }
   };
+}
+
+export interface LookupAgentRow extends AgentAccessInfo { name?: string | null; capabilities?: Record<string, unknown> | null; agent_type?: string | null }
+export const lookupAgentDenied = (name: string | null | undefined) => `이 앱의 문서 찾기 단계가 찾을 비서${name ? ` '${String(name).slice(0, 40)}'` : ''}를 쓸 수 없습니다. 앱을 만든 사람에게 찾을 비서를 바꿔 달라고 하세요.`;
+
+/**
+ * 실행 전 — 문서 찾기 단계가 찾을 다른 비서마다 **실행하는 사람이 그 비서를 쓸 수 있고**(`canUseAgent` — 같은 기관·지우지 않음·켜짐·단계별 공개 범위),
+ * 그 비서에 문서 찾기가 켜져 있는지 본다. 하나라도 아니면 실행하지 않는다(대화를 만들기 전에 거절). 비서를 읽지 못하면 닫는다
+ */
+export async function checkLookupAgents(
+  ids: readonly string[],
+  actor: ActorScope,
+  load: (ids: readonly string[]) => Promise<LookupAgentRow[] | null> = loadLookupAgents,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!ids.length) return { ok: true };
+  const rows = await load(ids);
+  if (!rows) return { ok: false, message: lookupAgentDenied(null) };
+  for (const id of ids) {
+    const row = rows.find((r) => r.id === id);
+    if (!row || row.agent_type === 'link' || !canUseAgent(row, actor) || !row.capabilities || typeof row.capabilities !== 'object' || !('doc_search' in row.capabilities)) {
+      return { ok: false, message: lookupAgentDenied(row?.name) };
+    }
+  }
+  return { ok: true };
+}
+
+async function loadLookupAgents(ids: readonly string[]): Promise<LookupAgentRow[] | null> {
+  const { data, error } = await supabaseAdmin.from('agents').select(`${AGENT_ACCESS_COLUMNS}, name, capabilities, agent_type`).in('id', [...ids]);
+  if (error) return null;
+  return (data ?? []) as unknown as LookupAgentRow[];
 }

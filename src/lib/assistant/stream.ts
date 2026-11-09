@@ -371,7 +371,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       files: turn.appFileNames,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
       // 문서 찾기 조회 단계(2026-11-09)는 이 턴의 비서·기관으로 대화와 같은 찾기 — 시험은 searchDocs로 바꿔 끼운다
-      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined)),
+      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined, turn.appLookupAgents ?? [])),
     }) : null;
     result = await runToolLoop(
       {

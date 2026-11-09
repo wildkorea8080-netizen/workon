@@ -31,6 +31,8 @@ export type SendEvent = (event: TurnEvent) => void;
 export interface PreparedTurn {
   appSteps?: import('@/lib/apps/definition').AppStep[];
   appStepInputs?: Record<string, string>;
+  /** 문서 찾기 단계가 찾을 다른 비서 중 실행 전에 권한을 확인한 것(2026-11-09) — 실행기는 이 목록 밖의 비서를 찾지 않는다 */
+  appLookupAgents?: string[];
   /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
   appMaterialPieces?: { pieces: string[]; chars: number };
   /** 이번 실행의 원자료 파일 이름(올린 파일 다음 문서함에서 고른 문서, 원자료 자리와 같은 순서) — 파일마다 반복 단계가 쓴다(2026-11-07) */
