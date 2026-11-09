@@ -21,6 +21,7 @@ function reusedLookup(saved: Record<string, unknown>, docSearch: boolean): Parti
     ...(docSearch ? {
       docSearch: true as const,
       ...(saved.gap === true ? { gap: true as const } : {}),
+      ...(Array.isArray(saved.tags) ? { tags: saved.tags.filter((t): t is string => typeof t === 'string').slice(0, 5).map((t) => t.slice(0, 20)) } : {}),
       ...(Array.isArray(saved.gapQueries) ? { gapQueries: saved.gapQueries.filter((q): q is string => typeof q === 'string').slice(0, 10).map((q) => q.slice(0, 200)) } : {}),
     } : {}),
   };

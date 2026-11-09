@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, APP_LOOKUP_TAGS_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -178,6 +178,9 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
               {lookupAgents.map(a => <option key={a.id} value={a.id}>{a.name}{a.tier === 'personal' ? ' (나만의 비서 — 나만 실행 가능)' : ''}</option>)}
               {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <option value={step.lookup.agent}>(지금 쓸 수 없는 비서)</option>}
             </select></label>
+            {/* 태그로 좁히기(2026-11-09) — 찾은 근거 중 이 태그가 붙은 문서의 것만(쉼표로 구분, 5개까지) */}
+            <label className="block text-xs text-slate-600">이 태그 문서만(선택)<input key={`tags-${index}-${(step.lookup.tags ?? []).join('|')}`} aria-label={`단계 ${index + 1} 태그로 좁히기`} className={`${input} mt-1`} maxLength={120} defaultValue={(step.lookup.tags ?? []).join(', ')} placeholder="예: 여비, 복무 — 비우면 문서함 전체" onBlur={e => { const tags = [...new Set(e.target.value.split(',').map(t => t.replace(/^#+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, APP_LOOKUP_TAGS_MAX); const { tags: _tags, ...rest } = step.lookup!; changeStep(index, { lookup: tags.length ? { ...rest, tags } : rest }); }} /></label>
+            {Boolean(step.lookup.tags?.length) && <p className="text-xs leading-5 text-slate-500">찾은 근거 중 태그({step.lookup.tags!.join(', ')}) 하나라도 붙은 이 기관 문서의 것만 다음 단계로 넘깁니다 — 공통 기준 문서는 태그가 없어 빠집니다. 문서 보관소가 태그로 미리 거르지 못해 찾은 뒤 거르므로 근거가 적게 남을 수 있습니다(남는 것이 없으면 정보 공백). 태그는 관리자 문서 화면에서 붙입니다.</p>}
             {step.lookup.agent && <p className="text-xs leading-5 text-slate-500">고른 비서의 문서함(그 비서의 문서 + 기관 유형의 공통 기준)을 찾습니다. 앱을 실행하는 사람이 그 비서를 쓸 수 없거나 그 비서의 문서 찾기가 꺼지면 실행 전에 막힙니다 — 부서·기관에 내놓을 앱이면 공식·부서 비서를 고르세요.</p>}
             {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <p role="alert" className="text-xs text-red-700">고른 비서를 지금 쓸 수 없거나 문서 찾기가 꺼져 있습니다. 다른 문서함을 고르세요.</p>}
           </div>}

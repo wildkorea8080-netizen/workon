@@ -1,3 +1,4 @@
+import { normalizeDocumentTags } from '@/lib/document-tags';
 /**
  * 입력 항목. `requiredWhen`(조건부 필수, 2026-11-08) — 늘 필수가 아닌 항목이 **다른 항목의 값**에 따라 필수가 된다
  * (예: 종류가 '민원'이면 민원 번호 필수). 조건 꼴·비교는 단계 실행 조건과 같고, 자기 자신·분류 결과(@N)는 볼 수 없다
@@ -39,7 +40,10 @@ export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' |
  * `refine`(2026-11-09, 더 찾기) — 조회를 마친 뒤 AI가 결과를 보고 **빠진 부분을 찾을 새 조회어**를 쓰면 그 조회어로 한 번 더 찾는다(1~2번).
  * AI가 '없음'이라고 하면 멈춘다. 단계 지시(비워도 됨)가 무엇이 빠졌는지 가늠하는 기준이다. 조문 칸을 받는 본문 도구에는 없다
  */
-export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string; refine?: number };
+/** `tags`(2026-11-09) — 문서 찾기가 찾은 근거 중 **이 태그가 붙은 이 기관 문서**의 것만 남긴다(태그 하나라도 맞으면, 대소문자 무시, 공통 기준은 태그가 없어 뺀다) */
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string; refine?: number; tags?: string[] };
+/** 문서 찾기 단계 하나의 태그 거르기 상한 */
+export const APP_LOOKUP_TAGS_MAX = 5;
 /** 줄마다 조회의 최대 줄 수 — 조회 한 번은 모델을 부르지 않지만 바깥 호출이라 상한을 둔다 */
 export const APP_LOOKUP_EACH_MAX = 5;
 /** 더 찾기의 최대 횟수(AI 호출 수)와 한 단계가 보내는 조회어 전체 상한 */
@@ -384,6 +388,13 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           // 다른 비서의 문서함 — 문서 찾기 단계만, 비서 id 꼴만(쓸 수 있는지는 실행 때 서버가 본다)
           if (APP_LOOKUP_TOOLS[lookup.tool].capability !== 'doc_search' || typeof lookup.agent !== 'string' || !AGENT_ID.test(lookup.agent.toLowerCase())) return { ok: false, message: `${step.name.trim()}: 찾을 비서는 문서 찾기 단계에서만, 목록에서 골라 주세요.` };
           normalized.lookup.agent = lookup.agent.toLowerCase();
+        }
+        if (lookup.tags !== undefined && lookup.tags !== null && !(Array.isArray(lookup.tags) && lookup.tags.length === 0)) {
+          // 태그로 좁히기 — 문서 찾기 단계만, 문서 태그와 같은 다듬기(20자), 5개까지
+          const tags = normalizeDocumentTags(lookup.tags);
+          if (APP_LOOKUP_TOOLS[lookup.tool].capability !== 'doc_search' || !Array.isArray(lookup.tags) || !tags.ok) return { ok: false, message: `${step.name.trim()}: 태그로 좁히기는 문서 찾기 단계에서만, 태그마다 20자까지 적어 주세요.` };
+          if (tags.tags.length > APP_LOOKUP_TAGS_MAX) return { ok: false, message: `${step.name.trim()}: 태그로 좁히기는 ${APP_LOOKUP_TAGS_MAX}개까지입니다.` };
+          if (tags.tags.length) normalized.lookup.tags = tags.tags;
         }
         if (lookup.each !== undefined && lookup.each !== null) {
           // 줄마다 조회 — 조회어에 넣은 앞 AI 단계 하나를 골라 그 결과의 줄마다(조문 칸과 함께 쓰지 않음)

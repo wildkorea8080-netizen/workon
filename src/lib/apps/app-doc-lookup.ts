@@ -34,6 +34,17 @@ export function docLookupResult(chunks: RetrievedChunk[]): { content: string; so
 }
 
 export const APP_DOC_LOOKUP_AGENT_DENIED = '이 단계가 찾을 비서의 문서함을 지금 쓸 수 없습니다.';
+/** 태그로 좁혔더니 남은 근거가 없을 때 — 멈추지 않고 정보 공백으로 넘긴다 */
+export const appDocLookupTagGap = (tags: readonly string[]) => `이 조회어로 태그 '${tags.join(', ')}'이(가) 붙은 문서에서 근거를 찾지 못했습니다 — 정보 공백입니다.`;
+
+/**
+ * 태그로 좁히기(2026-11-09) — 이 기관 문서(공통 기준 아님) 중 태그 하나라도 맞는 문서의 조각만(대소문자 무시, 순서·번호 그대로).
+ * NODA `/context`에 문서 거르기가 없어 찾은 뒤에 거른다 — 근거가 적게 남을 수 있다
+ */
+export function filterChunksByTags(chunks: RetrievedChunk[], docTags: ReadonlyMap<string, readonly string[]>, tags: readonly string[]): RetrievedChunk[] {
+  const want = new Set(tags.map((t) => t.toLocaleLowerCase('ko')));
+  return chunks.filter((c) => c.scope !== 'common' && (docTags.get(c.documentId) ?? []).some((t) => want.has(t.toLocaleLowerCase('ko'))));
+}
 
 /**
  * 이번 턴의 비서·기관으로 찾는 실행기 — 비서·기관은 서버가 채운 턴 정보에서만(조회어 말고는 입력을 받지 않는다).
@@ -43,8 +54,9 @@ export function appDocSearchRunner(
   ctx: { agentId: string; organizationId: string; capabilities?: { doc_search?: object } },
   search: (input: { agentId: string; organizationId: string; query: string }) => Promise<RetrievedChunk[] | null> = searchLikeChat,
   allowedAgents: readonly string[] = [],
+  loadTags: (ids: string[]) => Promise<Map<string, string[]> | null> = loadDocumentTags,
 ): AppDocSearchRunner {
-  return async (query, agent) => {
+  return async (query, agent, tags) => {
     const target = agent && agent !== ctx.agentId.toLowerCase() ? agent : ctx.agentId;
     if (target !== ctx.agentId && !allowedAgents.includes(target)) return { content: APP_DOC_LOOKUP_AGENT_DENIED, sources: [], isError: true };
     // 이 앱 비서 자신을 '다른 비서'로 적어 둔 단계 — 이 앱의 문서 찾기 능력을 그대로 본다(능력 확인을 건너뛰는 길이 되지 않게)
@@ -52,6 +64,15 @@ export function appDocSearchRunner(
     try {
       const chunks = await search({ agentId: target, organizationId: ctx.organizationId, query });
       if (!chunks) return { content: APP_DOC_LOOKUP_UNAVAILABLE, sources: [], isError: true };
+      if (tags?.length) {
+        // 태그를 읽지 못하면 거른 척하지 않고 멈춘다(근거 없는 답을 근거 있는 답처럼 내지 않는다)
+        const ids = [...new Set(chunks.filter((c) => c.scope !== 'common').map((c) => c.documentId))];
+        const docTags = ids.length ? await loadTags(ids) : new Map<string, string[]>();
+        if (!docTags) return { content: APP_DOC_LOOKUP_UNAVAILABLE, sources: [], isError: true };
+        const kept = filterChunksByTags(chunks, docTags, tags);
+        if (!kept.length) return { content: appDocLookupTagGap(tags), sources: [], gap: true };
+        return docLookupResult(kept);
+      }
       return docLookupResult(chunks);
     } catch {
       return { content: APP_DOC_LOOKUP_UNAVAILABLE, sources: [], isError: true };
@@ -81,6 +102,12 @@ export async function checkLookupAgents(
     }
   }
   return { ok: true };
+}
+
+async function loadDocumentTags(ids: string[]): Promise<Map<string, string[]> | null> {
+  const { data, error } = await supabaseAdmin.from('documents').select('id, tags').in('id', ids);
+  if (error) return null;
+  return new Map(((data ?? []) as Array<{ id: string; tags: unknown }>).map((d) => [d.id, Array.isArray(d.tags) ? d.tags.filter((t): t is string => typeof t === 'string') : []]));
 }
 
 async function loadLookupAgents(ids: readonly string[]): Promise<LookupAgentRow[] | null> {
