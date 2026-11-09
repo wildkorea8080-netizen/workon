@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오전 3): 기관 통계 읽기 API — 범위 제한 키(0075)
+
+- 2026-11-09 11:09 KST 배포 `dpl_8xMkn7BckbeFnxieWYg38uLFbW8n`(커밋 `4f62099`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_4SbeNkzGpWV2Mb668tosMBgpgvmo`(7f831ba)로 promote한다(0075 표는 옛 코드가 읽지 않는다 — 되돌리면 키 화면과 `/api/v1/*`만 없어진다).
+- **마이그레이션 0075 운영 적용**(코드 전, `npm run db:migrate -- 0075`): `org_api_keys`·`org_api_key_calls` 두 표 RLS 켜짐·정책 0개, CHECK 7개·2개, `org_api_key_claim(text, timestamptz, integer)` 실행 권한 service_role만(anon·authenticated 없음), 행 0개를 읽기 전용으로 확인.
+- 들어간 커밋: `cc5307e`(직전 배포 기록), `18370d7` 기관 통계 읽기 API(기관 전체 관리자가 범위·유효 기간을 정한 키를 '기관 정보' 화면에서 만들고 회수, `GET /api/v1/adoption-report`·`/api/v1/adoption-report/departments`·`/api/v1/usage-summary` — 숫자만, 직원별 400 — [기관 통계 API](ORG_API.md)), `4f62099` 문서.
+- **배포 전**: 가지 Preview(`4f62099`, `workon-58rusvcb6`) Ready를 확인한 뒤 `main`에 올렸다(그 전에 시험 DB를 띄운 전체 시험 215파일 3,207개 통과·tsc 0, 0075는 시험 DB에 두 번 적용).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login` 200, `/admin/organization` 307(로그인으로), `/api/v1/*` 셋 모두 키 없이 401·**없는 키로 401**(운영 DB의 차지 함수가 답함 — 함수가 없으면 500), `GET`·`POST /api/admin/api-keys` 403. pg_cron 호출 200(11:09~11:11 KST).
+- **확인하지 못한 것**(사용자 몫): 기관 전체 관리자로 로그인해 '기관 정보' 화면에서 키를 만들고, 그 키로 `/api/v1/adoption-report`를 불러 숫자를 받고, 회수 뒤 401이 되는지(브라우저로 보지 않음 — 개발 서버가 운영 DB를 씀). 기관 접속 허용 IP를 정한 기관이면 부르는 시스템의 주소가 그 안이어야 한다.
+
 ## 2026-11-09(오전 2): 문서 찾기 평가의 AI 채점(선택·참고)
 
 - 2026-11-09 10:46 KST 배포 `dpl_4SbeNkzGpWV2Mb668tosMBgpgvmo`(커밋 `7f831ba`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_2BooX7TA3UQytXToAKUnrdmwS7QC`(cb225fe)로 promote한다. **마이그레이션 없음** — 채점은 기존 `rag_eval_runs` jsonb 안 `answer.judge`·`summary.answers.judge` 칸이라 옛 코드는 읽지 않는다.
