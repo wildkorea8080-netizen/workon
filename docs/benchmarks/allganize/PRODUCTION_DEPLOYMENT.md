@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오후 2): 문서 찾기 단계 — 다른 비서의 문서함 찾기
+
+- 2026-11-09 14:01 KST 배포 `dpl_BTH78Ue1SAqHdwRe7DnMxDDUzrdw`(커밋 `7581b6a`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_59xv3RRRBnwcW4PrqbT2j49Luniq`(d2bc946)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사는 `lookup.agent`를 모르는 칸으로 떨구고(정의를 다시 저장하면 이 앱 비서의 문서함을 찾는 단계로 저장됨) 실행기는 이 앱 비서의 문서함을 찾는다.
+- 들어간 커밋: `0623c5f`(직전 배포 기록), `e24d522` 다른 비서의 문서함 찾기(`lookup.agent` — 실행 전에 대화를 만들기 전 `checkLookupAgents`로 실행하는 사람의 `canUseAgent`·그 비서의 `doc_search`를 다시 보고 하나라도 아니면 403, 실행기는 확인한 목록 밖의 비서로 찾지 않음 — [조회 단계](APP_LOOKUP_STEPS.md)), `7581b6a` 문서.
+- **배포 전**: 가지 Preview(`7581b6a`, `workon-gjwanrmb7`) Ready를 확인한 뒤 `main`에 올렸다. 그 전에 시험 DB를 띄운 전체 시험 3,252개 중 3,250개 통과 — 실패 2개(조회 함수에 빈 넷째 인자가 넘어가 옛 시험의 호출 기대와 어긋남)는 `agent`가 있을 때만 넘기도록 고쳐 관련 7파일 125개 통과, 파일별 시험 수가 지난번보다 준 곳 없음·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/builder`·`/chat` 200, `GET /api/agents`·`POST /api/chat`·`GET /api/v1/usage-summary` 401, `GET /api/admin/api-keys` 403. pg_cron 호출 200(14:00~14:02 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 문서 찾기 단계의 '찾을 문서함'에서 다른 비서(문서 찾기가 켜진 공식·부서 비서)를 고른 앱을 저장·실행해 그 비서 문서의 근거가 나오는지, 그 비서를 쓸 수 없는 직원이 실행하면 실행 전에 막히는지 보기(실제 NODA·모델 — 브라우저로 보지 않음).
+
 ## 2026-11-09(오후): 조사 계획 — 조회 단계의 줄마다 찾기
 
 - 2026-11-09 13:21 KST 배포 `dpl_59xv3RRRBnwcW4PrqbT2j49Luniq`(커밋 `d2bc946`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_DzmiUtCj8vC1PTgv1utkjfTJY64c`(1af5de2)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사는 `lookup.each`를 모르는 칸으로 떨구고(정의를 다시 저장하면 줄마다 찾기가 꺼진 채 저장됨) 실행기는 첫 줄로 한 번만 찾는다.

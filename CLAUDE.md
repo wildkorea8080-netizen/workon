@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-09 오후 2) 문서 찾기 단계 — 다른 비서의 문서함 찾기(`7581b6a`, 마이그레이션 없음)를 `dpl_BTH78Ue1SAqHdwRe7DnMxDDUzrdw`로 배포했다.
 - (2026-11-09 오후) 조사 계획 — 조회 단계의 줄마다 찾기(`d2bc946`, 마이그레이션 없음)를 `dpl_59xv3RRRBnwcW4PrqbT2j49Luniq`로 배포했다.
 - (2026-11-09 낮 2) 보완 조사 — 조회어에 앞 AI 단계 결과(`1af5de2`, 마이그레이션 없음)를 `dpl_DzmiUtCj8vC1PTgv1utkjfTJY64c`로 배포했다.
 - (2026-11-09 낮) 입력형 앱의 문서 찾기 조회 단계(`29c0232`, 마이그레이션 없음)를 `dpl_2ErKz3L1fWK6tREPvB7sr5wGYRCK`로 배포했다.
