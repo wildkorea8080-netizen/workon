@@ -1,6 +1,6 @@
 // src/lib/document-references-db.ts
 // 문서 참조 관계의 DB·저장소 의존(서버) — 규칙은 document-references.ts, 라우트는
-// `GET /api/documents/[id]/references`(한 문서)와 `POST /api/documents/references/index`(색인 만들기).
+// `GET /api/documents/[id]/references`(한 문서)와 `POST /api/documents/references/build`(색인 만들기).
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { isOrgType } from '@/lib/org-types';

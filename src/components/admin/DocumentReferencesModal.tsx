@@ -94,7 +94,7 @@ export default function DocumentReferencesModal({ documentId, onClose }: { docum
     setIndexError(null);
     try {
       for (let round = 0; round < INDEX_MAX_ROUNDS; round += 1) {
-        const res = await fetch('/api/documents/references/index', { method: 'POST' });
+        const res = await fetch('/api/documents/references/build', { method: 'POST' });
         const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: IndexData; error?: { message?: string } } | null;
         if (!res.ok || !body?.ok || !body.data) throw new Error(body?.error?.message ?? '참조 색인을 만들지 못했습니다.');
         const cov = body.data.coverage;

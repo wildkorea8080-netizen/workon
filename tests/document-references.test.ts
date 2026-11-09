@@ -232,7 +232,7 @@ describe('연결', () => {
     const route = readFileSync('src/app/api/documents/[id]/references/route.ts', 'utf8');
     expect(route).toContain('if (!isAdminSession(session))');
     expect(route).toContain('referenceDeps(actor)');
-    const index = readFileSync('src/app/api/documents/references/index/route.ts', 'utf8');
+    const index = readFileSync('src/app/api/documents/references/build/route.ts', 'utf8');
     expect(index).toContain('if (!isAdminSession(session))');
     expect(index).toContain('indexPendingDocuments(actor, indexDeps(actor))');
     const db = readFileSync('src/lib/document-references-db.ts', 'utf8');

@@ -48,6 +48,10 @@ describe('Next.js 라우트 파일의 내보내기', () => {
     const violations = pages.flatMap((file) => valueExports(readFileSync(file, 'utf8')).filter((n) => !PAGE_ALLOWED.has(n)).map((n) => `${file}: ${n}`));
     expect(violations).toEqual([]);
   });
+  it('라우트·화면 폴더 이름이 index가 아니다(/index로 끝나는 주소는 Next.js가 위 경로로 308 — 2026-11-09 색인 만들기 라우트가 운영에서 닿지 않았다)', () => {
+    const violations = [...files, ...pages].filter((file) => file.split(/[\\/]/).slice(0, -1).includes('index'));
+    expect(violations).toEqual([]);
+  });
   it('검사가 실제로 잡는다', () => {
     expect(valueExports("export const PAUSED = 'x';\nexport async function GET() {}\nexport { handler as POST, helper };")).toEqual(['PAUSED', 'GET', 'POST', 'helper']);
   });
