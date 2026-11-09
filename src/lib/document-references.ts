@@ -197,6 +197,61 @@ export interface CommonReferenceRow {
   retired_at: string | null;
 }
 
+// ── 참조 색인(2026-11-09) — 문서마다 인용한 이름의 열쇠를 `documents.metadata.references`에 둔다(마이그레이션 없음).
+// 거꾸로('이 문서를 인용하는 문서')는 이 색인으로만 찾는다 — 다른 문서를 그때마다 다시 읽지 않는다.
+
+export const REFERENCE_INDEX_VERSION = 1;
+/** 거꾸로 목록 상한 */
+export const CITED_BY_MAX = 50;
+/** 색인 한 번에 읽는 문서 수·시간 예산 */
+export const INDEX_BATCH = 5;
+export const INDEX_BUDGET_MS = 40_000;
+
+export type SkipReason = 'unreadable' | 'too_large' | 'deleting' | 'no_file';
+export type ReferenceIndex =
+  | { v: 1; status: 'ok'; keys: string[]; computed_at: string }
+  | { v: 1; status: 'skipped'; reason: SkipReason; keys: string[]; computed_at: string };
+
+export function buildIndex(citations: Citation[], now: Date): ReferenceIndex {
+  const keys = [...new Set(citations.map((c) => referenceKey(c.name)).filter(Boolean))].slice(0, REFERENCE_MAX_CITATIONS);
+  return { v: REFERENCE_INDEX_VERSION, status: 'ok', keys, computed_at: now.toISOString() };
+}
+
+export function skippedIndex(reason: SkipReason, now: Date): ReferenceIndex {
+  return { v: REFERENCE_INDEX_VERSION, status: 'skipped', reason, keys: [], computed_at: now.toISOString() };
+}
+
+/** 원문을 못 읽은 이유 → 건너뛸 이유(다시 읽어도 같은 것만). 저장소가 잠깐 안 될 때(503 등)는 null — 다음에 다시 */
+export function skipReasonFor(status: number): 'unreadable' | 'too_large' | null {
+  if (status === 413) return 'too_large';
+  if (status === 422) return 'unreadable';
+  return null;
+}
+
+/** 거꾸로 목록 한 줄 */
+export interface CitingDocument {
+  id: string;
+  name: string;
+  agentName?: string;
+  status: CandidateStatus;
+  effectiveFrom?: string | null;
+}
+
+/** 이 문서를 인용하는 문서 — 요청자가 볼 수 있는 것만(지운 비서·지우는 중 제외), 자기 문서 빼고, 지금 판 먼저, 상한까지 */
+export function buildCitedBy(actor: ActorScope, rows: ReferenceDocumentRow[], selfId: string): CitingDocument[] {
+  const seen = new Set<string>();
+  const out: CitingDocument[] = [];
+  for (const d of rows) {
+    if (d.id === selfId || seen.has(d.id) || d.noda_status === 'deleting' || !canReadDocument(d, actor)) continue;
+    const agent = agentOf(d);
+    if (!agent || agent.deleted_at) continue;
+    seen.add(d.id);
+    out.push({ id: d.id, name: d.title?.trim() || d.file_name, agentName: agent.name?.trim() || undefined, status: candidateStatus(d.noda_status, d.retired_at), effectiveFrom: d.effective_from });
+  }
+  out.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.name.localeCompare(b.name, 'ko'));
+  return out.slice(0, CITED_BY_MAX);
+}
+
 export interface ReferenceDeps {
   loadDocument(id: string, organizationId: string): Promise<ReferenceDocumentRow | null>;
   readText(storagePath: string, fileName: string): Promise<{ ok: true; text: string; truncated: boolean } | { ok: false; status: number; message: string }>;
@@ -204,10 +259,32 @@ export interface ReferenceDeps {
   listDocuments(organizationId: string): Promise<{ rows: ReferenceDocumentRow[]; truncated: boolean }>;
   /** 기관 유형의 공통 문서(지난 판 포함). 유형이 없으면 빈 목록 */
   listCommon(organizationId: string): Promise<CommonReferenceRow[]>;
+  /** 참조 색인 저장(그 문서의 metadata에 합침). 실패는 던지지 않고 false */
+  saveIndex(id: string, organizationId: string, index: ReferenceIndex): Promise<boolean>;
+  /** 색인에 그 열쇠 가운데 하나라도 든 기관 문서(비서 이름 포함) */
+  listCiting(organizationId: string, keys: string[]): Promise<ReferenceDocumentRow[]>;
+  /** 요청자가 볼 수 있는 기관 문서 중 색인된 수·전체 수. 못 세면 null */
+  coverage(actor: ActorScope): Promise<{ indexed: number; total: number } | null>;
+  now?(): Date;
 }
 
 export type ReferenceOutcome =
-  | { ok: true; data: { document: { id: string; name: string }; truncated: boolean; candidatesTruncated: boolean; rows: ReferenceRow[]; summary: ReferenceSummary } }
+  | {
+      ok: true;
+      data: {
+        document: { id: string; name: string };
+        truncated: boolean;
+        candidatesTruncated: boolean;
+        rows: ReferenceRow[];
+        summary: ReferenceSummary;
+        /** 이 문서의 원문을 글로 못 읽어 인용을 찾지 못한 이유(스캔 PDF·너무 큼) — 거꾸로 목록은 그래도 보인다 */
+        outgoingError?: string;
+        /** 이 문서를 인용하는 문서(참조 색인으로 찾음 — 같은 이름 열쇠만) */
+        citedBy: CitingDocument[];
+        /** 요청자가 볼 수 있는 문서 중 색인된 수 — 덜 됐으면 거꾸로 목록이 빠질 수 있다 */
+        coverage: { indexed: number; total: number } | null;
+      };
+    }
   | { ok: false; status: number; message: string };
 
 const agentOf = (row: ReferenceDocumentRow) => (Array.isArray(row.agent) ? row.agent[0] : row.agent) ?? null;
@@ -234,24 +311,100 @@ export function buildCandidates(actor: ActorScope, documents: ReferenceDocumentR
   return out;
 }
 
-/** 문서 하나의 참조 관계. 볼 수 없는 문서·없는 문서는 같은 404 */
+/**
+ * 문서 하나의 참조 관계. 볼 수 없는 문서·없는 문서는 같은 404.
+ * 나가는 쪽: 원문을 읽어 인용을 찾고 맞춘다(그 결과로 이 문서의 참조 색인을 새로 저장). 원문을 글로 못 읽으면(스캔 PDF·너무 큼) 그 이유만 싣고 이어 간다.
+ * 들어오는 쪽: 이 문서 이름(제목·파일 이름)의 열쇠가 든 참조 색인을 가진 문서
+ */
 export async function documentReferences(id: string, actor: ActorScope, deps: ReferenceDeps): Promise<ReferenceOutcome> {
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
-  const doc = await deps.loadDocument(id.toLowerCase(), actor.organizationId);
+  const organizationId = actor.organizationId;
+  const doc = await deps.loadDocument(id.toLowerCase(), organizationId);
   if (!doc || !doc.storage_path || doc.noda_status === 'deleting' || !canReadDocument(doc, actor)) return { ok: false, status: 404, message: '문서를 찾을 수 없습니다.' };
+  const now = deps.now?.() ?? new Date();
   const read = await deps.readText(doc.storage_path, doc.file_name);
-  if (!read.ok) return read;
-  const citations = extractCitations(read.text);
-  const [documents, common] = await Promise.all([deps.listDocuments(actor.organizationId), deps.listCommon(actor.organizationId)]);
+  const skip = read.ok ? null : skipReasonFor(read.status);
+  if (!read.ok && !skip) return read;
+  const citations = read.ok ? extractCitations(read.text) : [];
+  const selfKeys = candidateKeys(doc.title, doc.file_name);
+  const [documents, common, citing] = await Promise.all([
+    read.ok ? deps.listDocuments(organizationId) : Promise.resolve({ rows: [] as ReferenceDocumentRow[], truncated: false }),
+    read.ok ? deps.listCommon(organizationId) : Promise.resolve([] as CommonReferenceRow[]),
+    selfKeys.length ? deps.listCiting(organizationId, selfKeys) : Promise.resolve([] as ReferenceDocumentRow[]),
+  ]);
+  await deps.saveIndex(doc.id, organizationId, read.ok ? buildIndex(citations, now) : skippedIndex(skip!, now)).catch(() => false);
+  const coverage = await deps.coverage(actor).catch(() => null);
   const rows = matchReferences(citations, buildCandidates(actor, documents.rows, common), doc.id);
   return {
     ok: true,
     data: {
       document: { id: doc.id, name: doc.title?.trim() || doc.file_name },
-      truncated: read.truncated,
+      truncated: read.ok ? read.truncated : false,
       candidatesTruncated: documents.truncated,
       rows,
       summary: summarizeReferences(rows),
+      ...(read.ok ? {} : { outgoingError: read.message }),
+      citedBy: buildCitedBy(actor, citing, doc.id),
+      coverage,
     },
   };
+}
+
+// ── 색인 만들기(관리자 단추 — 한 번에 몇 개씩, 화면이 남은 것이 없을 때까지 다시 부른다) ──
+
+export interface PendingIndexRow {
+  id: string;
+  department_id: string;
+  organization_id: string | null;
+  visibility: string | null;
+  storage_path: string | null;
+  file_name: string;
+  noda_status: string | null;
+}
+
+export interface IndexDeps {
+  /** 색인이 없는 기관 문서 몇 개(최근 것부터) */
+  listPending(organizationId: string, limit: number): Promise<PendingIndexRow[]>;
+  readText: ReferenceDeps['readText'];
+  saveIndex: ReferenceDeps['saveIndex'];
+  coverage: ReferenceDeps['coverage'];
+  now(): number;
+}
+
+export interface IndexResult {
+  indexed: number;
+  skipped: number;
+  /** 저장소가 잠깐 안 돼 다음으로 미룬 수 */
+  deferred: number;
+  coverage: { indexed: number; total: number } | null;
+}
+
+/** 요청자가 볼 수 있는 문서 중 색인 없는 것을 몇 개 읽어 색인을 남긴다. 시간 예산을 넘기면 멈춘다 */
+export async function indexPendingDocuments(actor: ActorScope, deps: IndexDeps): Promise<IndexResult> {
+  const result: IndexResult = { indexed: 0, skipped: 0, deferred: 0, coverage: null };
+  if (!actor.organizationId) return result;
+  const organizationId = actor.organizationId;
+  const started = deps.now();
+  // 볼 수 없는 문서가 섞여 넉넉히 받아 거른다
+  const rows = (await deps.listPending(organizationId, INDEX_BATCH * 4)).filter((r) => canReadDocument(r, actor)).slice(0, INDEX_BATCH);
+  for (const row of rows) {
+    if (deps.now() - started > INDEX_BUDGET_MS) break;
+    const at = new Date(deps.now());
+    if (row.noda_status === 'deleting' || !row.storage_path) {
+      if (await deps.saveIndex(row.id, organizationId, skippedIndex(row.noda_status === 'deleting' ? 'deleting' : 'no_file', at))) result.skipped += 1;
+      else result.deferred += 1;
+      continue;
+    }
+    const read = await deps.readText(row.storage_path, row.file_name).catch(() => ({ ok: false as const, status: 503, message: '' }));
+    if (read.ok) {
+      if (await deps.saveIndex(row.id, organizationId, buildIndex(extractCitations(read.text), at))) result.indexed += 1;
+      else result.deferred += 1;
+      continue;
+    }
+    const skip = skipReasonFor(read.status);
+    if (skip && (await deps.saveIndex(row.id, organizationId, skippedIndex(skip, at)))) result.skipped += 1;
+    else result.deferred += 1;
+  }
+  result.coverage = await deps.coverage(actor).catch(() => null);
+  return result;
 }

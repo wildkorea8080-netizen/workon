@@ -2,10 +2,11 @@ import { readFileSync } from 'fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { ActorScope } from '@/lib/agent-permissions';
 import {
-  REFERENCE_MAX_CITATIONS, REFERENCE_MAX_MATCHES, buildCandidates, candidateKeys, candidateStatus, documentReferences, extractCitations, isLawLike,
-  matchReferences, referenceKey, summarizeReferences, type ReferenceCandidate, type ReferenceDeps, type ReferenceDocumentRow,
+  CITED_BY_MAX, INDEX_BATCH, INDEX_BUDGET_MS, REFERENCE_MAX_CITATIONS, REFERENCE_MAX_MATCHES, buildCandidates, buildCitedBy, buildIndex, candidateKeys, candidateStatus,
+  documentReferences, extractCitations, indexPendingDocuments, isLawLike, matchReferences, referenceKey, skipReasonFor, skippedIndex, summarizeReferences,
+  type IndexDeps, type PendingIndexRow, type ReferenceCandidate, type ReferenceDeps, type ReferenceDocumentRow, type ReferenceIndex,
 } from '@/lib/document-references';
-import { referenceVerdict } from '@/components/admin/DocumentReferencesModal';
+import { INDEX_MAX_ROUNDS, coverageNote, indexDone, referenceVerdict } from '@/components/admin/DocumentReferencesModal';
 
 /** 문서 참조 관계(2026-11-08) — 「」·『』로 인용한 이름을 문서함과 맞춘다(모델 없음) */
 
@@ -96,15 +97,24 @@ describe('후보', () => {
 });
 
 describe('문서 하나의 참조 관계', () => {
-  const deps = (over: Partial<ReferenceDeps> = {}): ReferenceDeps => ({
-    loadDocument: vi.fn(async () => docRow()),
-    readText: vi.fn(async () => ({ ok: true as const, text: '「여비 규정」에 따라 「예산편성기준」을 지킨다.', truncated: false })),
-    listDocuments: vi.fn(async () => ({ rows: [docRow(), docRow({ id: 'a', file_name: '여비 규정.hwpx' })], truncated: false })),
-    listCommon: vi.fn(async () => [{ id: 'c1', title: '예산편성기준', file_name: 'x.pdf', edition_year: 2026, noda_status: 'ready', retired_at: null }]),
-    ...over,
-  });
-  it('원본을 읽어 인용을 찾고 기관 문서·공통 자료와 맞춘다', async () => {
-    const d = deps();
+  const NOW = new Date('2026-11-09T01:00:00Z');
+  const deps = (over: Partial<ReferenceDeps> = {}) => {
+    const saved: { id: string; index: ReferenceIndex }[] = [];
+    const d: ReferenceDeps = {
+      loadDocument: vi.fn(async () => docRow()),
+      readText: vi.fn(async () => ({ ok: true as const, text: '「여비 규정」에 따라 「예산편성기준」을 지킨다.', truncated: false })),
+      listDocuments: vi.fn(async () => ({ rows: [docRow(), docRow({ id: 'a', file_name: '여비 규정.hwpx' })], truncated: false })),
+      listCommon: vi.fn(async () => [{ id: 'c1', title: '예산편성기준', file_name: 'x.pdf', edition_year: 2026, noda_status: 'ready', retired_at: null }]),
+      saveIndex: vi.fn(async (id: string, _org: string, index: ReferenceIndex) => { saved.push({ id, index }); return true; }),
+      listCiting: vi.fn(async () => [docRow({ id: 'b', file_name: '국외 출장 요령.hwpx' }), docRow(), docRow({ id: 'x', visibility: 'department', department_id: 'dep9' })]),
+      coverage: vi.fn(async () => ({ indexed: 3, total: 10 })),
+      now: () => NOW,
+      ...over,
+    };
+    return { d, saved };
+  };
+  it('원본을 읽어 인용을 찾고 기관 문서·공통 자료와 맞추고, 그 결과로 참조 색인을 남긴다', async () => {
+    const { d, saved } = deps();
     const r = await documentReferences('DOC1', actor, d);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -113,12 +123,107 @@ describe('문서 하나의 참조 관계', () => {
     expect(r.data.document).toEqual({ id: 'doc1', name: '출장 지침.hwpx' });
     expect(r.data.rows.map((x) => x.matches.map((m) => m.id))).toEqual([['a'], ['c1']]);
     expect(r.data.summary).toMatchObject({ cited: 2, matched: 2 });
+    expect(saved).toEqual([{ id: 'doc1', index: { v: 1, status: 'ok', keys: ['여비규정', '예산편성기준'], computed_at: NOW.toISOString() } }]);
   });
-  it('볼 수 없는 문서·없는 문서·지우는 중은 같은 404, 원본을 못 읽으면 그 이유', async () => {
+  it('거꾸로 — 이 문서 이름의 열쇠로 색인을 찾고, 볼 수 없는 문서·자기 문서는 빼고, 색인 범위를 함께', async () => {
+    const { d } = deps();
+    const r = await documentReferences('doc1', actor, d);
+    if (!r.ok) throw new Error('x');
+    expect(d.listCiting).toHaveBeenCalledWith('org1', ['출장지침']);
+    expect(r.data.citedBy.map((x) => x.id)).toEqual(['b']);
+    expect(r.data.coverage).toEqual({ indexed: 3, total: 10 });
+  });
+  it('원문을 글로 못 읽는 문서(스캔·너무 큼)도 거꾸로는 보이고, 건너뛴 색인을 남긴다. 저장소가 안 되면 그 이유로 실패', async () => {
+    const scan = deps({ readText: async () => ({ ok: false, status: 422, message: '스캔본' }) });
+    const r = await documentReferences('doc1', actor, scan.d);
+    if (!r.ok) throw new Error('x');
+    expect(r.data.outgoingError).toBe('스캔본');
+    expect(r.data.rows).toEqual([]);
+    expect(r.data.citedBy.map((x) => x.id)).toEqual(['b']);
+    expect(scan.d.listDocuments).not.toHaveBeenCalled();
+    expect(scan.saved[0].index).toMatchObject({ status: 'skipped', reason: 'unreadable', keys: [] });
+    const down = deps({ readText: async () => ({ ok: false, status: 503, message: '잠시 뒤' }) });
+    expect(await documentReferences('doc1', actor, down.d)).toEqual({ ok: false, status: 503, message: '잠시 뒤' });
+    expect(down.saved).toEqual([]);
+  });
+  it('볼 수 없는 문서·없는 문서·지우는 중은 같은 404', async () => {
     for (const row of [null, docRow({ visibility: 'department', department_id: 'dep9' }), docRow({ noda_status: 'deleting' }), docRow({ storage_path: null })]) {
-      expect(await documentReferences('doc1', actor, deps({ loadDocument: async () => row }))).toEqual({ ok: false, status: 404, message: '문서를 찾을 수 없습니다.' });
+      expect(await documentReferences('doc1', actor, deps({ loadDocument: async () => row }).d)).toEqual({ ok: false, status: 404, message: '문서를 찾을 수 없습니다.' });
     }
-    expect(await documentReferences('doc1', actor, deps({ readText: async () => ({ ok: false, status: 422, message: '스캔본' }) }))).toEqual({ ok: false, status: 422, message: '스캔본' });
+  });
+  it('색인 저장·범위 세기가 실패해도 결과는 돌려준다', async () => {
+    const { d } = deps({ saveIndex: async () => { throw new Error('db'); }, coverage: async () => { throw new Error('db'); } });
+    const r = await documentReferences('doc1', actor, d);
+    expect(r).toMatchObject({ ok: true, data: { coverage: null } });
+  });
+});
+
+describe('참조 색인', () => {
+  it('열쇠는 인용 이름의 열쇠(겹침 없이), 못 읽은 이유는 다시 읽어도 같은 것만 건너뜀', () => {
+    expect(buildIndex(extractCitations('「여비 규정」 「여비규정」 「복무 지침」'), new Date(0)).keys).toEqual(['여비규정', '복무지침']);
+    expect(skippedIndex('deleting', new Date(0))).toMatchObject({ status: 'skipped', reason: 'deleting', keys: [] });
+    expect([413, 422, 503, 500].map(skipReasonFor)).toEqual(['too_large', 'unreadable', null, null]);
+  });
+  it('거꾸로 목록은 지운 비서·지우는 중·겹침을 빼고 지금 판 먼저, 상한까지', () => {
+    const rows = [
+      docRow({ id: 'r', title: '가 지침', noda_status: 'retired', retired_at: 't' }),
+      docRow({ id: 'c', title: '나 지침' }), docRow({ id: 'c', title: '나 지침' }),
+      docRow({ id: 'd', noda_status: 'deleting' }),
+      docRow({ id: 'g', agent: { name: '옛', deleted_at: 'x' } }),
+    ];
+    expect(buildCitedBy(actor, rows, 'self').map((x) => [x.id, x.status])).toEqual([['c', 'current'], ['r', 'retired']]);
+    const many = Array.from({ length: CITED_BY_MAX + 5 }, (_, i) => docRow({ id: `m${i}` }));
+    expect(buildCitedBy(actor, many, 'self')).toHaveLength(CITED_BY_MAX);
+  });
+});
+
+describe('색인 만들기', () => {
+  const pending = (over: Partial<PendingIndexRow> = {}): PendingIndexRow => ({
+    id: 'p1', department_id: 'dep1', organization_id: 'org1', visibility: 'organization', storage_path: 'p/p1.hwpx', file_name: 'p1.hwpx', noda_status: 'ready', ...over,
+  });
+  const ideps = (rows: PendingIndexRow[], over: Partial<IndexDeps> = {}) => {
+    const saved: { id: string; index: ReferenceIndex }[] = [];
+    let t = 0;
+    const d: IndexDeps = {
+      listPending: vi.fn(async () => rows),
+      readText: vi.fn(async (path: string) => path.includes('scan') ? { ok: false as const, status: 422, message: 's' } : path.includes('down') ? { ok: false as const, status: 503, message: 'd' } : { ok: true as const, text: '「여비 규정」', truncated: false }),
+      saveIndex: vi.fn(async (id: string, _o: string, index: ReferenceIndex) => { saved.push({ id, index }); return true; }),
+      coverage: vi.fn(async () => ({ indexed: 7, total: 9 })),
+      now: () => t++,
+      ...over,
+    };
+    return { d, saved };
+  };
+  it('볼 수 있는 문서만 다섯 개까지 — 읽으면 색인, 스캔은 건너뜀, 저장소가 안 되면 미룸, 지우는 중·원본 없음은 건너뜀', async () => {
+    const rows = [
+      pending({ id: 'hidden', visibility: 'department', department_id: 'dep9' }),
+      pending({ id: 'ok' }), pending({ id: 'scan', storage_path: 'p/scan.pdf' }), pending({ id: 'down', storage_path: 'p/down.hwpx' }),
+      pending({ id: 'del', noda_status: 'deleting' }), pending({ id: 'nofile', storage_path: null }), pending({ id: 'sixth' }),
+    ];
+    const { d, saved } = ideps(rows);
+    const r = await indexPendingDocuments(actor, d);
+    expect(d.listPending).toHaveBeenCalledWith('org1', INDEX_BATCH * 4);
+    expect(saved.map((x) => [x.id, x.index.status])).toEqual([['ok', 'ok'], ['scan', 'skipped'], ['del', 'skipped'], ['nofile', 'skipped']]);
+    expect(r).toEqual({ indexed: 1, skipped: 3, deferred: 1, coverage: { indexed: 7, total: 9 } });
+    expect(saved.some((x) => x.id === 'hidden' || x.id === 'sixth')).toBe(false);
+  });
+  it('시간 예산을 넘기면 멈춘다', async () => {
+    let t = 0;
+    const { d, saved } = ideps([pending({ id: 'a' }), pending({ id: 'b' })], { now: () => (t += INDEX_BUDGET_MS + 1) });
+    await indexPendingDocuments(actor, d);
+    expect(saved).toEqual([]);
+  });
+});
+
+describe('화면 판단', () => {
+  it('색인 범위 안내와 멈출 때', () => {
+    expect(coverageNote(null)).toBeNull();
+    expect(coverageNote({ indexed: 5, total: 5 })).toBe('문서 5개 모두 색인했습니다.');
+    expect(coverageNote({ indexed: 2, total: 5 })).toContain('5개 중 2개만');
+    expect(indexDone({ indexed: 0, skipped: 0, deferred: 2, coverage: { indexed: 2, total: 5 } })).toBe(true);
+    expect(indexDone({ indexed: 1, skipped: 0, deferred: 0, coverage: { indexed: 3, total: 5 } })).toBe(false);
+    expect(indexDone({ indexed: 1, skipped: 0, deferred: 0, coverage: { indexed: 5, total: 5 } })).toBe(true);
+    expect(INDEX_MAX_ROUNDS).toBeGreaterThan(0);
   });
 });
 
@@ -126,11 +231,20 @@ describe('연결', () => {
   it('라우트는 관리자만, 문서 화면에 단추·창', () => {
     const route = readFileSync('src/app/api/documents/[id]/references/route.ts', 'utf8');
     expect(route).toContain('if (!isAdminSession(session))');
-    expect(route).toContain('readText: readOriginalText');
+    expect(route).toContain('referenceDeps(actor)');
+    const index = readFileSync('src/app/api/documents/references/index/route.ts', 'utf8');
+    expect(index).toContain('if (!isAdminSession(session))');
+    expect(index).toContain('indexPendingDocuments(actor, indexDeps(actor))');
+    const db = readFileSync('src/lib/document-references-db.ts', 'utf8');
+    expect(db).toContain('readText: readOriginalText');
+    expect(db).toContain(".contains('metadata', { references: { keys: [key] } })");
+    expect(db).toContain(".is('metadata->references', null)");
+    expect(db).toContain('.or(visibilityFilter(actor))');
+    expect(db).toContain('metadata: { ...base, references: index }');
     const manager = readFileSync('src/components/admin/DocumentsManager.tsx', 'utf8');
     expect(manager).toContain('onClick={() => setReferencesId(doc.id)}');
     expect(manager).toContain('<DocumentReferencesModal documentId={referencesId}');
     // 화면은 서버 모듈 값을 가져오지 않는다(꼴만)
-    expect(readFileSync('src/components/admin/DocumentReferencesModal.tsx', 'utf8')).toContain("import type { CandidateStatus, ReferenceRow, ReferenceSummary } from '@/lib/document-references';");
+    expect(readFileSync('src/components/admin/DocumentReferencesModal.tsx', 'utf8')).toContain("import type { CandidateStatus, CitingDocument, ReferenceRow, ReferenceSummary } from '@/lib/document-references';");
   });
 });
