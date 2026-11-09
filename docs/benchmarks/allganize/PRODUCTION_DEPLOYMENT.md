@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-09(오후): 조사 계획 — 조회 단계의 줄마다 찾기
+
+- 2026-11-09 13:21 KST 배포 `dpl_59xv3RRRBnwcW4PrqbT2j49Luniq`(커밋 `d2bc946`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_DzmiUtCj8vC1PTgv1utkjfTJY64c`(1af5de2)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사는 `lookup.each`를 모르는 칸으로 떨구고(정의를 다시 저장하면 줄마다 찾기가 꺼진 채 저장됨) 실행기는 첫 줄로 한 번만 찾는다.
+- 들어간 커밋: `b25d3a8`(직전 배포 기록), `1d5a56f` 조사 계획(`lookup.each` — 앞 AI 단계 결과의 줄마다 최대 5번 찾고, 근거 없는 조회어를 `gapQueries`/`not_found_queries`로 따로 정보 공백 — [조회 단계](APP_LOOKUP_STEPS.md)), `d2bc946` 문서.
+- **배포 전**: 가지 Preview(`d2bc946`, `workon-ict9bsape`) Ready를 확인한 뒤 `main`에 올렸다. 그 전에 시험 DB를 띄운 전체 시험에서 한 시험 프로세스가 이 PC 메모리 부족으로 시작하자마자 죽어 `work-currentize-shift.test.ts`(21개)만 빠졌고, 그 파일을 따로 돌려 통과 — 합쳐 218파일 3,242개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/apps/builder`·`/apps/run` 200, `POST /api/chat`·`PATCH /api/agents/[id]` 401. pg_cron 호출 200(13:20~13:22 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 AI 처리(조회어를 줄마다) → 문서 찾기 `{{@1}}` + '줄마다 찾기' 앱을 저장·실행해 '줄마다 K번'·근거 없는 조회어 표시와 결과의 정보 공백 문구 보기(실제 NODA·모델 — 브라우저로 보지 않음).
+
 ## 2026-11-09(낮 2): 보완 조사 — 조회어에 앞 AI 단계 결과
 
 - 2026-11-09 12:36 KST 배포 `dpl_DzmiUtCj8vC1PTgv1utkjfTJY64c`(커밋 `1af5de2`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_2ErKz3L1fWK6tREPvB7sr5wGYRCK`(29c0232)로 promote한다. **마이그레이션 없음**. 되돌리면 옛 코드의 저장 검사가 조회어의 `{{@N}}`을 '현재 입력 항목만' 규칙으로 거절하니, 되돌리기 전에 그런 앱이 생겼는지 본다.
