@@ -12,7 +12,43 @@ export const BATCH_MAX_ATTEMPTS = 2;
 /** `running`으로 이만큼 지나면 실행기가 끊긴 것으로 보고 다시 차지한다 */
 export const BATCH_STALE_MS = 15 * 60_000;
 export const BATCH_TITLE_PREFIX = '[일괄] ';
-export const BATCH_FILES_UNSUPPORTED = '파일 첨부가 꼭 필요한 앱은 일괄 실행할 수 없습니다(줄마다 파일을 붙일 수 없습니다).';
+export const BATCH_FILES_UNSUPPORTED = "파일 첨부가 꼭 필요한 앱은 '파일마다 한 건'으로 일괄 실행해 주세요.";
+/** 파일마다 한 건(2026-11-10) — 한 번에 올릴 파일 수. 직원의 '보내지 않은 첨부' 상한(20)을 실행 때 다시 붙일 몫까지 남기려고 10 */
+export const BATCH_MAX_FILES = 10;
+export const BATCH_FILE_PREFIX = 'app-batch-files';
+export const BATCH_FILES_NOT_ALLOWED = '파일을 받지 않는 앱입니다. 앱 설정에서 파일 첨부를 켠 앱만 파일마다 실행할 수 있습니다.';
+export const BATCH_FILE_ROWS_MISMATCH = '파일마다 실행할 때 표는 한 줄(모든 파일에 같은 입력)이거나 파일 수와 같은 줄 수(올린 순서대로 짝)여야 합니다.';
+
+/** 줄이 가진 파일 사본 하나 — `path`는 화면으로 내보내지 않는다 */
+export type BatchFile = { id: string; name: string; size: number; path: string };
+
+export function batchFilePath(organizationId: string, userId: string, fileId: string, ext: string): string {
+  return `${BATCH_FILE_PREFIX}/${organizationId}/${userId}/${fileId}.${ext}`;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** DB 칸 → 파일 사본(꼴이 틀리거나 일괄 실행 접두사 밖이면 null) */
+export function batchFileOf(raw: unknown): BatchFile | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { id, name, size, path } = raw as Record<string, unknown>;
+  if (typeof id !== 'string' || !UUID_RE.test(id) || typeof name !== 'string' || !name || typeof size !== 'number' || !Number.isFinite(size)
+    || typeof path !== 'string' || !path.startsWith(`${BATCH_FILE_PREFIX}/`) || path.includes('..')) return null;
+  return { id: id.toLowerCase(), name, size, path };
+}
+
+/** 요청의 첨부 id 목록 — 없으면 빈 목록, 꼴이 틀리거나 상한을 넘으면 null. 겹친 id는 한 번(올린 순서 유지) */
+export function parseBatchAttachmentIds(raw: unknown): string[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > BATCH_MAX_FILES || raw.some((v) => typeof v !== 'string' || !UUID_RE.test(v))) return null;
+  return [...new Set((raw as string[]).map((v) => v.toLowerCase()))];
+}
+
+/** 파일마다 한 건 — 줄 하나면 모든 파일에, 파일 수와 같으면 순서대로 짝. 아니면 null */
+export function pairRowsWithFiles<R>(rows: R[], fileCount: number): R[] | null {
+  if (fileCount < 1) return null;
+  if (rows.length === 1) return Array.from({ length: fileCount }, () => rows[0]);
+  return rows.length === fileCount ? rows : null;
+}
 
 export type BatchStatus = 'running' | 'done' | 'cancelled' | 'stopped';
 export type BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
@@ -25,6 +61,8 @@ export interface BatchView {
 }
 export interface BatchItemView {
   position: number; status: BatchItemStatus; error: string | null; conversationId: string | null; inputs: Record<string, string>;
+  /** 파일마다 한 건이면 그 줄의 파일 이름 */
+  fileName?: string | null;
 }
 
 type Field = { key: string; label: string };

@@ -8,6 +8,9 @@
 //   앱 변경·권한·계정·부서·한도 문제는 묶음을 멈추고(남은 줄은 건너뜀), 줄의 입력 문제는 그 줄만 실패, 모델 오류는 한 번 더 해 본다.
 //   묶음을 마치거나 멈추면(그 조건부 갱신을 한 쪽만) 만든 직원에게 메일 한 통(줄 수·멈춘 이유·보내기 전 확인 수 — 입력·결과 글 없음, 2026-11-10).
 //   직원이 그만둔 묶음은 알리지 않는다.
+// - 파일마다 한 건(2026-11-10, 0079): 직원이 올린 읽힌 첨부(10개까지)를 줄마다 하나씩 사본(`app-batch-files/…`)으로 복사해 두고,
+//   실행기가 그 줄을 돌릴 때 사본을 새 첨부로 다시 붙인다(예약의 올린 파일과 같은 길). 표는 한 줄(모든 파일에 같은 입력)이거나 파일 수와 같은 줄.
+//   원본 첨부는 복사한 뒤 묘비로 지운다(보내지 않은 첨부 상한을 빨리 돌려줌). 사본은 묶음이 끝나면(마침·멈춤·그만둠) 지운다.
 // - 결과: 줄마다 그 실행의 대화·답변 메시지를 가리킨다(결과 글을 따로 저장하지 않음). 엑셀은 입력·상태·결과 글·오류를 한 시트로(값만, 수식 주입 막음).
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ActorScope } from '@/lib/agent-permissions';
@@ -19,9 +22,11 @@ import { APP_URL } from '@/lib/config';
 import { batchFinishedMail, isMailConfigured, sendBatchFinishedEmail } from '@/lib/mailer';
 import { safeText } from '@/lib/xlsx-export';
 import {
-  BATCH_FILES_UNSUPPORTED, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_ROWS, BATCH_MAX_RUNNING, BATCH_STALE_MS, BATCH_TITLE_PREFIX,
-  normalizeBatchName, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
+  BATCH_FILES_NOT_ALLOWED, BATCH_FILES_UNSUPPORTED, BATCH_FILE_ROWS_MISMATCH, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_MAX_RUNNING,
+  BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, normalizeBatchName, pairRowsWithFiles, parseBatchAttachmentIds,
+  type BatchFile, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
 } from './batch-spec';
+import { copyAttachmentsTo, defaultScheduleFileIo, discardAttachments, removeScheduleFileObjects, type ScheduleFileIo } from './schedule-files';
 
 type Fail = { ok: false; status: number; message: string };
 const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_at, finished_at';
@@ -37,35 +42,55 @@ async function loadApp(agentId: string): Promise<AgentRow | null> {
 /** 만들기 — 줄마다 앱 규칙으로 다시 검사(첫 오류 10개를 줄 번호와 함께), 실행 중 3개 상한 */
 export async function createBatch(actor: ActorScope, body: unknown): Promise<{ ok: true; batch: BatchView } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
-  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown };
+  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown };
   const agent = typeof b.agent_id === 'string' ? await loadApp(b.agent_id) : null;
   if (!agent || agent.agent_type === 'link' || !canUseAgent(agent, actor)) return { ok: false, status: 404, message: '앱을 찾을 수 없습니다.' };
   const definition = validateAppDefinition(agent.app_definition ?? null);
   if (!definition.ok || !definition.value) return { ok: false, status: 400, message: '입력형 앱만 일괄 실행할 수 있습니다.' };
-  if (definition.value.attachments?.required) return { ok: false, status: 400, message: BATCH_FILES_UNSUPPORTED };
+  const attachmentIds = parseBatchAttachmentIds(b.attachment_ids);
+  if (!attachmentIds) return { ok: false, status: 400, message: `파일은 ${BATCH_MAX_FILES}개까지 올려 주세요.` };
+  const fileMode = attachmentIds.length > 0;
+  if (fileMode && !definition.value.attachments) return { ok: false, status: 400, message: BATCH_FILES_NOT_ALLOWED };
+  if (!fileMode && definition.value.attachments?.required) return { ok: false, status: 400, message: BATCH_FILES_UNSUPPORTED };
   if (!Array.isArray(b.rows) || !b.rows.length) return { ok: false, status: 400, message: '실행할 줄이 없습니다.' };
   if (b.rows.length > BATCH_MAX_ROWS) return { ok: false, status: 400, message: `한 번에 ${BATCH_MAX_ROWS}줄까지 실행합니다.` };
+  if (fileMode && !pairRowsWithFiles(b.rows, attachmentIds.length)) return { ok: false, status: 400, message: BATCH_FILE_ROWS_MISMATCH };
   const errors: string[] = [];
-  const inputs: Record<string, string>[] = [];
+  const checkedRows: Record<string, string>[] = [];
   b.rows.forEach((row, i) => {
     const checked = renderAppInput(definition.value!, row);
     if (!checked.ok) errors.push(`${i + 1}번째 줄: ${checked.message}`);
-    else inputs.push({ ...checked.inputs });
+    else checkedRows.push({ ...checked.inputs });
   });
   if (errors.length) return { ok: false, status: 400, message: errors[0], errors: errors.slice(0, 10) };
+  const inputs = fileMode ? pairRowsWithFiles(checkedRows, attachmentIds.length)!.map((row) => ({ ...row })) : checkedRows;
   const name = normalizeBatchName(b.name) ?? `${agent.name.slice(0, 60)} 일괄 실행`;
   const { count, error: countError } = await supabaseAdmin.from('app_batches').select('id', { count: 'exact', head: true }).eq('user_id', actor.userId).eq('status', 'running');
   if (countError) return { ok: false, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if ((count ?? 0) >= BATCH_MAX_RUNNING) return { ok: false, status: 409, message: `실행 중인 일괄 실행은 ${BATCH_MAX_RUNNING}개까지입니다. 끝나거나 그만둔 뒤 다시 만들어 주세요.` };
+  // 파일마다 한 건 — 직원의 읽힌 첨부(요청자의 것·ready만)를 줄마다 사본으로
+  let files: BatchFile[] = [];
+  if (fileMode) {
+    const organizationId = actor.organizationId;
+    const copied = await copyAttachmentsTo({ userId: actor.userId, organizationId }, attachmentIds, (fileId, ext) => batchFilePath(organizationId, actor.userId, fileId, ext));
+    if (!copied.ok) return { ok: false, status: copied.status, message: copied.status === 400 ? '일괄 실행에 붙일 파일을 찾을 수 없습니다. 파일을 다시 올려 주세요.' : '파일을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+    files = copied.files;
+  }
+  const failCreate = async () => {
+    await removeScheduleFileObjects(files, '일괄 실행 만들기 실패 뒤 정리');
+    return { ok: false as const, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+  };
   const { data: batch, error } = await supabaseAdmin.from('app_batches').insert({
     organization_id: actor.organizationId, department_id: actor.departmentId, user_id: actor.userId, agent_id: agent.id, app_version: agent.version, name, total: inputs.length,
   }).select(BATCH_COLUMNS).single();
-  if (error || !batch) return { ok: false, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
-  const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row })));
+  if (error || !batch) return failCreate();
+  const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row, ...(files[i] ? { file: files[i] } : {}) })));
   if (itemError) {
     await supabaseAdmin.from('app_batches').delete().eq('id', batch.id);
-    return { ok: false, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+    return failCreate();
   }
+  // 원본 첨부는 사본을 만들었으니 묘비로(보내지 않은 첨부 상한을 빨리 돌려준다 — 실행 때 다시 붙일 몫)
+  if (fileMode) await discardAttachments(actor.userId, attachmentIds);
   return { ok: true, batch: batchView(batch as BatchRowView, agent.name, { done: 0, failed: 0, skipped: 0, pending: inputs.length }) };
 }
 
@@ -110,9 +135,9 @@ async function ownBatch(userId: string, id: string): Promise<(BatchRowView & { u
 export async function getBatch(userId: string, id: string): Promise<{ batch: BatchView; items: BatchItemView[] } | null> {
   const batch = await ownBatch(userId, id);
   if (!batch) return null;
-  const { data } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
-  const items = ((data ?? []) as Array<{ position: number; status: BatchItemStatus; error: string | null; conversation_id: string | null; inputs: Record<string, string> }>)
-    .map((r) => ({ position: r.position, status: r.status, error: r.error, conversationId: r.conversation_id, inputs: r.inputs ?? {} }));
+  const { data } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs, file').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  const items = ((data ?? []) as Array<{ position: number; status: BatchItemStatus; error: string | null; conversation_id: string | null; inputs: Record<string, string>; file?: unknown }>)
+    .map((r) => ({ position: r.position, status: r.status, error: r.error, conversationId: r.conversation_id, inputs: r.inputs ?? {}, fileName: batchFileOf(r.file)?.name ?? null }));
   const counts: Counts = { done: 0, failed: 0, skipped: 0, pending: 0 };
   for (const it of items) { if (it.status === 'done') counts.done++; else if (it.status === 'failed') counts.failed++; else if (it.status === 'skipped') counts.skipped++; else counts.pending++; }
   const { data: agent } = await supabaseAdmin.from('agents').select('name').eq('id', batch.agent_id).maybeSingle();
@@ -128,13 +153,25 @@ export async function cancelBatch(userId: string, id: string, nowMs = Date.now()
   if (error) return { ok: false, status: 503, message: '그만두지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!data?.length) return { ok: false, status: 409, message: '이미 끝났거나 멈춘 일괄 실행입니다.' };
   await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: now, error: '직원이 그만뒀습니다.' }).eq('batch_id', id).eq('status', 'pending');
+  await removeBatchFiles(id).catch(() => undefined);
   return { ok: true };
+}
+
+/** 끝난 묶음의 파일 사본 지우기(파일마다 한 건) — 줄의 파일 이름은 남긴다(결과 엑셀). 실패는 기록만, 던지지 않는다 */
+export async function removeBatchFiles(batchId: string): Promise<void> {
+  const { data, error } = await supabaseAdmin.from('app_batch_items').select('file').eq('batch_id', batchId).not('file', 'is', null).limit(BATCH_MAX_ROWS);
+  if (error) {
+    await logSystem({ level: 'warning', category: 'database', message: '일괄 실행 파일 사본을 찾지 못했습니다 — 사본이 남았을 수 있음', details: { batch_id: batchId, error: error.message } }).catch(() => undefined);
+    return;
+  }
+  const files = ((data ?? []) as Array<{ file: unknown }>).map((r) => batchFileOf(r.file)).filter((f): f is BatchFile => Boolean(f));
+  await removeScheduleFileObjects(files, '일괄 실행이 끝난 뒤');
 }
 
 // ── 실행기 ─────────────────────────────────────────────────────────
 
 export interface BatchRunRow { id: string; organization_id: string; department_id: string; user_id: string; agent_id: string; app_version: number; status: BatchStatus }
-export interface BatchItemRun { id: string; batch_id: string; position: number; inputs: Record<string, string>; status: 'pending' | 'running'; attempts: number; claimed_at: string | null; batch: BatchRunRow }
+export interface BatchItemRun { id: string; batch_id: string; position: number; inputs: Record<string, string>; status: 'pending' | 'running'; attempts: number; claimed_at: string | null; batch: BatchRunRow; file?: unknown }
 export type ItemPatch = { status: 'done' | 'failed' | 'skipped' | 'pending'; attempts: number; error: string | null; conversation_id?: string | null; message_id?: string | null };
 
 export interface BatchDeps {
@@ -150,6 +187,8 @@ export interface BatchDeps {
   settle(batchId: string, nowIso: string): Promise<boolean | void>;
   /** 마치거나 멈춘 묶음을 만든 직원에게 알림(메일) — 보냈으면 true. 던져도 실행기는 이어 간다 */
   notifyFinished?(batchId: string): Promise<boolean>;
+  /** 끝난 묶음(이 호출이 마치거나 멈춤)의 파일 사본 지우기. 던져도 실행기는 이어 간다 */
+  cleanup?(batchId: string): Promise<void>;
   log(message: string, details: Record<string, unknown>, orgId: string): Promise<void>;
 }
 export type BatchTick = { ran: number; done: number; failed: number; retried: number; stopped: number; notified: number };
@@ -179,6 +218,7 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
   try { queue = (await deps.openItems(iso(start - BATCH_STALE_MS), 20)) ?? []; } catch { queue = []; }
   const stoppedBatches = new Set<string>();
   const notify = async (batch: BatchRunRow) => {
+    if (deps.cleanup) await deps.cleanup(batch.id).catch(() => undefined);
     if (!deps.notifyFinished) return;
     try { if (await deps.notifyFinished(batch.id)) tick.notified++; } catch (error) {
       await deps.log('앱 일괄 실행 마침 메일을 보내지 못했습니다', { batch_id: batch.id, error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }, batch.organization_id).catch(() => {});
@@ -233,7 +273,7 @@ export function batchDeps(): BatchDeps {
       if (error) return null;
       const byId = new Map(((batches ?? []) as BatchRunRow[]).map((b) => [b.id, b]));
       if (!byId.size) return [];
-      const { data: items, error: itemError } = await supabaseAdmin.from('app_batch_items').select('id, batch_id, position, inputs, status, attempts, claimed_at')
+      const { data: items, error: itemError } = await supabaseAdmin.from('app_batch_items').select('id, batch_id, position, inputs, status, attempts, claimed_at, file')
         .in('batch_id', [...byId.keys()])
         .or(`status.eq.pending,and(status.eq.running,claimed_at.lt.${staleIso})`)
         .order('position', { ascending: true }).limit(limit * 3);
@@ -250,9 +290,7 @@ export function batchDeps(): BatchDeps {
       const { data, error } = await q.select('id');
       return !error && Boolean(data?.length);
     },
-    run: (item, deadlineAt) => runAppAs({
-      userId: item.batch.user_id, departmentId: item.batch.department_id, agentId: item.batch.agent_id, appVersion: item.batch.app_version, inputs: item.inputs, deadlineAt,
-    }, BATCH_TITLE_PREFIX, defaultRunAsIo()),
+    run: (item, deadlineAt) => runBatchItem(item, deadlineAt),
     async finishItem(id, patch, nowIso) {
       const terminal = patch.status !== 'pending';
       await supabaseAdmin.from('app_batch_items').update({ ...patch, claimed_at: null, finished_at: terminal ? nowIso : null }).eq('id', id).eq('status', 'running');
@@ -269,8 +307,41 @@ export function batchDeps(): BatchDeps {
       return Boolean(data?.length);
     },
     notifyFinished: (batchId) => notifyBatchFinished(batchId),
+    cleanup: (batchId) => removeBatchFiles(batchId),
     async log(message, details, orgId) { await logSystem({ level: 'warning', category: 'api', message, details, orgId }); },
   };
+}
+
+export interface BatchRunIo {
+  files: ScheduleFileIo;
+  runAs(input: Parameters<typeof runAppAs>[0]): Promise<RunAsOutcome>;
+}
+const defaultBatchRunIo = (): BatchRunIo => ({ files: defaultScheduleFileIo, runAs: (input) => runAppAs(input, BATCH_TITLE_PREFIX, defaultRunAsIo()) });
+
+/**
+ * 줄 하나 실행 — 파일마다 한 건이면 그 줄의 사본을 새 첨부로 다시 붙여 함께 실행한다.
+ * 사본을 못 불러오면 '실패'(한 번 더 해 봄), 사본이 없거나 붙인 파일을 읽지 못하면 그 줄만 실패(400 — 다시 해도 같음). 시작 전에 끝났으면 붙인 첨부를 묘비로
+ */
+export async function runBatchItem(item: BatchItemRun, deadlineAt: number, io: BatchRunIo = defaultBatchRunIo()): Promise<RunAsOutcome> {
+  const actor = { userId: item.batch.user_id, departmentId: item.batch.department_id, organizationId: item.batch.organization_id };
+  const base = { userId: actor.userId, departmentId: actor.departmentId, agentId: item.batch.agent_id, appVersion: item.batch.app_version, inputs: item.inputs, deadlineAt };
+  if (item.file === undefined || item.file === null) return io.runAs(base);
+  const file = batchFileOf(item.file);
+  if (!file) return { kind: 'rejected', status: 400, message: '이 줄의 파일 정보를 읽지 못했습니다.' };
+  let attached: Awaited<ReturnType<ScheduleFileIo['attach']>>;
+  try { attached = await io.files.attach(actor, file); } catch { return { kind: 'failed', error: `파일 '${file.name}'을 붙이지 못했습니다(잠시 뒤 다시).`, conversationId: null }; }
+  if (!attached.ok) {
+    if (attached.status === 404) return { kind: 'rejected', status: 400, message: `파일 '${file.name}'의 사본이 남아 있지 않습니다.` };
+    return { kind: 'failed', error: `파일 '${file.name}'을 붙이지 못했습니다: ${attached.message}`.slice(0, 300), conversationId: null };
+  }
+  const attachmentId = attached.attachment.id;
+  if (attached.attachment.status !== 'ready') {
+    await discardAttachments(actor.userId, [attachmentId], io.files);
+    return { kind: 'rejected', status: 400, message: `파일 '${file.name}'을 읽지 못했습니다${attached.attachment.error ? `(${attached.attachment.error})` : ''}.`.slice(0, 300) };
+  }
+  const outcome = await io.runAs({ ...base, attachmentIds: [attachmentId] });
+  if (outcome.kind !== 'completed' && outcome.kind !== 'failed') await discardAttachments(actor.userId, [attachmentId], io.files);
+  return outcome;
 }
 
 /** 마치거나 멈춘 묶음의 안내 메일 — 메일이 설정돼 있고 주소가 있을 때만. 보내지 못하면 던진다(실행기가 기록) */
@@ -337,7 +408,7 @@ function batchNoticeIo(): BatchNoticeIo {
 
 // ── 결과 엑셀 ─────────────────────────────────────────────────────
 
-/** 결과 엑셀 한 시트 — 번호·입력 항목들·상태·결과 글·오류·대화 주소(값만, 수식 주입 막음) */
+/** 결과 엑셀 한 시트 — 번호·(파일마다 한 건이면 파일)·입력 항목들·상태·결과 글·오류·대화 주소(값만, 수식 주입 막음) */
 export async function batchWorkbook(input: {
   name: string; fields: Array<{ key: string; label: string }>; origin: string;
   items: Array<BatchItemView & { result: string | null }>;
@@ -346,17 +417,19 @@ export async function batchWorkbook(input: {
   const workbook = new ExcelJS.Workbook();
   workbook.title = input.name;
   const sheet = workbook.addWorksheet('결과');
-  sheet.addRow(['번호', ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화']);
+  const withFile = input.items.some((it) => it.fileName);
+  sheet.addRow(['번호', ...(withFile ? ['파일'] : []), ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화']);
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   for (const it of input.items) {
     sheet.addRow([
-      it.position, ...input.fields.map((f) => safeText(it.inputs[f.key] ?? '')), BATCH_ITEM_STATUS_LABELS[it.status],
+      it.position, ...(withFile ? [safeText(it.fileName ?? '')] : []), ...input.fields.map((f) => safeText(it.inputs[f.key] ?? '')), BATCH_ITEM_STATUS_LABELS[it.status],
       safeText(it.result ?? ''), safeText(it.error ?? ''), it.conversationId ? `${input.origin}/chat?conv=${it.conversationId}` : '',
     ]);
   }
-  sheet.columns.forEach((col, i) => { col.width = i === 0 ? 6 : i === input.fields.length + 2 ? 80 : 20; });
-  sheet.getColumn(input.fields.length + 3).alignment = { wrapText: true, vertical: 'top' };
+  const lead = withFile ? 1 : 0;
+  sheet.columns.forEach((col, i) => { col.width = i === 0 ? 6 : i === input.fields.length + lead + 2 ? 80 : 20; });
+  sheet.getColumn(input.fields.length + lead + 3).alignment = { wrapText: true, vertical: 'top' };
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 

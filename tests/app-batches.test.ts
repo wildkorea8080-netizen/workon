@@ -141,7 +141,7 @@ describe('결과 가리키기·연결', () => {
     const lib = readFileSync('src/lib/apps/batches.ts', 'utf8');
     expect(lib).toContain(".eq('id', id).eq('user_id', userId)");
     expect(lib).toContain("eq('conversation.user_id', userId)");
-    expect(lib).toContain('if (definition.value.attachments?.required) return { ok: false, status: 400, message: BATCH_FILES_UNSUPPORTED };');
+    expect(lib).toContain('if (!fileMode && definition.value.attachments?.required) return { ok: false, status: 400, message: BATCH_FILES_UNSUPPORTED };');
     expect(lib).toContain('canUseAgent(agent, actor)');
     for (const route of ['src/app/api/apps/batches/route.ts', 'src/app/api/apps/batches/[id]/route.ts', 'src/app/api/apps/batches/[id]/export/route.ts']) {
       expect(readFileSync(route, 'utf8')).toContain('session.user.id');

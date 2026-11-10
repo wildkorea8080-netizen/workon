@@ -30,6 +30,18 @@ export async function copyAttachmentsForSchedule(
   actor: { userId: string; organizationId: string },
   attachmentIds: string[]
 ): Promise<{ ok: true; files: ScheduleFile[] } | Failure> {
+  return copyAttachmentsTo(actor, attachmentIds, (fileId, ext) => scheduleFilePath(actor.organizationId, actor.userId, fileId, ext));
+}
+
+/**
+ * 직원의 읽힌 첨부를 `pathFor`가 정한 경로로 복사한다(예약 0073·일괄 실행의 파일마다 한 건 2026-11-10). 하나라도 못 하면 만든 사본을 지우고 실패.
+ * 원본은 **요청자의 것·`ready`만**. 돌려주는 순서는 요청한 id 순서
+ */
+export async function copyAttachmentsTo(
+  actor: { userId: string; organizationId: string },
+  attachmentIds: string[],
+  pathFor: (fileId: string, ext: string) => string
+): Promise<{ ok: true; files: ScheduleFile[] } | Failure> {
   if (!attachmentIds.length) return { ok: true, files: [] };
   const { data, error } = await supabaseAdmin.from('chat_attachments').select('id, file_name, size_bytes, storage_path')
     .eq('user_id', actor.userId).eq('status', 'ready').in('id', attachmentIds);
@@ -44,7 +56,7 @@ export async function copyAttachmentsForSchedule(
     const ext = attachmentExtension(row.file_name);
     if (!ext) { await removeScheduleFileObjects(made, '예약 파일 복사 실패 뒤 정리'); return { ok: false, status: 400, message: SCHEDULE_FILES_NOT_FOUND }; }
     const fileId = randomUUID();
-    const path = scheduleFilePath(actor.organizationId, actor.userId, fileId, ext);
+    const path = pathFor(fileId, ext);
     const { error: copyError } = await bucket.copy(row.storage_path, path);
     if (copyError) { await removeScheduleFileObjects(made, '예약 파일 복사 실패 뒤 정리'); return { ok: false, status: 503, message: SCHEDULE_FILES_RETRY }; }
     made.push({ id: fileId, name: row.file_name, size: Number(row.size_bytes ?? 0), path });
@@ -60,7 +72,7 @@ export async function removeScheduleFileObjects(files: ScheduleFile[], context: 
     const { error } = await supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET).remove(paths);
     if (error) throw new Error(error.message);
   } catch (e) {
-    await logSystem({ level: 'warning', category: 'database', message: `${context} — 예약 파일 사본이 남았을 수 있음`, details: { paths, error: e instanceof Error ? e.message : String(e) } }).catch(() => undefined);
+    await logSystem({ level: 'warning', category: 'database', message: `${context} — 파일 사본이 남았을 수 있음`, details: { paths, error: e instanceof Error ? e.message : String(e) } }).catch(() => undefined);
   }
 }
 

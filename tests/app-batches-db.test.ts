@@ -85,4 +85,13 @@ describe.skipIf(!url)('앱 일괄 실행 DB (0077)', () => {
       } finally { await db.query('RESET ROLE'); }
     }
   });
+  it('0079 — 줄의 파일 칸은 비었거나 경로·이름이 글인 객체', async () => {
+    const b = (await batch()).rows[0].id as string;
+    const id = (await item(b, 1)).rows[0].id as string;
+    await db.query('UPDATE app_batch_items SET file = $1 WHERE id = $2', [JSON.stringify({ id: 'x', name: 'a.hwpx', size: 1, path: 'app-batch-files/o/u/x.hwpx' }), id]);
+    for (const bad of ['[]', '"x"', '{"name":"a"}', '{"name":1,"path":"p"}']) {
+      await expect(db.query('UPDATE app_batch_items SET file = $1::jsonb WHERE id = $2', [bad, id])).rejects.toMatchObject({ code: '23514' });
+    }
+    await db.query('UPDATE app_batch_items SET file = NULL WHERE id = $1', [id]);
+  });
 });
