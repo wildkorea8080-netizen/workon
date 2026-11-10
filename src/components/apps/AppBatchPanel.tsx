@@ -84,7 +84,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
         <div className="mt-3 space-y-3">
           <p className="text-xs leading-5 text-slate-500">
             엑셀에서 표를 복사해 붙이거나 CSV 파일을 고르세요. <strong>첫 줄은 입력 항목 이름</strong>({definition.fields.map((f) => f.label).join(', ')})이고 아래로 한 줄에 한 건, {BATCH_MAX_ROWS}줄까지입니다.
-            줄마다 이 앱을 한 번씩 실행해(지금 판·지금 권한) 결과를 엑셀로 모아 줍니다. 서버가 5분마다 몇 줄씩 처리하므로 줄이 많으면 시간이 걸립니다(창을 닫아도 이어 갑니다). 줄마다 AI 사용량이 듭니다.
+            줄마다 이 앱을 한 번씩 실행해(지금 판·지금 권한) 결과를 엑셀로 모아 줍니다. 서버가 5분마다 몇 줄씩 처리하므로 줄이 많으면 시간이 걸립니다(창을 닫아도 이어 가고, 모두 마치거나 멈추면 메일로 한 번 알립니다). 줄마다 AI 사용량이 듭니다.
           </p>
           <button type="button" onClick={() => setText(`${header}\n`)} className="text-xs text-ws-accent-text underline">머리글 넣기</button>
           <textarea aria-label="일괄 실행 표" value={text} disabled={disabled || busy} onChange={(e) => setText(e.target.value)} rows={6} placeholder={`${header}\n…`} className="w-full rounded-xl border border-slate-200 p-3 font-mono text-xs" />

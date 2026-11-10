@@ -6,6 +6,8 @@
 // - 실행기: 앱 예약 실행기(pg_cron 5분)가 예약 실행과 나란히 부른다. 실행 중인 묶음의 줄을 만든 순서대로 조건부로 차지해
 //   예약과 같은 `runAppAs`(그 직원의 세션 꼴 — 권한·한도·사용 기록이 손 실행과 같음)로 돌린다. 두 줄씩 나란히, 새 줄은 시작 90초 안에서만.
 //   앱 변경·권한·계정·부서·한도 문제는 묶음을 멈추고(남은 줄은 건너뜀), 줄의 입력 문제는 그 줄만 실패, 모델 오류는 한 번 더 해 본다.
+//   묶음을 마치거나 멈추면(그 조건부 갱신을 한 쪽만) 만든 직원에게 메일 한 통(줄 수·멈춘 이유·보내기 전 확인 수 — 입력·결과 글 없음, 2026-11-10).
+//   직원이 그만둔 묶음은 알리지 않는다.
 // - 결과: 줄마다 그 실행의 대화·답변 메시지를 가리킨다(결과 글을 따로 저장하지 않음). 엑셀은 입력·상태·결과 글·오류를 한 시트로(값만, 수식 주입 막음).
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ActorScope } from '@/lib/agent-permissions';
@@ -13,6 +15,8 @@ import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/a
 import { renderAppInput, validateAppDefinition } from '@/lib/apps/definition';
 import { defaultRunAsIo, runAppAs, type RunAsOutcome } from '@/lib/apps/run-as';
 import { logSystem } from '@/lib/logger';
+import { APP_URL } from '@/lib/config';
+import { batchFinishedMail, isMailConfigured, sendBatchFinishedEmail } from '@/lib/mailer';
 import { safeText } from '@/lib/xlsx-export';
 import {
   BATCH_FILES_UNSUPPORTED, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_ROWS, BATCH_MAX_RUNNING, BATCH_STALE_MS, BATCH_TITLE_PREFIX,
@@ -140,13 +144,15 @@ export interface BatchDeps {
   claim(item: BatchItemRun, nowIso: string, staleIso: string): Promise<boolean>;
   run(item: BatchItemRun, deadlineAt: number): Promise<RunAsOutcome>;
   finishItem(id: string, patch: ItemPatch, nowIso: string): Promise<void>;
-  /** 묶음을 멈춤 — 남은 줄은 건너뜀 */
-  stop(batchId: string, reason: string, nowIso: string): Promise<void>;
-  /** 열린 줄이 없으면 묶음을 마침 */
-  settle(batchId: string, nowIso: string): Promise<void>;
+  /** 묶음을 멈춤 — 남은 줄은 건너뜀. 이 호출이 묶음을 멈췄으면 true */
+  stop(batchId: string, reason: string, nowIso: string): Promise<boolean | void>;
+  /** 열린 줄이 없으면 묶음을 마침. 이 호출이 묶음을 마쳤으면 true */
+  settle(batchId: string, nowIso: string): Promise<boolean | void>;
+  /** 마치거나 멈춘 묶음을 만든 직원에게 알림(메일) — 보냈으면 true. 던져도 실행기는 이어 간다 */
+  notifyFinished?(batchId: string): Promise<boolean>;
   log(message: string, details: Record<string, unknown>, orgId: string): Promise<void>;
 }
-export type BatchTick = { ran: number; done: number; failed: number; retried: number; stopped: number };
+export type BatchTick = { ran: number; done: number; failed: number; retried: number; stopped: number; notified: number };
 
 /** 시작 후 이 시간 안에서만 새 줄을 시작한다 — 실행 하나가 2분 남짓이라 함수 시간 제한(300초) 안에 끝나게 */
 export const BATCH_START_WINDOW_MS = 90_000;
@@ -167,11 +173,17 @@ const stopReasonFor = (outcome: RunAsOutcome): string | null => {
 /** 차례가 된 줄을 두 줄씩 나란히. 던지지 않는다 */
 export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
   const start = deps.now();
-  const tick: BatchTick = { ran: 0, done: 0, failed: 0, retried: 0, stopped: 0 };
+  const tick: BatchTick = { ran: 0, done: 0, failed: 0, retried: 0, stopped: 0, notified: 0 };
   const iso = (ms: number) => new Date(ms).toISOString();
   let queue: BatchItemRun[];
   try { queue = (await deps.openItems(iso(start - BATCH_STALE_MS), 20)) ?? []; } catch { queue = []; }
   const stoppedBatches = new Set<string>();
+  const notify = async (batch: BatchRunRow) => {
+    if (!deps.notifyFinished) return;
+    try { if (await deps.notifyFinished(batch.id)) tick.notified++; } catch (error) {
+      await deps.log('앱 일괄 실행 마침 메일을 보내지 못했습니다', { batch_id: batch.id, error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }, batch.organization_id).catch(() => {});
+    }
+  };
   const worker = async () => {
     while (queue.length) {
       if (deps.now() - start > BATCH_START_WINDOW_MS) return;
@@ -187,10 +199,11 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       const stopReason = stopReasonFor(outcome);
       if (stopReason) {
         await deps.finishItem(item.id, { status: 'skipped', attempts, error: stopReason }, doneAt);
-        await deps.stop(item.batch_id, stopReason, doneAt);
+        const ended = await deps.stop(item.batch_id, stopReason, doneAt).catch(() => false);
         stoppedBatches.add(item.batch_id);
         tick.stopped++;
         await deps.log('앱 일괄 실행을 멈췄습니다', { batch_id: item.batch_id, reason: stopReason, kind: outcome.kind }, item.batch.organization_id).catch(() => {});
+        if (ended === true) await notify(item.batch);
         continue;
       }
       if (outcome.kind === 'completed') {
@@ -204,7 +217,7 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
         await deps.finishItem(item.id, { status: 'failed', attempts, error: error.slice(0, 300), ...(outcome.kind === 'failed' ? { conversation_id: outcome.conversationId } : {}) }, doneAt);
         tick.failed++;
       }
-      await deps.settle(item.batch_id, doneAt).catch(() => {});
+      if ((await deps.settle(item.batch_id, doneAt).catch(() => false)) === true) await notify(item.batch);
     }
   };
   await Promise.all(Array.from({ length: BATCH_CONCURRENCY }, worker));
@@ -245,15 +258,80 @@ export function batchDeps(): BatchDeps {
       await supabaseAdmin.from('app_batch_items').update({ ...patch, claimed_at: null, finished_at: terminal ? nowIso : null }).eq('id', id).eq('status', 'running');
     },
     async stop(batchId, reason, nowIso) {
-      await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running');
+      const { data } = await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
       await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: nowIso, error: reason }).eq('batch_id', batchId).eq('status', 'pending');
+      return Boolean(data?.length);
     },
     async settle(batchId, nowIso) {
       const { count, error } = await supabaseAdmin.from('app_batch_items').select('id', { count: 'exact', head: true }).eq('batch_id', batchId).in('status', ['pending', 'running']);
-      if (error || (count ?? 0) > 0) return;
-      await supabaseAdmin.from('app_batches').update({ status: 'done', finished_at: nowIso }).eq('id', batchId).eq('status', 'running');
+      if (error || (count ?? 0) > 0) return false;
+      const { data } = await supabaseAdmin.from('app_batches').update({ status: 'done', finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
+      return Boolean(data?.length);
     },
+    notifyFinished: (batchId) => notifyBatchFinished(batchId),
     async log(message, details, orgId) { await logSystem({ level: 'warning', category: 'api', message, details, orgId }); },
+  };
+}
+
+/** 마치거나 멈춘 묶음의 안내 메일 — 메일이 설정돼 있고 주소가 있을 때만. 보내지 못하면 던진다(실행기가 기록) */
+export async function notifyBatchFinished(batchId: string, io: BatchNoticeIo = batchNoticeIo()): Promise<boolean> {
+  if (!io.mailConfigured()) return false;
+  const facts = await io.load(batchId);
+  if (!facts || (facts.status !== 'done' && facts.status !== 'stopped')) return false;
+  const to = facts.email?.trim() ?? '';
+  if (!to) return false;
+  const runUrl = `${APP_URL}/apps/run?agent=${encodeURIComponent(facts.agentId)}`;
+  const mail = batchFinishedMail({
+    appName: facts.appName, batchName: facts.name, stopped: facts.status === 'stopped', stopReason: facts.stopReason,
+    total: facts.total, done: facts.done, failed: facts.failed, skipped: facts.skipped, awaitingApproval: facts.awaitingApproval,
+    finishedAt: facts.finishedAt ? new Date(facts.finishedAt) : new Date(), runUrl,
+    ...(facts.done + facts.failed > 0 ? { exportUrl: `${APP_URL}/api/apps/batches/${encodeURIComponent(batchId)}/export` } : {}),
+  });
+  const sent = await io.send(to, mail);
+  if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
+  return true;
+}
+
+export interface BatchNoticeFacts {
+  agentId: string; appName: string; name: string; status: BatchStatus; stopReason: string | null; total: number; finishedAt: string | null;
+  done: number; failed: number; skipped: number; awaitingApproval: number; email: string | null;
+}
+export interface BatchNoticeIo {
+  mailConfigured(): boolean;
+  load(batchId: string): Promise<BatchNoticeFacts | null>;
+  send(to: string, mail: { subject: string; html: string }): Promise<{ sent: boolean; reason?: string; error?: string }>;
+}
+
+function batchNoticeIo(): BatchNoticeIo {
+  return {
+    mailConfigured: isMailConfigured,
+    async load(batchId) {
+      const { data: batch, error } = await supabaseAdmin.from('app_batches').select('id, user_id, agent_id, name, status, total, stop_reason, finished_at').eq('id', batchId).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!batch) return null;
+      const b = batch as { user_id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; finished_at: string | null };
+      const [{ data: items, error: itemError }, { data: user }, { data: agent }] = await Promise.all([
+        supabaseAdmin.from('app_batch_items').select('status, message_id').eq('batch_id', batchId),
+        supabaseAdmin.from('users').select('email').eq('id', b.user_id).maybeSingle(),
+        supabaseAdmin.from('agents').select('name').eq('id', b.agent_id).maybeSingle(),
+      ]);
+      if (itemError) throw new Error(itemError.message);
+      const rows = (items ?? []) as Array<{ status: string; message_id: string | null }>;
+      const messageIds = rows.map((r) => r.message_id).filter((v): v is string => typeof v === 'string');
+      let awaitingApproval = 0;
+      if (messageIds.length) {
+        // 이 묶음의 답변 중 보내기 전 확인(0078)을 기다리는 것 — 그 직원의 기록만
+        const { count } = await supabaseAdmin.from('app_outbound_deliveries').select('id', { count: 'exact', head: true })
+          .eq('user_id', b.user_id).eq('status', 'awaiting_approval').in('message_id', messageIds);
+        awaitingApproval = count ?? 0;
+      }
+      return {
+        agentId: b.agent_id, appName: (agent as { name?: string } | null)?.name ?? '입력형 앱', name: b.name, status: b.status, stopReason: b.stop_reason, total: b.total, finishedAt: b.finished_at,
+        done: rows.filter((r) => r.status === 'done').length, failed: rows.filter((r) => r.status === 'failed').length, skipped: rows.filter((r) => r.status === 'skipped').length,
+        awaitingApproval, email: typeof (user as { email?: unknown } | null)?.email === 'string' ? (user as { email: string }).email : null,
+      };
+    },
+    send: sendBatchFinishedEmail,
   };
 }
 

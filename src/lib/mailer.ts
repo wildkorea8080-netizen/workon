@@ -390,3 +390,57 @@ export function scheduleRunnerAlertMail(params: {
 export function sendScheduleRunnerAlertEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
   return sendMail(to, mail.subject, mail.html);
 }
+
+/**
+ * 입력형 앱 일괄 실행(0077)을 마쳤다는 안내의 글(보내지 않음 — 시험이 글을 본다). 만든 직원에게 한 번.
+ * 줄 수·멈춘 이유·보내기 전 확인을 기다리는 결과 수만 싣고, 입력값·결과 글은 싣지 않는다
+ */
+export function batchFinishedMail(params: {
+  appName: string;
+  batchName: string;
+  stopped: boolean;
+  stopReason: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  /** 보내기 전 확인(0078)을 기다리는 이 묶음의 결과 수 */
+  awaitingApproval: number;
+  finishedAt: Date;
+  runUrl: string;
+  /** 마친 줄이 있을 때만 — 결과 엑셀(로그인한 주인만 받는다) */
+  exportUrl?: string;
+}): { subject: string; html: string } {
+  const { appName, batchName, stopped, stopReason, total, done, failed, skipped, awaitingApproval, finishedAt, runUrl, exportUrl } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const rows: Array<[string, string]> = [
+    ['앱', appName],
+    ['일괄 실행', batchName],
+    ['마친 시각', `${kst(finishedAt)} (한국 시간)`],
+    ['줄', `전체 ${total}줄 · 마침 ${done} · 실패 ${failed}${skipped ? ` · 건너뜀 ${skipped}` : ''}`],
+  ];
+  if (stopped && stopReason) rows.push(['멈춘 이유', stopReason]);
+  if (awaitingApproval > 0) rows.push(['보내기 전 확인', `${awaitingApproval}건이 확인을 기다립니다`]);
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  const notes = [
+    'AI가 작성한 결과입니다. 로그인해 내용을 검토한 뒤 사용해 주세요. 입력값과 결과 글은 메일에 싣지 않습니다.',
+    ...(awaitingApproval > 0 ? ['결과를 외부 시스템으로 보내기 전에 실행 화면의 \'보내기 전 확인할 결과\'에서 보낼지 정해 주세요 — 7일 안에 정하지 않으면 보내지 않습니다.'] : []),
+  ];
+  return {
+    subject: stopped ? `[${APP_NAME}] 앱 일괄 실행이 멈췄습니다 — ${appName}` : `[${APP_NAME}] 앱 일괄 실행을 마쳤습니다 — ${appName}`,
+    html: layout(
+      stopped ? `${appName} 일괄 실행을 멈췄습니다` : `${appName} 일괄 실행을 마쳤습니다`,
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       ${notes.map((n) => `<p style="font-size:15px;line-height:1.7">${escapeHtml(n)}</p>`).join('')}
+       ${button(runUrl, '실행 화면 열기')}
+       ${exportUrl ? button(exportUrl, '결과 엑셀 받기') : ''}`
+    ),
+  };
+}
+
+/** 일괄 실행 마침 안내 한 통 — 만든 직원에게만 */
+export function sendBatchFinishedEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}
