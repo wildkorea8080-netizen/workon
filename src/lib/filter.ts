@@ -23,7 +23,10 @@ export type SecurityEventType =
   | 'org_api_key_revoked'
   /** 기관 전체 관리자가 앱 결과를 보낼 곳을 만듦 / 회수함 (0076) */
   | 'app_outbound_endpoint_created'
-  | 'app_outbound_endpoint_revoked';
+  | 'app_outbound_endpoint_revoked'
+  | 'app_outbound_endpoint_updated'
+  | 'app_outbound_result_approved'
+  | 'app_outbound_result_rejected';
 
 // 보안 감사 로그 기록 함수
 export async function logSecurityEvent(

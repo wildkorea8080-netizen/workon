@@ -10,6 +10,9 @@ export const OUTBOUND_URL_MAX = 500;
 export const OUTBOUND_SECRET_PREFIX = 'wo_out_';
 /** 보내는 결과 글 상한 — 넘으면 앞부분만 싣고 `truncated: true` */
 export const OUTBOUND_TEXT_MAX = 50_000;
+/** 결과 한글 파일을 함께 실을 때(2026-11-10) 파일 상한 — 넘으면 파일 없이 보내고 `file_omitted: 'too_large'` */
+export const OUTBOUND_FILE_MAX_BYTES = 5 * 1024 * 1024;
+export const OUTBOUND_FILE_CONTENT_TYPE = 'application/hwp+zip';
 /** 한 번 보낼 때 기다리는 시간 */
 export const OUTBOUND_TIMEOUT_MS = 8_000;
 /** 시도 상한 — 첫 시도 포함 */
@@ -19,6 +22,13 @@ export const OUTBOUND_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000];
 /** `sending`으로 이만큼 지나면 실행기가 죽은 것으로 보고 다시 차지한다 */
 export const OUTBOUND_STALE_MS = 600_000;
 export const OUTBOUND_REVOKE_REASON_MIN = 5;
+/** 보내기 전 확인(0078) — 실행한 직원이 이 기간 안에 '보내기'를 누르지 않으면 보내지 않는다 */
+export const OUTBOUND_APPROVAL_DAYS = 7;
+export const OUTBOUND_APPROVAL_MS = OUTBOUND_APPROVAL_DAYS * 86_400_000;
+/** 확인 목록에 미리 보이는 결과 글 길이 */
+export const OUTBOUND_PREVIEW_CHARS = 600;
+export const OUTBOUND_APPROVAL_EXPIRED = `${OUTBOUND_APPROVAL_DAYS}일 안에 확인하지 않아 보내지 않았습니다.`;
+export const OUTBOUND_APPROVAL_ENDPOINT_GONE = '보낼 곳이 회수돼 보낼 수 없습니다.';
 export const OUTBOUND_WHOLE_ORG_ONLY = '보낼 곳은 기관 전체 관리자(최상위 부서 소속 관리자)만 관리할 수 있습니다.';
 
 export const OUTBOUND_HEADERS = {
@@ -30,10 +40,21 @@ export const OUTBOUND_HEADERS = {
 } as const;
 export const OUTBOUND_EVENT = 'app.run.completed';
 
-export type OutboundStatus = 'pending' | 'sending' | 'sent' | 'gave_up';
+export type OutboundStatus = 'awaiting_approval' | 'pending' | 'sending' | 'sent' | 'gave_up' | 'rejected';
 export const OUTBOUND_STATUS_LABELS: Record<OutboundStatus, string> = {
-  pending: '보낼 차례 기다림', sending: '보내는 중', sent: '보냄', gave_up: '그만둠',
+  awaiting_approval: '직원 확인 기다림', pending: '보낼 차례 기다림', sending: '보내는 중', sent: '보냄', gave_up: '그만둠', rejected: '직원이 보내지 않음',
 };
+export type OutboundDecision = 'approve' | 'reject';
+
+/** 확인 기다림 기록이 '보내기'를 받을 수 있는 마지막 시각(ms) */
+export function approvalExpiresAt(createdAtIso: string): number {
+  return Date.parse(createdAtIso) + OUTBOUND_APPROVAL_MS;
+}
+
+export function parseDecision(raw: unknown): OutboundDecision | null {
+  const body = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+  return body?.decision === 'approve' || body?.decision === 'reject' ? body.decision : null;
+}
 
 export interface OutboundEndpointView {
   id: string;
@@ -41,10 +62,25 @@ export interface OutboundEndpointView {
   /** 화면에는 주소 전체를 보인다(관리자 화면만 — 직원 화면에는 이름만) */
   url: string;
   secretPrefix: string;
+  /** 보내기 전 실행한 직원이 확인한다(0078) */
+  requireApproval: boolean;
   createdAt: string;
   createdByName: string | null;
   revokedAt: string | null;
   revokedReason: string | null;
+}
+/** 직원이 확인할 결과(0078) — 이 직원이 실행한 결과만 */
+export interface OutboundApprovalView {
+  id: string;
+  agentId: string;
+  appName: string;
+  endpointName: string;
+  conversationId: string | null;
+  createdAt: string;
+  expiresAt: string;
+  /** 결과 글 앞부분 — 전체는 대화에서 본다 */
+  preview: string;
+  truncated: boolean;
 }
 export interface OutboundDeliveryView {
   id: string;
@@ -57,6 +93,9 @@ export interface OutboundDeliveryView {
   createdAt: string;
   sentAt: string | null;
   nextAttemptAt: string | null;
+  /** 보내기 전 확인을 누가·언제 했는지(보냄·보내지 않음) */
+  decidedAt: string | null;
+  decidedByName: string | null;
 }
 
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
@@ -84,14 +123,14 @@ export function parseOutboundUrl(raw: unknown): { ok: true; url: string; host: s
   return { ok: true, url: u.toString(), host };
 }
 
-export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string } } | { ok: false; message: string } {
+export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string; requireApproval: boolean } } | { ok: false; message: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: '보낼 곳 정보를 확인해 주세요.' };
   const body = raw as Record<string, unknown>;
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
   if (!name || name.length > OUTBOUND_NAME_MAX || CONTROL.test(name)) return { ok: false, message: `이름은 ${OUTBOUND_NAME_MAX}자 안으로 입력해 주세요.` };
   const url = parseOutboundUrl(body.url);
   if (!url.ok) return url;
-  return { ok: true, value: { name, url: url.url } };
+  return { ok: true, value: { name, url: url.url, requireApproval: body.require_approval === true } };
 }
 
 export function parseRevokeReason(raw: unknown): { ok: true; reason: string } | { ok: false; message: string } {
@@ -167,21 +206,34 @@ export function nextAttemptAt(attempt: number, nowMs: number): number | null {
   return nowMs + OUTBOUND_BACKOFF_MS[Math.min(attempt, OUTBOUND_BACKOFF_MS.length) - 1];
 }
 
-/** 보내는 몸 — 결과 글(상한에서 자름)과 앱·실행 식별자만. 입력값·중간 단계·직원 정보는 싣지 않는다 */
+/** 함께 싣는 결과 한글 파일(2026-11-10) — 실었거나(base64), 상한을 넘어 뺐거나 */
+export type OutboundFile =
+  | { name: string; size: number; sha256: string; base64: string }
+  | { omitted: 'too_large'; size: number };
+
+/** 보내는 몸 — 결과 글(상한에서 자름)과 앱·실행 식별자만(+ 앱이 고르면 결과 한글 파일). 입력값·중간 단계·직원 정보는 싣지 않는다 */
 export function buildOutboundPayload(input: {
   deliveryId: string; sentAt: string;
   app: { id: string; name: string };
   run: { messageId: string; conversationId: string; completedAt: string };
   text: string;
+  file?: OutboundFile;
 }): string {
   const truncated = input.text.length > OUTBOUND_TEXT_MAX;
+  const result: Record<string, unknown> = { text: truncated ? input.text.slice(0, OUTBOUND_TEXT_MAX) : input.text, truncated };
+  if (input.file && 'omitted' in input.file) {
+    result.file = null;
+    result.file_omitted = input.file.omitted;
+  } else if (input.file) {
+    result.file = { name: input.file.name, content_type: OUTBOUND_FILE_CONTENT_TYPE, size: input.file.size, sha256: input.file.sha256, encoding: 'base64', data: input.file.base64 };
+  }
   return JSON.stringify({
     event: OUTBOUND_EVENT,
     delivery_id: input.deliveryId,
     sent_at: input.sentAt,
     app: { id: input.app.id, name: input.app.name },
     run: { message_id: input.run.messageId, conversation_id: input.run.conversationId, completed_at: input.run.completedAt },
-    result: { text: truncated ? input.text.slice(0, OUTBOUND_TEXT_MAX) : input.text, truncated },
+    result,
   });
 }
 

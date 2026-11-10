@@ -43,7 +43,7 @@ describe('주소', () => {
   });
 
   it('만들기 입력·회수 사유', () => {
-    expect(parseCreateEndpoint({ name: ' 전자결재  연계 ', url: 'https://hook.example.com/a' })).toEqual({ ok: true, value: { name: '전자결재 연계', url: 'https://hook.example.com/a' } });
+    expect(parseCreateEndpoint({ name: ' 전자결재  연계 ', url: 'https://hook.example.com/a' })).toEqual({ ok: true, value: { name: '전자결재 연계', url: 'https://hook.example.com/a', requireApproval: false } });
     expect(parseCreateEndpoint({ name: '', url: 'https://hook.example.com' })).toMatchObject({ ok: false });
     expect(parseCreateEndpoint({ name: 'x'.repeat(61), url: 'https://hook.example.com' })).toMatchObject({ ok: false });
     expect(parseCreateEndpoint(null)).toMatchObject({ ok: false });
@@ -134,7 +134,7 @@ describe('보내기 실행기', () => {
 
   it('보내면 sent — 서명 머리글이 본문과 맞고, 같은 기록 id가 멱등 열쇠', async () => {
     const { d, finished, posted } = deps();
-    expect(await dispatchDueDeliveries(d)).toEqual({ claimed: 1, sent: 1, retried: 0, gaveUp: 0 });
+    expect(await dispatchDueDeliveries(d)).toEqual({ claimed: 1, sent: 1, retried: 0, gaveUp: 0, expired: 0 });
     const p = posted[0];
     expect(p.url).toBe('https://hook.example.com/in');
     expect(p.headers[OUTBOUND_HEADERS.delivery]).toBe('d1');
@@ -181,7 +181,7 @@ describe('보내기 실행기', () => {
 
   it('차지 못 한 기록은 건너뛰고, 읽기 실패는 시도 수를 세지 않고 다음 차례, 시간 예산을 넘으면 멈춤', async () => {
     const notMine = deps({ claim: async () => false });
-    expect(await dispatchDueDeliveries(notMine.d)).toEqual({ claimed: 0, sent: 0, retried: 0, gaveUp: 0 });
+    expect(await dispatchDueDeliveries(notMine.d)).toEqual({ claimed: 0, sent: 0, retried: 0, gaveUp: 0, expired: 0 });
     const unread = deps({ context: null });
     await dispatchDueDeliveries(unread.d);
     expect(unread.finished[0].patch).toMatchObject({ status: 'pending', attempts: 0 });
@@ -190,7 +190,7 @@ describe('보내기 실행기', () => {
     const r = await dispatchDueDeliveries(slow.d, { budgetMs: 10_000 });
     expect(r.sent).toBe(1);
     // 목록을 못 읽어도 던지지 않는다
-    expect(await dispatchDueDeliveries({ ...deps().d, listDue: async () => { throw new Error('db'); } })).toEqual({ claimed: 0, sent: 0, retried: 0, gaveUp: 0 });
+    expect(await dispatchDueDeliveries({ ...deps().d, listDue: async () => { throw new Error('db'); } })).toEqual({ claimed: 0, sent: 0, retried: 0, gaveUp: 0, expired: 0 });
   });
 });
 
@@ -224,7 +224,7 @@ describe('연결', () => {
     expect(wholeOrgAdminProblem(actor({ isAdmin: false }))).toMatchObject({ status: 403 });
     expect(wholeOrgAdminProblem(null)).toMatchObject({ status: 403 });
     const admin = readFileSync('src/lib/apps/outbound/admin.ts', 'utf8');
-    expect(admin).toMatch(/from\('app_outbound_endpoints'\)\.select\('id, name'\)/);
+    expect(admin).toMatch(/from\('app_outbound_endpoints'\)\.select\('id, name, require_approval'\)/);
     expect(readFileSync('src/app/api/apps/outbound-endpoints/route.ts', 'utf8')).not.toMatch(/secret|url:/);
     // 화면 모듈은 서버 코드를 가져오지 않는다
     expect(readFileSync('src/lib/apps/outbound/spec.ts', 'utf8')).not.toMatch(/^import /m);

@@ -2,21 +2,25 @@
 // 앱 결과 보내기(0076) — 넣기·서명·주소 확인·보내기·다시 보내기(서버).
 //
 // - 넣기(`enqueueOutbound`): 앱 실행이 끝까지 마치고 답변을 저장한 뒤, 앱 정의가 고른 보낼 곳이 이 기관의 쓸 수 있는 곳이면 기록 한 줄(pending).
+//   보낼 곳이 '보내기 전 확인'(0078)이면 awaiting_approval로 넣고 실행한 직원이 '보내기'를 누를 때까지 보내지 않는다(`approval.ts`, 7일 지나면 그만둠).
 //   같은 결과·같은 곳은 한 벌(UNIQUE) — 이어 실행으로 같은 답변이 다시 와도 두 번 넣지 않는다.
 // - 보내기(`dispatchDueDeliveries`): 앱 예약 실행기(pg_cron 5분)가 부른다. 차례가 된 기록을 조건부로 차지(sending)하고,
 //   보낼 곳·결과를 **그때** 다시 읽어(회수됐거나 대화를 지웠으면 그만둠) 주소를 다시 풀어 사설 주소면 그만둔다(등록 뒤 DNS가 바뀌어도).
 //   2xx 보냄 · 3xx·4xx(408·429 빼고) 그만둠 · 그 밖·연결 실패는 1·5·30분·2시간 뒤 다시(5번까지).
+// - 결과 한글 파일(2026-11-10): 앱 정의의 `deliverFile`이 켜졌으면 보내기 직전 그 답을 결과 한글 파일로 만들어(예약 결과 파일과 같은 양식 규칙 —
+//   앱 설정 양식, 아니면 표준 보고서, 저장하지 않음) `result.file`에 base64로 싣는다. 5MB를 넘으면 파일 없이 `file_omitted`. 만들지 못하면 다시 보낼 일로 센다.
 // - 리다이렉트는 따르지 않는다(`redirect: 'manual'`) — 따라가면 승인한 주소 밖으로 결과가 간다. 응답 몸은 읽지 않는다.
 // - 남은 위험: 주소를 확인한 뒤 실제 연결 사이에 DNS 답이 바뀌는 경우(DNS rebinding)는 막지 못한다 — 보낼 곳은 기관 전체 관리자가 승인한 주소만이다.
-import { createHmac, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes } from 'crypto';
 import { lookup } from 'dns/promises';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { decryptApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
+import { buildResultHwpxBytes } from '@/lib/apps/schedule-result-file';
 import {
-  OUTBOUND_EVENT, OUTBOUND_HEADERS, OUTBOUND_SECRET_PREFIX, OUTBOUND_STALE_MS, OUTBOUND_TIMEOUT_MS,
+  OUTBOUND_APPROVAL_EXPIRED, OUTBOUND_APPROVAL_MS, OUTBOUND_EVENT, OUTBOUND_HEADERS, OUTBOUND_SECRET_PREFIX, OUTBOUND_STALE_MS, OUTBOUND_TIMEOUT_MS, OUTBOUND_FILE_MAX_BYTES,
   buildOutboundPayload, isIpLiteral, isPrivateAddress, nextAttemptAt, outcomeForStatus, parseOutboundUrl,
-  type AttemptOutcome,
+  type AttemptOutcome, type OutboundFile,
 } from './spec';
 
 export function generateOutboundSecret(): { secret: string; prefix: string } {
@@ -63,18 +67,20 @@ export function shouldDeliver(input: { endpointId?: string; draft: boolean; save
   return input.steps.every((s) => s.status === 'completed' || s.status === 'skipped');
 }
 
-/** 보내기 기록 넣기 — 보낼 곳이 이 기관의 쓸 수 있는 곳일 때만. 실패해도 던지지 않는다(답변은 이미 저장됐다) */
-export async function enqueueOutbound(input: { organizationId: string; endpointId: string; agentId: string; messageId: string; userId: string }): Promise<'queued' | 'skipped' | 'failed'> {
+/** 보내기 기록 넣기 — 보낼 곳이 이 기관의 쓸 수 있는 곳일 때만. 확인을 받는 곳이면 'awaiting'(직원이 누를 때까지 안 보냄). 실패해도 던지지 않는다(답변은 이미 저장됐다) */
+export async function enqueueOutbound(input: { organizationId: string; endpointId: string; agentId: string; messageId: string; userId: string }): Promise<'queued' | 'awaiting' | 'skipped' | 'failed'> {
   try {
-    const { data: endpoint, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id')
+    const { data: endpoint, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id, require_approval')
       .eq('id', input.endpointId).eq('organization_id', input.organizationId).is('revoked_at', null).maybeSingle();
     if (error) throw error;
     if (!endpoint) return 'skipped';
+    const awaiting = (endpoint as { require_approval?: boolean }).require_approval === true;
     const { error: insertError } = await supabaseAdmin.from('app_outbound_deliveries').insert({
       organization_id: input.organizationId, endpoint_id: input.endpointId, agent_id: input.agentId, message_id: input.messageId, user_id: input.userId,
+      status: awaiting ? 'awaiting_approval' : 'pending',
     });
     if (insertError && insertError.code !== '23505') throw insertError;
-    return 'queued';
+    return awaiting ? 'awaiting' : 'queued';
   } catch (error) {
     await logSystem({ level: 'warning', category: 'api', message: '앱 결과 보내기 기록을 넣지 못했습니다', details: { agent_id: input.agentId, message_id: input.messageId, error: error instanceof Error ? error.message : String(error) }, orgId: input.organizationId });
     return 'failed';
@@ -86,8 +92,8 @@ export async function enqueueOutbound(input: { organizationId: string; endpointI
 export interface DueDelivery { id: string; organization_id: string; endpoint_id: string; agent_id: string; message_id: string; status: 'pending' | 'sending'; attempts: number; claimed_at: string | null }
 export interface DeliveryContext {
   endpoint: { url: string; secret_encrypted: string; organization_id: string; revoked_at: string | null } | null;
-  message: { content: string; conversation_id: string; created_at: string; role: string } | null;
-  agent: { id: string; name: string } | null;
+  message: { content: string; conversation_id: string; created_at: string; role: string; source_references?: Record<string, unknown> | null; agent_version?: number | null } | null;
+  agent: { id: string; name: string; app_definition?: { deliverFile?: unknown; exportTemplateId?: unknown } | null } | null;
 }
 export type FinishPatch = { status: 'sent' | 'pending' | 'gave_up'; attempts: number; last_status: number | null; last_error: string | null; next_attempt_at?: string; sent_at?: string };
 
@@ -101,15 +107,22 @@ export interface OutboundDeps {
   checkHost(host: string): Promise<HostCheck>;
   post(url: string, headers: Record<string, string>, body: string): Promise<AttemptOutcome>;
   log(message: string, details: Record<string, unknown>, orgId: string): Promise<void>;
+  /** 결과 한글 파일 바이트(2026-11-10) — 앱 정의가 `deliverFile`일 때만 부른다. 던지면 다시 보낼 일 */
+  buildFile?(ctx: DeliveryContext & { message: NonNullable<DeliveryContext['message']>; agent: NonNullable<DeliveryContext['agent']> }): Promise<{ name: string; bytes: Buffer }>;
+  /** 확인 기한(7일)이 지난 확인 기다림 기록을 그만둠으로 — 바꾼 수(0078) */
+  expireApprovals?(cutoffIso: string): Promise<number>;
 }
 
-export type DispatchResult = { claimed: number; sent: number; retried: number; gaveUp: number };
+export type DispatchResult = { claimed: number; sent: number; retried: number; gaveUp: number; expired: number };
 
 /** 차례가 된 보내기를 한 번에 `limit`개까지, `budgetMs` 안에서. 던지지 않는다 */
 export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: number; budgetMs?: number } = {}): Promise<DispatchResult> {
   const start = deps.now();
-  const result: DispatchResult = { claimed: 0, sent: 0, retried: 0, gaveUp: 0 };
+  const result: DispatchResult = { claimed: 0, sent: 0, retried: 0, gaveUp: 0, expired: 0 };
   const iso = (ms: number) => new Date(ms).toISOString();
+  if (deps.expireApprovals) {
+    try { result.expired = await deps.expireApprovals(iso(start - OUTBOUND_APPROVAL_MS)); } catch { /* 다음 차례에 다시 */ }
+  }
   let due: DueDelivery[] | null;
   try { due = await deps.listDue(iso(start), iso(start - OUTBOUND_STALE_MS), opts.limit ?? 20); } catch { due = null; }
   for (const row of due ?? []) {
@@ -142,7 +155,20 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
     }
     const host = await deps.checkHost(url.host);
     let outcome: AttemptOutcome;
+    let file: OutboundFile | undefined;
+    let fileError: string | null = null;
+    if (host.ok && ctx.agent.app_definition?.deliverFile === true && deps.buildFile) {
+      try {
+        const built = await deps.buildFile({ ...ctx, message: ctx.message, agent: ctx.agent });
+        file = built.bytes.length > OUTBOUND_FILE_MAX_BYTES
+          ? { omitted: 'too_large', size: built.bytes.length }
+          : { name: built.name, size: built.bytes.length, sha256: createHash('sha256').update(built.bytes).digest('hex'), base64: built.bytes.toString('base64') };
+      } catch {
+        fileError = '결과 한글 파일을 만들지 못했습니다(잠시 뒤 다시 보냄).';
+      }
+    }
     if (!host.ok) outcome = host.retry ? { kind: 'retry', status: null, error: host.message } : { kind: 'give_up', status: null, error: host.message };
+    else if (fileError) outcome = { kind: 'retry', status: null, error: fileError };
     else {
       const sentAt = iso(deps.now());
       const timestamp = String(Math.floor(deps.now() / 1000));
@@ -150,6 +176,7 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
         deliveryId: row.id, sentAt, app: { id: ctx.agent.id, name: ctx.agent.name },
         run: { messageId: row.message_id, conversationId: ctx.message.conversation_id, completedAt: ctx.message.created_at },
         text: ctx.message.content,
+        ...(file ? { file } : {}),
       });
       outcome = await deps.post(url.url, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -202,8 +229,8 @@ export function outboundDeps(): OutboundDeps {
     async load(row) {
       const [endpoint, message, agent] = await Promise.all([
         supabaseAdmin.from('app_outbound_endpoints').select('url, secret_encrypted, organization_id, revoked_at').eq('id', row.endpoint_id).maybeSingle(),
-        supabaseAdmin.from('messages').select('content, conversation_id, created_at, role').eq('id', row.message_id).maybeSingle(),
-        supabaseAdmin.from('agents').select('id, name').eq('id', row.agent_id).maybeSingle(),
+        supabaseAdmin.from('messages').select('content, conversation_id, created_at, role, source_references, agent_version').eq('id', row.message_id).maybeSingle(),
+        supabaseAdmin.from('agents').select('id, name, app_definition').eq('id', row.agent_id).maybeSingle(),
       ]);
       if (endpoint.error || message.error || agent.error) return null;
       return {
@@ -219,6 +246,20 @@ export function outboundDeps(): OutboundDeps {
     decrypt: (enc) => decryptApiKey(enc),
     checkHost: (host) => checkPublicHost(host),
     post: (url, headers, body) => postOnce(url, headers, body),
+    async buildFile(ctx) {
+      const built = await buildResultHwpxBytes({
+        agentId: ctx.agent.id, appName: ctx.agent.name, exportTemplateId: ctx.agent.app_definition?.exportTemplateId,
+        message: { content: ctx.message.content, source_references: ctx.message.source_references ?? null, agent_version: ctx.message.agent_version ?? null },
+      });
+      return { name: built.fileName, bytes: built.bytes };
+    },
     async log(message, details, orgId) { await logSystem({ level: 'critical', category: 'api', message, details, orgId }); },
+    async expireApprovals(cutoffIso) {
+      const { data, error } = await supabaseAdmin.from('app_outbound_deliveries')
+        .update({ status: 'gave_up', last_error: OUTBOUND_APPROVAL_EXPIRED })
+        .eq('status', 'awaiting_approval').lt('created_at', cutoffIso).select('id');
+      if (error) throw error;
+      return data?.length ?? 0;
+    },
   };
 }

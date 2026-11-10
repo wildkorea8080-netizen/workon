@@ -7,6 +7,7 @@
 // - 양식(2026-11-08): 앱 설정의 결과 한글 파일 양식(`app_definition.exportTemplateId`)이 그 앱의 지금 HWPX 양식이면 그 양식에,
 //   아니면(없음·지운 양식·본문 표시 없음·읽기 실패) **표준 보고서**로 만든다 — 예약 결과 파일이 양식 문제로 빠지지 않게.
 // - 파일은 그 직원의 '대화에서 만든 파일'(`generated_files`)에 남고, 내려받기는 주인만(`/api/files/[id]`).
+// - `buildResultHwpxBytes`(2026-11-10): 같은 양식 규칙으로 바이트만 만든다(저장하지 않음) — 앱 결과 보내기가 결과 한글 파일을 함께 실을 때 쓴다.
 import { createHash } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
@@ -35,6 +36,23 @@ async function inAppTemplate(agentId: string, templateId: unknown, input: AppRes
   } catch {
     return null; // 본문 표시 없음·패키지 검사 실패 — 표준 보고서로
   }
+}
+
+/** 저장된 답 하나를 결과 한글 파일 바이트로 — 앱 설정 양식(쓸 수 있으면) 또는 표준 보고서. 저장하지 않는다. 표준 양식이 없거나 DB 오류면 던진다 */
+export async function buildResultHwpxBytes(input: {
+  agentId: string; appName: string; exportTemplateId: unknown;
+  message: { content: string; source_references: Record<string, unknown> | null; agent_version: number | null };
+}): Promise<{ bytes: Buffer; fileName: string; templateName: string }> {
+  const result: AppResultInput = {
+    name: input.appName, version: input.message.agent_version, content: input.message.content, references: input.message.source_references ?? {},
+    createdAt: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
+  };
+  const fileName = safeFileName(`${input.appName} 작성 결과`, 'hwpx');
+  const custom = await inAppTemplate(input.agentId, input.exportTemplateId, result);
+  if (custom) return { bytes: custom.bytes, fileName, templateName: custom.name };
+  const standard = await loadBuiltinTemplate(findBuiltinTemplate('builtin:report')!);
+  if (!standard) throw new Error('기본 한글 양식이 준비되지 않았습니다.');
+  return { bytes: await buildAppResultHwpx(standard, result), fileName, templateName: '앱 실행 결과' };
 }
 
 /** 결과 파일 id를 돌려준다. 만들 수 없는 결과(끝나지 않은 단계·빈 답)는 null. DB·저장 오류는 던진다 */

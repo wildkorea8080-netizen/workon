@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  OUTBOUND_MAX_ATTEMPTS, OUTBOUND_MAX_ENDPOINTS, OUTBOUND_NAME_MAX, OUTBOUND_REVOKE_REASON_MIN, OUTBOUND_STATUS_LABELS, OUTBOUND_URL_MAX, OUTBOUND_VERIFY_HINT,
+  OUTBOUND_APPROVAL_DAYS, OUTBOUND_MAX_ATTEMPTS, OUTBOUND_MAX_ENDPOINTS, OUTBOUND_NAME_MAX, OUTBOUND_REVOKE_REASON_MIN, OUTBOUND_STATUS_LABELS, OUTBOUND_URL_MAX, OUTBOUND_VERIFY_HINT,
   type OutboundDeliveryView, type OutboundEndpointView,
 } from '@/lib/apps/outbound/spec';
 
@@ -19,6 +19,7 @@ export default function OutboundEndpointsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
+  const [requireApproval, setRequireApproval] = useState(true);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ name: string; secret: string } | null>(null);
 
@@ -39,11 +40,23 @@ export default function OutboundEndpointsPanel() {
     if (busy || !name.trim() || !url.trim()) return;
     setBusy(true); setError(null); setCreated(null);
     try {
-      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url }) });
+      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, require_approval: requireApproval }) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 만들지 못했습니다.');
       else { setCreated({ name: body.data.endpoint.name, secret: body.data.secret }); setName(''); setUrl(''); await load(); }
     } finally { setBusy(false); }
+  }
+
+  async function toggleApproval(endpoint: OutboundEndpointView) {
+    const next = !endpoint.requireApproval;
+    if (!window.confirm(next
+      ? `'${endpoint.name}'에 보내기 전 확인을 켭니다. 이제부터 실행을 마친 결과는 실행한 직원이 내용을 보고 '보내기'를 눌러야 보냅니다.`
+      : `'${endpoint.name}'의 보내기 전 확인을 끕니다. 이제부터 실행을 마친 결과가 사람 확인 없이 곧바로 보내집니다(이미 확인을 기다리는 결과는 그대로 직원이 정합니다).`)) return;
+    setError(null);
+    const res = await fetch(`/api/admin/outbound-endpoints/${encodeURIComponent(endpoint.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ require_approval: next }) });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 바꾸지 못했습니다.');
+    else await load();
   }
 
   async function revoke(endpoint: OutboundEndpointView) {
@@ -68,6 +81,7 @@ export default function OutboundEndpointsPanel() {
           승인한 https 주소로 입력형 앱의 <strong>결과 글</strong>을 보냅니다(직원이 앱 빌더에서 보낼 곳을 고른 앱만, 끝까지 마친 실행만, 시험 판 실행은 빼고).
           입력값·중간 단계·직원 정보는 보내지 않습니다. 결과 글이 기관 밖으로 나가므로 받는 시스템을 확인한 뒤 등록하세요.
           보내기는 약 5분마다 이루어지고, 실패하면 {OUTBOUND_MAX_ATTEMPTS}번까지 다시 보냅니다. 기관에 {OUTBOUND_MAX_ENDPOINTS}곳까지, 내부망·사설 IP 주소는 받지 않습니다.
+          <strong>보내기 전 확인</strong>을 켜 두면 실행한 직원이 결과 글을 보고 '보내기'를 눌러야 보냅니다({OUTBOUND_APPROVAL_DAYS}일 안에 누르지 않으면 보내지 않음).
         </p>
       </div>
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto]">
@@ -75,6 +89,7 @@ export default function OutboundEndpointsPanel() {
         <input aria-label="보낼 주소" value={url} maxLength={OUTBOUND_URL_MAX} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.go.kr/workon/receive" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         <button type="button" disabled={busy || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
       </div>
+      <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />보내기 전 실행한 직원이 결과를 확인(권장 — 끄면 실행을 마친 결과가 사람 확인 없이 곧바로 나갑니다)</label>
       {created && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6">
           <p className="font-semibold">'{created.name}'의 서명 비밀값 — 지금 한 번만 보입니다. 받는 시스템에 넣어 두세요.</p>
@@ -84,17 +99,18 @@ export default function OutboundEndpointsPanel() {
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <table className="w-full text-left text-xs">
-        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
+        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">보내기 전 확인</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
         <tbody>{endpoints.map((e) => (
           <tr key={e.id} className="border-t border-slate-100 align-top">
             <td className="py-1 pr-2 font-medium">{e.name}</td>
             <td className="break-all pr-2">{e.url}</td>
             <td className="pr-2"><code>{e.secretPrefix}…</code></td>
+            <td className="pr-2">{e.requireApproval ? '받음' : '안 받음'}{!e.revokedAt && <button type="button" onClick={() => void toggleApproval(e)} className="ml-1 text-ws-accent-text underline">{e.requireApproval ? '끄기' : '켜기'}</button>}</td>
             <td className="pr-2">{kst(e.createdAt)}{e.createdByName ? ` · ${e.createdByName}` : ''}</td>
             <td className="pr-2">{e.revokedAt ? <span className="text-slate-500">회수됨({kst(e.revokedAt)}) — {e.revokedReason}</span> : <span className="text-emerald-700">쓰는 중</span>}</td>
             <td>{!e.revokedAt && <button type="button" onClick={() => void revoke(e)} className="text-red-600 underline">회수</button>}</td>
           </tr>))}
-          {!endpoints.length && <tr><td colSpan={6} className="py-2 text-slate-500">아직 보낼 곳이 없습니다.</td></tr>}
+          {!endpoints.length && <tr><td colSpan={7} className="py-2 text-slate-500">아직 보낼 곳이 없습니다.</td></tr>}
         </tbody>
       </table>
       <div>
@@ -106,7 +122,7 @@ export default function OutboundEndpointsPanel() {
               <td className="py-1 pr-2">{kst(d.createdAt)}</td>
               <td className="pr-2">{d.appName}</td>
               <td className="pr-2">{d.endpointName}</td>
-              <td className={`pr-2 ${d.status === 'sent' ? 'text-emerald-700' : d.status === 'gave_up' ? 'text-red-700' : 'text-slate-700'}`}>{OUTBOUND_STATUS_LABELS[d.status]}{d.sentAt ? ` · ${kst(d.sentAt)}` : ''}{d.nextAttemptAt ? ` · 다음 ${kst(d.nextAttemptAt)}` : ''}</td>
+              <td className={`pr-2 ${d.status === 'sent' ? 'text-emerald-700' : d.status === 'gave_up' ? 'text-red-700' : 'text-slate-700'}`}>{OUTBOUND_STATUS_LABELS[d.status]}{d.sentAt ? ` · ${kst(d.sentAt)}` : ''}{d.nextAttemptAt ? ` · 다음 ${kst(d.nextAttemptAt)}` : ''}{d.decidedAt ? ` · 확인 ${kst(d.decidedAt)}${d.decidedByName ? ` ${d.decidedByName}` : ''}` : ''}</td>
               <td className="pr-2">{d.attempts}</td>
               <td>{d.lastStatus ?? '—'}{d.lastError ? ` · ${d.lastError}` : ''}</td>
             </tr>))}
