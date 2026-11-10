@@ -93,6 +93,8 @@ const SECURITY_LABEL: Record<string, string> = {
   app_schedules_org_enabled: '기관 앱 예약 켜기(관리자)',
   org_api_key_created: '기관 통계 API 키 만들기(관리자)',
   org_api_key_revoked: '기관 통계 API 키 회수(관리자)',
+  app_outbound_endpoint_created: '앱 결과 보낼 곳 만들기(관리자)',
+  app_outbound_endpoint_revoked: '앱 결과 보낼 곳 회수(관리자)',
   forbidden_word: '금지어 감지',
   personal_info: '개인정보 패턴 감지',
   blocked_upload: '업로드 차단',

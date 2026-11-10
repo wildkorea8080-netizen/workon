@@ -1,5 +1,6 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import AppAutomationAdmin from '@/components/admin/AppAutomationAdmin';
+import OutboundEndpointsPanel from '@/components/admin/OutboundEndpointsPanel';
 
 export default async function AdminAppAutomationsPage() {
   const session = await getServerAuthSession();
@@ -21,6 +22,7 @@ export default async function AdminAppAutomationsPage() {
         </p>
       </div>
       <AppAutomationAdmin />
+      <OutboundEndpointsPanel />
     </section>
   );
 }

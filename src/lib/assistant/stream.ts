@@ -8,6 +8,7 @@ import type { Capability, TurnContext, ToolOutcome, GeneratedFileRef } from '@/l
 import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
+import { enqueueOutbound, shouldDeliver } from '@/lib/apps/outbound/deliver';
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
@@ -47,6 +48,8 @@ export interface StreamTurnDeps {
   deadlineAt?: number;
   /** 숫자 근거 다시 찾기(2026-11-08)와 앱의 문서 찾기 조회 단계(2026-11-09)가 부르는 문서 찾기 — 기본은 대화와 같은 `searchLikeChat`. 시험이 바꿔 끼운다 */
   searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
+  /** 앱 결과 보내기 기록 넣기(0076) — 시험이 바꿔 끼운다 */
+  enqueueOutbound?: typeof enqueueOutbound;
 }
 
 /**
@@ -477,6 +480,10 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       verify,
     })
   );
+  // 앱 결과 보내기(0076) — 끝까지 마친 실행만, 저장된 답변을 보낼 차례에 넣는다(보내기는 앱 예약 실행기가 5분마다). 실패해도 답에는 영향 없음
+  if (shouldDeliver({ endpointId: turn.appDeliverEndpointId, draft: Boolean(turn.appDraftSavedAt), saved: !saveError, text: result.text, steps: appRecords })) {
+    await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId });
+  }
   if (saveError) {
     // 답변은 이미 흘러갔으므로 요청을 실패시킬 수 없다. 저장 실패는 알린다 —
     // 모르면 새로고침 뒤 내용이 사라진 이유를 알 수 없다.
