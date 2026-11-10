@@ -48,6 +48,9 @@ export interface RagEvalAnswer {
   error?: string;
   /** 'AI 채점도'를 고른 실행의 기대 문서 있는 질문에만(2026-11-09, rag-eval-judge.ts) — 참고, `passed`를 바꾸지 않는다 */
   judge?: RagEvalJudge;
+  /** 도구를 쓰는 답(2026-11-09)으로 만든 실행에만 — 부른 도구 수와 이름(겹침 없이 10개). 도구 결과 숫자는 숫자 확인의 '본 숫자'에 들었다 */
+  toolCalls?: number;
+  toolsUsed?: string[];
   /** 관리자가 평가 뒤에 매긴 사람 판정(2026-11-09) — AI 채점과 맞대 채점자를 잰다. `passed`를 바꾸지 않는다 */
   human?: RagEvalHumanLabel;
 }
@@ -78,6 +81,8 @@ export interface RagEvalAnswerSummary {
   models: string[];
   /** AI 채점을 한 실행에만 — 토큰·원가는 위 합계와 따로 센다 */
   judge?: RagEvalJudgeSummary;
+  /** 도구를 쓰는 답으로 만든 실행에만 — 도구를 한 번이라도 부른 답 수 */
+  toolAnswers?: number;
   /** 사람 판정이 있을 때만 — 사람 판정과 AI 채점 맞대기 */
   agreement?: RagEvalJudgeAgreement;
 }
@@ -206,6 +211,7 @@ export function summarizeAnswers(results: Array<Pick<RagEvalResult, 'expected' |
     models,
     ...(judge ? { judge } : {}),
     ...(agreement ? { agreement } : {}),
+    ...(rows.some((r) => typeof r.answer!.toolCalls === 'number') ? { toolAnswers: rows.filter((r) => (r.answer!.toolCalls ?? 0) > 0).length } : {}),
   };
 }
 

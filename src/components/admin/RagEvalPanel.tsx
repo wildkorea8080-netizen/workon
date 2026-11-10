@@ -46,6 +46,7 @@ export function summaryLine(s: RagEvalSummary): string {
     if (a.judge) {
       parts.push(`AI 채점(참고) 맞음 ${a.judge.correct} · 일부 ${a.judge.partial} · 틀림 ${a.judge.incorrect}${a.judge.unfaithful ? ` · 근거 밖 내용 ${a.judge.unfaithful}` : ''}${a.judge.errors ? ` · 채점 못 함 ${a.judge.errors}` : ''}`);
     }
+    if (typeof a.toolAnswers === 'number') parts.push(`도구 쓴 답 ${a.toolAnswers}/${a.evaluated}`);
     if (a.agreement) parts.push(agreementNote(a.agreement));
     const cost = Math.round((a.costKrw + (a.judge?.costKrw ?? 0)) * 100) / 100;
     parts.push(`AI 사용 ${cost.toLocaleString('ko-KR')}원`);
@@ -75,6 +76,8 @@ export default function RagEvalPanel() {
   const [withAnswers, setWithAnswers] = useState(false);
   // AI 채점(2026-11-09, 참고) — 답변까지 평가할 때만, 기대 문서가 있는 질문의 답마다 AI를 한 번 더 부른다
   const [withJudge, setWithJudge] = useState(false);
+  // 도구를 쓰는 답(2026-11-09) — 대화처럼 그 비서의 공공 데이터 도구(법령·통계 등)를 쓰게 한다
+  const [withTools, setWithTools] = useState(false);
 
   useEffect(() => {
     void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { if (r.ok) setSets(r.data); });
@@ -96,7 +99,7 @@ export default function RagEvalPanel() {
   async function evaluate() {
     if (!agentId || running || !preview?.ok || tooManyForAnswers) return;
     setRunning(true); setError(null); setCompare(null);
-    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set, ...(withAnswers ? { answers: true, ...(withJudge ? { judge: true } : {}) } : {}) }) });
+    const r = await call<RunRow>('/api/admin/rag-eval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId, set, ...(withAnswers ? { answers: true, ...(withJudge ? { judge: true } : {}), ...(withTools ? { tools: true } : {}) } : {}) }) });
     if (r.ok) { setRun(r.data); setHistory((h) => [{ ...r.data, results: undefined }, ...h].slice(0, 20)); }
     else setError(r.message);
     setRunning(false);
@@ -195,9 +198,18 @@ export default function RagEvalPanel() {
         <input type="checkbox" checked={withAnswers} onChange={(e) => setWithAnswers(e.target.checked)} className="mt-1" />
         <span>
           <strong>AI 답변까지 평가</strong> — 질문마다 대화와 같은 지시문·참고 자료로 답을 한 번 만들고, 기대 문서를 [번호]로 인용했는지·답의 숫자가 근거에 있는지·기대 답 핵심어가 모두 들었는지를 프로그램이 봅니다(엉뚱한 질문은 문서를 인용하지 않아야 맞음).
-          <span className="block text-xs text-slate-500">질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지 · 질문마다 AI를 한 번 불러 사용량(기관 한도)이 듭니다 · 공공 데이터 조회 같은 도구·첨부·앱 단계는 쓰지 않습니다 · 답이 맞는 말인지까지는 모릅니다 — 핵심어를 적어 두면 그만큼 더 봅니다.</span>
+          <span className="block text-xs text-slate-500">질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지 · 질문마다 AI를 한 번 불러 사용량(기관 한도)이 듭니다 · 공공 데이터 도구는 아래에서 고를 때만, 첨부·앱 단계·파일 만들기는 쓰지 않습니다 · 답이 맞는 말인지까지는 모릅니다 — 핵심어를 적어 두면 그만큼 더 봅니다.</span>
         </span>
       </label>
+      {withAnswers && (
+        <label className="ml-6 flex items-start gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={withTools} onChange={(e) => setWithTools(e.target.checked)} className="mt-1" />
+          <span>
+            <strong>도구도 쓰기</strong> — 대화처럼 이 비서에 켜진 공공 데이터 도구(법령·통계·입찰·공시)를 AI가 필요하면 불러 답합니다. 도구가 보여 준 숫자는 숫자 확인에서 '본 숫자'로 칩니다.
+            <span className="block text-xs text-slate-500">도구를 부를 때마다 AI를 한 번 더 부르고 바깥 조회가 있어 느려지고 사용량이 늘어납니다 · 켜진 공공 데이터 도구가 없는 비서는 고를 수 없습니다(평가 실행 때 안내) · 파일을 만드는 도구는 쓰지 않습니다.</span>
+          </span>
+        </label>
+      )}
       {withAnswers && (
         <label className="ml-6 flex items-start gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={withJudge} onChange={(e) => setWithJudge(e.target.checked)} className="mt-1" />
@@ -232,6 +244,7 @@ export default function RagEvalPanel() {
                     <p className={`font-semibold ${r.answer.passed ? 'text-emerald-700' : 'text-red-700'}`}>{answerNote(r.answer)}</p>
                     {r.keywords?.length ? <p className="text-slate-500">핵심어: {r.keywords.join(', ')}</p> : null}
                     {r.answer.cited.length > 0 && <p className="text-slate-500">인용: {r.answer.cited.join(' · ')}</p>}
+                    {typeof r.answer.toolCalls === 'number' && <p className="text-slate-500">도구: {r.answer.toolCalls ? `${r.answer.toolsUsed?.join(', ') ?? ''} (${r.answer.toolCalls}번)` : '부르지 않음'}</p>}
                     {r.answer.judge && <p className={r.answer.judge.grade === 'correct' && r.answer.judge.faithful !== false ? 'text-emerald-700' : 'text-amber-700'}>AI 채점(참고): {judgeNote(r.answer.judge)}{r.answer.judge.reason ? ` — ${r.answer.judge.reason}` : ''}</p>}
                     {r.answer.text && !r.answer.error && <label className="mt-1 flex items-center gap-2 text-slate-600">사람 판정<select aria-label={`${r.line}번 질문 사람 판정`} disabled={labeling !== null} value={r.answer.human?.grade ?? ''} onChange={(e) => void labelAnswer(r.line, isJudgeGrade(e.target.value) ? e.target.value : null)} className="rounded border border-slate-200 px-1 py-0.5 text-xs">
                       <option value="">—</option>

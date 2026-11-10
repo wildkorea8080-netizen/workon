@@ -23,6 +23,11 @@ export interface RagEvalRunDeps {
   logUsage(usage: LlmUsage): Promise<void>;
   /** AI 채점의 모델 사용 기록(`rag_eval_judge`) — AI 채점을 고른 실행에만 쓴다 */
   logJudgeUsage?(usage: LlmUsage): Promise<void>;
+  /**
+   * 도구를 쓰는 답(2026-11-09, `answers.tools`) — 대화와 같은 도구 루프(그 비서의 공공 데이터 도구만)로 답을 만든다.
+   * 돌려주는 사용량은 라운드마다 모델별로, `shownValues`는 도구가 보여 준 숫자(숫자 확인의 '본 숫자'), `toolsUsed`는 부른 도구 이름(부른 순서, 겹쳐도 그대로)
+   */
+  answerWithTools?(input: { model: string; system: string; question: string }): Promise<{ text: string; usage: LlmUsage[]; shownValues: number[]; toolsUsed: string[] }>;
   /** 모델 호출 실패 등 운영 기록(질문 글 없이) */
   logFailure(message: string, details: Record<string, unknown>): Promise<void>;
   now(): number;
@@ -31,7 +36,7 @@ export interface RagEvalRunDeps {
 export interface RagEvalRunInput {
   rows: RagEvalRow[];
   /** 답변까지 평가하면 그 비서의 지시문·정책을 거친 모델 */
-  answers?: { systemPrompt: string | null; model: string; judge?: boolean };
+  answers?: { systemPrompt: string | null; model: string; judge?: boolean; tools?: boolean };
   concurrency: number;
   budgetMs: number;
 }
@@ -97,25 +102,28 @@ export async function runRagEval(input: RagEvalRunInput, deps: RagEvalRunDeps): 
 
       const system = buildSystemPrompt(input.answers.systemPrompt, [prepared.systemAddendum]);
       try {
-        const completion = await deps.complete({
-          model: input.answers.model,
-          system,
-          messages: [{ role: 'user', content: row.question }],
-          maxTokens: RAG_EVAL_ANSWER_MAX_TOKENS,
-        });
-        await deps.logUsage(completion.usage).catch(() => {});
-        // 대화의 숫자 확인과 같다 — 그 턴에 AI가 본 숫자 = 시스템 프롬프트(참고 자료 포함) + 질문
-        const answer = scoreAnswer(row, prepared.chunks, completion.text, numbersIn(system).concat(numbersIn(row.question)));
+        // 도구를 쓰는 답(2026-11-09)이면 대화와 같은 도구 루프로, 아니면 모델 한 번
+        const made = input.answers.tools && deps.answerWithTools
+          ? await deps.answerWithTools({ model: input.answers.model, system, question: row.question })
+          : await deps.complete({ model: input.answers.model, system, messages: [{ role: 'user', content: row.question }], maxTokens: RAG_EVAL_ANSWER_MAX_TOKENS })
+            .then((c) => ({ text: c.text, usage: [c.usage], shownValues: [] as number[], toolsUsed: [] as string[] }));
+        for (const usage of made.usage) await deps.logUsage(usage).catch(() => {});
+        // 대화의 숫자 확인과 같다 — 그 턴에 AI가 본 숫자 = 시스템 프롬프트(참고 자료 포함) + 질문 + 도구가 보여 준 숫자
+        const answer = scoreAnswer(row, prepared.chunks, made.text, numbersIn(system).concat(numbersIn(row.question), made.shownValues));
         // AI 채점 — 기대 문서가 있는 질문만(엉뚱한 질문은 프로그램 판정으로 충분하다)
-        const judge = input.answers.judge && row.expected ? await judgeAnswer(row, prepared.chunks, completion.text) : undefined;
+        const judge = input.answers.judge && row.expected ? await judgeAnswer(row, prepared.chunks, made.text) : undefined;
+        const tokens = (f: (u: LlmUsage) => number) => made.usage.reduce((s, u) => s + f(u), 0);
+        const models = [...new Set(made.usage.map((u) => u.model))];
+        const toolsUsed = [...new Set(made.toolsUsed)].slice(0, 10);
         results[index] = {
           ...result,
           answer: {
             ...answer,
-            model: completion.usage.model,
-            inputTokens: completion.usage.input_tokens,
-            outputTokens: completion.usage.output_tokens,
-            costKrw: estimateCostKrw(completion.usage, completion.usage.model),
+            model: models.join(', ') || input.answers.model,
+            inputTokens: tokens((u) => u.input_tokens),
+            outputTokens: tokens((u) => u.output_tokens),
+            costKrw: made.usage.reduce((s, u) => s + estimateCostKrw(u, u.model), 0),
+            ...(input.answers.tools ? { toolCalls: made.toolsUsed.length, ...(toolsUsed.length ? { toolsUsed } : {}) } : {}),
             ...(judge ? { judge } : {}),
           },
         };

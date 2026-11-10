@@ -271,12 +271,15 @@ export function ragEvalCsv(results: RagEvalResult[]): string {
   const withJudge = results.some((r) => r.answer?.judge);
   // 사람 판정을 남긴 실행만 한 칸 더(2026-11-09)
   const withHuman = results.some((r) => r.answer?.human);
-  const head = ['줄', '질문', '기대 문서', '기대 쪽', '판정', '순위', '쪽 맞음', '근거 수', '최고 유사도', '상위 문서', ...(withAnswers ? ['기대 답 핵심어', '답변 판정', '답변 맞음', '인용한 문서', '답변'] : []), ...(withJudge ? ['AI 채점(참고)', 'AI 채점 이유'] : []), ...(withHuman ? ['사람 판정'] : [])];
+  // 도구를 쓰는 답으로 만든 실행만 한 칸 더(2026-11-09)
+  const withTools = results.some((r) => typeof r.answer?.toolCalls === 'number');
+  const head = ['줄', '질문', '기대 문서', '기대 쪽', '판정', '순위', '쪽 맞음', '근거 수', '최고 유사도', '상위 문서', ...(withAnswers ? ['기대 답 핵심어', '답변 판정', '답변 맞음', '인용한 문서', '답변'] : []), ...(withJudge ? ['AI 채점(참고)', 'AI 채점 이유'] : []), ...(withHuman ? ['사람 판정'] : []), ...(withTools ? ['부른 도구'] : [])];
   const lines = results.map((r) => [
     r.line, r.question, r.expected, r.page, RAG_EVAL_VERDICT_LABELS[r.verdict], r.rank, r.pageMatch === null ? '' : r.pageMatch ? '예' : '아니오', r.chunkCount, r.topSimilarity === null ? '' : r.topSimilarity.toFixed(3), r.topDocuments.join(' · '),
     ...(withAnswers ? [(r.keywords ?? []).join('; '), r.answer ? answerNote(r.answer) : '', r.answer ? (r.answer.passed ? '예' : '아니오') : '', r.answer?.cited.join(' · ') ?? '', r.answer?.text ?? ''] : []),
     ...(withJudge ? [r.answer?.judge ? judgeNote(r.answer.judge) : '', r.answer?.judge?.reason ?? ''] : []),
     ...(withHuman ? [r.answer?.human ? RAG_EVAL_JUDGE_LABELS[r.answer.human.grade] ?? '' : ''] : []),
+    ...(withTools ? [typeof r.answer?.toolCalls === 'number' ? (r.answer.toolCalls ? `${(r.answer.toolsUsed ?? []).join(' · ')} (${r.answer.toolCalls}번)` : '없음') : ''] : []),
   ].map(cell).join(','));
   return `﻿${[head.join(','), ...lines].join('\n')}`;
 }
