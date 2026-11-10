@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-10(밤 2): 일괄 실행의 '파일마다 한 건'(0079)
+
+- 2026-11-10 22:33 KST 배포 `dpl_okrhn3Ax46yE67fQbXiL4jyQ55JG`(커밋 `3e96f43`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_6uxJ4EJrxi8ywWPtHyAkB82oiJDW`(b798c02)로 promote한다. 0079는 칸 하나 추가라 그대로 둬도 된다 — 옛 코드는 `file` 칸을 읽지 않아 파일 줄도 파일 없이 실행하고, 사본(`app-batch-files/…`)을 지우지 않는다.
+- **운영 DB 먼저**: `npm run db:migrate -- 0079`(22:2x KST). 읽기 전용 확인 — `app_batch_items.file` jsonb(NULL 허용), CHECK `app_batch_items_file_check`(빠진 키를 COALESCE로 막는 꼴), RLS 켜짐, 줄 0.
+- 들어간 커밋: `56654d7`(직전 배포 기록), `5edbd54` 파일마다 한 건(파일을 받는 앱은 10개까지 올려 파일 하나마다 실행, 입력 한 줄 또는 파일마다 한 줄, 요청자의 읽힌 첨부만 사본으로·원본은 묘비로, 실행 때 새 첨부로 다시 붙임, 묶음이 끝나면 사본 지움, 결과 엑셀 파일 열 — [일괄 실행](APP_BATCHES.md)), `3e96f43` 문서.
+- **배포 전**: 가지 Preview(`3e96f43`, `workon-eyl0gjaxc`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 232파일 3,367개 통과(빠진 파일 없음)·tsc 0. 0079는 시험 DB에 두 번 적용(첫 CHECK가 빠진 키를 통과시킨 것을 DB 시험이 잡아 COALESCE로 고친 뒤).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/apps`·`/apps/run` 200, `GET`·`POST /api/apps/batches`·`DELETE /api/apps/batches/[id]`·`…/export`·`/api/cron/app-schedules` 401. pg_cron 호출 200(22:33~22:35 KST — 새 코드의 앱 예약 실행기 차례 22:35 포함, 일괄 실행은 대상이 없어 빈 차례).
+- **확인하지 못한 것**(사용자 몫): 로그인해 파일을 받는 앱의 실행 화면 '여러 건 한 번에 실행'에서 '파일마다 한 건'으로 파일 몇 개를 올려 실행하고, 5분 실행기가 파일마다 줄을 마치는지·결과 엑셀의 파일 열·묶음이 끝난 뒤 사본이 지워지는지(실제 NODA·모델·저장소 — 브라우저로 보지 않음).
+
 ## 2026-11-10(밤): 보내기 전 사람 확인(0078)·결과 한글 파일 함께 보내기·일괄 실행 마침 메일
 
 - 2026-11-10 20:43 KST 배포 `dpl_6uxJ4EJrxi8ywWPtHyAkB82oiJDW`(커밋 `b798c02`, `main` fast-forward — GitHub 연동). 사용자 선택("가" = 운영반영). 되돌릴 때는 직전 `dpl_AjVGRfbxDrgTcgX38mA76jqEMhW6`(41ffc6d)로 promote한다. 0078은 추가만(칸 셋·상태 값 넓힘)이라 되돌려도 그대로 둬도 된다 — 옛 코드는 `require_approval`을 읽지 않아 확인을 켠 곳도 곧바로 보내고, 확인 기다림(`awaiting_approval`) 기록은 집지 않아 남는다. 옛 저장 검사는 앱 정의의 `deliverFile`을 모르는 칸으로 떨군다.
