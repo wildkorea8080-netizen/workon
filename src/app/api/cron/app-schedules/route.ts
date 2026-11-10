@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'crypto';
 import { CRON_SECRET, WORK_WORKER_SECRET } from '@/lib/config';
 import { runDueSchedules, scheduleDeps } from '@/lib/apps/schedules';
 import { recordRunnerHeartbeat } from '@/lib/apps/schedule-health';
+import { dispatchDueDeliveries, outboundDeps } from '@/lib/apps/outbound/deliver';
+import { batchDeps, runDueBatchItems } from '@/lib/apps/batches';
 
 export const dynamic = 'force-dynamic';
 // 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 실행기의 시간 예산(180초)보다 길게
@@ -32,8 +34,13 @@ export async function GET(request: Request) {
   }
   // '살아 있음' 도장 — 하루 한 번 Vercel 예약 작업이 이 도장으로 pg_cron이 멈췄는지 본다(schedule-health.ts). 실패해도 실행은 이어 간다
   await recordRunnerHeartbeat(Date.now());
-  const result = await runDueSchedules(scheduleDeps());
-  return NextResponse.json({ ok: true, data: result });
+  // 앱 결과 보내기(0076)·일괄 실행(0077) — 예약 실행과 나란히(예약의 시간 예산을 쓰지 않게). 던지지 않는다
+  const [outbound, batches, result] = await Promise.all([
+    dispatchDueDeliveries(outboundDeps(), { limit: 20, budgetMs: 60_000 }),
+    runDueBatchItems(batchDeps()),
+    runDueSchedules(scheduleDeps()),
+  ]);
+  return NextResponse.json({ ok: true, data: { ...result, outbound, batches } });
 }
 
 /** pg_cron `net.http_post`는 POST로 부른다 — 같은 자격·같은 일 */

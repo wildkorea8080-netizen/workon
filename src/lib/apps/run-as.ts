@@ -17,7 +17,8 @@ export type RunAsInput = { userId: string; departmentId: string; agentId: string
 export type RunAsUser = { id: string; email: string | null; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null };
 
 export type RunAsOutcome =
-  | { kind: 'completed'; conversationId: string | null }
+  /** `messageId` — 답변 메시지 id(실행기의 `done`이 실어 줄 때만, 일괄 실행 0077이 결과를 가리킨다) */
+  | { kind: 'completed'; conversationId: string | null; messageId?: string }
   /** 계정이 없거나 비활성·탈퇴 */
   | { kind: 'user_unavailable' }
   /** 만들 때와 소속 부서가 다르다 — 권한 범위가 바뀌었을 수 있어 실행하지 않는다 */
@@ -47,12 +48,12 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
   } as Session;
   const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}), ...(input.attachmentIds?.length ? { attachment_ids: input.attachmentIds } : {}), ...(input.resumeMessageId ? { resume_message_id: input.resumeMessageId } : {}) });
   if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message };
-  let conversationId: string | null = null; let error: string | null = null; let done = false;
+  let conversationId: string | null = null; let error: string | null = null; let done = false; let messageId: string | null = null;
   try {
     await io.stream(prepared.turn, (event) => {
       if (event.event === 'meta') conversationId = event.data.conversation_id;
       else if (event.event === 'error') error = error ?? event.data.message;
-      else if (event.event === 'done') done = true;
+      else if (event.event === 'done') { done = true; messageId = event.data.message_id ?? null; }
     }, input.deadlineAt !== undefined ? { deadlineAt: input.deadlineAt } : undefined);
   } catch (failure) { error = error ?? errorText(failure); }
   if (error) return { kind: 'failed', error, conversationId };
@@ -60,7 +61,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
   if (conversationId) {
     try { await io.retitle(conversationId, titlePrefix); } catch { /* 제목은 표시일 뿐 — 실행 결과를 바꾸지 않는다 */ }
   }
-  return { kind: 'completed', conversationId };
+  return { kind: 'completed', conversationId, ...(messageId ? { messageId } : {}) };
 }
 
 export function defaultRunAsIo(): RunAsIo {
