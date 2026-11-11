@@ -11,6 +11,9 @@
 // - 파일마다 한 건(2026-11-10, 0079): 직원이 올린 읽힌 첨부(10개까지)를 줄마다 하나씩 사본(`app-batch-files/…`)으로 복사해 두고,
 //   실행기가 그 줄을 돌릴 때 사본을 새 첨부로 다시 붙인다(예약의 올린 파일과 같은 길). 표는 한 줄(모든 파일에 같은 입력)이거나 파일 수와 같은 줄.
 //   원본 첨부는 복사한 뒤 묘비로 지운다(보내지 않은 첨부 상한을 빨리 돌려줌). 사본은 묶음이 끝나면(마침·멈춤·그만둠) 지운다.
+// - 기대 핵심어(2026-11-11, 0088): 줄마다 '기대 핵심어'를 두면 실행기가 줄을 마칠 때 그 실행의 답변 글에 핵심어가 모두 있는지 한 번 재
+//   `expect_missing`에 둔다(모델 호출 없음 — 문서 찾기 평가의 핵심어와 같은 규칙). 목록은 맞은 줄 수, 엑셀은 줄마다 맞음·빠진 핵심어.
+// - 비동기 연동이 넣은 묶음(0087)은 줄이 끝나면 그 연동의 '마지막 결과'를 바꾼다(기다리는 호출과 같은 칸 — 2026-11-11).
 // - 결과: 줄마다 그 실행의 대화·답변 메시지를 가리킨다(결과 글을 따로 저장하지 않음). 엑셀은 입력·상태·결과 글·오류를 한 시트로(값만, 수식 주입 막음).
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ActorScope } from '@/lib/agent-permissions';
@@ -24,7 +27,8 @@ import { safeText } from '@/lib/xlsx-export';
 import { OUTBOUND_STATUS_LABELS, type OutboundStatus } from './outbound/spec';
 import {
   BATCH_FILES_NOT_ALLOWED, BATCH_FILES_UNSUPPORTED, BATCH_FILE_ROWS_MISMATCH, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_MAX_RUNNING,
-  BATCH_APP_VERSION_CHANGED, BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, normalizeBatchName, pairRowsWithFiles, parseBatchAttachmentIds,
+  BATCH_APP_VERSION_CHANGED, BATCH_EXPECT_MAX, BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, expectMissing, expectVerdict, normalizeBatchName, normalizeExpect,
+  pairRowsWithFiles, parseBatchAttachmentIds,
   type BatchFile, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
 } from './batch-spec';
 import { copyAttachmentsTo, defaultScheduleFileIo, discardAttachments, removeScheduleFileObjects, type ScheduleFileIo } from './schedule-files';
@@ -45,7 +49,7 @@ async function loadApp(agentId: string): Promise<AgentRow | null> {
 /** 만들기 — 줄마다 앱 규칙으로 다시 검사(첫 오류 10개를 줄 번호와 함께), 실행 중 3개 상한 */
 export async function createBatch(actor: ActorScope, body: unknown, opts: { source?: 'webhook'; appVersion?: number; webhookId?: string } = {}): Promise<{ ok: true; batch: BatchView } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
-  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown };
+  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown; expects?: unknown };
   const agent = typeof b.agent_id === 'string' ? await loadApp(b.agent_id) : null;
   if (!agent || agent.agent_type === 'link' || !canUseAgent(agent, actor)) return { ok: false, status: 404, message: '앱을 찾을 수 없습니다.' };
   const definition = validateAppDefinition(agent.app_definition ?? null);
@@ -59,6 +63,15 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   if (!Array.isArray(b.rows) || !b.rows.length) return { ok: false, status: 400, message: '실행할 줄이 없습니다.' };
   if (b.rows.length > BATCH_MAX_ROWS) return { ok: false, status: 400, message: `한 번에 ${BATCH_MAX_ROWS}줄까지 실행합니다.` };
   if (fileMode && !pairRowsWithFiles(b.rows, attachmentIds.length)) return { ok: false, status: 400, message: BATCH_FILE_ROWS_MISMATCH };
+  // 기대 핵심어(0088) — 주면 줄과 같은 수, 줄마다 글(비면 그 줄은 재지 않음)
+  let expects: (string | null)[] = b.rows.map(() => null);
+  if (b.expects !== undefined && b.expects !== null) {
+    if (!Array.isArray(b.expects) || b.expects.length !== b.rows.length) return { ok: false, status: 400, message: '기대 핵심어는 줄마다 하나씩(줄 수와 같게) 보내 주세요.' };
+    const normalized = b.expects.map(normalizeExpect);
+    const tooLong = normalized.findIndex((e) => e === 'too_long');
+    if (tooLong >= 0) return { ok: false, status: 400, message: `${tooLong + 1}번째 줄: 기대 핵심어는 ${BATCH_EXPECT_MAX}자까지입니다.` };
+    expects = normalized as (string | null)[];
+  }
   const errors: string[] = [];
   const checkedRows: Record<string, string>[] = [];
   b.rows.forEach((row, i) => {
@@ -68,6 +81,7 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   });
   if (errors.length) return { ok: false, status: 400, message: errors[0], errors: errors.slice(0, 10) };
   const inputs = fileMode ? pairRowsWithFiles(checkedRows, attachmentIds.length)!.map((row) => ({ ...row })) : checkedRows;
+  const rowExpects = fileMode ? pairRowsWithFiles(expects, attachmentIds.length)! : expects;
   // 기관이 정한 한 번 최대 줄 수(0084) — 읽지 못하면 만들지 않는다(관리자가 낮춘 상한을 넘지 않게)
   let orgLimit: number | null;
   try { orgLimit = await readBatchLimit(actor.organizationId); } catch { return { ok: false, status: 503, message: '일괄 실행 설정을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }; }
@@ -95,7 +109,7 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
     ...(opts.source === 'webhook' && opts.webhookId ? { webhook_id: opts.webhookId } : {}),
   }).select(BATCH_COLUMNS).single();
   if (error || !batch) return failCreate();
-  const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row, ...(files[i] ? { file: files[i] } : {}) })));
+  const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row, ...(files[i] ? { file: files[i] } : {}), ...(rowExpects[i] ? { expect: rowExpects[i] } : {}) })));
   if (itemError) {
     await supabaseAdmin.from('app_batches').delete().eq('id', batch.id);
     return failCreate();
@@ -106,7 +120,7 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
 }
 
 type BatchRowView = { id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; created_at: string; finished_at: string | null };
-type Counts = { done: number; failed: number; skipped: number; pending: number };
+type Counts = { done: number; failed: number; skipped: number; pending: number; expectChecked?: number; expectPassed?: number };
 const batchView = (r: BatchRowView, agentName: string | null, c: Counts): BatchView => ({
   id: r.id, agentId: r.agent_id, agentName, name: r.name, status: r.status, total: r.total, ...c, stopReason: r.stop_reason, createdAt: r.created_at, finishedAt: r.finished_at,
 });
@@ -114,12 +128,13 @@ const batchView = (r: BatchRowView, agentName: string | null, c: Counts): BatchV
 async function countsFor(batchIds: string[]): Promise<Map<string, Counts> | null> {
   const out = new Map<string, Counts>(batchIds.map((id) => [id, { done: 0, failed: 0, skipped: 0, pending: 0 }]));
   if (!batchIds.length) return out;
-  const { data, error } = await supabaseAdmin.from('app_batch_items').select('batch_id, status').in('batch_id', batchIds).limit(BATCH_MAX_ROWS * batchIds.length);
+  const { data, error } = await supabaseAdmin.from('app_batch_items').select('batch_id, status, expect_missing').in('batch_id', batchIds).limit(BATCH_MAX_ROWS * batchIds.length);
   if (error) return null;
-  for (const row of (data ?? []) as Array<{ batch_id: string; status: BatchItemStatus }>) {
+  for (const row of (data ?? []) as Array<{ batch_id: string; status: BatchItemStatus; expect_missing?: string[] | null }>) {
     const c = out.get(row.batch_id);
     if (!c) continue;
     if (row.status === 'done') c.done++; else if (row.status === 'failed') c.failed++; else if (row.status === 'skipped') c.skipped++; else c.pending++;
+    if (Array.isArray(row.expect_missing)) { c.expectChecked = (c.expectChecked ?? 0) + 1; if (!row.expect_missing.length) c.expectPassed = (c.expectPassed ?? 0) + 1; }
   }
   return out;
 }
@@ -146,11 +161,14 @@ async function ownBatch(userId: string, id: string): Promise<(BatchRowView & { u
 export async function getBatch(userId: string, id: string): Promise<{ batch: BatchView; items: BatchItemView[] } | null> {
   const batch = await ownBatch(userId, id);
   if (!batch) return null;
-  const { data } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs, file').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
-  const items = ((data ?? []) as Array<{ position: number; status: BatchItemStatus; error: string | null; conversation_id: string | null; inputs: Record<string, string>; file?: unknown }>)
-    .map((r) => ({ position: r.position, status: r.status, error: r.error, conversationId: r.conversation_id, inputs: r.inputs ?? {}, fileName: batchFileOf(r.file)?.name ?? null }));
+  const { data } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs, file, expect, expect_missing').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  const items = ((data ?? []) as Array<{ position: number; status: BatchItemStatus; error: string | null; conversation_id: string | null; inputs: Record<string, string>; file?: unknown; expect?: string | null; expect_missing?: string[] | null }>)
+    .map((r) => ({ position: r.position, status: r.status, error: r.error, conversationId: r.conversation_id, inputs: r.inputs ?? {}, fileName: batchFileOf(r.file)?.name ?? null, expect: r.expect ?? null, expectMissing: r.expect_missing ?? null }));
   const counts: Counts = { done: 0, failed: 0, skipped: 0, pending: 0 };
-  for (const it of items) { if (it.status === 'done') counts.done++; else if (it.status === 'failed') counts.failed++; else if (it.status === 'skipped') counts.skipped++; else counts.pending++; }
+  for (const it of items) {
+    if (it.status === 'done') counts.done++; else if (it.status === 'failed') counts.failed++; else if (it.status === 'skipped') counts.skipped++; else counts.pending++;
+    if (it.expectMissing) { counts.expectChecked = (counts.expectChecked ?? 0) + 1; if (!it.expectMissing.length) counts.expectPassed = (counts.expectPassed ?? 0) + 1; }
+  }
   const { data: agent } = await supabaseAdmin.from('agents').select('name').eq('id', batch.agent_id).maybeSingle();
   return { batch: batchView(batch, (agent as { name: string } | null)?.name ?? null, counts), items };
 }
@@ -176,13 +194,13 @@ export async function retryUnfinished(actor: ActorScope, batchId: string): Promi
   const batch = await ownBatch(actor.userId, batchId);
   if (!batch) return { ok: false, status: 404, message: '일괄 실행을 찾을 수 없습니다.' };
   if (batch.status === 'running') return { ok: false, status: 409, message: '아직 실행 중인 일괄 실행입니다. 끝난 뒤에 다시 실행할 수 있습니다.' };
-  const { data, error } = await supabaseAdmin.from('app_batch_items').select('position, inputs, file, status').eq('batch_id', batchId).in('status', ['failed', 'skipped']).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  const { data, error } = await supabaseAdmin.from('app_batch_items').select('position, inputs, file, status, expect').eq('batch_id', batchId).in('status', ['failed', 'skipped']).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
   if (error) return { ok: false, status: 503, message: '줄을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
-  const rows = (data ?? []) as Array<{ position: number; inputs: Record<string, string>; file?: unknown }>;
+  const rows = (data ?? []) as Array<{ position: number; inputs: Record<string, string>; file?: unknown; expect?: string | null }>;
   const tableRows = rows.filter((r) => r.file === null || r.file === undefined);
   const skippedFiles = rows.length - tableRows.length;
   if (!tableRows.length) return { ok: false, status: 409, message: skippedFiles ? '파일마다 한 건의 줄은 파일을 다시 올려 새로 실행해 주세요(사본은 일괄 실행이 끝날 때 지웠습니다).' : '다시 실행할 줄(실패·건너뜀)이 없습니다.' };
-  const created = await createBatch(actor, { agent_id: batch.agent_id, name: `${batch.name.slice(0, 74)} 다시`, rows: tableRows.map((r) => r.inputs ?? {}) });
+  const created = await createBatch(actor, { agent_id: batch.agent_id, name: `${batch.name.slice(0, 74)} 다시`, rows: tableRows.map((r) => r.inputs ?? {}), ...(tableRows.some((r) => r.expect) ? { expects: tableRows.map((r) => r.expect ?? '') } : {}) });
   if (!created.ok) return created;
   return { ok: true, batch: created.batch, skippedFiles };
 }
@@ -200,9 +218,11 @@ export async function removeBatchFiles(batchId: string): Promise<void> {
 
 // ── 실행기 ─────────────────────────────────────────────────────────
 
-export interface BatchRunRow { id: string; organization_id: string; department_id: string; user_id: string; agent_id: string; app_version: number; status: BatchStatus }
-export interface BatchItemRun { id: string; batch_id: string; position: number; inputs: Record<string, string>; status: 'pending' | 'running'; attempts: number; claimed_at: string | null; batch: BatchRunRow; file?: unknown }
-export type ItemPatch = { status: 'done' | 'failed' | 'skipped' | 'pending'; attempts: number; error: string | null; conversation_id?: string | null; message_id?: string | null };
+export interface BatchRunRow { id: string; organization_id: string; department_id: string; user_id: string; agent_id: string; app_version: number; status: BatchStatus; webhook_id?: string | null }
+export interface BatchItemRun { id: string; batch_id: string; position: number; inputs: Record<string, string>; status: 'pending' | 'running'; attempts: number; claimed_at: string | null; batch: BatchRunRow; file?: unknown; expect?: string | null }
+export type ItemPatch = { status: 'done' | 'failed' | 'skipped' | 'pending'; attempts: number; error: string | null; conversation_id?: string | null; message_id?: string | null; expect_missing?: string[] | null };
+/** 비동기 연동 묶음(0087)의 줄이 끝났을 때 그 연동의 '마지막 결과' — 기다리는 호출의 `finish`와 같은 칸 */
+export type WebhookResultPatch = { last_status: 'completed' | 'failed'; last_error: string | null; last_conversation_id: string | null };
 
 export interface BatchDeps {
   now(): number;
@@ -219,6 +239,10 @@ export interface BatchDeps {
   notifyFinished?(batchId: string): Promise<boolean>;
   /** 끝난 묶음(이 호출이 마치거나 멈춤)의 파일 사본 지우기. 던져도 실행기는 이어 간다 */
   cleanup?(batchId: string): Promise<void>;
+  /** 그 실행의 답변 글(기대 핵심어를 잴 때만) — 못 읽으면 null(재지 않음) */
+  resultText?(messageId: string): Promise<string | null>;
+  /** 비동기 연동 묶음의 줄이 끝나면 그 연동의 마지막 결과를 바꾼다. 던져도 실행기는 이어 간다 */
+  webhookResult?(webhookId: string, patch: WebhookResultPatch, nowIso: string): Promise<void>;
   log(message: string, details: Record<string, unknown>, orgId: string): Promise<void>;
 }
 export type BatchTick = { ran: number; done: number; failed: number; retried: number; stopped: number; notified: number };
@@ -254,6 +278,15 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       await deps.log('앱 일괄 실행 마침 메일을 보내지 못했습니다', { batch_id: batch.id, error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }, batch.organization_id).catch(() => {});
     }
   };
+  const webhookResult = async (item: BatchItemRun, patch: WebhookResultPatch, nowIso: string) => {
+    if (!item.batch.webhook_id || !deps.webhookResult) return;
+    await deps.webhookResult(item.batch.webhook_id, patch, nowIso).catch(() => undefined);
+  };
+  /** 기대 핵심어 재기 — 못 읽으면 null(재지 않음). 던지지 않는다 */
+  const judge = async (item: BatchItemRun, messageId: string | undefined): Promise<string[] | null> => {
+    if (!item.expect || !messageId || !deps.resultText) return null;
+    try { const text = await deps.resultText(messageId); return text === null ? null : expectMissing(text, item.expect); } catch { return null; }
+  };
   const worker = async () => {
     while (queue.length) {
       if (deps.now() - start > BATCH_START_WINDOW_MS) return;
@@ -269,6 +302,7 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       const stopReason = stopReasonFor(outcome);
       if (stopReason) {
         await deps.finishItem(item.id, { status: 'skipped', attempts, error: stopReason }, doneAt);
+        await webhookResult(item, { last_status: 'failed', last_error: stopReason, last_conversation_id: null }, doneAt);
         const ended = await deps.stop(item.batch_id, stopReason, doneAt).catch(() => false);
         stoppedBatches.add(item.batch_id);
         tick.stopped++;
@@ -277,7 +311,9 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
         continue;
       }
       if (outcome.kind === 'completed') {
-        await deps.finishItem(item.id, { status: 'done', attempts, error: null, conversation_id: outcome.conversationId, message_id: outcome.messageId ?? null }, doneAt);
+        const missing = await judge(item, outcome.messageId);
+        await deps.finishItem(item.id, { status: 'done', attempts, error: null, conversation_id: outcome.conversationId, message_id: outcome.messageId ?? null, ...(missing ? { expect_missing: missing } : {}) }, doneAt);
+        await webhookResult(item, { last_status: 'completed', last_error: null, last_conversation_id: outcome.conversationId }, doneAt);
         tick.done++;
       } else if (outcome.kind === 'failed' && attempts < BATCH_MAX_ATTEMPTS) {
         await deps.finishItem(item.id, { status: 'pending', attempts, error: outcome.error.slice(0, 300), conversation_id: outcome.conversationId }, doneAt);
@@ -285,6 +321,7 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       } else {
         const error = outcome.kind === 'failed' ? outcome.error : outcome.kind === 'rejected' ? outcome.message : '실행하지 못했습니다.';
         await deps.finishItem(item.id, { status: 'failed', attempts, error: error.slice(0, 300), ...(outcome.kind === 'failed' ? { conversation_id: outcome.conversationId } : {}) }, doneAt);
+        await webhookResult(item, { last_status: 'failed', last_error: error.slice(0, 300), last_conversation_id: outcome.kind === 'failed' ? outcome.conversationId : null }, doneAt);
         tick.failed++;
       }
       if ((await deps.settle(item.batch_id, doneAt).catch(() => false)) === true) await notify(item.batch);
@@ -298,12 +335,12 @@ export function batchDeps(): BatchDeps {
   return {
     now: () => Date.now(),
     async openItems(staleIso, limit) {
-      const { data: batches, error } = await supabaseAdmin.from('app_batches').select('id, organization_id, department_id, user_id, agent_id, app_version, status')
+      const { data: batches, error } = await supabaseAdmin.from('app_batches').select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id')
         .eq('status', 'running').order('created_at', { ascending: true }).limit(20);
       if (error) return null;
       const byId = new Map(((batches ?? []) as BatchRunRow[]).map((b) => [b.id, b]));
       if (!byId.size) return [];
-      const { data: items, error: itemError } = await supabaseAdmin.from('app_batch_items').select('id, batch_id, position, inputs, status, attempts, claimed_at, file')
+      const { data: items, error: itemError } = await supabaseAdmin.from('app_batch_items').select('id, batch_id, position, inputs, status, attempts, claimed_at, file, expect')
         .in('batch_id', [...byId.keys()])
         .or(`status.eq.pending,and(status.eq.running,claimed_at.lt.${staleIso})`)
         .order('position', { ascending: true }).limit(limit * 3);
@@ -338,6 +375,15 @@ export function batchDeps(): BatchDeps {
     },
     notifyFinished: (batchId) => notifyBatchFinished(batchId),
     cleanup: (batchId) => removeBatchFiles(batchId),
+    async resultText(messageId) {
+      const { data, error } = await supabaseAdmin.from('messages').select('content').eq('id', messageId).maybeSingle();
+      if (error) return null;
+      return (data as { content?: string } | null)?.content ?? null;
+    },
+    async webhookResult(webhookId, patch, nowIso) {
+      const { error } = await supabaseAdmin.from('app_webhooks').update({ ...patch, updated_at: nowIso }).eq('id', webhookId);
+      if (error) throw new Error(`app_webhooks result: ${error.message}`);
+    },
     async log(message, details, orgId) { await logSystem({ level: 'warning', category: 'api', message, details, orgId }); },
   };
 }
@@ -457,7 +503,8 @@ export async function batchWorkbook(input: {
   const sheet = workbook.addWorksheet('결과');
   const withFile = input.items.some((it) => it.fileName);
   const withDelivery = input.items.some((it) => it.delivery);
-  sheet.addRow(['번호', ...(withFile ? ['파일'] : []), ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화', ...(withDelivery ? ['보내기', '접수 번호'] : [])]);
+  const withExpect = input.items.some((it) => it.expect);
+  sheet.addRow(['번호', ...(withFile ? ['파일'] : []), ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화', ...(withDelivery ? ['보내기', '접수 번호'] : []), ...(withExpect ? ['기대 핵심어', '핵심어 판정'] : [])]);
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   for (const it of input.items) {
@@ -465,6 +512,7 @@ export async function batchWorkbook(input: {
       it.position, ...(withFile ? [safeText(it.fileName ?? '')] : []), ...input.fields.map((f) => safeText(it.inputs[f.key] ?? '')), BATCH_ITEM_STATUS_LABELS[it.status],
       safeText(it.result ?? ''), safeText(it.error ?? ''), it.conversationId ? `${input.origin}/chat?conv=${it.conversationId}` : '',
       ...(withDelivery ? [it.delivery ? OUTBOUND_STATUS_LABELS[it.delivery.status] ?? it.delivery.status : '', safeText(it.delivery?.receiptRef ?? '')] : []),
+      ...(withExpect ? [safeText(it.expect ?? ''), safeText(expectVerdict(it.expect, it.status === 'done' ? it.expectMissing : null))] : []),
     ]);
   }
   const lead = withFile ? 1 : 0;

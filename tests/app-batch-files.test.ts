@@ -141,7 +141,7 @@ describe('연결', () => {
     expect(lib).toContain('copyAttachmentsTo({ userId: actor.userId, organizationId }, attachmentIds, (fileId, ext) => batchFilePath(organizationId, actor.userId, fileId, ext))');
     expect(lib).toContain('...(files[i] ? { file: files[i] } : {})');
     expect(lib).toContain('if (fileMode) await discardAttachments(actor.userId, attachmentIds);');
-    expect(lib).toContain("select('id, batch_id, position, inputs, status, attempts, claimed_at, file')");
+    expect(lib).toContain("select('id, batch_id, position, inputs, status, attempts, claimed_at, file, expect')");
     expect(lib).toContain('run: (item, deadlineAt) => runBatchItem(item, deadlineAt)');
     expect(lib).toContain('cleanup: (batchId) => removeBatchFiles(batchId)');
     const cancel = lib.slice(lib.indexOf('export async function cancelBatch'), lib.indexOf('export async function removeBatchFiles'));

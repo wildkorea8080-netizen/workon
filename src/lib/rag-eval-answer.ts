@@ -116,15 +116,9 @@ export function saysNotFound(text: string): boolean {
   return /찾(?:지|을\s*수)\s*(?:못|없)/.test(text) || /근거(?:가|를)?\s*(?:찾|확인할\s*수)\s*(?:없|못)/.test(text);
 }
 
-/** 핵심어 비교용 — 공백·대소문자 무시, 숫자 사이 쉼표 무시(1,200 = 1200) */
-export function keywordKey(s: string): string {
-  return s.normalize('NFC').toLowerCase().replace(/(\d),(?=\d{3})/g, '$1').replace(/\s+/g, '');
-}
-
-export function missingKeywords(answer: string, keywords: string[]): string[] {
-  const text = keywordKey(answer);
-  return keywords.filter((k) => !text.includes(keywordKey(k)));
-}
+// 핵심어 맞추기 규칙은 앱 일괄 실행의 기대 핵심어(0088)와 한 곳(keyword-match.ts)
+export { keywordKey, missingKeywords } from '@/lib/keyword-match';
+import { missingKeywords } from '@/lib/keyword-match';
 
 /**
  * 답 하나의 판정. `chunks`는 그 질문의 근거(대화와 같은 번호), `shown`은 그 턴에 AI가 본 숫자(시스템 프롬프트·질문).

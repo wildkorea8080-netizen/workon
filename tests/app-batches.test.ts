@@ -16,13 +16,13 @@ const definition: AppDefinition = { schemaVersion: 1, output: 'bullets', fields:
 
 describe('표 읽기', () => {
   it('엑셀에서 붙인 탭 표 — 머리글은 항목 이름이나 키(대소문자·공백 무시), 빈 줄은 건너뜀', () => {
-    expect(parseBatchTable('주제\t세부  내용\n여비\t국내 출장\n\n복무\t\n', fields)).toEqual({ ok: true, rows: [{ topic: '여비', detail: '국내 출장' }, { topic: '복무', detail: '' }] });
-    expect(parseBatchTable('TOPIC\n여비', fields)).toEqual({ ok: true, rows: [{ topic: '여비' }] });
+    expect(parseBatchTable('주제\t세부  내용\n여비\t국내 출장\n\n복무\t\n', fields)).toEqual({ ok: true, rows: [{ topic: '여비', detail: '국내 출장' }, { topic: '복무', detail: '' }], expects: ['', ''] });
+    expect(parseBatchTable('TOPIC\n여비', fields)).toEqual({ ok: true, rows: [{ topic: '여비' }], expects: [''] });
   });
 
   it('CSV — 따옴표 칸(쉼표·따옴표·줄바꿈)·BOM', () => {
     const csv = '﻿주제,세부 내용\r\n"여비, 일비","그는 ""급히"" 출장\n두 줄"\r\n복무,연가';
-    expect(parseBatchTable(csv, fields)).toEqual({ ok: true, rows: [{ topic: '여비, 일비', detail: '그는 "급히" 출장\n두 줄' }, { topic: '복무', detail: '연가' }] });
+    expect(parseBatchTable(csv, fields)).toEqual({ ok: true, rows: [{ topic: '여비, 일비', detail: '그는 "급히" 출장\n두 줄' }, { topic: '복무', detail: '연가' }], expects: ['', ''] });
   });
 
   it('모르는 머리글·같은 항목 두 번·줄 없음·너무 많음·칸이 넘침은 오류', () => {
@@ -33,11 +33,11 @@ describe('표 읽기', () => {
     expect(parseBatchTable(`주제\n${Array.from({ length: BATCH_MAX_ROWS + 1 }, (_, i) => `q${i}`).join('\n')}`, fields)).toMatchObject({ ok: false, errors: [expect.stringContaining(`${BATCH_MAX_ROWS}줄`)] });
     // 첫 줄에 탭이 없으면 쉼표로 가른다
     expect(parseBatchTable('주제\n여비,넘침', fields)).toMatchObject({ ok: false, errors: [expect.stringContaining('2번째 줄')] });
-    expect(parseBatchTable('주제\n여비\t넘침', fields)).toEqual({ ok: true, rows: [{ topic: '여비\t넘침' }] });
+    expect(parseBatchTable('주제\n여비\t넘침', fields)).toEqual({ ok: true, rows: [{ topic: '여비\t넘침' }], expects: [''] });
   });
 
   it('미리 보기 — 줄마다 앱 규칙(필수 항목)으로 검사하고 많으면 AI 호출 수를 더한다', () => {
-    expect(previewBatch(definition, '주제\t세부 내용\n여비\t\n복무\t연가')).toEqual({ ok: true, rows: [{ topic: '여비', detail: '' }, { topic: '복무', detail: '연가' }], maxCalls: 2 });
+    expect(previewBatch(definition, '주제\t세부 내용\n여비\t\n복무\t연가')).toEqual({ ok: true, rows: [{ topic: '여비', detail: '' }, { topic: '복무', detail: '연가' }], expects: ['', ''], maxCalls: 2 });
     expect(previewBatch(definition, '세부 내용\n연가')).toMatchObject({ ok: false, errors: [expect.stringMatching(/^1번째 줄:/)] });
   });
 
@@ -146,7 +146,10 @@ describe('결과 가리키기·연결', () => {
     for (const route of ['src/app/api/apps/batches/route.ts', 'src/app/api/apps/batches/[id]/route.ts', 'src/app/api/apps/batches/[id]/export/route.ts']) {
       expect(readFileSync(route, 'utf8')).toContain('session.user.id');
     }
-    expect(readFileSync('src/lib/apps/batch-spec.ts', 'utf8')).not.toMatch(/^import /m);
+    // 잎 파일 — 핵심어 규칙(keyword-match.ts, 그것도 아무것도 import하지 않음) 말고는 가져오지 않는다
+    const spec = readFileSync('src/lib/apps/batch-spec.ts', 'utf8');
+    expect(spec.match(/^import .*$/gm)).toEqual(["import { missingKeywords } from '@/lib/keyword-match';"]);
+    expect(readFileSync('src/lib/keyword-match.ts', 'utf8')).not.toMatch(/^import /m);
     // 시험 판 실행 화면에는 일괄 실행을 두지 않는다(일괄 실행은 언제나 지금 판)
     expect(readFileSync('src/app/apps/run/page.tsx', 'utf8')).toContain('{!draftSavedAt && <AppBatchPanel');
   });
