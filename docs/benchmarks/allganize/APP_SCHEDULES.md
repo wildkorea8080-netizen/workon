@@ -87,6 +87,11 @@
 - 다시 켜면 다음 시각을 **지금부터** 다시 세고 실패 수·차지를 지운다. 멈춘 사이의 차례는 돌지 않는다.
 - 마이그레이션 0048(`app_schedules`) — 추가만, RLS 켜고 정책 없음(서비스 키만), 앱·사용자·부서·기관 삭제에 연쇄, `last_conversation_id`는 대화 삭제 때 NULL.
 
+## 지금 한 번 실행 (2026-11-10, 마이그레이션 없음)
+
+- 앱 예약 화면의 켜진 예약에 **'지금 한 번 실행'** — `PATCH /api/apps/schedules/[id] { action: 'run_now' }`가 다음 실행 시각을 지금으로 당긴다. 실행기(5분마다)가 다음 차례에 평소처럼(같은 권한·한도·사용 기록·완료 메일·한글 파일) 실행하고, 그 뒤로는 원래 일정대로 돈다.
+- 내 예약·켜짐·관리자 잠금 없음·실행기가 잡지 않음일 때만(조건부 갱신 — 아니면 409, 잠금 403). 멈춘 예약은 먼저 다시 켜라고 409, 방금(마지막 실행 10분 안) 실행한 예약은 429, 이미 차례가 된 예약은 바꾸지 않고 그대로. 기관이 예약을 꺼 두었으면 단추를 보이지 않는다(실행기도 넘긴다).
+
 ## 실행기와 운영 설정
 
 - 라우트 `GET|POST /api/cron/app-schedules`(`maxDuration` 300). 자격은 Bearer 비밀값 하나 — **업무 작업자와 같은 `WORK_WORKER_SECRET`**(pg_cron이 Vault `work_worker_secret`으로 이미 싣는 값) 또는 `CRON_SECRET`, 상수 시간 비교. 둘 다 없으면 503(2026-11-03에 작업자 비밀값을 더했다 — `CRON_SECRET`은 Vercel에만 있고 Vault·`.env.local`에 없어 pg_cron이 실을 수 없었다. 비밀값을 새로 만들어 돌리는 대신 이미 맞는 값을 쓴다). 한 번에 예약 3개(`SCHEDULE_BATCH`)까지, 시간 예산 180초(`SCHEDULE_RUN_BUDGET_MS`)를 넘기면 남은 것은 다음 호출에(`partial`). 응답 `{ checked, completed, failed, paused, skipped, partial }`.
