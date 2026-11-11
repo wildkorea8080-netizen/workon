@@ -282,7 +282,8 @@ export type OutboundFile =
 export function buildOutboundPayload(input: {
   deliveryId: string; sentAt: string;
   app: { id: string; name: string };
-  run: { messageId: string; conversationId: string; completedAt: string };
+  /** `batchId` — 일괄 실행(비동기 연동 0087 포함)의 줄이 낸 결과일 때만. 비동기 연동 응답의 `batch_id`와 맞춰 본다 */
+  run: { messageId: string; conversationId: string; completedAt: string; batchId?: string | null };
   text: string;
   file?: OutboundFile;
   /** 받는 쪽 동작(0081) */
@@ -302,7 +303,7 @@ export function buildOutboundPayload(input: {
     sent_at: input.sentAt,
     ...(input.action ? { action: { key: input.action.key, label: input.action.label } } : {}),
     app: { id: input.app.id, name: input.app.name },
-    run: { message_id: input.run.messageId, conversation_id: input.run.conversationId, completed_at: input.run.completedAt },
+    run: { message_id: input.run.messageId, conversation_id: input.run.conversationId, completed_at: input.run.completedAt, ...(input.run.batchId ? { batch_id: input.run.batchId } : {}) },
     result,
   });
 }

@@ -39,6 +39,17 @@ export function parseIdempotencyKey(header: string | null): { ok: true; key: str
   return { ok: true, key };
 }
 
+// ── 비동기 호출(2026-11-11, 0087) ────────────────────────────────────────────
+/** 비동기 호출을 고르는 머리글(RFC 7240) — 본문 `"async": true`와 같다 */
+export const PREFER_HEADER = 'Prefer';
+export const WEBHOOK_ASYNC_NO_FILES = '비동기 호출(async)에는 파일을 함께 보낼 수 없습니다 — 파일은 기다리는 호출(async 없이)로 보내 주세요.';
+export const WEBHOOK_ASYNC_NO_DOCUMENTS = '문서함 문서를 고른 연동은 비동기로 실행하지 않습니다 — async 없이 불러 주세요.';
+export const WEBHOOK_ASYNC_BUSY = '이 연동의 직원에게 실행 중인 일괄 실행이 많습니다(3개까지). 잠시 뒤 다시 보내 주세요.';
+/** 본문 `async: true` 또는 `Prefer: respond-async`면 비동기 — 그 밖의 값은 기다리는 호출 */
+export function wantsAsync(bodyAsync: unknown, prefer: string | null | undefined): boolean {
+  return bodyAsync === true || /(^|[\s,;])respond-async($|[\s,;=])/i.test(prefer ?? '');
+}
+
 /** 입력값을 키 순서대로 맞춘 JSON — 같은 내용이면 키 순서가 달라도 같은 글(해시는 서버가 낸다) */
 export function canonicalInputs(inputs: Record<string, string>): string {
   return JSON.stringify(Object.keys(inputs).sort().map((key) => [key, inputs[key]]));

@@ -154,7 +154,7 @@ describe('POST /api/apps/webhook — 호출 라우트', () => {
     state.handlerResult = { status: 429, body: { ok: false, error: { message: '잠시' } }, headers: { 'Retry-After': '30' } };
     const res = await callRoute({ Authorization: 'Bearer wo_wh_x', 'Idempotency-Key': 'order-42' });
     expect(res.status).toBe(429); expect(res.headers.get('Retry-After')).toBe('30');
-    expect(state.handled[0]).toEqual({ authorization: 'Bearer wo_wh_x', idempotencyKey: 'order-42', bodyText: '{"inputs":{}}' });
+    expect(state.handled[0]).toEqual({ authorization: 'Bearer wo_wh_x', idempotencyKey: 'order-42', prefer: null, bodyText: '{"inputs":{}}' });
     await callRoute({ Authorization: 'Bearer wo_wh_x' });
     expect(state.handled[1]).toMatchObject({ idempotencyKey: null });
   });

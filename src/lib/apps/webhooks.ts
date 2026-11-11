@@ -17,6 +17,10 @@
 // - 외부 시스템은 본문 `files`(`[{ name, content_base64 }]`, 3개·풀어서 3MB까지)로 파일을 함께 보낼 수 있다(2026-11-08). 차지한 뒤
 //   그 직원의 새 첨부로 올려(`attachBytes` — 직접 올리기와 같은 형식·크기·읽기·사용 기록) 그 실행의 대화에 붙인다. 읽지 못하면 422.
 //   파일 내용은 따로 저장하지 않고(대화 첨부로만 남는다) `Idempotency-Key`의 요청 해시에 이름·SHA-256만 넣는다.
+// - **비동기 호출**(2026-11-11, 0087): 본문 `"async": true` 또는 `Prefer: respond-async`면 기다리지 않고 202 `{ status: 'accepted', batch_id }`.
+//   그 직원의 한 줄짜리 일괄 실행(`createBatch` — 같은 앱 규칙·권한·기관 상한, 연동이 박은 앱 판, `source='webhook'`)으로 넣어
+//   일괄 실행 실행기(5분)가 돌린다(300초 넘는 앱도). 결과는 앱의 '결과 보낼 곳'(0076)이 있으면 그리로 가고 몸의 `run.batch_id`로 맞춘다 —
+//   이것이 콜백이다(보낼 곳은 기관 전체 관리자가 승인한 주소만). 파일·문서함 문서를 쓰는 호출은 비동기로 받지 않는다(400). 마침 메일은 보내지 않는다.
 import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
@@ -26,7 +30,11 @@ import { agentDocumentRows } from './app-document-choice';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MAX_BODY_WITH_FILES_BYTES, WEBHOOK_MAX_FILES, WEBHOOK_MAX_FILE_TOTAL_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
   IDEMPOTENCY_HEADER, WEBHOOK_ORG_DISABLED, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
+  WEBHOOK_ASYNC_BUSY, WEBHOOK_ASYNC_NO_DOCUMENTS, WEBHOOK_ASYNC_NO_FILES, wantsAsync,
 } from './webhook-spec';
+import type { Session } from 'next-auth';
+import type { ActorScope } from '@/lib/agent-permissions';
+import { BATCH_APP_VERSION_CHANGED } from './batch-spec';
 import { tokenOrgWebhooksDisabled } from './webhook-switch';
 import { attachBytes } from '@/lib/attachments/reuse';
 import { deleteAttachment } from '@/lib/attachments/store';
@@ -60,6 +68,8 @@ export interface WebhookDeps {
   /** 키 있는 호출의 결과를 남긴다(null이면 지워 같은 키로 다시 시도할 수 있게 — 서버 쪽 실패) */
   recordCall(callId: string, record: CallRecord | null): Promise<void>;
   execute(webhook: ClaimedWebhook, inputs: Record<string, string>, files: WebhookFile[]): Promise<RunAsOutcome>;
+  /** 비동기 호출(0087) — 한 줄짜리 일괄 실행으로 넣는다. 없으면 비동기를 받지 않는다(501) */
+  enqueue?(webhook: ClaimedWebhook, inputs: Record<string, string>): Promise<WebhookEnqueueOutcome>;
   finish(id: string, patch: { last_status: 'completed' | 'failed'; last_error: string | null; last_conversation_id: string | null; updated_at: string }): Promise<void>;
   log(level: 'info' | 'warning' | 'error', message: string, details: Record<string, unknown>, organizationId: string | null): Promise<void>;
   now(): number;
@@ -138,6 +148,40 @@ async function attachWebhookFiles(
   return { ok: true, ids };
 }
 
+export type WebhookEnqueueOutcome =
+  | { kind: 'accepted'; batchId: string; resultDelivery: boolean }
+  | { kind: 'user_unavailable' } | { kind: 'department_changed' } | { kind: 'app_changed' }
+  | { kind: 'rejected'; status: number; message: string };
+
+export interface EnqueueWebhookIo {
+  documentIdsOf(webhookId: string): Promise<string[]>;
+  loadUser(userId: string): Promise<{ id: string; role: string | null; department_id: string | null; is_active: boolean | null; deleted_at: string | null } | null>;
+  actorFor(user: { id: string; role: string | null; department_id: string }): Promise<ActorScope | null>;
+  /** 앱의 지금 이름·결과 보낼 곳 유무 */
+  appInfo(agentId: string): Promise<{ name: string; deliverEndpointId: string | null } | null>;
+  createBatch(actor: ActorScope, body: { agent_id: string; name: string; rows: Record<string, string>[] }, opts: { source: 'webhook'; appVersion: number; webhookId: string }): Promise<{ ok: true; batchId: string } | { ok: false; status: number; message: string }>;
+}
+
+/**
+ * 비동기 연동 한 번 넣기(0087) — 기다리는 호출(`runAppAs`)과 같은 문턱(계정·부서·앱 판)을 먼저 보고, 그 직원의 한 줄 일괄 실행으로 넣는다.
+ * 실행 자체(권한·한도·사용 기록)는 일괄 실행 실행기가 손 실행과 같은 길로 다시 본다
+ */
+export async function enqueueWebhookRun(w: ClaimedWebhook, inputs: Record<string, string>, io: EnqueueWebhookIo): Promise<WebhookEnqueueOutcome> {
+  if ((await io.documentIdsOf(w.id)).length) return { kind: 'rejected', status: 400, message: WEBHOOK_ASYNC_NO_DOCUMENTS };
+  const user = await io.loadUser(w.user_id);
+  if (!user || user.is_active === false || user.deleted_at) return { kind: 'user_unavailable' };
+  if (!user.department_id || user.department_id !== w.department_id) return { kind: 'department_changed' };
+  const actor = await io.actorFor({ id: user.id, role: user.role, department_id: user.department_id });
+  if (!actor?.organizationId || actor.organizationId !== w.organization_id) return { kind: 'department_changed' };
+  const app = await io.appInfo(w.agent_id);
+  if (!app) return { kind: 'rejected', status: 404, message: '앱을 찾을 수 없습니다.' };
+  const created = await io.createBatch(actor, { agent_id: w.agent_id, name: `${WEBHOOK_TITLE_PREFIX}${app.name}`.slice(0, 80), rows: [inputs] }, { source: 'webhook', appVersion: w.app_version, webhookId: w.id });
+  if (created.ok) return { kind: 'accepted', batchId: created.batchId, resultDelivery: Boolean(app.deliverEndpointId) };
+  if (created.status === 409 && created.message === BATCH_APP_VERSION_CHANGED) return { kind: 'app_changed' };
+  if (created.status === 409) return { kind: 'rejected', status: 429, message: WEBHOOK_ASYNC_BUSY };
+  return { kind: 'rejected', status: created.status, message: created.message };
+}
+
 /** 대화에 묶이지 못한 첨부를 묘비로(묶인 것은 `deleteAttachment`가 건드리지 않는다) */
 async function discardAll(userId: string, ids: string[], io: WebhookFileIo): Promise<void> {
   for (const id of ids) { try { await io.discard(userId, id); } catch { /* 24시간 정리가 치운다 */ } }
@@ -201,7 +245,7 @@ function readInputs(raw: unknown): Record<string, string> | null {
 }
 
 /** 호출 하나 처리 — 토큰 꼴 → 본문 → 차지(간격·하루 상한) → 실행 → 기록. 앱 결과 글은 응답에 싣지 않는다 */
-export async function handleWebhookCall(deps: WebhookDeps, request: { authorization: string | null; bodyText: string; idempotencyKey?: string | null }): Promise<WebhookResponse> {
+export async function handleWebhookCall(deps: WebhookDeps, request: { authorization: string | null; bodyText: string; idempotencyKey?: string | null; prefer?: string | null }): Promise<WebhookResponse> {
   const token = bearerWebhookToken(request.authorization);
   if (!token) return fail(401, WEBHOOK_INVALID_TOKEN);
   const idem = parseIdempotencyKey(request.idempotencyKey ?? null);
@@ -218,11 +262,14 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   if ((files.length ? Buffer.byteLength(JSON.stringify(rawInputs), 'utf8') : bodyBytes) > WEBHOOK_MAX_BODY_BYTES) return fail(413, '보내는 내용이 너무 큽니다(64KB까지).');
   const inputs = readInputs(rawInputs);
   if (!inputs) return fail(400, 'inputs는 항목 키와 글·숫자 값의 객체여야 합니다.');
+  const isAsync = wantsAsync((parsed as { async?: unknown } | null)?.async, request.prefer);
+  if (isAsync && files.length) return fail(400, WEBHOOK_ASYNC_NO_FILES);
 
   if (await deps.orgDisabled(hashWebhookToken(token), deps.now())) return fail(403, WEBHOOK_ORG_DISABLED);
   // 파일은 이름·SHA-256만 해시에 넣는다(파일이 없으면 예전과 같은 해시)
   const fileDigest = files.map((f) => `\n${f.name}:${createHash('sha256').update(f.bytes).digest('hex')}`).join('');
-  const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs) + fileDigest, 'utf8').digest('hex') } : undefined;
+  // 비동기는 해시에 표시를 더한다 — 같은 키로 기다리는 호출과 비동기 호출을 섞으면 다른 요청(422)
+  const idempotency = idem.key ? { key: idem.key, requestHash: createHash('sha256').update(canonicalInputs(inputs) + fileDigest + (isAsync ? '\nasync' : ''), 'utf8').digest('hex') } : undefined;
   const claim = await deps.claim(hashWebhookToken(token), deps.now(), idempotency);
   if (!claim.ok) {
     if (claim.reason === 'replay') return replayResponse(claim.call);
@@ -233,6 +280,7 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
     return fail(401, WEBHOOK_INVALID_TOKEN);
   }
   const webhook = claim.webhook;
+  if (isAsync) return handleAsync(deps, webhook, inputs, claim.call_id ?? null);
 
   let outcome: RunAsOutcome;
   try { outcome = await deps.execute(webhook, inputs, files); }
@@ -269,9 +317,36 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   return response;
 }
 
-/** 같은 키의 처음 응답을 그대로 — 완료면 상태·대화 id, 거절이면 그 상태·안내 */
+/** 비동기 호출(0087) — 넣고 202. 기록은 기다리는 호출과 같은 규칙(5xx·429는 남기지 않음), 받은 묶음 번호는 기록의 안내 칸에 둬 같은 키에 같은 번호를 돌려준다 */
+async function handleAsync(deps: WebhookDeps, webhook: ClaimedWebhook, inputs: Record<string, string>, callId: string | null): Promise<WebhookResponse> {
+  let queued: WebhookEnqueueOutcome;
+  if (!deps.enqueue) queued = { kind: 'rejected', status: 501, message: '비동기 호출을 받지 않습니다.' };
+  else {
+    try { queued = await deps.enqueue(webhook, inputs); }
+    catch (error) { queued = { kind: 'rejected', status: 500, message: '잠시 뒤 다시 보내 주세요.' }; await deps.log('error', '앱 연동 비동기 넣기 오류', { webhook_id: webhook.id, error: errorText(error) }, webhook.organization_id); }
+  }
+  let response: WebhookResponse;
+  switch (queued.kind) {
+    case 'accepted': response = { status: 202, body: { ok: true, data: { status: 'accepted', batch_id: queued.batchId, result_delivery: queued.resultDelivery } } }; break;
+    case 'user_unavailable': response = fail(403, WEBHOOK_USER_UNAVAILABLE); break;
+    case 'department_changed': response = fail(403, WEBHOOK_DEPARTMENT_CHANGED); break;
+    case 'app_changed': response = fail(409, WEBHOOK_APP_CHANGED); break;
+    case 'rejected': response = fail(queued.status, queued.message); break;
+  }
+  const message = queued.kind === 'accepted' ? queued.batchId : String((response.body.error as { message: string }).message).slice(0, 300);
+  if (callId) {
+    const record: CallRecord | null = response.status >= 500 || response.status === 429 ? null : { http_status: response.status, message, conversation_id: null };
+    try { await deps.recordCall(callId, record); }
+    catch (error) { await deps.log('warning', '앱 연동 호출 기록을 저장하지 못함', { webhook_id: webhook.id, error: errorText(error) }, webhook.organization_id); }
+  }
+  if (queued.kind !== 'accepted') await deps.log('warning', '앱 연동 비동기 넣기 실패', { webhook_id: webhook.id, agent_id: webhook.agent_id, status: response.status, kind: queued.kind }, webhook.organization_id);
+  return response;
+}
+
+/** 같은 키의 처음 응답을 그대로 — 완료면 상태·대화 id, 비동기로 받았으면 그 묶음 번호(0087), 거절이면 그 상태·안내 */
 function replayResponse(call: ReplayedCall): WebhookResponse {
   const headers = { [REPLAYED_HEADER]: 'true' };
+  if (call.http_status === 202) return { status: 202, body: { ok: true, data: { status: 'accepted', batch_id: call.message, replayed: true } }, headers };
   if (call.http_status === 200) return { status: 200, body: { ok: true, data: { status: 'completed', conversation_id: call.conversation_id, replayed: true } }, headers };
   return fail(call.http_status, call.message ?? '처음 요청이 거절됐습니다.', headers);
 }
@@ -300,6 +375,34 @@ export function webhookDeps(): WebhookDeps {
       },
       run: (input) => runAppAs(input, WEBHOOK_TITLE_PREFIX, defaultRunAsIo()),
     }, files),
+    enqueue: (w, inputs) => enqueueWebhookRun(w, inputs, {
+      async documentIdsOf(id) {
+        const { data, error } = await supabaseAdmin.from('app_webhooks').select('document_ids').eq('id', id).maybeSingle();
+        if (error) throw new Error(`app_webhooks documents: ${error.message}`);
+        return ((data as { document_ids?: string[] | null } | null)?.document_ids ?? []);
+      },
+      async loadUser(userId) {
+        const { data, error } = await supabaseAdmin.from('users').select('id, role, department_id, is_active, deleted_at').eq('id', userId).maybeSingle();
+        if (error) throw new Error(`users: ${error.message}`);
+        return data as Awaited<ReturnType<EnqueueWebhookIo['loadUser']>>;
+      },
+      async actorFor(user) {
+        const { getActorScope } = await import('@/lib/actor-scope');
+        return getActorScope({ user: { id: user.id, role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: user.department_id }, expires: new Date(Date.now() + 60_000).toISOString() } as Session);
+      },
+      async appInfo(agentId) {
+        const { data, error } = await supabaseAdmin.from('agents').select('name, app_definition').eq('id', agentId).is('deleted_at', null).maybeSingle();
+        if (error) throw new Error(`agents: ${error.message}`);
+        if (!data) return null;
+        const def = (data as { app_definition?: { deliverEndpointId?: unknown } | null }).app_definition;
+        return { name: (data as { name: string }).name, deliverEndpointId: typeof def?.deliverEndpointId === 'string' ? def.deliverEndpointId : null };
+      },
+      async createBatch(actor, body, opts) {
+        const { createBatch } = await import('./batches');
+        const out = await createBatch(actor, body, opts);
+        return out.ok ? { ok: true, batchId: out.batch.id } : { ok: false, status: out.status, message: out.message };
+      },
+    }),
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_webhooks').update(patch).eq('id', id);
       if (error) throw new Error(`app_webhooks finish: ${error.message}`);

@@ -24,13 +24,14 @@ import { safeText } from '@/lib/xlsx-export';
 import { OUTBOUND_STATUS_LABELS, type OutboundStatus } from './outbound/spec';
 import {
   BATCH_FILES_NOT_ALLOWED, BATCH_FILES_UNSUPPORTED, BATCH_FILE_ROWS_MISMATCH, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_MAX_RUNNING,
-  BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, normalizeBatchName, pairRowsWithFiles, parseBatchAttachmentIds,
+  BATCH_APP_VERSION_CHANGED, BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, normalizeBatchName, pairRowsWithFiles, parseBatchAttachmentIds,
   type BatchFile, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
 } from './batch-spec';
 import { copyAttachmentsTo, defaultScheduleFileIo, discardAttachments, removeScheduleFileObjects, type ScheduleFileIo } from './schedule-files';
 import { readBatchLimit } from './batch-limit';
 
 type Fail = { ok: false; status: number; message: string };
+
 const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_at, finished_at';
 
 type AgentRow = AgentAccessInfo & { name: string; app_definition: unknown; agent_type: string | null };
@@ -42,13 +43,14 @@ async function loadApp(agentId: string): Promise<AgentRow | null> {
 }
 
 /** 만들기 — 줄마다 앱 규칙으로 다시 검사(첫 오류 10개를 줄 번호와 함께), 실행 중 3개 상한 */
-export async function createBatch(actor: ActorScope, body: unknown): Promise<{ ok: true; batch: BatchView } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
+export async function createBatch(actor: ActorScope, body: unknown, opts: { source?: 'webhook'; appVersion?: number; webhookId?: string } = {}): Promise<{ ok: true; batch: BatchView } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
   const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown };
   const agent = typeof b.agent_id === 'string' ? await loadApp(b.agent_id) : null;
   if (!agent || agent.agent_type === 'link' || !canUseAgent(agent, actor)) return { ok: false, status: 404, message: '앱을 찾을 수 없습니다.' };
   const definition = validateAppDefinition(agent.app_definition ?? null);
   if (!definition.ok || !definition.value) return { ok: false, status: 400, message: '입력형 앱만 일괄 실행할 수 있습니다.' };
+  if (opts.appVersion !== undefined && agent.version !== opts.appVersion) return { ok: false, status: 409, message: BATCH_APP_VERSION_CHANGED };
   const attachmentIds = parseBatchAttachmentIds(b.attachment_ids);
   if (!attachmentIds) return { ok: false, status: 400, message: `파일은 ${BATCH_MAX_FILES}개까지 올려 주세요.` };
   const fileMode = attachmentIds.length > 0;
@@ -88,6 +90,9 @@ export async function createBatch(actor: ActorScope, body: unknown): Promise<{ o
   };
   const { data: batch, error } = await supabaseAdmin.from('app_batches').insert({
     organization_id: actor.organizationId, department_id: actor.departmentId, user_id: actor.userId, agent_id: agent.id, app_version: agent.version, name, total: inputs.length,
+    // 비동기 연동이 만든 묶음(0087) — 마침 메일을 보내지 않는다(호출마다 메일이 가지 않게)
+    ...(opts.source ? { source: opts.source } : {}),
+    ...(opts.source === 'webhook' && opts.webhookId ? { webhook_id: opts.webhookId } : {}),
   }).select(BATCH_COLUMNS).single();
   if (error || !batch) return failCreate();
   const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row, ...(files[i] ? { file: files[i] } : {}) })));
@@ -374,6 +379,8 @@ export async function notifyBatchFinished(batchId: string, io: BatchNoticeIo = b
   if (!io.mailConfigured()) return false;
   const facts = await io.load(batchId);
   if (!facts || (facts.status !== 'done' && facts.status !== 'stopped')) return false;
+  // 비동기 연동(0087)이 만든 한 줄 묶음은 메일을 보내지 않는다 — 결과는 연동의 결과 보낼 곳·앱 실행 기록으로 본다
+  if (facts.source === 'webhook') return false;
   const to = facts.email?.trim() ?? '';
   if (!to) return false;
   const runUrl = `${APP_URL}/apps/run?agent=${encodeURIComponent(facts.agentId)}`;
@@ -391,6 +398,8 @@ export async function notifyBatchFinished(batchId: string, io: BatchNoticeIo = b
 export interface BatchNoticeFacts {
   agentId: string; appName: string; name: string; status: BatchStatus; stopReason: string | null; total: number; finishedAt: string | null;
   done: number; failed: number; skipped: number; awaitingApproval: number; email: string | null;
+  /** 만든 곳(0087) — 'webhook'이면 메일 없음 */
+  source?: string | null;
 }
 export interface BatchNoticeIo {
   mailConfigured(): boolean;
@@ -402,10 +411,10 @@ function batchNoticeIo(): BatchNoticeIo {
   return {
     mailConfigured: isMailConfigured,
     async load(batchId) {
-      const { data: batch, error } = await supabaseAdmin.from('app_batches').select('id, user_id, agent_id, name, status, total, stop_reason, finished_at').eq('id', batchId).maybeSingle();
+      const { data: batch, error } = await supabaseAdmin.from('app_batches').select('id, user_id, agent_id, name, status, total, stop_reason, finished_at, source').eq('id', batchId).maybeSingle();
       if (error) throw new Error(error.message);
       if (!batch) return null;
-      const b = batch as { user_id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; finished_at: string | null };
+      const b = batch as { user_id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; finished_at: string | null; source?: string | null };
       const [{ data: items, error: itemError }, { data: user }, { data: agent }] = await Promise.all([
         supabaseAdmin.from('app_batch_items').select('status, message_id').eq('batch_id', batchId),
         supabaseAdmin.from('users').select('email').eq('id', b.user_id).maybeSingle(),
@@ -425,6 +434,7 @@ function batchNoticeIo(): BatchNoticeIo {
         agentId: b.agent_id, appName: (agent as { name?: string } | null)?.name ?? '입력형 앱', name: b.name, status: b.status, stopReason: b.stop_reason, total: b.total, finishedAt: b.finished_at,
         done: rows.filter((r) => r.status === 'done').length, failed: rows.filter((r) => r.status === 'failed').length, skipped: rows.filter((r) => r.status === 'skipped').length,
         awaitingApproval, email: typeof (user as { email?: unknown } | null)?.email === 'string' ? (user as { email: string }).email : null,
+        source: b.source ?? null,
       };
     },
     send: sendBatchFinishedEmail,

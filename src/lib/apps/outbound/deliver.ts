@@ -120,6 +120,8 @@ export interface DeliveryContext {
   endpoint: { url: string; secret_encrypted: string; organization_id: string; revoked_at: string | null; actions?: unknown } | null;
   message: { content: string; conversation_id: string; created_at: string; role: string; source_references?: Record<string, unknown> | null; agent_version?: number | null } | null;
   agent: { id: string; name: string; app_definition?: { deliverFile?: unknown; exportTemplateId?: unknown } | null } | null;
+  /** 이 결과를 낸 일괄 실행(0087 — 비동기 연동이 맞춰 보는 번호). 일괄 실행이 아니면 없음 */
+  batchId?: string | null;
 }
 export type FinishPatch = { status: 'sent' | 'pending' | 'gave_up'; attempts: number; last_status: number | null; last_error: string | null; next_attempt_at?: string; sent_at?: string; receipt_ref?: string | null; receipt_url?: string | null };
 
@@ -202,7 +204,7 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
       const timestamp = String(Math.floor(deps.now() / 1000));
       const body = buildOutboundPayload({
         deliveryId: row.id, sentAt, app: { id: ctx.agent.id, name: ctx.agent.name },
-        run: { messageId: row.message_id, conversationId: ctx.message.conversation_id, completedAt: ctx.message.created_at },
+        run: { messageId: row.message_id, conversationId: ctx.message.conversation_id, completedAt: ctx.message.created_at, ...(ctx.batchId ? { batchId: ctx.batchId } : {}) },
         text: ctx.message.content,
         ...(file ? { file } : {}),
         ...(action.action ? { action: action.action } : {}),
@@ -257,16 +259,19 @@ export function outboundDeps(): OutboundDeps {
       return !error && Boolean(data?.length);
     },
     async load(row) {
-      const [endpoint, message, agent] = await Promise.all([
+      const [endpoint, message, agent, batchItem] = await Promise.all([
         supabaseAdmin.from('app_outbound_endpoints').select('url, secret_encrypted, organization_id, revoked_at, actions').eq('id', row.endpoint_id).maybeSingle(),
         supabaseAdmin.from('messages').select('content, conversation_id, created_at, role, source_references, agent_version').eq('id', row.message_id).maybeSingle(),
         supabaseAdmin.from('agents').select('id, name, app_definition').eq('id', row.agent_id).maybeSingle(),
+        // 일괄 실행의 줄이 낸 결과면 그 묶음 번호(0087 색인) — 못 읽으면 번호 없이 보낸다
+        supabaseAdmin.from('app_batch_items').select('batch_id').eq('message_id', row.message_id).limit(1).maybeSingle(),
       ]);
       if (endpoint.error || message.error || agent.error) return null;
       return {
         endpoint: endpoint.data as DeliveryContext['endpoint'],
         message: message.data as DeliveryContext['message'],
         agent: agent.data as DeliveryContext['agent'],
+        batchId: batchItem.error ? null : ((batchItem.data as { batch_id?: string } | null)?.batch_id ?? null),
       };
     },
     async finish(id, patch) {

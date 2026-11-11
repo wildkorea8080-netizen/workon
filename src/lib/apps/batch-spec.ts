@@ -12,6 +12,8 @@ export const BATCH_MAX_ATTEMPTS = 2;
 /** `running`으로 이만큼 지나면 실행기가 끊긴 것으로 보고 다시 차지한다 */
 export const BATCH_STALE_MS = 15 * 60_000;
 export const BATCH_TITLE_PREFIX = '[일괄] ';
+/** 연동이 박아 둔 앱 판과 지금 판이 다를 때(비동기 연동 0087) — 기다리는 연동의 409와 같은 뜻 */
+export const BATCH_APP_VERSION_CHANGED = '앱 설정이 바뀌어 이 연동으로는 실행할 수 없습니다.';
 export const BATCH_FILES_UNSUPPORTED = "파일 첨부가 꼭 필요한 앱은 '파일마다 한 건'으로 일괄 실행해 주세요.";
 /** 파일마다 한 건(2026-11-10) — 한 번에 올릴 파일 수. 직원의 '보내지 않은 첨부' 상한(20)을 실행 때 다시 붙일 몫까지 남기려고 10 */
 export const BATCH_MAX_FILES = 10;

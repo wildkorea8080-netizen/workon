@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { handleWebhookCall, webhookDeps } from '@/lib/apps/webhooks';
-import { IDEMPOTENCY_HEADER, WEBHOOK_MAX_BODY_WITH_FILES_BYTES } from '@/lib/apps/webhook-spec';
+import { IDEMPOTENCY_HEADER, PREFER_HEADER, WEBHOOK_MAX_BODY_WITH_FILES_BYTES } from '@/lib/apps/webhook-spec';
 import { logSystem } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
-// 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 호출한 쪽은 끝날 때까지 기다린다
+// 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 호출한 쪽은 끝날 때까지 기다린다(비동기 `async`면 202로 바로 돌려준다, 0087)
 export const maxDuration = 300;
 
 /**
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: { message: '보내는 내용이 너무 큽니다(파일 합계 3MB·입력 64KB까지).' } }, { status: 413 });
   }
   try {
-    const result = await handleWebhookCall(webhookDeps(), { authorization: request.headers.get('authorization'), idempotencyKey: request.headers.get(IDEMPOTENCY_HEADER), bodyText: await request.text() });
+    const result = await handleWebhookCall(webhookDeps(), { authorization: request.headers.get('authorization'), idempotencyKey: request.headers.get(IDEMPOTENCY_HEADER), prefer: request.headers.get(PREFER_HEADER), bodyText: await request.text() });
     return NextResponse.json(result.body, { status: result.status, headers: result.headers });
   } catch (error) {
     await logSystem({ level: 'error', category: 'api', message: '앱 연동 호출 처리 실패', details: { error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' } });
