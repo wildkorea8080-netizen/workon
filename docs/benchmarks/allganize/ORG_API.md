@@ -9,8 +9,11 @@
 | `/api/v1/adoption-report?month=YYYY-MM` | `adoption` | 월별 도입 현황과 전월(관리자 통계 '월별 도입 현황'과 같은 DB 함수 `adoption_report`·같은 줄 `adoptionRows`) |
 | `/api/v1/adoption-report/departments?month=YYYY-MM` | `adoption` | 부서별 도입 현황(`adoption_by_department` — 부서마다 자기 부서 기록만) |
 | `/api/v1/usage-summary?by=agent\|department&from=YYYY-MM-DD&to=YYYY-MM-DD` | `usage` | 비서별·부서별 이용통계(`usage_summary` — 횟수·토큰·원가·모델·활동). 기간은 한국 날짜, 비우면 최근 30일, 366일까지 |
+| `/api/v1/feedback-summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | `usage` | (2026-11-11, 0086) 답변 평가 요약 — 관리자 통계 '답변 평가'와 같은 `loadFeedbackSummary`: 전체·비서별 도움됨·아쉬움·도움됨 비율·이유 수·줄인 시간(자기 신고, 분)·고른 답 수. 기간 규칙은 관리자 화면과 같다(비우면 최근 30일, 1년까지, 없는 날짜 400) |
+| `/api/v1/app-runs` | `usage` | (2026-11-11, 0086) 입력형 앱 실행 현황(최근 30일) — 관리자 통계와 같은 `loadAppRunOverview`(0046 `app_run_states`): 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름·마지막 중단 시각. 개인 앱은 이름 없이 한 묶음 |
+| `/api/v1/budget` | `usage` | (2026-11-11, 0086) 예산 소진 현황 — 차단·알림과 같은 `organizationBudgetStatus`(연간 정액이면 계약 기간 금액 `unit: krw`, 종량제면 이번 달 토큰 `unit: tokens`, 한도가 없으면 `organization: null`)·`departmentBudgetStatuses`(월 한도를 둔 부서의 이번 달 사용액, 집계 못 한 부서 수 `departmentsFailed`). **개인 한도는 싣지 않는다** |
 
-- **숫자만**: 직원 이름·이메일·질문 원문·답변 글·결과 파일은 어느 주소에도 없다. **직원별 이용통계(`by=user`)는 400**이다. 나만의 비서는 직원이 붙인 이름 대신 `(나만의 비서)`로 보인다. 비서 아이콘 같은 화면 칸은 뺀다.
+- **숫자만**: 직원 이름·이메일·질문 원문·답변 글·결과 파일은 어느 주소에도 없다(앱 실행 현황의 앱·단계 이름, 부서 이름은 관리자 화면과 같이 싣는다). **직원별 이용통계(`by=user`)는 400**이다. 나만의 비서는 직원이 붙인 이름 대신 `(나만의 비서)`로 보인다. 비서 아이콘 같은 화면 칸은 뺀다.
 - 응답은 `{ ok: true, data }`, 오류는 `{ ok: false, error: { message } }`, 모두 `Cache-Control: no-store`. `month`가 없으면 이번 달, 아직 오지 않은 달은 400.
 - 숫자의 범위는 **키를 만든 기관 전체 관리자의 관리 범위**(= 기관의 모든 부서)다. 관리자 화면과 같은 셈이라 두 곳의 숫자가 갈리지 않는다.
 
@@ -36,6 +39,10 @@
 
 `org_api_keys`(키 — 범위 CHECK `scopes <@ {adoption, usage}`·1~2개, 해시 꼴, 회수 짝, 이름 1~40자, 만료가 만든 때 뒤)·`org_api_key_calls`(호출 기록 — 끝점 셋·상태 코드 CHECK, 키를 지우면 함께 지움)·`org_api_key_claim(text, timestamptz, integer)`. 추가만, 여러 번 적용해도 안전, 두 표 모두 RLS 켜고 정책 없음, 함수 실행 권한 service_role만. **코드 배포 전에 적용** — 없으면 키 화면과 `/api/v1/*`만 실패한다(다른 기능은 이 표를 읽지 않는다).
 
+## 마이그레이션 0086 (2026-11-11)
+
+호출 기록 `org_api_key_calls.endpoint`의 CHECK를 끝점 여섯(`feedback-summary`·`app-runs`·`budget` 추가)으로 넓힌다 — 옛 CHECK를 이름과 상관없이 찾아 지우고 다시 건다. 키의 범위(`scopes`)는 그대로(`usage` 키가 새 셋을 읽는다). 여러 번 적용해도 안전. 코드 배포 전이 좋다 — 없으면 새 끝점 호출은 돌지만 호출 기록만 빠진다(기록 실패는 응답을 바꾸지 않음).
+
 ## 하지 않은 것
 
 - 쓰기·대화·문서·사용자 API는 없다(읽기 전용 숫자만). SSO(SAML/OIDC)·그룹 매핑도 그대로 남은 일이다.
@@ -46,4 +53,5 @@
 
 - `tests/org-api.test.ts` — 키 꼴·해시·Bearer(연동 토큰 접두는 아님), 만들기 검사(이름 다듬기·범위 순서·기간), 이용통계 기간(최근 30일·날짜 꼴·366일), 화면 꼴(해시 없음·만료), 호출 확인 여덟 경우(성공·관리 범위·무효 401은 기록 없음·하루 상한 429 기록·IP 밖/모름 403·범위 밖 403·만든 관리자 일곱 경우 403·입력 오류·집계 실패 500·기록 실패해도 응답), 나만의 비서 이름 숨김·직원별 400, 기관 전체 관리자만, 라우트 셋이 같은 확인·no-store, 관리 라우트 관리자 확인·대리 접근·해시 안 실음, 화면이 잎 파일만 가져옴, 0075 꼴
 - `tests/org-api-db.test.ts`(시험 DB) — 무효 한 사유·키 정보·사용 기록, 하루 상한 한국 날짜·다음 날 0부터, 동시 호출 하나만, CHECK 일곱, 호출 기록 CHECK·연쇄 삭제, anon·authenticated 거절
-- `tests/route-auth.test.ts`에 `/v1/*` 셋을 이유와 함께 공개 라우트로 적었다
+- `tests/route-auth.test.ts`에 `/v1/*` 여섯을 이유와 함께 공개 라우트로 적었다
+- `tests/org-api-more.test.ts`(2026-11-11) — 새 셋의 범위·주소, 답변 평가 기간(관리자 화면과 같은 규칙·없는 날짜 400·읽지 않음), 앱 실행 현황이 관리자 라우트와 같은 읽기 함수, 예산(단위·키 범위 부서만·집계 못 한 부서 수·개인 한도와 내부 열쇠 없음·한도 없으면 null), 0086 CHECK(시험 DB — 새 셋 받고 모르는 끝점 거절)
