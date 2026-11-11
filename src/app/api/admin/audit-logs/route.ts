@@ -88,6 +88,7 @@ const SECURITY_LABEL: Record<string, string> = {
   app_schedule_paused: '앱 예약 멈춤(관리자)',
   app_schedule_unlocked: '앱 예약 잠금 풀기(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
+  app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_webhooks_org_disabled: '기관 외부 연동 끄기(관리자)',
   app_webhooks_org_enabled: '기관 외부 연동 켜기(관리자)',
   app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)',

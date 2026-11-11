@@ -1,5 +1,7 @@
 import { SCHEDULE_OVERDUE_MS, describeSchedule, specOfRow, type AppScheduleFrequency } from '@/lib/apps/schedule-spec';
 import type { WebhookSwitchView } from '@/lib/apps/webhook-spec';
+/** 기관의 일괄 실행 한 번 최대 줄 수(0084) — batch-limit.ts의 보기와 같은 꼴(화면이 서버 모듈을 가져오지 않게 여기 둔다) */
+export type AdminBatchLimitView = { maxRows: number | null; effective: number; canChange: boolean };
 
 /**
  * 앱 예약·연동 관리자 통제의 순수 규칙(0050) — 화면과 서버가 함께 쓴다. DB·저장소를 모른다.
@@ -75,7 +77,7 @@ export type AdminBatchView = {
 /** 예약 실행기 상태(`schedule-health.ts`) — 실행기 도장은 서비스 전체, 숫자는 관리 범위 안 예약만. 읽지 못하면 null */
 export type AdminRunnerStatus = { alive: boolean; lastRunAt: string | null; overdueCount: number; stuckClaimCount: number; problems: string[] };
 /** `webhookSwitch`·`scheduleSwitch` — 기관 전체 외부 연동(0068)·예약(0070) 스위치. 읽지 못하면 null(목록은 보인다) */
-export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; batches: AdminBatchView[]; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null; scheduleSwitch: WebhookSwitchView | null };
+export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; batches: AdminBatchView[]; batchLimit?: AdminBatchLimitView | null; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null; scheduleSwitch: WebhookSwitchView | null };
 
 const appLabel = (agent: AgentJoin | null) => (!agent ? '삭제된 앱' : agent.tier === 'personal' ? PERSONAL_APP_LABEL : agent.name);
 const ownerLabel = (owner: UserJoin | null) => (!owner ? '알 수 없음' : owner.deleted_at ? `${owner.full_name ?? '이름 없음'}(탈퇴)` : owner.full_name ?? '이름 없음');

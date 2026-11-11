@@ -21,12 +21,14 @@ import { logSystem } from '@/lib/logger';
 import { APP_URL } from '@/lib/config';
 import { batchFinishedMail, isMailConfigured, sendBatchFinishedEmail } from '@/lib/mailer';
 import { safeText } from '@/lib/xlsx-export';
+import { OUTBOUND_STATUS_LABELS, type OutboundStatus } from './outbound/spec';
 import {
   BATCH_FILES_NOT_ALLOWED, BATCH_FILES_UNSUPPORTED, BATCH_FILE_ROWS_MISMATCH, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_MAX_RUNNING,
   BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, normalizeBatchName, pairRowsWithFiles, parseBatchAttachmentIds,
   type BatchFile, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
 } from './batch-spec';
 import { copyAttachmentsTo, defaultScheduleFileIo, discardAttachments, removeScheduleFileObjects, type ScheduleFileIo } from './schedule-files';
+import { readBatchLimit } from './batch-limit';
 
 type Fail = { ok: false; status: number; message: string };
 const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_at, finished_at';
@@ -64,6 +66,10 @@ export async function createBatch(actor: ActorScope, body: unknown): Promise<{ o
   });
   if (errors.length) return { ok: false, status: 400, message: errors[0], errors: errors.slice(0, 10) };
   const inputs = fileMode ? pairRowsWithFiles(checkedRows, attachmentIds.length)!.map((row) => ({ ...row })) : checkedRows;
+  // 기관이 정한 한 번 최대 줄 수(0084) — 읽지 못하면 만들지 않는다(관리자가 낮춘 상한을 넘지 않게)
+  let orgLimit: number | null;
+  try { orgLimit = await readBatchLimit(actor.organizationId); } catch { return { ok: false, status: 503, message: '일괄 실행 설정을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }; }
+  if (orgLimit !== null && inputs.length > orgLimit) return { ok: false, status: 400, message: `기관이 정한 일괄 실행 상한은 한 번에 ${orgLimit}줄입니다(지금 ${inputs.length}줄). 나눠서 실행해 주세요.` };
   const name = normalizeBatchName(b.name) ?? `${agent.name.slice(0, 60)} 일괄 실행`;
   const { count, error: countError } = await supabaseAdmin.from('app_batches').select('id', { count: 'exact', head: true }).eq('user_id', actor.userId).eq('status', 'running');
   if (countError) return { ok: false, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
@@ -408,29 +414,48 @@ function batchNoticeIo(): BatchNoticeIo {
 
 // ── 결과 엑셀 ─────────────────────────────────────────────────────
 
-/** 결과 엑셀 한 시트 — 번호·(파일마다 한 건이면 파일)·입력 항목들·상태·결과 글·오류·대화 주소(값만, 수식 주입 막음) */
+/** 줄의 외부 보내기(0076) 상태·받는 쪽 접수 번호(0080) — 결과 엑셀 '보내기'·'접수 번호' 열 */
+export type BatchDeliveryCell = { status: OutboundStatus; receiptRef: string | null };
+
+/** 결과 엑셀 한 시트 — 번호·(파일마다 한 건이면 파일)·입력 항목들·상태·결과 글·오류·대화 주소·(보낸 줄이 있으면 보내기·접수 번호)(값만, 수식 주입 막음) */
 export async function batchWorkbook(input: {
   name: string; fields: Array<{ key: string; label: string }>; origin: string;
-  items: Array<BatchItemView & { result: string | null }>;
+  items: Array<BatchItemView & { result: string | null; delivery?: BatchDeliveryCell | null }>;
 }): Promise<Buffer> {
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   workbook.title = input.name;
   const sheet = workbook.addWorksheet('결과');
   const withFile = input.items.some((it) => it.fileName);
-  sheet.addRow(['번호', ...(withFile ? ['파일'] : []), ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화']);
+  const withDelivery = input.items.some((it) => it.delivery);
+  sheet.addRow(['번호', ...(withFile ? ['파일'] : []), ...input.fields.map((f) => safeText(f.label)), '상태', '결과', '오류', '대화', ...(withDelivery ? ['보내기', '접수 번호'] : [])]);
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   for (const it of input.items) {
     sheet.addRow([
       it.position, ...(withFile ? [safeText(it.fileName ?? '')] : []), ...input.fields.map((f) => safeText(it.inputs[f.key] ?? '')), BATCH_ITEM_STATUS_LABELS[it.status],
       safeText(it.result ?? ''), safeText(it.error ?? ''), it.conversationId ? `${input.origin}/chat?conv=${it.conversationId}` : '',
+      ...(withDelivery ? [it.delivery ? OUTBOUND_STATUS_LABELS[it.delivery.status] ?? it.delivery.status : '', safeText(it.delivery?.receiptRef ?? '')] : []),
     ]);
   }
   const lead = withFile ? 1 : 0;
   sheet.columns.forEach((col, i) => { col.width = i === 0 ? 6 : i === input.fields.length + lead + 2 ? 80 : 20; });
   sheet.getColumn(input.fields.length + lead + 3).alignment = { wrapText: true, vertical: 'top' };
   return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+/** 엑셀에 넣을 줄마다 보내기 상태·접수 번호 — 만든 사람의 보내기 기록만(그 실행의 답변 메시지로 맞춤). 못 읽으면 null(열 없이) */
+export async function loadBatchDeliveries(userId: string, batchId: string): Promise<Map<number, BatchDeliveryCell> | null> {
+  const { data, error } = await supabaseAdmin.from('app_batch_items').select('position, message_id').eq('batch_id', batchId).not('message_id', 'is', null).limit(BATCH_MAX_ROWS);
+  if (error) return null;
+  const rows = (data ?? []) as Array<{ position: number; message_id: string }>;
+  if (!rows.length) return new Map();
+  const { data: deliveries, error: dErr } = await supabaseAdmin.from('app_outbound_deliveries').select('message_id, status, receipt_ref, created_at')
+    .eq('user_id', userId).in('message_id', rows.map((r) => r.message_id)).order('created_at', { ascending: true });
+  if (dErr) return null;
+  // 같은 답변을 두 곳으로 보냈으면 나중 기록
+  const byMessage = new Map(((deliveries ?? []) as Array<{ message_id: string; status: OutboundStatus; receipt_ref: string | null }>).map((d) => [d.message_id, { status: d.status, receiptRef: d.receipt_ref ?? null }]));
+  return new Map(rows.filter((r) => byMessage.has(r.message_id)).map((r) => [r.position, byMessage.get(r.message_id)!]));
 }
 
 /** 엑셀에 넣을 줄마다 결과 글 — 그 실행의 답변 메시지(만든 사람의 대화만) */

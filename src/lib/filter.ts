@@ -16,6 +16,8 @@ export type SecurityEventType =
   | 'app_schedule_unlocked'
   /** 관리자가 직원의 앱 일괄 실행을 멈춤 (2026-11-10) */
   | 'app_batch_stopped'
+  /** 기관 전체 관리자가 일괄 실행 한 번 최대 줄 수를 바꿈 (0084) */
+  | 'app_batch_limit_changed'
   | 'app_webhooks_org_disabled'
   | 'app_webhooks_org_enabled'
   | 'app_schedules_org_disabled'

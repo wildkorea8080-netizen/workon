@@ -6,6 +6,7 @@ import { readScheduleSwitch, readWebhookSwitch, webhookSwitchView } from '@/lib/
 import { notifyAutomationOwner } from '@/lib/apps/automation-notice';
 import { removeBatchFiles } from '@/lib/apps/batches';
 import { pagedRows } from '@/lib/paged-select';
+import { batchLimitView, readBatchLimit } from '@/lib/apps/batch-limit';
 import {
   ADMIN_AUTOMATION_LIMIT, ADMIN_BATCH_LIMIT, ADMIN_UNLOCKED_REASON, adminBatchStopReason, adminBatchView, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
   type AdminAutomationList, type AdminBatchCounts, type AdminBatchRow, type AdminBatchView, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
@@ -42,6 +43,7 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
     .catch(() => null);
   const switchPromise = readWebhookSwitch(actor.organizationId).then((s) => webhookSwitchView(s, actor)).catch(() => null);
   const scheduleSwitchPromise = readScheduleSwitch(actor.organizationId).then((s) => webhookSwitchView(s, actor)).catch(() => null);
+  const batchLimitPromise = readBatchLimit(actor.organizationId).then((v) => batchLimitView(v, actor)).catch(() => null);
   const [webhooks, schedules, departments, batches] = await Promise.all([
     supabaseAdmin.from('app_webhooks').select(WEBHOOK_SELECT).eq('organization_id', actor.organizationId)
       .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_AUTOMATION_LIMIT + 1),
@@ -68,6 +70,7 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
       runner: await runnerPromise,
       webhookSwitch: await switchPromise,
       scheduleSwitch: await scheduleSwitchPromise,
+      batchLimit: await batchLimitPromise,
     },
   };
 }

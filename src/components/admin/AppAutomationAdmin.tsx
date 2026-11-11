@@ -142,6 +142,26 @@ export default function AppAutomationAdmin() {
       (item) => setData((d) => (d ? { ...d, schedules: d.schedules.map((x) => (x.id === item.id ? item : x)) } : d)));
   }
 
+  async function changeBatchLimit() {
+    const current = data?.batchLimit;
+    if (!current) return;
+    const raw = window.prompt(`일괄 실행 한 번에 실행할 최대 줄 수(1~100, 비우면 기본 100줄). 지금: ${current.maxRows ?? '기본 100'}줄. 이미 만든 일괄 실행은 그대로 돕니다.`, current.maxRows ? String(current.maxRows) : '');
+    if (raw === null) return;
+    const trimmed = raw.trim();
+    const value = trimmed === '' ? null : Number(trimmed);
+    if (value !== null && (!Number.isInteger(value) || value < 1 || value > 100)) { window.alert('1~100 사이 정수로 적어 주세요(비우면 기본 100줄).'); return; }
+    const reason = askReason(`일괄 실행 상한을 ${value ?? '기본 100'}줄로 바꿀까요?`);
+    if (!reason) return;
+    setBusy('batch-limit'); setError(null);
+    try {
+      const res = await fetch('/api/admin/app-automations/batch-limit', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ max_rows: value, reason }) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) setError(body?.error?.message ?? '처리하지 못했습니다.');
+      else setData((d) => (d ? { ...d, batchLimit: body.data } : d));
+    } catch { setError('처리하지 못했습니다.'); }
+    setBusy(null);
+  }
+
   function stopBatch(b: AdminBatchView) {
     const reason = askReason(`${b.ownerName}의 '${b.name}' 일괄 실행을 멈출까요? 남은 ${b.pending}줄은 실행하지 않습니다(실행 중인 줄은 끝까지 갑니다). 되돌릴 수 없습니다.`);
     if (!reason) return;
@@ -256,6 +276,12 @@ export default function AppAutomationAdmin() {
 
       <div>
         <h2 className="text-lg font-semibold text-slate-900">앱 일괄 실행</h2>
+        {data.batchLimit && (
+          <p className="mt-1 text-sm text-slate-700">
+            기관 상한: 한 번에 <strong>{data.batchLimit.effective}줄</strong>{data.batchLimit.maxRows === null ? '(기본)' : ''}
+            {data.batchLimit.canChange && <button type="button" disabled={busy === 'batch-limit'} onClick={() => void changeBatchLimit()} className="ml-2 text-xs text-[#003087] underline disabled:opacity-40">바꾸기</button>}
+          </p>
+        )}
         <p className="text-sm text-slate-500 mt-0.5 mb-3">직원이 여러 건(표·파일)을 한 번에 맡긴 실행입니다(최근 50개). 줄마다 AI 사용량이 듭니다. 입력·결과는 보이지 않습니다. 멈추면 남은 줄은 실행하지 않고 되돌릴 수 없습니다(직원이 새로 만듭니다).</p>
         {batches.length ? (
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
