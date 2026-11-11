@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-11(밤): 예약 지금 실행·다시 보내기·마치지 못한 줄 다시 실행·부서별 줄인 시간(0085)
+
+- 2026-11-11 21:16 KST 배포 `dpl_8zi6sUATcdTpaMcNGDm7YsnemviA`(커밋 `1091e1d`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 작은 항목 넷 묶음). 되돌릴 때는 직전 `dpl_G5H7uyRUMkNQhAg55Lr1TRGHbZ4D`(c551c55)로 promote한다. 0085는 함수에 칸 하나를 더한 것이라(옛 코드는 읽지 않음) 그대로 둬도 된다.
+- **운영 DB 먼저**: `npm run db:migrate -- 0085`(21:1x KST). 읽기 전용 확인 — `adoption_by_department` 정의에 `'saved_minutes'`·`'cost_krw'` 둘 다, 같은 이름 함수 하나, 실행 권한 anon·authenticated 없음·service_role 있음, 두 기관으로 실제 호출해 모든 부서 줄에 `saved_minutes`(합 0).
+- 들어간 커밋: `715b4b7`(직전 배포 기록), `a0b1ae3` 앱 예약 '지금 한 번 실행'(켜짐·잠금 없음·실행기가 잡지 않음·10분 간격 — [앱 예약](APP_SCHEDULES.md)), 그만둔 결과 보내기의 직원 '다시 보내기'(시도 1번 이상·7일 안·보낼 곳 쓰임, 보안 로그 low — [결과 보내기](APP_OUTBOUND.md)), 일괄 실행 '마치지 못한 줄 다시 실행'(만들기와 같은 검사, 파일 줄 제외 — [일괄 실행](APP_BATCHES.md)), 부서별 도입 현황 '줄인 시간' 열(0085 — [도입 현황](ADOPTION_REPORT.md)), `1091e1d` 문서.
+- **배포 전**: 가지 Preview(`1091e1d`, `workon-6sbyxc4rq`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 240파일 3,437개 통과(빠진 파일 없음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/apps/run`·`/apps/schedules` 200, `/admin/stats` 307, `PATCH /api/apps/schedules/[id]`(run_now)·`POST /api/apps/outbound-deliveries/[id]`·`POST /api/apps/batches/[id]`·`GET /api/v1/adoption-report/departments` 401, `GET /api/admin/adoption-report/departments` 403. pg_cron 호출 200(21:15~21:18 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 ① 앱 예약 '지금 한 번 실행' 뒤 5분 안에 실행되고 다음 실행 시각이 원래 일정으로 돌아오는지 ② 그만둔 보내기에 '다시 보내기'가 보이고 받는 쪽에 다시 오는지 ③ 실패 줄이 있는 일괄 실행에서 '마치지 못한 줄 다시 실행'으로 새 묶음이 생기는지 ④ 관리자 '부서별 보기'·CSV의 '줄인 시간' 열(브라우저로 보지 않았다).
+
 ## 2026-11-11(저녁): 도입 현황 줄인 시간(0083)·일괄 실행 기관 상한(0084)·결과 엑셀 보내기 열
 
 - 2026-11-11 17:24 KST 배포 `dpl_G5H7uyRUMkNQhAg55Lr1TRGHbZ4D`(커밋 `c551c55`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 작은 항목 셋 묶음). 되돌릴 때는 직전 `dpl_3Rd8DR1hd7Y9DmX9Rk5fcpPEQbuA`(7e5d695)로 promote한다. 0083은 함수에 칸 둘을 더한 것이고(옛 코드는 읽지 않음), 0084는 칸 하나 추가라 그대로 둬도 된다(옛 코드는 상한을 보지 않음).
