@@ -47,6 +47,9 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/v1/adoption-report', '기관 통계 읽기 API(0075) — 기관의 다른 시스템이 부른다. 기관 API 키(Bearer, DB에는 SHA-256만)가 유일한 자격이고 차지 함수가 유효·하루 상한을 원자적으로 본 뒤 기관 접속 허용 IP·키 범위·키를 만든 관리자가 아직 기관 전체 관리자인지를 다시 본다. 숫자만 돌려준다(직원·원문 없음)'],
   ['/v1/adoption-report/departments', '위와 같은 기관 통계 읽기 API(부서별 도입 현황) — 같은 확인(handleOrgApiCall)'],
   ['/v1/usage-summary', '위와 같은 기관 통계 읽기 API(비서별·부서별 이용통계, 직원별은 거절) — 같은 확인(handleOrgApiCall)'],
+  ['/v1/feedback-summary', '위와 같은 기관 통계 읽기 API(답변 평가 요약, 0086) — 같은 확인(handleOrgApiCall)'],
+  ['/v1/app-runs', '위와 같은 기관 통계 읽기 API(입력형 앱 실행 현황 — 단계 이름·상태만, 0086) — 같은 확인(handleOrgApiCall)'],
+  ['/v1/budget', '위와 같은 기관 통계 읽기 API(기관·부서 예산 소진, 0086) — 같은 확인(handleOrgApiCall)'],
   ['/cron/noda-events', 'Vercel 예약 작업이 부르는 곳(하루 한 번 놓친 NODA 웹훅 다시 받기). CRON_SECRET Bearer 상수 시간 비교가 자격이고, 하는 일은 NODA 일 장부를 웹훅과 같은 조건부 처리로 반영하는 것뿐'],
 ]);
 

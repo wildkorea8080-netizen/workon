@@ -82,8 +82,10 @@ export async function loadConversationFeedback(userId: string, conversationId: s
 export function feedbackPeriod(from: string | null, to: string | null, now = new Date()): { from: string; to: string; fromIso: string; toIso: string } | null {
   const today = new Date(now.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
   const end = to ?? today;
-  const start = from ?? new Date(Date.parse(`${end}T00:00:00Z`) - 29 * 86400_000).toISOString().slice(0, 10);
-  const valid = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  const start = from ?? (Number.isFinite(endMs) ? new Date(endMs - 29 * 86400_000).toISOString().slice(0, 10) : '');
+  // 없는 날짜(2026-13-01)는 Date가 Invalid라 toISOString이 던진다 — 먼저 걸러 400으로(전에는 503이었다)
+  const valid = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
   if (!valid(start) || !valid(end) || start > end) return null;
   const days = (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400_000 + 1;
   if (days > FEEDBACK_MAX_DAYS) return null;

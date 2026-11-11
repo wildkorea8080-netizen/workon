@@ -21,15 +21,19 @@ export type OrgApiScope = 'adoption' | 'usage';
 export const ORG_API_SCOPES: OrgApiScope[] = ['adoption', 'usage'];
 export const ORG_API_SCOPE_LABELS: Record<OrgApiScope, string> = {
   adoption: '도입 현황(월별·부서별)',
-  usage: '이용통계(비서별·부서별)',
+  usage: '이용통계(비서별·부서별)·답변 평가·앱 실행·예산',
 };
 
-export type OrgApiEndpoint = 'adoption-report' | 'adoption-departments' | 'usage-summary';
+export type OrgApiEndpoint = 'adoption-report' | 'adoption-departments' | 'usage-summary' | 'feedback-summary' | 'app-runs' | 'budget';
 /** 끝점 → 필요한 범위·주소 — 화면 안내와 서버가 같은 표를 본다 */
 export const ORG_API_ENDPOINTS: Record<OrgApiEndpoint, { scope: OrgApiScope; path: string; label: string }> = {
   'adoption-report': { scope: 'adoption', path: '/api/v1/adoption-report?month=2026-11', label: '월별 도입 현황' },
   'adoption-departments': { scope: 'adoption', path: '/api/v1/adoption-report/departments?month=2026-11', label: '부서별 도입 현황' },
   'usage-summary': { scope: 'usage', path: '/api/v1/usage-summary?by=agent&from=2026-10-01&to=2026-10-31', label: '이용통계(by=agent|department)' },
+  // (2026-11-11, 0086) 관리자 통계 화면의 숫자 셋 — 같은 읽기 함수, 질문·답변·결과 글·직원 없음
+  'feedback-summary': { scope: 'usage', path: '/api/v1/feedback-summary?from=2026-10-01&to=2026-10-31', label: '답변 평가(비서별 도움됨·아쉬움·줄인 시간)' },
+  'app-runs': { scope: 'usage', path: '/api/v1/app-runs', label: '입력형 앱 실행 현황(최근 30일)' },
+  'budget': { scope: 'usage', path: '/api/v1/budget', label: '예산 소진 현황(기관·부서 월 한도)' },
 };
 
 export const ORG_API_INVALID_TOKEN = 'API 키가 올바르지 않거나 회수·만료됐습니다.';

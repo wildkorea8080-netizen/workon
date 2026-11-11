@@ -9,6 +9,9 @@ import { LEGACY_PRICING_MODEL_ID } from '@/lib/models';
 import { pagedRows } from '@/lib/paged-select';
 import { parseUsageGroups, usageRowsFromGroups } from '@/lib/usage-summary';
 import { kstDay } from '@/lib/kst-time';
+import { feedbackPeriod, loadFeedbackSummary } from '@/lib/message-feedback';
+import { loadAppRunOverview } from '@/lib/apps/run-overview-load';
+import { departmentBudgetStatuses, organizationBudgetStatus } from '@/lib/usage-limit';
 import { parseUsagePeriod } from './spec';
 import type { OrgApiContext } from './keys';
 
@@ -89,6 +92,43 @@ export async function usageSummary(ctx: OrgApiContext, params: { by: string | nu
       totalCount: rows.reduce((s, r) => s + r.count, 0),
       totalCostKrw: Math.round(rows.reduce((s, r) => s + r.costKrw, 0) * 100) / 100,
       rows,
+    },
+  };
+}
+
+// ── (2026-11-11, 0086) 답변 평가·앱 실행 현황·예산 — 관리자 통계 화면과 같은 읽기 함수 ─────────────────────────
+
+/** 답변 평가 요약 — `?from=&to=`(한국 날짜, 끝 날 포함, 비우면 최근 30일, 1년까지). 비서별 도움됨·아쉬움·이유 수·줄인 시간(자기 신고)만, 나만의 비서는 이름 없이 */
+export async function feedbackSummaryReport(ctx: OrgApiContext, params: { from: string | null; to: string | null }, nowMs = Date.now()): Promise<Out> {
+  const period = feedbackPeriod(params.from, params.to, new Date(nowMs));
+  if (!period) return { status: 400, message: '기간은 2026-11-01처럼 적고, 1년 안으로 정해 주세요.' };
+  const summary = await loadFeedbackSummary({ organizationId: ctx.organizationId, departmentIds: ctx.departmentIds }, period);
+  return { data: { from: period.from, to: period.to, ...summary } };
+}
+
+/** 입력형 앱 실행 현황(최근 30일) — 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름. 입력·결과·실행한 사람 없음, 개인 앱은 이름 없이 한 묶음 */
+export async function appRunsReport(ctx: OrgApiContext, nowMs = Date.now()): Promise<Out> {
+  return { data: await loadAppRunOverview(ctx.organizationId, ctx.departmentIds, nowMs) };
+}
+
+/**
+ * 예산 소진 현황 — 기관(연간 정액이면 계약 기간 금액, 종량제면 이번 달 토큰)과 월 한도를 둔 부서의 이번 달 사용액.
+ * 판정 기준은 차단·알림과 같은 함수(`organizationBudgetStatus`·`departmentBudgetStatuses`). 한도가 없으면 `organization: null`. 개인 한도는 싣지 않는다
+ */
+export async function budgetReport(ctx: OrgApiContext): Promise<Out> {
+  const [org, depts] = await Promise.all([organizationBudgetStatus(ctx.organizationId), departmentBudgetStatuses(ctx.organizationId)]);
+  const scope = new Set(ctx.departmentIds);
+  return {
+    data: {
+      organization: org ? {
+        kind: org.kind, unit: org.kind === 'annual_budget' ? 'krw' : 'tokens',
+        used: org.used, limit: org.limit, percent: org.percent, alertPercent: org.alertPercent, periodEndsAt: org.periodEndsAt,
+      } : null,
+      departments: depts.statuses.filter((d) => scope.has(d.departmentId)).map((d) => ({
+        departmentId: d.departmentId, name: d.departmentName, usedKrw: d.used, limitKrw: d.limit, percent: d.percent,
+      })),
+      /** 집계하지 못한 부서 수(그 부서는 빠짐) */
+      departmentsFailed: depts.failed,
     },
   };
 }

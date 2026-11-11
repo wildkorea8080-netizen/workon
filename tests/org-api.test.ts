@@ -168,11 +168,14 @@ describe('관리·라우트 (원본)', () => {
     expect(wholeOrgAdminProblem(actor({ isAdmin: false }))).toMatchObject({ status: 403 });
     expect(wholeOrgAdminProblem(null)).toMatchObject({ status: 403 });
   });
-  it('API 라우트 셋은 같은 확인(handleOrgApiCall)을 거치고 캐시하지 않는다', () => {
+  it('API 라우트 여섯은 같은 확인(handleOrgApiCall)을 거치고 캐시하지 않는다', () => {
     for (const [f, endpoint] of [
       ['src/app/api/v1/adoption-report/route.ts', 'adoption-report'],
       ['src/app/api/v1/adoption-report/departments/route.ts', 'adoption-departments'],
       ['src/app/api/v1/usage-summary/route.ts', 'usage-summary'],
+      ['src/app/api/v1/feedback-summary/route.ts', 'feedback-summary'],
+      ['src/app/api/v1/app-runs/route.ts', 'app-runs'],
+      ['src/app/api/v1/budget/route.ts', 'budget'],
     ]) {
       const src = readFileSync(f, 'utf8');
       expect(src).toContain('handleOrgApiCall(orgApiDeps()');
