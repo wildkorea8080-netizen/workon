@@ -3,6 +3,7 @@
 //
 // 기록된 사실만 센다(채택·완료·재작업). '절약한 시간'·'생산성 n%' 같은 추정치는 만들지 않는다 —
 // 실제 작업 시간을 재는 장치가 없는데 숫자를 만들면 보고서가 근거 없는 주장이 된다.
+// (2026-11-10, 0083) 직원이 답변 평가에서 스스로 고른 '줄인 시간'(0082)의 합은 싣는다 — **자기 신고**라고 이름과 읽는 법에 밝힌다(추정치를 만들지 않는다).
 
 export interface AdoptionStats {
   registered_users: number;
@@ -22,6 +23,9 @@ export interface AdoptionStats {
   completed_versions: number;
   /** (0066) 그 달에 완료한 작업의 만들기~검토 완료 시간 중앙값(시간). 완료 작업이 없거나 DB에 0066이 없으면 null('—') */
   completed_median_hours: number | null;
+  /** (0083) 직원이 고른 '줄인 시간'의 합(분)과 고른 답 수 — 자기 신고. DB에 0083이 없으면 null('—') */
+  saved_minutes_reported: number | null;
+  saved_reports: number | null;
 }
 
 const KEYS: (keyof AdoptionStats)[] = [
@@ -41,6 +45,10 @@ export function readAdoptionStats(raw: unknown): AdoptionStats {
   const hours = o.completed_median_hours;
   const h = hours === null || hours === undefined || hours === '' ? NaN : Number(hours);
   out.completed_median_hours = Number.isFinite(h) && h >= 0 ? h : null;
+  for (const k of ['saved_minutes_reported', 'saved_reports'] as const) {
+    const v = o[k] === null || o[k] === undefined || o[k] === '' ? NaN : Number(o[k]);
+    out[k] = Number.isFinite(v) && v >= 0 ? v : null;
+  }
   return out;
 }
 
@@ -82,7 +90,7 @@ export type AdoptionUnit = 'people' | 'count' | 'krw' | 'percent' | 'average' | 
 
 export interface AdoptionRow {
   key: string;
-  group: '채택' | '사용' | '업무 작업' | '비용';
+  group: '채택' | '사용' | '업무 작업' | '자기 신고' | '비용';
   label: string;
   unit: AdoptionUnit;
   value: number | null;
@@ -111,6 +119,8 @@ export function adoptionRows(current: AdoptionStats, previous: AdoptionStats): A
     { key: 'revision_requests', group: '업무 작업', label: 'AI 수정 요청', unit: 'count', ...both((s) => s.revision_requests), note: '작업실에서 AI에게 고쳐 달라고 한 횟수.' },
     { key: 'versions_per_completed', group: '업무 작업', label: '완료 작업당 판 수', unit: 'average', ...both((s) => ratio(s.completed_versions, s.tasks_completed)), note: '완료까지 만든 판의 평균(만들기 포함). 1에 가까울수록 처음 만든 그대로 완료했습니다.' },
     { key: 'completed_median_hours', group: '업무 작업', label: '완료까지 걸린 시간(중앙값)', unit: 'hours', ...both((s) => s.completed_median_hours), note: '그 달에 검토 완료한 작업의 만들기~검토 완료 사이 시간의 중앙값. 사람이 일한 시간이 아니라 기다린 시간도 들어 있습니다(추정치 아님).' },
+    { key: 'saved_hours_reported', group: '자기 신고', label: '직원이 고른 줄인 시간', unit: 'hours', ...both((s) => (s.saved_minutes_reported === null ? null : s.saved_minutes_reported / 60)), note: "'도움됨'을 누른 직원이 '이 답으로 줄인 시간'(10분~반나절)을 스스로 고른 값의 합. 측정하거나 추정한 시간이 아닙니다." },
+    { key: 'saved_reports', group: '자기 신고', label: '줄인 시간을 고른 답', unit: 'count', ...both((s) => s.saved_reports), note: '줄인 시간을 고른 답변 수(평가를 바꾼 때 기준).' },
     { key: 'cost_krw', group: '비용', label: 'AI 사용 금액', unit: 'krw', ...both((s) => s.cost_krw), note: '기록 시점 단가로 확정한 금액(옛 기록 중 금액 없는 것은 빠짐).' },
     { key: 'cost_per_active', group: '비용', label: '쓴 직원 1인당 금액', unit: 'krw', ...both((s) => ratio(s.cost_krw, s.active_users)), note: 'AI 사용 금액 ÷ AI를 쓴 직원.' },
   ];

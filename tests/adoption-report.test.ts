@@ -47,7 +47,7 @@ describe('지표', () => {
     expect(by.versions_per_completed).toMatchObject({ value: 1.5, previous: null });
     expect(by.cost_per_active).toMatchObject({ value: 5000, previous: 5000 });
     expect(rows.every((r) => r.note.length > 0)).toBe(true);
-    expect(new Set(rows.map((r) => r.group))).toEqual(new Set(['채택', '사용', '업무 작업', '비용']));
+    expect(new Set(rows.map((r) => r.group))).toEqual(new Set(['채택', '사용', '업무 작업', '자기 신고', '비용']));
     // 추정 시간·생산성 같은 줄은 없다
     expect(JSON.stringify(rows)).not.toMatch(/절약|시간 단축|생산성/);
   });
