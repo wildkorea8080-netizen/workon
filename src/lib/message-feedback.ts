@@ -55,21 +55,23 @@ export async function saveMessageFeedback(
       agent_version: typeof msg.agent_version === 'number' ? msg.agent_version : null,
       rating: input.rating,
       reason: input.reason,
+      // 줄인 시간(0082) — '도움됨'일 때만, 자기 신고
+      saved_minutes: input.rating === 'up' ? input.savedMinutes ?? null : null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'message_id' }
   );
   if (saveError) return { ok: false, status: 503, message: RETRY };
-  return { ok: true, feedback: { rating: input.rating, reason: input.reason } };
+  return { ok: true, feedback: { rating: input.rating, reason: input.reason, ...(input.rating === 'up' && input.savedMinutes ? { savedMinutes: input.savedMinutes } : {}) } };
 }
 
 /** 이 대화에서 내가 남긴 평가(답변 id → 평가). 못 읽으면 빈 값 — 대화 화면은 평가 없이 돈다 */
 export async function loadConversationFeedback(userId: string, conversationId: string): Promise<Record<string, MessageFeedback>> {
   try {
-    const { data, error } = await supabaseAdmin.from('message_feedback').select('message_id, rating, reason').eq('conversation_id', conversationId).eq('user_id', userId);
+    const { data, error } = await supabaseAdmin.from('message_feedback').select('message_id, rating, reason, saved_minutes').eq('conversation_id', conversationId).eq('user_id', userId);
     if (error) return {};
     const out: Record<string, MessageFeedback> = {};
-    for (const row of (data ?? []) as { message_id: string; rating: MessageFeedback['rating']; reason: MessageFeedback['reason'] }[]) out[row.message_id] = { rating: row.rating, reason: row.reason ?? null };
+    for (const row of (data ?? []) as { message_id: string; rating: MessageFeedback['rating']; reason: MessageFeedback['reason']; saved_minutes?: number | null }[]) out[row.message_id] = { rating: row.rating, reason: row.reason ?? null, ...(row.saved_minutes ? { savedMinutes: row.saved_minutes } : {}) };
     return out;
   } catch {
     return {};
@@ -97,10 +99,10 @@ export async function loadFeedbackSummary(
   scope: { organizationId: string; departmentIds: string[] | null },
   period: { fromIso: string; toIso: string }
 ): Promise<FeedbackSummary> {
-  const rows = await pagedRows<{ message_id: string; agent_id: string | null; rating: string; reason: string | null }>((a, b, withCount) => {
+  const rows = await pagedRows<{ message_id: string; agent_id: string | null; rating: string; reason: string | null; saved_minutes: number | null }>((a, b, withCount) => {
     let q = supabaseAdmin
       .from('message_feedback')
-      .select('message_id, agent_id, rating, reason', withCount ? { count: 'exact' } : undefined)
+      .select('message_id, agent_id, rating, reason, saved_minutes', withCount ? { count: 'exact' } : undefined)
       .eq('organization_id', scope.organizationId)
       .gte('updated_at', period.fromIso)
       .lt('updated_at', period.toIso);

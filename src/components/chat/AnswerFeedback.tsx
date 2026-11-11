@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FEEDBACK_REASONS, type FeedbackReason, type MessageFeedback } from '@/lib/message-feedback-spec';
+import { FEEDBACK_REASONS, FEEDBACK_SAVED_MINUTE_CHOICES, type FeedbackReason, type MessageFeedback } from '@/lib/message-feedback-spec';
 
 /**
  * 답변 평가(2026-11-05, 0064) — '도움됨 / 아쉬움', 아쉬우면 정해 둔 이유 하나. 다시 누르면 지운다.
@@ -21,7 +21,7 @@ export default function AnswerFeedback({ messageId, initial }: { messageId: stri
       const res = await fetch(`/api/messages/${encodeURIComponent(messageId)}/feedback`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next ? { rating: next.rating, reason: next.reason } : { rating: null }),
+        body: JSON.stringify(next ? { rating: next.rating, reason: next.reason, ...(next.rating === 'up' && next.savedMinutes ? { saved_minutes: next.savedMinutes } : {}) } : { rating: null }),
       });
       const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
       if (!res.ok || !body?.ok) throw new Error(body?.error?.message ?? '평가를 저장하지 못했습니다.');
@@ -45,6 +45,16 @@ export default function AnswerFeedback({ messageId, initial }: { messageId: stri
           {FEEDBACK_REASONS[reason]}
         </button>
       ))}
+      {feedback?.rating === 'up' && (
+        <span className="flex flex-wrap items-center gap-1" aria-label="이 답으로 줄인 시간">
+          <span className="text-[11px] text-slate-500">줄인 시간(선택)</span>
+          {FEEDBACK_SAVED_MINUTE_CHOICES.map((c) => (
+            <button key={c.minutes} type="button" disabled={saving} aria-pressed={feedback.savedMinutes === c.minutes} className={`${base} ${feedback.savedMinutes === c.minutes ? on : off}`} onClick={() => void save({ rating: 'up', reason: null, savedMinutes: feedback.savedMinutes === c.minutes ? null : c.minutes })}>
+              {c.label}
+            </button>
+          ))}
+        </span>
+      )}
       {error && <span role="alert" className="text-[11px] text-red-600">{error}</span>}
     </div>
   );

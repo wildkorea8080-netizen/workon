@@ -60,7 +60,7 @@ describe('요약', () => {
       { agent_id: 'p1', rating: 'down', reason: 'format' }, { agent_id: 'p2', rating: 'up', reason: null },
       { agent_id: 'gone', rating: 'down', reason: 'other' }, { agent_id: null, rating: 'up', reason: null }, { agent_id: 'a1', rating: 'weird', reason: null },
     ], agents);
-    expect(s.total).toEqual({ up: 4, down: 3, helpfulPercent: 57.1 });
+    expect(s.total).toEqual({ up: 4, down: 3, helpfulPercent: 57.1, savedMinutes: 0, savedReports: 0 });
     expect(s.agents.map((a) => [a.agentName, a.up, a.down, a.helpfulPercent])).toEqual([
       ['여비 도우미', 2, 1, 66.7], ['나만의 비서', 1, 1, 50], ['비서 없음', 1, 0, 100], ['지운 비서', 0, 1, 0],
     ]);
@@ -152,7 +152,7 @@ describe('화면', () => {
     expect(chat).toContain('feedback: m.role === \'assistant\' ? (result.data.feedback?.[m.id] ?? null) : undefined');
     expect(readFileSync('src/app/api/conversations/[id]/route.ts', 'utf8')).toContain('loadConversationFeedback(session.user.id, conversationId)');
     expect(readFileSync('src/app/admin/stats/page.tsx', 'utf8')).toContain('<FeedbackSummary />');
-    const table = renderToStaticMarkup(createElement(FeedbackSummaryTable, { data: { from: 'a', to: 'b', truncated: false, total: { up: 1, down: 1, helpfulPercent: 50 }, agents: [{ agentId: 'a1', agentName: '여비 도우미', up: 1, down: 1, helpfulPercent: 50, reasons: { wrong: 1, no_evidence: 0, incomplete: 0, format: 0, other: 0 } }] } }));
+    const table = renderToStaticMarkup(createElement(FeedbackSummaryTable, { data: { from: 'a', to: 'b', truncated: false, total: { up: 1, down: 1, helpfulPercent: 50, savedMinutes: 0, savedReports: 0 }, agents: [{ agentId: 'a1', agentName: '여비 도우미', up: 1, down: 1, helpfulPercent: 50, reasons: { wrong: 1, no_evidence: 0, incomplete: 0, format: 0, other: 0 }, savedMinutes: 0, savedReports: 0 }] } }));
     expect(table).toContain('여비 도우미');
     expect(table).toContain('50%');
   });

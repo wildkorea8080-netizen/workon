@@ -5,6 +5,8 @@ import { FEEDBACK_REASONS, type FeedbackReason, type FeedbackSummary as Summary 
 
 type Data = Summary & { from: string; to: string };
 const REASON_KEYS = Object.keys(FEEDBACK_REASONS) as FeedbackReason[];
+/** 분 → '3.5시간'(1시간 미만이면 '40분') */
+export const savedLabel = (minutes: number) => (minutes < 60 ? `${minutes}분` : `${Math.round((minutes / 60) * 10) / 10}시간`);
 
 /** 비서별 답변 평가 표(순수 렌더링) — 숫자·비서 이름만 */
 export function FeedbackSummaryTable({ data }: { data: Data }) {
@@ -15,6 +17,11 @@ export function FeedbackSummaryTable({ data }: { data: Data }) {
         전체 도움됨 {data.total.up}건 · 아쉬움 {data.total.down}건{data.total.helpfulPercent !== null ? ` · 도움됨 비율 ${data.total.helpfulPercent}%` : ''}
         {data.truncated ? ' (평가가 많아 일부만 셌습니다)' : ''}
       </p>
+      {(data.total.savedReports ?? 0) > 0 && (
+        <p className="text-sm text-slate-700">
+          직원이 고른 &lsquo;줄인 시간&rsquo; 합 {savedLabel(data.total.savedMinutes)}(답 {data.total.savedReports}건) <span className="text-xs text-slate-500">— 도움됨을 누른 직원이 스스로 고른 값입니다. 측정하거나 추정한 시간이 아닙니다.</span>
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs text-slate-500">
@@ -24,6 +31,7 @@ export function FeedbackSummaryTable({ data }: { data: Data }) {
               <th className="px-3 py-2 text-right">아쉬움</th>
               <th className="px-3 py-2 text-right">도움됨 비율</th>
               {REASON_KEYS.map((k) => <th key={k} className="px-3 py-2 text-right">{FEEDBACK_REASONS[k]}</th>)}
+              <th className="px-3 py-2 text-right">줄인 시간(자기 신고)</th>
             </tr>
           </thead>
           <tbody>
@@ -34,6 +42,7 @@ export function FeedbackSummaryTable({ data }: { data: Data }) {
                 <td className="px-3 py-2 text-right">{a.down}</td>
                 <td className="px-3 py-2 text-right">{a.helpfulPercent === null ? '—' : `${a.helpfulPercent}%`}</td>
                 {REASON_KEYS.map((k) => <td key={k} className="px-3 py-2 text-right text-slate-600">{a.reasons[k] || ''}</td>)}
+                <td className="px-3 py-2 text-right text-slate-600">{a.savedReports ? `${savedLabel(a.savedMinutes)} · ${a.savedReports}건` : ''}</td>
               </tr>
             ))}
           </tbody>
