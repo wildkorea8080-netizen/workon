@@ -5,6 +5,7 @@ import { runDueSchedules, scheduleDeps } from '@/lib/apps/schedules';
 import { recordRunnerHeartbeat } from '@/lib/apps/schedule-health';
 import { dispatchDueDeliveries, outboundDeps } from '@/lib/apps/outbound/deliver';
 import { batchDeps, runDueBatchItems } from '@/lib/apps/batches';
+import { runOutboundNotices } from '@/lib/apps/outbound/notices';
 
 export const dynamic = 'force-dynamic';
 // 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 실행기의 시간 예산(180초)보다 길게
@@ -35,12 +36,14 @@ export async function GET(request: Request) {
   // '살아 있음' 도장 — 하루 한 번 Vercel 예약 작업이 이 도장으로 pg_cron이 멈췄는지 본다(schedule-health.ts). 실패해도 실행은 이어 간다
   await recordRunnerHeartbeat(Date.now());
   // 앱 결과 보내기(0076)·일괄 실행(0077) — 예약 실행과 나란히(예약의 시간 예산을 쓰지 않게). 던지지 않는다
-  const [outbound, batches, result] = await Promise.all([
+  // 보내기 알림(2026-11-10, 0081) — 그만둔 보내기는 기관 전체 관리자에게(보낼 곳마다 6시간에 한 번), 확인 기다림은 실행한 직원에게(결과마다 한 번)
+  const [outbound, batches, result, notices] = await Promise.all([
     dispatchDueDeliveries(outboundDeps(), { limit: 20, budgetMs: 60_000 }),
     runDueBatchItems(batchDeps()),
     runDueSchedules(scheduleDeps()),
+    runOutboundNotices().catch(() => null),
   ]);
-  return NextResponse.json({ ok: true, data: { ...result, outbound, batches } });
+  return NextResponse.json({ ok: true, data: { ...result, outbound, batches, notices } });
 }
 
 /** pg_cron `net.http_post`는 POST로 부른다 — 같은 자격·같은 일 */

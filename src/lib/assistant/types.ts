@@ -35,6 +35,8 @@ export interface PreparedTurn {
   appLookupAgents?: string[];
   /** 실행을 마친 결과를 보낼 곳 id(0076) — 시험 판 실행에는 두지 않는다. 넣을 때 그 기관의 회수되지 않은 곳인지 다시 본다 */
   appDeliverEndpointId?: string;
+  /** 보낼 곳의 동작 키(0081) */
+  appDeliverAction?: string;
   /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
   appMaterialPieces?: { pieces: string[]; chars: number };
   /** 이번 실행의 원자료 파일 이름(올린 파일 다음 문서함에서 고른 문서, 원자료 자리와 같은 순서) — 파일마다 반복 단계가 쓴다(2026-11-07) */

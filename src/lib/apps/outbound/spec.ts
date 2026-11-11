@@ -37,7 +37,17 @@ export const OUTBOUND_APPROVAL_EXPIRED = `${OUTBOUND_APPROVAL_DAYS}일 안에 �
 export const OUTBOUND_APPROVAL_ENDPOINT_GONE = '보낼 곳이 회수돼 보낼 수 없습니다.';
 export const OUTBOUND_WHOLE_ORG_ONLY = '보낼 곳은 기관 전체 관리자(최상위 부서 소속 관리자)만 관리할 수 있습니다.';
 
+/** 보낼 곳마다 정하는 동작 수(0081) */
+export const OUTBOUND_MAX_ACTIONS = 5;
+export const OUTBOUND_ACTION_LABEL_MAX = 40;
+export const OUTBOUND_ACTION_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+/** 받는 쪽이 알아듣는 동작 — 키(영문 소문자·숫자·_)와 화면 이름. 예 draft=기안 임시 저장 */
+export type OutboundAction = { key: string; label: string };
+export const OUTBOUND_ACTION_REQUIRED = '보낼 곳이 동작을 정해 두었습니다 — 앱 설정의 \'결과를 보낼 곳\'에서 동작을 골라 주세요.';
+export const OUTBOUND_ACTION_GONE = '앱이 고른 동작이 보낼 곳에서 없어졌습니다 — 앱 설정에서 동작을 다시 골라 주세요.';
+
 export const OUTBOUND_HEADERS = {
+  action: 'X-Workon-Action',
   event: 'X-Workon-Event',
   delivery: 'X-Workon-Delivery',
   timestamp: 'X-Workon-Timestamp',
@@ -70,6 +80,8 @@ export interface OutboundEndpointView {
   secretPrefix: string;
   /** 보내기 전 실행한 직원이 확인한다(0078) */
   requireApproval: boolean;
+  /** 받는 쪽 동작(0081) — 비면 동작 없이 보낸다 */
+  actions: OutboundAction[];
   createdAt: string;
   createdByName: string | null;
   revokedAt: string | null;
@@ -131,14 +143,58 @@ export function parseOutboundUrl(raw: unknown): { ok: true; url: string; host: s
   return { ok: true, url: u.toString(), host };
 }
 
-export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string; requireApproval: boolean } } | { ok: false; message: string } {
+/**
+ * 동작 목록 읽기(0081) — 없으면 빈 목록. 글이면 한 줄에 하나 `키=이름`(또는 `키: 이름`), 배열이면 `{ key, label }`.
+ * 키는 영문 소문자로 시작·영문 소문자·숫자·_ 32자, 이름은 1~40자(제어 글자 없음), 키는 겹치지 않게, 5개까지
+ */
+export function parseActions(raw: unknown): { ok: true; actions: OutboundAction[] } | { ok: false; message: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, actions: [] };
+  let items: Array<{ key: unknown; label: unknown }>;
+  if (typeof raw === 'string') {
+    items = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+      const m = /^([^=:]+)[=:](.*)$/.exec(l);
+      return m ? { key: m[1].trim(), label: m[2].trim() } : { key: l, label: '' };
+    });
+  } else if (Array.isArray(raw)) {
+    items = raw.map((a) => (a && typeof a === 'object' ? (a as { key: unknown; label: unknown }) : { key: null, label: null }));
+  } else return { ok: false, message: '동작 목록을 확인해 주세요.' };
+  if (items.length > OUTBOUND_MAX_ACTIONS) return { ok: false, message: `동작은 ${OUTBOUND_MAX_ACTIONS}개까지 정할 수 있습니다.` };
+  const actions: OutboundAction[] = [];
+  for (const it of items) {
+    const key = typeof it.key === 'string' ? it.key.trim() : '';
+    const label = typeof it.label === 'string' ? it.label.trim().replace(/\s+/g, ' ') : '';
+    if (!OUTBOUND_ACTION_KEY.test(key)) return { ok: false, message: `동작 키 '${key.slice(0, 32)}'는 영문 소문자로 시작하고 영문 소문자·숫자·_만 32자까지 쓸 수 있습니다(예: draft=기안 임시 저장).` };
+    if (!label || label.length > OUTBOUND_ACTION_LABEL_MAX || CONTROL.test(label)) return { ok: false, message: `동작 '${key}'의 이름을 ${OUTBOUND_ACTION_LABEL_MAX}자 안으로 적어 주세요(예: ${key}=기안 임시 저장).` };
+    if (actions.some((a) => a.key === key)) return { ok: false, message: `동작 키 '${key}'가 두 번 나옵니다.` };
+    actions.push({ key, label });
+  }
+  return { ok: true, actions };
+}
+
+/** DB 칸 → 동작 목록(꼴이 틀린 원소는 버림) */
+export function actionsOf(raw: unknown): OutboundAction[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((a) => (a && typeof a === 'object' && typeof (a as OutboundAction).key === 'string' && OUTBOUND_ACTION_KEY.test((a as OutboundAction).key) && typeof (a as OutboundAction).label === 'string'
+    ? [{ key: (a as OutboundAction).key, label: (a as OutboundAction).label.slice(0, OUTBOUND_ACTION_LABEL_MAX) }] : [])).slice(0, OUTBOUND_MAX_ACTIONS);
+}
+
+/** 보낼 때 쓸 동작 — 보낼 곳이 동작을 정했으면 기록의 동작이 그중 하나여야 하고, 정하지 않았으면 동작 없이(기록에 동작이 남아 있으면 그만둠) */
+export function resolveAction(actions: OutboundAction[], key: string | null | undefined): { ok: true; action: OutboundAction | null } | { ok: false; message: string } {
+  if (!key) return actions.length ? { ok: false, message: OUTBOUND_ACTION_REQUIRED } : { ok: true, action: null };
+  const found = actions.find((a) => a.key === key);
+  return found ? { ok: true, action: found } : { ok: false, message: OUTBOUND_ACTION_GONE };
+}
+
+export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string; requireApproval: boolean; actions: OutboundAction[] } } | { ok: false; message: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: '보낼 곳 정보를 확인해 주세요.' };
   const body = raw as Record<string, unknown>;
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
   if (!name || name.length > OUTBOUND_NAME_MAX || CONTROL.test(name)) return { ok: false, message: `이름은 ${OUTBOUND_NAME_MAX}자 안으로 입력해 주세요.` };
   const url = parseOutboundUrl(body.url);
   if (!url.ok) return url;
-  return { ok: true, value: { name, url: url.url, requireApproval: body.require_approval === true } };
+  const actions = parseActions(body.actions);
+  if (!actions.ok) return actions;
+  return { ok: true, value: { name, url: url.url, requireApproval: body.require_approval === true, actions: actions.actions } };
 }
 
 export function parseRevokeReason(raw: unknown): { ok: true; reason: string } | { ok: false; message: string } {
@@ -229,6 +285,8 @@ export function buildOutboundPayload(input: {
   run: { messageId: string; conversationId: string; completedAt: string };
   text: string;
   file?: OutboundFile;
+  /** 받는 쪽 동작(0081) */
+  action?: OutboundAction | null;
 }): string {
   const truncated = input.text.length > OUTBOUND_TEXT_MAX;
   const result: Record<string, unknown> = { text: truncated ? input.text.slice(0, OUTBOUND_TEXT_MAX) : input.text, truncated };
@@ -242,6 +300,7 @@ export function buildOutboundPayload(input: {
     event: OUTBOUND_EVENT,
     delivery_id: input.deliveryId,
     sent_at: input.sentAt,
+    ...(input.action ? { action: { key: input.action.key, label: input.action.label } } : {}),
     app: { id: input.app.id, name: input.app.name },
     run: { message_id: input.run.messageId, conversation_id: input.run.conversationId, completed_at: input.run.completedAt },
     result,

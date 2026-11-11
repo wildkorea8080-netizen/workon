@@ -482,7 +482,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   );
   // 앱 결과 보내기(0076) — 끝까지 마친 실행만, 저장된 답변을 보낼 차례에 넣는다(보내기는 앱 예약 실행기가 5분마다). 실패해도 답에는 영향 없음
   if (shouldDeliver({ endpointId: turn.appDeliverEndpointId, draft: Boolean(turn.appDraftSavedAt), saved: !saveError, text: result.text, steps: appRecords })) {
-    await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId });
+    await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(turn.appDeliverAction ? { action: turn.appDeliverAction } : {}) });
   }
   if (saveError) {
     // 답변은 이미 흘러갔으므로 요청을 실패시킬 수 없다. 저장 실패는 알린다 —

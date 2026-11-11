@@ -105,4 +105,13 @@ describe.skipIf(!url)('앱 결과 보내기 DB (0076)', () => {
     const pending = (await delivery(e, m2)).rows[0].id as string;
     await expect(db.query("UPDATE app_outbound_deliveries SET receipt_ref = '1' WHERE id = $1", [pending])).rejects.toMatchObject({ code: '23514' });
   });
+  it('0081 — 동작은 배열 5개까지, 기록의 동작 키 꼴, 알림 때 칸', async () => {
+    const e = await endpoint(); const m = await message();
+    await db.query('UPDATE app_outbound_endpoints SET actions = $1::jsonb, failure_notified_at = now() WHERE id = $2', [JSON.stringify([{ key: 'draft', label: '기안' }]), e]);
+    await expect(db.query("UPDATE app_outbound_endpoints SET actions = '{}'::jsonb WHERE id = $1", [e])).rejects.toMatchObject({ code: '23514' });
+    await expect(db.query("UPDATE app_outbound_endpoints SET actions = '[1,2,3,4,5,6]'::jsonb WHERE id = $1", [e])).rejects.toMatchObject({ code: '23514' });
+    const id = (await delivery(e, m)).rows[0].id as string;
+    await db.query("UPDATE app_outbound_deliveries SET action = 'draft', approval_notified_at = now() WHERE id = $1", [id]);
+    await expect(db.query("UPDATE app_outbound_deliveries SET action = 'Bad Key' WHERE id = $1", [id])).rejects.toMatchObject({ code: '23514' });
+  });
 });

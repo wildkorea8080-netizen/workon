@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  OUTBOUND_APPROVAL_DAYS, OUTBOUND_MAX_ATTEMPTS, OUTBOUND_MAX_ENDPOINTS, OUTBOUND_NAME_MAX, OUTBOUND_REVOKE_REASON_MIN, OUTBOUND_STATUS_LABELS, OUTBOUND_URL_MAX, OUTBOUND_VERIFY_HINT,
+  OUTBOUND_APPROVAL_DAYS, OUTBOUND_MAX_ACTIONS, OUTBOUND_MAX_ATTEMPTS, OUTBOUND_MAX_ENDPOINTS, OUTBOUND_NAME_MAX, OUTBOUND_REVOKE_REASON_MIN, OUTBOUND_STATUS_LABELS, OUTBOUND_URL_MAX, OUTBOUND_VERIFY_HINT,
   type OutboundDeliveryView, type OutboundEndpointView,
 } from '@/lib/apps/outbound/spec';
 
@@ -20,6 +20,7 @@ export default function OutboundEndpointsPanel() {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [requireApproval, setRequireApproval] = useState(true);
+  const [actionsText, setActionsText] = useState('');
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ name: string; secret: string } | null>(null);
 
@@ -40,10 +41,10 @@ export default function OutboundEndpointsPanel() {
     if (busy || !name.trim() || !url.trim()) return;
     setBusy(true); setError(null); setCreated(null);
     try {
-      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, require_approval: requireApproval }) });
+      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, require_approval: requireApproval, ...(actionsText.trim() ? { actions: actionsText } : {}) }) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 만들지 못했습니다.');
-      else { setCreated({ name: body.data.endpoint.name, secret: body.data.secret }); setName(''); setUrl(''); await load(); }
+      else { setCreated({ name: body.data.endpoint.name, secret: body.data.secret }); setName(''); setUrl(''); setActionsText(''); await load(); }
     } finally { setBusy(false); }
   }
 
@@ -56,6 +57,18 @@ export default function OutboundEndpointsPanel() {
     const res = await fetch(`/api/admin/outbound-endpoints/${encodeURIComponent(endpoint.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ require_approval: next }) });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 바꾸지 못했습니다.');
+    else await load();
+  }
+
+  /** 동작 바꾸기(0081) — 한 줄에 하나 '키=이름', 비우면 동작 없이 보낸다. 이미 넣은 기록은 보낼 때 새 목록으로 다시 본다 */
+  async function editActions(endpoint: OutboundEndpointView) {
+    const current = endpoint.actions.map((a) => `${a.key}=${a.label}`).join('\n');
+    const text = window.prompt(`'${endpoint.name}'의 동작(받는 쪽이 알아듣는 일 — 한 줄에 하나 '키=이름', ${OUTBOUND_MAX_ACTIONS}개까지, 비우면 동작 없이 보냅니다). 바꾸면 앱이 고른 동작이 없어진 결과는 보내지 않습니다.`, current);
+    if (text === null) return;
+    setError(null);
+    const res = await fetch(`/api/admin/outbound-endpoints/${encodeURIComponent(endpoint.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions: text.replace(/\s*[,;]\s*/g, '\n') }) });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) setError(body?.error?.message ?? '동작을 바꾸지 못했습니다.');
     else await load();
   }
 
@@ -90,6 +103,10 @@ export default function OutboundEndpointsPanel() {
         <button type="button" disabled={busy || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
       </div>
       <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />보내기 전 실행한 직원이 결과를 확인(권장 — 끄면 실행을 마친 결과가 사람 확인 없이 곧바로 나갑니다)</label>
+      <label className="block text-sm text-slate-700">받는 쪽 동작(선택 — 한 줄에 하나 <code>키=이름</code>, {OUTBOUND_MAX_ACTIONS}개까지. 예: <code>draft=기안 임시 저장</code>)
+        <textarea aria-label="받는 쪽 동작" value={actionsText} onChange={(e) => setActionsText(e.target.value)} rows={2} placeholder={'draft=기안 임시 저장\nboard=게시판 등록'} className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs" />
+        <span className="text-xs text-slate-500">정하면 앱마다 그중 하나를 골라야 보내고, 보내는 몸의 <code>action</code>과 <code>X-Workon-Action</code> 머리글에 실립니다.</span>
+      </label>
       {created && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6">
           <p className="font-semibold">'{created.name}'의 서명 비밀값 — 지금 한 번만 보입니다. 받는 시스템에 넣어 두세요.</p>
@@ -99,18 +116,19 @@ export default function OutboundEndpointsPanel() {
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <table className="w-full text-left text-xs">
-        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">보내기 전 확인</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
+        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">보내기 전 확인</th><th className="pr-2">동작</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
         <tbody>{endpoints.map((e) => (
           <tr key={e.id} className="border-t border-slate-100 align-top">
             <td className="py-1 pr-2 font-medium">{e.name}</td>
             <td className="break-all pr-2">{e.url}</td>
             <td className="pr-2"><code>{e.secretPrefix}…</code></td>
             <td className="pr-2">{e.requireApproval ? '받음' : '안 받음'}{!e.revokedAt && <button type="button" onClick={() => void toggleApproval(e)} className="ml-1 text-ws-accent-text underline">{e.requireApproval ? '끄기' : '켜기'}</button>}</td>
+            <td className="pr-2">{e.actions.length ? e.actions.map((a) => `${a.label}(${a.key})`).join(', ') : '—'}{!e.revokedAt && <button type="button" onClick={() => void editActions(e)} className="ml-1 text-ws-accent-text underline">바꾸기</button>}</td>
             <td className="pr-2">{kst(e.createdAt)}{e.createdByName ? ` · ${e.createdByName}` : ''}</td>
             <td className="pr-2">{e.revokedAt ? <span className="text-slate-500">회수됨({kst(e.revokedAt)}) — {e.revokedReason}</span> : <span className="text-emerald-700">쓰는 중</span>}</td>
             <td>{!e.revokedAt && <button type="button" onClick={() => void revoke(e)} className="text-red-600 underline">회수</button>}</td>
           </tr>))}
-          {!endpoints.length && <tr><td colSpan={7} className="py-2 text-slate-500">아직 보낼 곳이 없습니다.</td></tr>}
+          {!endpoints.length && <tr><td colSpan={8} className="py-2 text-slate-500">아직 보낼 곳이 없습니다.</td></tr>}
         </tbody>
       </table>
       <div>

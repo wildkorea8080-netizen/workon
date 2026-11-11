@@ -7,12 +7,12 @@ import { logSecurityEvent } from '@/lib/filter';
 import { encryptApiKey } from '@/lib/crypto';
 import { checkPublicHost, generateOutboundSecret, type HostCheck } from './deliver';
 import {
-  OUTBOUND_MAX_ENDPOINTS, OUTBOUND_WHOLE_ORG_ONLY, parseCreateEndpoint, parseRevokeReason,
-  type OutboundDeliveryView, type OutboundEndpointView, type OutboundStatus,
+  OUTBOUND_MAX_ENDPOINTS, OUTBOUND_WHOLE_ORG_ONLY, actionsOf, parseActions, parseCreateEndpoint, parseRevokeReason,
+  type OutboundAction, type OutboundDeliveryView, type OutboundEndpointView, type OutboundStatus,
 } from './spec';
 
 type Fail = { ok: false; status: number; message: string };
-const ENDPOINT_COLUMNS = 'id, name, url, secret_prefix, require_approval, created_at, created_by, revoked_at, revoked_reason';
+const ENDPOINT_COLUMNS = 'id, name, url, secret_prefix, require_approval, actions, created_at, created_by, revoked_at, revoked_reason';
 /** 화면에 보이는 최근 보내기 기록 수 */
 export const RECENT_DELIVERIES = 50;
 
@@ -22,9 +22,9 @@ export function wholeOrgAdminProblem(actor: ActorScope | null): Fail | null {
   return null;
 }
 
-type EndpointRow = { id: string; name: string; url: string; secret_prefix: string; require_approval: boolean; created_at: string; created_by: string | null; revoked_at: string | null; revoked_reason: string | null };
+type EndpointRow = { id: string; name: string; url: string; secret_prefix: string; require_approval: boolean; actions?: unknown; created_at: string; created_by: string | null; revoked_at: string | null; revoked_reason: string | null };
 const endpointView = (r: EndpointRow, names: Map<string, string>): OutboundEndpointView => ({
-  id: r.id, name: r.name, url: r.url, secretPrefix: r.secret_prefix, requireApproval: r.require_approval === true, createdAt: r.created_at,
+  id: r.id, name: r.name, url: r.url, secretPrefix: r.secret_prefix, requireApproval: r.require_approval === true, actions: actionsOf(r.actions), createdAt: r.created_at,
   createdByName: r.created_by ? names.get(r.created_by) ?? '(이름 없음)' : null, revokedAt: r.revoked_at, revokedReason: r.revoked_reason,
 });
 
@@ -76,10 +76,10 @@ export async function createOutboundEndpoint(actor: ActorScope, raw: unknown, ch
   const { secret, prefix } = generateOutboundSecret();
   const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').insert({
     organization_id: actor.organizationId, name: parsed.value.name, url: parsed.value.url, secret_encrypted: encryptApiKey(secret), secret_prefix: prefix, created_by: actor.userId,
-    require_approval: parsed.value.requireApproval,
+    require_approval: parsed.value.requireApproval, actions: parsed.value.actions,
   }).select(ENDPOINT_COLUMNS).single();
   if (error || !data) return { ok: false, status: 503, message: '보낼 곳을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
-  await logSecurityEvent(actor.departmentId, actor.userId, 'app_outbound_endpoint_created', { endpoint_id: data.id, name: parsed.value.name, url: parsed.value.url, secret_prefix: prefix, require_approval: parsed.value.requireApproval }, 'high');
+  await logSecurityEvent(actor.departmentId, actor.userId, 'app_outbound_endpoint_created', { endpoint_id: data.id, name: parsed.value.name, url: parsed.value.url, secret_prefix: prefix, require_approval: parsed.value.requireApproval, actions: parsed.value.actions.map((a) => a.key) }, 'high');
   return { ok: true, endpoint: endpointView(data as EndpointRow, new Map()), secret };
 }
 
@@ -102,29 +102,39 @@ export async function revokeOutboundEndpoint(actor: ActorScope, id: string, rawR
 }
 
 /**
- * '보내기 전 확인' 켜고 끄기(0078) — 켜면 그 뒤 넣는 기록부터 직원 확인을 기다린다. 꺼도 이미 확인을 기다리는 기록은 그대로(직원이 정함).
- * 요청 몸 `{ require_approval: boolean }`
+ * '보내기 전 확인' 켜고 끄기(0078)·동작 바꾸기(0081) — 요청 몸 `{ require_approval?: boolean, actions?: 글|배열 }`(하나 이상).
+ * 확인을 켜면 그 뒤 넣는 기록부터 직원 확인을 기다린다. 꺼도 이미 확인을 기다리는 기록은 그대로(직원이 정함).
+ * 동작을 바꾸면 이미 넣은 기록은 보낼 때 새 목록으로 다시 본다(앱이 고른 동작이 없어졌으면 그만둠)
  */
 export async function setEndpointApproval(actor: ActorScope, id: string, raw: unknown): Promise<{ ok: true; endpoint: OutboundEndpointView } | Fail> {
   const problem = wholeOrgAdminProblem(actor);
   if (problem) return problem;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return { ok: false, status: 404, message: '보낼 곳을 찾을 수 없습니다.' };
   const body = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
-  if (typeof body?.require_approval !== 'boolean') return { ok: false, status: 400, message: '보내기 전 확인을 켤지 끌지 정해 주세요.' };
-  const requireApproval = body.require_approval;
-  const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').update({ require_approval: requireApproval })
+  const hasApproval = typeof body?.require_approval === 'boolean';
+  const hasActions = body ? 'actions' in body : false;
+  if (!hasApproval && !hasActions) return { ok: false, status: 400, message: '보내기 전 확인을 켤지 끌지 정해 주세요.' };
+  let actions: OutboundAction[] | undefined;
+  if (hasActions) {
+    const parsed = parseActions(body!.actions);
+    if (!parsed.ok) return { ok: false, status: 400, message: parsed.message };
+    actions = parsed.actions;
+  }
+  const requireApproval = hasApproval ? (body!.require_approval as boolean) : undefined;
+  const patch: Record<string, unknown> = { ...(requireApproval !== undefined ? { require_approval: requireApproval } : {}), ...(actions ? { actions } : {}) };
+  const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').update(patch)
     .eq('id', id).eq('organization_id', actor.organizationId!).is('revoked_at', null).select(ENDPOINT_COLUMNS);
   if (error) return { ok: false, status: 503, message: '보낼 곳을 바꾸지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!data?.length) return { ok: false, status: 404, message: '보낼 곳을 찾을 수 없거나 이미 회수됐습니다.' };
   const row = data[0] as EndpointRow;
-  await logSecurityEvent(actor.departmentId, actor.userId, 'app_outbound_endpoint_updated', { endpoint_id: id, name: row.name, url: row.url, require_approval: requireApproval }, 'high');
+  await logSecurityEvent(actor.departmentId, actor.userId, 'app_outbound_endpoint_updated', { endpoint_id: id, name: row.name, url: row.url, ...(requireApproval !== undefined ? { require_approval: requireApproval } : {}), ...(actions ? { actions: actions.map((a) => a.key) } : {}) }, 'high');
   return { ok: true, endpoint: endpointView(row, new Map()) };
 }
 
-/** 직원이 앱에 고를 수 있는 보낼 곳 — 이 기관의 회수되지 않은 곳, 이름과 보내기 전 확인 여부만(주소·비밀값 없음) */
-export async function listUsableEndpoints(organizationId: string): Promise<Array<{ id: string; name: string; requireApproval: boolean }> | null> {
-  const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id, name, require_approval')
+/** 직원이 앱에 고를 수 있는 보낼 곳 — 이 기관의 회수되지 않은 곳, 이름·보내기 전 확인 여부·동작만(주소·비밀값 없음) */
+export async function listUsableEndpoints(organizationId: string): Promise<Array<{ id: string; name: string; requireApproval: boolean; actions: OutboundAction[] }> | null> {
+  const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id, name, require_approval, actions')
     .eq('organization_id', organizationId).is('revoked_at', null).order('name', { ascending: true }).limit(100);
   if (error) return null;
-  return ((data ?? []) as Array<{ id: string; name: string; require_approval: boolean }>).map((r) => ({ id: r.id, name: r.name, requireApproval: r.require_approval === true }));
+  return ((data ?? []) as Array<{ id: string; name: string; require_approval: boolean; actions?: unknown }>).map((r) => ({ id: r.id, name: r.name, requireApproval: r.require_approval === true, actions: actionsOf(r.actions) }));
 }

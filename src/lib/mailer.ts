@@ -446,3 +446,52 @@ export function batchFinishedMail(params: {
 export function sendBatchFinishedEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
   return sendMail(to, mail.subject, mail.html);
 }
+
+/**
+ * 앱 결과 보내기가 그만둔 일 알림(2026-11-10) — 기관 전체 관리자에게. 보낼 곳마다 6시간에 한 번.
+ * 보낼 곳 이름·그만둔 수·마지막 이유(우리가 쓴 안내 글)·관리 화면 링크만. 결과 글·받는 쪽 응답·직원은 싣지 않는다
+ */
+export function outboundFailureMail(params: { endpointName: string; count: number; lastError: string | null; since: Date; url: string }): { subject: string; html: string } {
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const rows: Array<[string, string]> = [
+    ['보낼 곳', params.endpointName],
+    ['보내지 못하고 그만둔 결과', `${params.count}건 (${kst(params.since)} 이후, 한국 시간)`],
+    ...(params.lastError ? [['마지막 이유', params.lastError] as [string, string]] : []),
+  ];
+  const table = rows
+    .map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#64748b;vertical-align:top">${escapeHtml(k)}</td><td style="font-weight:600">${escapeHtml(v)}</td></tr>`)
+    .join('');
+  return {
+    subject: `[${APP_NAME}] 앱 결과를 외부 시스템으로 보내지 못했습니다 — ${params.endpointName}`,
+    html: layout(
+      '앱 결과 보내기가 그만둔 일이 있습니다',
+      `<table style="margin:8px 0 20px;font-size:15px">${table}</table>
+       <p style="font-size:15px;line-height:1.7">${escapeHtml('받는 시스템의 주소·서명 확인·응답을 점검해 주세요. 다섯 번 시도했거나 다시 보내도 같은 응답(4xx·리다이렉트)이라 더 보내지 않습니다. 같은 보낼 곳은 6시간에 한 번만 알립니다. 결과 글은 메일에 싣지 않습니다.')}</p>
+       ${button(params.url, '앱 예약·연동 화면 열기')}`
+    ),
+  };
+}
+
+/**
+ * 보내기 전 확인을 기다리는 결과 알림(2026-11-10) — 그 결과를 실행한 직원에게, 한 번만(결과마다 표시).
+ * 앱 이름·수·마감·실행 화면 링크만. 결과 글은 싣지 않는다
+ */
+export function approvalWaitingMail(params: { apps: Array<{ name: string; count: number; url: string }>; total: number; earliestDeadline: Date }): { subject: string; html: string } {
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const list = params.apps
+    .map((a) => `<li style="margin:4px 0"><a href="${escapeHtml(a.url)}">${escapeHtml(a.name)}</a> — ${a.count}건</li>`)
+    .join('');
+  return {
+    subject: `[${APP_NAME}] 외부로 보내기 전 확인할 결과가 ${params.total}건 있습니다`,
+    html: layout(
+      '보내기 전 확인할 결과가 있습니다',
+      `<p style="font-size:15px;line-height:1.7">${escapeHtml('예약·연동·일괄 실행으로 마친 결과를 외부 시스템으로 보내기 전에 확인이 필요합니다. 실행 화면의 \'보내기 전 확인할 결과\'에서 내용을 보고 보내기 또는 보내지 않기를 눌러 주세요.')}</p>
+       <ul style="font-size:15px;line-height:1.7">${list}</ul>
+       <p style="font-size:15px;line-height:1.7">${escapeHtml(`가장 빠른 마감: ${kst(params.earliestDeadline)} (한국 시간) — 7일 안에 정하지 않으면 보내지 않습니다. 결과 글은 메일에 싣지 않습니다.`)}</p>`
+    ),
+  };
+}
+
+export function sendOutboundNoticeEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}

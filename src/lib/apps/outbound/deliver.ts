@@ -21,7 +21,7 @@ import { buildResultHwpxBytes } from '@/lib/apps/schedule-result-file';
 import {
   OUTBOUND_APPROVAL_EXPIRED, OUTBOUND_APPROVAL_MS, OUTBOUND_EVENT, OUTBOUND_HEADERS, OUTBOUND_SECRET_PREFIX, OUTBOUND_STALE_MS, OUTBOUND_TIMEOUT_MS, OUTBOUND_FILE_MAX_BYTES,
   buildOutboundPayload, isIpLiteral, isPrivateAddress, nextAttemptAt, outcomeForStatus, parseOutboundUrl,
-  OUTBOUND_MY_DELIVERIES_LIMIT, OUTBOUND_RECEIPT_MAX_BYTES, parseOutboundReceipt,
+  OUTBOUND_MY_DELIVERIES_LIMIT, OUTBOUND_RECEIPT_MAX_BYTES, actionsOf, parseOutboundReceipt, resolveAction,
   type AttemptOutcome, type OutboundFile, type OutboundMyDeliveryView, type OutboundStatus,
 } from './spec';
 
@@ -92,7 +92,7 @@ export function shouldDeliver(input: { endpointId?: string; draft: boolean; save
 }
 
 /** 보내기 기록 넣기 — 보낼 곳이 이 기관의 쓸 수 있는 곳일 때만. 확인을 받는 곳이면 'awaiting'(직원이 누를 때까지 안 보냄). 실패해도 던지지 않는다(답변은 이미 저장됐다) */
-export async function enqueueOutbound(input: { organizationId: string; endpointId: string; agentId: string; messageId: string; userId: string }): Promise<'queued' | 'awaiting' | 'skipped' | 'failed'> {
+export async function enqueueOutbound(input: { organizationId: string; endpointId: string; agentId: string; messageId: string; userId: string; action?: string }): Promise<'queued' | 'awaiting' | 'skipped' | 'failed'> {
   try {
     const { data: endpoint, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id, require_approval')
       .eq('id', input.endpointId).eq('organization_id', input.organizationId).is('revoked_at', null).maybeSingle();
@@ -102,6 +102,8 @@ export async function enqueueOutbound(input: { organizationId: string; endpointI
     const { error: insertError } = await supabaseAdmin.from('app_outbound_deliveries').insert({
       organization_id: input.organizationId, endpoint_id: input.endpointId, agent_id: input.agentId, message_id: input.messageId, user_id: input.userId,
       status: awaiting ? 'awaiting_approval' : 'pending',
+      // 앱이 고른 동작(0081) — 넣을 때 박고, 보낼 때 보낼 곳의 지금 동작 목록과 다시 맞춘다
+      ...(input.action ? { action: input.action } : {}),
     });
     if (insertError && insertError.code !== '23505') throw insertError;
     return awaiting ? 'awaiting' : 'queued';
@@ -113,9 +115,9 @@ export async function enqueueOutbound(input: { organizationId: string; endpointI
 
 // ── 보내기 실행기 ─────────────────────────────────────────────────────
 
-export interface DueDelivery { id: string; organization_id: string; endpoint_id: string; agent_id: string; message_id: string; status: 'pending' | 'sending'; attempts: number; claimed_at: string | null }
+export interface DueDelivery { id: string; organization_id: string; endpoint_id: string; agent_id: string; message_id: string; status: 'pending' | 'sending'; attempts: number; claimed_at: string | null; action?: string | null }
 export interface DeliveryContext {
-  endpoint: { url: string; secret_encrypted: string; organization_id: string; revoked_at: string | null } | null;
+  endpoint: { url: string; secret_encrypted: string; organization_id: string; revoked_at: string | null; actions?: unknown } | null;
   message: { content: string; conversation_id: string; created_at: string; role: string; source_references?: Record<string, unknown> | null; agent_version?: number | null } | null;
   agent: { id: string; name: string; app_definition?: { deliverFile?: unknown; exportTemplateId?: unknown } | null } | null;
 }
@@ -171,6 +173,8 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
     if (!ctx.message || ctx.message.role !== 'assistant' || !ctx.agent) { await giveUp('보낼 결과를 찾지 못했습니다(대화·앱을 지웠을 수 있습니다).', null, row.attempts); continue; }
     const url = parseOutboundUrl(ctx.endpoint.url);
     if (!url.ok) { await giveUp(url.message, null, row.attempts); continue; }
+    const action = resolveAction(actionsOf(ctx.endpoint.actions), row.action);
+    if (!action.ok) { await giveUp(action.message, null, row.attempts); continue; }
     const secret = deps.decrypt(ctx.endpoint.secret_encrypted);
     if (!secret) {
       await deps.log('앱 결과 보내기 — 서명 비밀값을 읽지 못했습니다(ENCRYPTION_KEY 확인)', { delivery_id: row.id, endpoint_id: row.endpoint_id }, row.organization_id);
@@ -201,6 +205,7 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
         run: { messageId: row.message_id, conversationId: ctx.message.conversation_id, completedAt: ctx.message.created_at },
         text: ctx.message.content,
         ...(file ? { file } : {}),
+        ...(action.action ? { action: action.action } : {}),
       });
       outcome = await deps.post(url.url, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -210,6 +215,7 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
         [OUTBOUND_HEADERS.idempotency]: row.id,
         [OUTBOUND_HEADERS.timestamp]: timestamp,
         [OUTBOUND_HEADERS.signature]: signOutbound(secret, timestamp, body),
+        ...(action.action ? { [OUTBOUND_HEADERS.action]: action.action.key } : {}),
       }, body);
     }
     const done = deps.now();
@@ -238,7 +244,7 @@ export function outboundDeps(): OutboundDeps {
     now: () => Date.now(),
     async listDue(nowIso, staleIso, limit) {
       const { data, error } = await supabaseAdmin.from('app_outbound_deliveries')
-        .select('id, organization_id, endpoint_id, agent_id, message_id, status, attempts, claimed_at')
+        .select('id, organization_id, endpoint_id, agent_id, message_id, status, attempts, claimed_at, action')
         .or(`and(status.eq.pending,next_attempt_at.lte.${nowIso}),and(status.eq.sending,claimed_at.lt.${staleIso})`)
         .order('next_attempt_at', { ascending: true }).limit(limit);
       if (error) return null;
@@ -252,7 +258,7 @@ export function outboundDeps(): OutboundDeps {
     },
     async load(row) {
       const [endpoint, message, agent] = await Promise.all([
-        supabaseAdmin.from('app_outbound_endpoints').select('url, secret_encrypted, organization_id, revoked_at').eq('id', row.endpoint_id).maybeSingle(),
+        supabaseAdmin.from('app_outbound_endpoints').select('url, secret_encrypted, organization_id, revoked_at, actions').eq('id', row.endpoint_id).maybeSingle(),
         supabaseAdmin.from('messages').select('content, conversation_id, created_at, role, source_references, agent_version').eq('id', row.message_id).maybeSingle(),
         supabaseAdmin.from('agents').select('id, name, app_definition').eq('id', row.agent_id).maybeSingle(),
       ]);

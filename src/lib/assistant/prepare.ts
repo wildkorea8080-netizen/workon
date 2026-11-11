@@ -386,7 +386,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       appStepInputs,
       ...(appLookupAgents.length ? { appLookupAgents } : {}),
-      ...(appStepInputs && !appDraftSavedAt && definition.value?.deliverEndpointId ? { appDeliverEndpointId: definition.value.deliverEndpointId } : {}),
+      ...(appStepInputs && !appDraftSavedAt && definition.value?.deliverEndpointId ? { appDeliverEndpointId: definition.value.deliverEndpointId, ...(definition.value.deliverAction ? { appDeliverAction: definition.value.deliverAction } : {}) } : {}),
       appMaterialPieces,
       ...(appFileNames?.length ? { appFileNames } : {}),
       ...(libraryRefs.length ? { appDocuments: libraryRefs } : {}),

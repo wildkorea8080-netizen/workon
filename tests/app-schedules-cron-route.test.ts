@@ -15,6 +15,7 @@ vi.mock('@/lib/apps/schedule-health', () => ({ recordRunnerHeartbeat: async () =
 // 앱 결과 보내기(0076) — 예약 실행과 나란히 돈다. 자격이 없으면 이것도 돌지 않아야 한다
 vi.mock('@/lib/apps/batches', () => ({ batchDeps: () => ({}), runDueBatchItems: async () => { state.batches++; return { ran: 0, done: 0, failed: 0, retried: 0, stopped: 0 }; } }));
 vi.mock('@/lib/apps/outbound/deliver', () => ({ outboundDeps: () => ({}), dispatchDueDeliveries: async () => { state.dispatches++; return { claimed: 0, sent: 0, retried: 0, gaveUp: 0 }; } }));
+vi.mock('@/lib/apps/outbound/notices', () => ({ runOutboundNotices: async () => ({ failureMails: 0, approvalMails: 0 }) }));
 
 import { GET, POST } from '@/app/api/cron/app-schedules/route';
 

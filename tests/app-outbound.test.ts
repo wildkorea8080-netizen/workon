@@ -43,7 +43,7 @@ describe('주소', () => {
   });
 
   it('만들기 입력·회수 사유', () => {
-    expect(parseCreateEndpoint({ name: ' 전자결재  연계 ', url: 'https://hook.example.com/a' })).toEqual({ ok: true, value: { name: '전자결재 연계', url: 'https://hook.example.com/a', requireApproval: false } });
+    expect(parseCreateEndpoint({ name: ' 전자결재  연계 ', url: 'https://hook.example.com/a' })).toEqual({ ok: true, value: { name: '전자결재 연계', url: 'https://hook.example.com/a', requireApproval: false, actions: [] } });
     expect(parseCreateEndpoint({ name: '', url: 'https://hook.example.com' })).toMatchObject({ ok: false });
     expect(parseCreateEndpoint({ name: 'x'.repeat(61), url: 'https://hook.example.com' })).toMatchObject({ ok: false });
     expect(parseCreateEndpoint(null)).toMatchObject({ ok: false });
@@ -224,7 +224,7 @@ describe('연결', () => {
     expect(wholeOrgAdminProblem(actor({ isAdmin: false }))).toMatchObject({ status: 403 });
     expect(wholeOrgAdminProblem(null)).toMatchObject({ status: 403 });
     const admin = readFileSync('src/lib/apps/outbound/admin.ts', 'utf8');
-    expect(admin).toMatch(/from\('app_outbound_endpoints'\)\.select\('id, name, require_approval'\)/);
+    expect(admin).toMatch(/from\('app_outbound_endpoints'\)\.select\('id, name, require_approval, actions'\)/);
     expect(readFileSync('src/app/api/apps/outbound-endpoints/route.ts', 'utf8')).not.toMatch(/secret|url:/);
     // 화면 모듈은 서버 코드를 가져오지 않는다
     expect(readFileSync('src/lib/apps/outbound/spec.ts', 'utf8')).not.toMatch(/^import /m);
