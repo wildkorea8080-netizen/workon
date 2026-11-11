@@ -4,9 +4,11 @@ import { logSecurityEvent } from '@/lib/filter';
 import { readScheduleHealth } from '@/lib/apps/schedule-health';
 import { readScheduleSwitch, readWebhookSwitch, webhookSwitchView } from '@/lib/apps/webhook-switch';
 import { notifyAutomationOwner } from '@/lib/apps/automation-notice';
+import { removeBatchFiles } from '@/lib/apps/batches';
+import { pagedRows } from '@/lib/paged-select';
 import {
-  ADMIN_AUTOMATION_LIMIT, ADMIN_UNLOCKED_REASON, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
-  type AdminAutomationList, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
+  ADMIN_AUTOMATION_LIMIT, ADMIN_BATCH_LIMIT, ADMIN_UNLOCKED_REASON, adminBatchStopReason, adminBatchView, adminPausedReason, adminRevokedReason, adminScheduleView, adminWebhookView,
+  type AdminAutomationList, type AdminBatchCounts, type AdminBatchRow, type AdminBatchView, type AdminScheduleRow, type AdminScheduleView, type AdminWebhookRow, type AdminWebhookView,
 } from '@/lib/apps/automation-admin-spec';
 
 export * from '@/lib/apps/automation-admin-spec';
@@ -17,9 +19,12 @@ export * from '@/lib/apps/automation-admin-spec';
  * 기관 관리자는 **관리 범위 부서** 직원의 예약·연동을 본다 — 무엇이(앱·연동 이름) 누구 이름으로(직원·부서) 언제까지·몇 번 도는지.
  * **입력값·결과·대화·실패 원문·토큰은 보지 않는다**(직원 작업은 관리자도 열람하지 않는다는 원칙). 개인 앱은 이름도 가린다(앱 실행 현황과 같음).
  * 관리자가 할 수 있는 것: 연동 회수(되돌릴 수 없음), 예약 멈춤(직원이 다시 켜지 못하게 잠금)과 잠금 풀기. 모두 사유 5자 이상을 받고 보안 로그에 남긴다.
+ * 일괄 실행(0077, 2026-11-10): 최근 묶음의 앱·직원·줄 수·상태를 보고(입력·결과·파일 이름은 안 봄), 실행 중인 묶음을 사유와 함께 멈춘다
+ * (남은 줄은 건너뜀·실행 중인 줄은 끝까지·파일 사본 지움·직원에게 메일). 되돌릴 수 없다(직원이 새로 만든다).
  */
 
 const WEBHOOK_SELECT = 'id, name, token_prefix, status, expires_at, revoked_at, revoked_reason, last_used_at, use_count, last_status, created_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
+const BATCH_SELECT = 'id, name, status, total, stop_reason, created_at, finished_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
 const SCHEDULE_SELECT = 'id, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, consecutive_failures, run_count, created_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
 
 export type AdminResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
@@ -37,14 +42,19 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
     .catch(() => null);
   const switchPromise = readWebhookSwitch(actor.organizationId).then((s) => webhookSwitchView(s, actor)).catch(() => null);
   const scheduleSwitchPromise = readScheduleSwitch(actor.organizationId).then((s) => webhookSwitchView(s, actor)).catch(() => null);
-  const [webhooks, schedules, departments] = await Promise.all([
+  const [webhooks, schedules, departments, batches] = await Promise.all([
     supabaseAdmin.from('app_webhooks').select(WEBHOOK_SELECT).eq('organization_id', actor.organizationId)
       .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_AUTOMATION_LIMIT + 1),
     supabaseAdmin.from('app_schedules').select(SCHEDULE_SELECT).eq('organization_id', actor.organizationId)
       .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_AUTOMATION_LIMIT + 1),
     supabaseAdmin.from('departments').select('id, name').eq('organization_id', actor.organizationId).in('id', actor.managedDepartmentIds),
+    supabaseAdmin.from('app_batches').select(BATCH_SELECT).eq('organization_id', actor.organizationId)
+      .in('department_id', actor.managedDepartmentIds).order('created_at', { ascending: false }).limit(ADMIN_BATCH_LIMIT),
   ]);
-  if (webhooks.error || schedules.error || departments.error) return { ok: false, status: 503, message: '앱 예약·연동을 불러오지 못했습니다.' };
+  if (webhooks.error || schedules.error || departments.error || batches.error) return { ok: false, status: 503, message: '앱 예약·연동을 불러오지 못했습니다.' };
+  const batchRows = (batches.data ?? []) as unknown as AdminBatchRow[];
+  const counts = await batchCounts(batchRows.map((b) => b.id));
+  if (!counts) return { ok: false, status: 503, message: '앱 예약·연동을 불러오지 못했습니다.' };
   const deptName = new Map(((departments.data ?? []) as Array<{ id: string; name: string }>).map((d) => [d.id, d.name]));
   const hookRows = (webhooks.data ?? []) as unknown as AdminWebhookRow[];
   const scheduleRows = (schedules.data ?? []) as unknown as AdminScheduleRow[];
@@ -53,6 +63,7 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
     data: {
       webhooks: hookRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminWebhookView(r, deptName.get(r.department_id) ?? null, nowMs)),
       schedules: scheduleRows.slice(0, ADMIN_AUTOMATION_LIMIT).map((r) => adminScheduleView(r, deptName.get(r.department_id) ?? null, nowMs)),
+      batches: batchRows.map((r) => adminBatchView(r, deptName.get(r.department_id) ?? null, counts.get(r.id) ?? { done: 0, failed: 0, skipped: 0, pending: 0 })),
       truncated: hookRows.length > ADMIN_AUTOMATION_LIMIT || scheduleRows.length > ADMIN_AUTOMATION_LIMIT,
       runner: await runnerPromise,
       webhookSwitch: await switchPromise,
@@ -61,15 +72,30 @@ export async function listAdminAutomations(actor: ActorScope, nowMs: number): Pr
   };
 }
 
+/** 묶음마다 줄 상태 수 — 줄이 1,000개를 넘을 수 있어(묶음 50개 × 100줄) 쪽마다 끝까지 읽는다. 못 읽으면 null */
+async function batchCounts(batchIds: string[]): Promise<Map<string, AdminBatchCounts> | null> {
+  const out = new Map<string, AdminBatchCounts>(batchIds.map((id) => [id, { done: 0, failed: 0, skipped: 0, pending: 0 }]));
+  if (!batchIds.length) return out;
+  const rows = await pagedRows<{ batch_id: string; status: string }>((from, to, withCount) => supabaseAdmin.from('app_batch_items')
+    .select('batch_id, status', withCount ? { count: 'exact' } : undefined).in('batch_id', batchIds).order('id', { ascending: true }).range(from, to), { cap: batchIds.length * 100 });
+  if (rows.error) return null;
+  for (const r of rows.data) {
+    const c = out.get(r.batch_id);
+    if (!c) continue;
+    if (r.status === 'done') c.done++; else if (r.status === 'failed') c.failed++; else if (r.status === 'skipped') c.skipped++; else c.pending++;
+  }
+  return out;
+}
+
 export type AdminActor = { scope: ActorScope; userId: string; impersonating: boolean };
 
 /** 범위 안의 행인지 — 기관과 관리 부서를 함께 건다(부서 id만 보면 기관이 어긋난 행이 걸린다) */
-async function findScoped(table: 'app_webhooks' | 'app_schedules', id: string, actor: ActorScope & { organizationId: string }, columns: string) {
+async function findScoped(table: 'app_webhooks' | 'app_schedules' | 'app_batches', id: string, actor: ActorScope & { organizationId: string }, columns: string) {
   return supabaseAdmin.from(table).select(columns).eq('id', id).eq('organization_id', actor.organizationId)
     .in('department_id', actor.managedDepartmentIds).maybeSingle();
 }
 
-async function audit(admin: AdminActor, event: 'app_webhook_revoked' | 'app_schedule_paused' | 'app_schedule_unlocked', details: Record<string, unknown>) {
+async function audit(admin: AdminActor, event: 'app_webhook_revoked' | 'app_schedule_paused' | 'app_schedule_unlocked' | 'app_batch_stopped', details: Record<string, unknown>) {
   await logSecurityEvent(admin.scope.departmentId, admin.userId, event, { ...details, impersonating: admin.impersonating }, 'medium');
 }
 
@@ -159,4 +185,41 @@ export async function unlockScheduleByAdmin(admin: AdminActor, id: string, reaso
     }
   }
   return readSchedule(actor, id);
+}
+
+/**
+ * 일괄 실행 멈춤(2026-11-10) — 실행 중인 묶음만(이미 끝난 묶음은 그대로 돌려준다). 기다리던 줄은 건너뛰고 실행 중인 줄은 끝까지 간다.
+ * 파일마다 한 건의 사본을 지우고 직원에게 사유와 함께 메일. 되돌릴 수 없다(다시 하려면 직원이 새로 만든다)
+ */
+export async function stopBatchByAdmin(admin: AdminActor, id: string, reason: string, nowMs: number): Promise<AdminResult<AdminBatchView>> {
+  const actor = admin.scope;
+  if (!scoped(actor)) return { ok: false, status: 403, message: '관리 범위를 확인할 수 없습니다.' };
+  const found = await findScoped('app_batches', id, actor, 'id, user_id, agent_id, status');
+  if (found.error) return { ok: false, status: 503, message: '일괄 실행을 불러오지 못했습니다.' };
+  const target = found.data as { id: string; user_id: string; agent_id: string; status: string } | null;
+  if (!target) return { ok: false, status: 404, message: '관리 범위에서 일괄 실행을 찾을 수 없습니다.' };
+  if (target.status === 'running') {
+    const now = new Date(nowMs).toISOString();
+    const stopReason = adminBatchStopReason(reason);
+    const { data: changed, error } = await supabaseAdmin.from('app_batches')
+      .update({ status: 'stopped', stop_reason: stopReason, finished_at: now })
+      .eq('id', id).eq('organization_id', actor.organizationId).eq('status', 'running').select('id');
+    if (error) return { ok: false, status: 503, message: '일괄 실행을 멈추지 못했습니다.' };
+    if (changed?.length) {
+      await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: now, error: stopReason.slice(0, 300) }).eq('batch_id', id).eq('status', 'pending');
+      await removeBatchFiles(id).catch(() => undefined);
+      await audit(admin, 'app_batch_stopped', { batch_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
+      await notifyAutomationOwner({ kind: 'batch_stopped', organizationId: actor.organizationId, userId: target.user_id, agentId: target.agent_id, targetId: id, reason, at: new Date(nowMs) });
+    }
+  }
+  return readBatch(actor, id);
+}
+
+async function readBatch(actor: ActorScope & { organizationId: string }, id: string): Promise<AdminResult<AdminBatchView>> {
+  const { data, error } = await findScoped('app_batches', id, actor, BATCH_SELECT);
+  if (error || !data) return { ok: false, status: 503, message: '일괄 실행을 불러오지 못했습니다.' };
+  const row = data as unknown as AdminBatchRow;
+  const counts = await batchCounts([id]);
+  if (!counts) return { ok: false, status: 503, message: '일괄 실행을 불러오지 못했습니다.' };
+  return { ok: true, data: adminBatchView(row, await departmentName(row.department_id, actor.organizationId), counts.get(id)!) };
 }

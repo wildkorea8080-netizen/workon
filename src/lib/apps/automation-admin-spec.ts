@@ -27,6 +27,9 @@ export function parseAdminReason(raw: unknown): { ok: true; reason: string } | {
 
 export const adminRevokedReason = (reason: string) => `관리자가 회수했습니다 — ${reason}`;
 export const adminPausedReason = (reason: string) => `관리자가 멈췄습니다 — ${reason}`;
+/** 일괄 실행(0077) 관리 목록 — 최근 묶음 수 */
+export const ADMIN_BATCH_LIMIT = 50;
+export const adminBatchStopReason = (reason: string) => `관리자가 멈췄습니다 — ${reason}`;
 
 type Joined<T> = T | T[] | null;
 const one = <T>(v: Joined<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v);
@@ -45,6 +48,12 @@ export type AdminScheduleRow = {
   agent: Joined<AgentJoin>; owner: Joined<UserJoin>;
 };
 
+export type AdminBatchRow = {
+  id: string; name: string; status: string; total: number; stop_reason: string | null; created_at: string; finished_at: string | null; department_id: string;
+  agent: Joined<AgentJoin>; owner: Joined<UserJoin>;
+};
+export type AdminBatchCounts = { done: number; failed: number; skipped: number; pending: number };
+
 export type AdminWebhookView = {
   id: string; name: string; appName: string; ownerName: string; departmentName: string | null; tokenPrefix: string;
   state: 'active' | 'revoked' | 'expired'; expiresAt: string; revokedAt: string | null; revokedReason: string | null;
@@ -57,14 +66,30 @@ export type AdminScheduleView = {
   /** 켜진 예약인데 예정 시각이 1시간 넘게 지났다 — 실행기가 멈춘 신호(직원 화면의 '실행 지연'과 같은 기준) */
   overdue: boolean;
 };
+/** 관리자용 일괄 실행 한 줄(2026-11-10) — 입력값·결과·파일 이름은 싣지 않는다(줄 수·상태만) */
+export type AdminBatchView = {
+  id: string; name: string; appName: string; ownerName: string; departmentName: string | null;
+  status: 'running' | 'done' | 'cancelled' | 'stopped'; total: number; done: number; failed: number; skipped: number; pending: number;
+  stopReason: string | null; createdAt: string; finishedAt: string | null;
+};
 /** 예약 실행기 상태(`schedule-health.ts`) — 실행기 도장은 서비스 전체, 숫자는 관리 범위 안 예약만. 읽지 못하면 null */
 export type AdminRunnerStatus = { alive: boolean; lastRunAt: string | null; overdueCount: number; stuckClaimCount: number; problems: string[] };
 /** `webhookSwitch`·`scheduleSwitch` — 기관 전체 외부 연동(0068)·예약(0070) 스위치. 읽지 못하면 null(목록은 보인다) */
-export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null; scheduleSwitch: WebhookSwitchView | null };
+export type AdminAutomationList = { webhooks: AdminWebhookView[]; schedules: AdminScheduleView[]; batches: AdminBatchView[]; truncated: boolean; runner: AdminRunnerStatus | null; webhookSwitch: WebhookSwitchView | null; scheduleSwitch: WebhookSwitchView | null };
 
 const appLabel = (agent: AgentJoin | null) => (!agent ? '삭제된 앱' : agent.tier === 'personal' ? PERSONAL_APP_LABEL : agent.name);
 const ownerLabel = (owner: UserJoin | null) => (!owner ? '알 수 없음' : owner.deleted_at ? `${owner.full_name ?? '이름 없음'}(탈퇴)` : owner.full_name ?? '이름 없음');
 const lastStatusOf = (s: string | null) => (s === 'completed' || s === 'failed' ? s : null);
+
+const BATCH_STATUSES = ['running', 'done', 'cancelled', 'stopped'] as const;
+/** 관리자용 일괄 실행 한 줄 — 줄의 입력·결과·파일은 싣지 않는다. 개인 앱은 이름을 가린다 */
+export function adminBatchView(row: AdminBatchRow, departmentName: string | null, counts: AdminBatchCounts): AdminBatchView {
+  const status = (BATCH_STATUSES as readonly string[]).includes(row.status) ? (row.status as AdminBatchView['status']) : 'done';
+  return {
+    id: row.id, name: row.name, appName: appLabel(one(row.agent)), ownerName: ownerLabel(one(row.owner)), departmentName,
+    status, total: row.total, ...counts, stopReason: row.stop_reason, createdAt: row.created_at, finishedAt: row.finished_at,
+  };
+}
 
 /** 관리자용 연동 한 줄 — 토큰 해시·마지막 오류·결과 대화는 싣지 않는다 */
 export function adminWebhookView(row: AdminWebhookRow, departmentName: string | null, nowMs: number): AdminWebhookView {

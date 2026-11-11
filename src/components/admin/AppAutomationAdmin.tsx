@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { parseAdminReason, type AdminAutomationList, type AdminScheduleView, type AdminWebhookView } from '@/lib/apps/automation-admin-spec';
+import { parseAdminReason, type AdminAutomationList, type AdminBatchView, type AdminScheduleView, type AdminWebhookView } from '@/lib/apps/automation-admin-spec';
 import type { WebhookSwitchView } from '@/lib/apps/webhook-spec';
 
 const kst = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '—');
@@ -19,6 +19,13 @@ function scheduleState(s: AdminScheduleView): { label: string; className: string
   if (s.lastStatus === 'failed') return { label: `실패 ${s.consecutiveFailures}회`, className: 'bg-amber-50 text-amber-900' };
   return { label: '예약 중', className: 'bg-emerald-50 text-emerald-800' };
 }
+
+const BATCH_STATE: Record<AdminBatchView['status'], { label: string; className: string }> = {
+  running: { label: '실행 중', className: 'bg-emerald-50 text-emerald-800' },
+  done: { label: '마침', className: 'bg-slate-100 text-slate-600' },
+  cancelled: { label: '직원이 그만둠', className: 'bg-slate-100 text-slate-600' },
+  stopped: { label: '멈춤', className: 'bg-red-50 text-red-800' },
+};
 
 /** 사유를 받는다(취소하면 null). 규칙은 서버와 같은 parseAdminReason — 서버가 다시 본다 */
 function askReason(question: string): string | null {
@@ -135,16 +142,24 @@ export default function AppAutomationAdmin() {
       (item) => setData((d) => (d ? { ...d, schedules: d.schedules.map((x) => (x.id === item.id ? item : x)) } : d)));
   }
 
+  function stopBatch(b: AdminBatchView) {
+    const reason = askReason(`${b.ownerName}의 '${b.name}' 일괄 실행을 멈출까요? 남은 ${b.pending}줄은 실행하지 않습니다(실행 중인 줄은 끝까지 갑니다). 되돌릴 수 없습니다.`);
+    if (!reason) return;
+    void act<AdminBatchView>(b.id, `/api/admin/app-automations/batches/${encodeURIComponent(b.id)}`, { action: 'stop', reason },
+      (item) => setData((d) => (d ? { ...d, batches: d.batches.map((x) => (x.id === item.id ? item : x)) } : d)));
+  }
+
   if (!data) return error ? <p role="alert" className="text-sm text-red-700">{error}</p> : <p role="status" className="text-sm text-slate-500">불러오는 중…</p>;
   const webhooks = onlyLive ? data.webhooks.filter((w) => w.state === 'active') : data.webhooks;
   const schedules = onlyLive ? data.schedules.filter((s) => s.status === 'active' || s.adminPaused) : data.schedules;
+  const batches = onlyLive ? (data.batches ?? []).filter((b) => b.status === 'running') : (data.batches ?? []);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
-          쓰는 연동·켜진 예약만 보기
+          쓰는 연동·켜진 예약·실행 중인 일괄 실행만 보기
         </label>
         <button type="button" onClick={() => void load()} className="text-sm text-[#003087]">새로고침</button>
       </div>
@@ -237,6 +252,39 @@ export default function AppAutomationAdmin() {
             </table>
           </div>
         ) : <p className="text-sm text-slate-500">{onlyLive ? '켜진 예약이 없습니다.' : '예약이 없습니다.'}</p>}
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">앱 일괄 실행</h2>
+        <p className="text-sm text-slate-500 mt-0.5 mb-3">직원이 여러 건(표·파일)을 한 번에 맡긴 실행입니다(최근 50개). 줄마다 AI 사용량이 듭니다. 입력·결과는 보이지 않습니다. 멈추면 남은 줄은 실행하지 않고 되돌릴 수 없습니다(직원이 새로 만듭니다).</p>
+        {batches.length ? (
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">일괄 실행</th><th className="px-3 py-2">앱</th><th className="px-3 py-2">직원·부서</th><th className="px-3 py-2">상태</th>
+                  <th className="px-3 py-2 text-right">줄</th><th className="px-3 py-2">만든 때</th><th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id} className="border-t border-slate-100 align-top">
+                    <td className="px-3 py-2 font-medium text-slate-900">{b.name}</td>
+                    <td className="px-3 py-2 text-slate-600">{b.appName}</td>
+                    <td className="px-3 py-2 text-slate-600">{b.ownerName}<br /><span className="text-xs text-slate-400">{b.departmentName ?? '—'}</span></td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${BATCH_STATE[b.status].className}`}>{BATCH_STATE[b.status].label}</span>
+                      {b.stopReason && <p className="mt-1 max-w-xs text-xs text-slate-500">{b.stopReason}</p>}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">완료 {b.done}/{b.total}{b.failed ? ` · 실패 ${b.failed}` : ''}{b.skipped ? ` · 건너뜀 ${b.skipped}` : ''}</td>
+                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{kst(b.createdAt)}</td>
+                    <td className="px-3 py-2">{b.status === 'running' && <button type="button" disabled={busy === b.id} onClick={() => stopBatch(b)} className="rounded-lg border border-red-200 px-3 py-1 text-xs text-red-700 disabled:opacity-40">멈추기</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-sm text-slate-500">{onlyLive ? '실행 중인 일괄 실행이 없습니다.' : '일괄 실행이 없습니다.'}</p>}
       </div>
     </div>
   );

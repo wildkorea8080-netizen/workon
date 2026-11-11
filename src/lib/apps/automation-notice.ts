@@ -22,6 +22,11 @@ export type AutomationNotice = {
 };
 
 async function targetLabel(n: AutomationNotice): Promise<string> {
+  if (n.kind === 'batch_stopped') {
+    const { data } = await supabaseAdmin.from('app_batches').select('name').eq('id', n.targetId).maybeSingle();
+    const name = (data as { name?: unknown } | null)?.name;
+    return typeof name === 'string' && name.trim() ? `일괄 실행 '${name.trim()}'` : '앱 일괄 실행';
+  }
   if (n.kind === 'webhook_revoked') {
     const { data } = await supabaseAdmin.from('app_webhooks').select('name').eq('id', n.targetId).maybeSingle();
     const name = (data as { name?: unknown } | null)?.name;
@@ -47,7 +52,7 @@ export async function notifyAutomationOwner(n: AutomationNotice): Promise<void> 
     const appName = typeof (agent as { name?: unknown } | null)?.name === 'string' ? (agent as { name: string }).name : '입력형 앱';
     const mail = automationAdminNoticeMail({
       kind: n.kind, appName, target, reason: n.reason, at: n.at,
-      url: `${APP_URL}${n.kind === 'webhook_revoked' ? '/apps/webhooks' : '/apps/schedules'}`,
+      url: `${APP_URL}${n.kind === 'webhook_revoked' ? '/apps/webhooks' : n.kind === 'batch_stopped' ? `/apps/run?agent=${encodeURIComponent(n.agentId)}` : '/apps/schedules'}`,
     });
     const sent = await sendAutomationAdminNoticeEmail(to, mail);
     if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
