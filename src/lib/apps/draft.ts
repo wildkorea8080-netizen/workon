@@ -7,6 +7,11 @@
 
 import { validateAppDefinition, type AppDefinition } from './definition';
 
+/** 대화 화면에서 시험 판 실행의 답변 위 이름표(2026-11-12) — 답변 행 `source_references.app_draft`가 있을 때 */
+export const APP_DRAFT_BADGE = '시험 판 실행';
+/** 시험 판 실행으로 시작한 대화의 입력창 위 안내 — 이어 묻는 질문은 시험 판이 아니라 지금 판(배포된 설정)의 비서로 답한다 */
+export const APP_DRAFT_FOLLOWUP_NOTE = '이 대화는 시험 판 실행으로 시작했습니다. 이어 묻는 질문은 배포된 지금 판 설정으로 답합니다.';
+
 /** 시험 판에 담는 설정 — 빌더가 고치는 것만. 모델·양식·운영 값은 시험 판에 넣지 않는다(지금 판 그대로) */
 export const APP_DRAFT_KEYS = ['name', 'description', 'category', 'system_prompt', 'app_definition', 'capabilities'] as const;
 export type AppDraftKey = (typeof APP_DRAFT_KEYS)[number];

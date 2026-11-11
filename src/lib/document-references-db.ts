@@ -9,7 +9,7 @@ import { visibilityFilter } from '@/lib/department-scope';
 import type { ActorScope } from '@/lib/agent-permissions';
 import {
   REFERENCE_DOCUMENT_COLUMNS,
-  type CommonReferenceRow, type IndexDeps, type PendingIndexRow, type ReferenceDeps, type ReferenceDocumentRow, type ReferenceIndex,
+  type AutoIndexDeps, type CommonReferenceRow, type IndexDeps, type PendingIndexRow, type ReferenceDeps, type ReferenceDocumentRow, type ReferenceIndex,
 } from '@/lib/document-references';
 
 /** 후보로 읽는 기관 문서 행 상한 */
@@ -106,6 +106,27 @@ export function referenceDeps(actor: ActorScope): ReferenceDeps {
       return lists.flat();
     },
     coverage: () => referenceCoverage(actor),
+  };
+}
+
+/** 5분 실행기의 색인 자동 채우기(2026-11-12) — 모든 기관의 색인 없는 문서(최근 것부터), 그 문서의 기관으로만 저장 */
+export function autoIndexDeps(): AutoIndexDeps {
+  return {
+    async listPendingAll(limit) {
+      const { data, error } = await supabaseAdmin
+        .from('documents')
+        .select('id, department_id, organization_id, visibility, storage_path, file_name, noda_status')
+        .not('organization_id', 'is', null)
+        .is('metadata->references', null)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) throw new Error(`documents: ${error.message}`);
+      return (data ?? []) as PendingIndexRow[];
+    },
+    readText: readOriginalText,
+    saveIndex: saveReferenceIndex,
+    now: () => Date.now(),
+    random: () => Math.random(),
   };
 }
 

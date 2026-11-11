@@ -389,22 +389,61 @@ export async function indexPendingDocuments(actor: ActorScope, deps: IndexDeps):
   const rows = (await deps.listPending(organizationId, INDEX_BATCH * 4)).filter((r) => canReadDocument(r, actor)).slice(0, INDEX_BATCH);
   for (const row of rows) {
     if (deps.now() - started > INDEX_BUDGET_MS) break;
-    const at = new Date(deps.now());
-    if (row.noda_status === 'deleting' || !row.storage_path) {
-      if (await deps.saveIndex(row.id, organizationId, skippedIndex(row.noda_status === 'deleting' ? 'deleting' : 'no_file', at))) result.skipped += 1;
-      else result.deferred += 1;
-      continue;
-    }
-    const read = await deps.readText(row.storage_path, row.file_name).catch(() => ({ ok: false as const, status: 503, message: '' }));
-    if (read.ok) {
-      if (await deps.saveIndex(row.id, organizationId, buildIndex(extractCitations(read.text), at))) result.indexed += 1;
-      else result.deferred += 1;
-      continue;
-    }
-    const skip = skipReasonFor(read.status);
-    if (skip && (await deps.saveIndex(row.id, organizationId, skippedIndex(skip, at)))) result.skipped += 1;
-    else result.deferred += 1;
+    result[await indexOneDocument(row, organizationId, deps)] += 1;
   }
   result.coverage = await deps.coverage(actor).catch(() => null);
   return result;
+}
+
+/** 문서 하나의 색인 — 원본을 읽어 인용 열쇠를 남기거나, 다시 읽어도 같은 이유면 '건너뜀'으로 남긴다. 저장소가 잠깐 안 되면 'deferred'(다음에 다시) */
+async function indexOneDocument(row: PendingIndexRow, organizationId: string, deps: Pick<IndexDeps, 'readText' | 'saveIndex' | 'now'>): Promise<'indexed' | 'skipped' | 'deferred'> {
+  const at = new Date(deps.now());
+  if (row.noda_status === 'deleting' || !row.storage_path) {
+    return (await deps.saveIndex(row.id, organizationId, skippedIndex(row.noda_status === 'deleting' ? 'deleting' : 'no_file', at))) ? 'skipped' : 'deferred';
+  }
+  const read = await deps.readText(row.storage_path, row.file_name).catch(() => ({ ok: false as const, status: 503, message: '' }));
+  if (read.ok) return (await deps.saveIndex(row.id, organizationId, buildIndex(extractCitations(read.text), at))) ? 'indexed' : 'deferred';
+  const skip = skipReasonFor(read.status);
+  return skip && (await deps.saveIndex(row.id, organizationId, skippedIndex(skip, at))) ? 'skipped' : 'deferred';
+}
+
+// ── 색인 자동 채우기(2026-11-12) — 5분 실행기(pg_cron, /api/cron/app-schedules)가 부른다 ──
+// 관리자가 '색인 만들기'를 누르기 전에도 새로 올린 문서의 거꾸로 목록('이 문서를 인용하는 문서')에 잡히게, 색인 없는 문서를 한 번에 몇 개씩 채운다.
+// 사람의 권한 범위가 아니라 **기관마다 그 기관 문서의 metadata에만** 쓴다(색인은 그 문서 자신의 인용 이름 — 다른 기관·다른 문서로 아무것도 옮기지 않는다).
+// 원본을 읽기만 하고 모델을 부르지 않는다. 지우는 중·원본 없음·다시 읽어도 같은 실패는 '건너뜀'으로 남겨 다시 집지 않는다.
+
+export const AUTO_INDEX_BATCH = 2;
+export const AUTO_INDEX_BUDGET_MS = 25_000;
+/** 같은 문서가 잠깐 실패를 되풀이해 차례를 막지 않게 — 한 번에 받아 섞어 고르는 후보 수 */
+export const AUTO_INDEX_CANDIDATES = 20;
+
+export interface AutoIndexDeps {
+  /** 색인이 없고 원본 경로가 있거나 지우는 중인 기관 문서(모든 기관, 최근 것부터) */
+  listPendingAll(limit: number): Promise<PendingIndexRow[]>;
+  readText: IndexDeps['readText'];
+  saveIndex: IndexDeps['saveIndex'];
+  now(): number;
+  /** 0 이상 1 미만 — 시험에서 바꿔 끼운다 */
+  random(): number;
+}
+
+export type AutoIndexTick = { indexed: number; skipped: number; deferred: number };
+
+/** 색인 없는 문서 몇 개를 채운다. 던지지 않는다 */
+export async function autoIndexReferences(deps: AutoIndexDeps): Promise<AutoIndexTick> {
+  const tick: AutoIndexTick = { indexed: 0, skipped: 0, deferred: 0 };
+  let rows: PendingIndexRow[];
+  try { rows = await deps.listPendingAll(AUTO_INDEX_CANDIDATES); } catch { return tick; }
+  // 최근 것부터 받아 섞는다 — 잠깐 실패(deferred)한 문서가 맨 앞에 남아 매번 같은 문서만 집지 않게
+  const pool = rows.filter((r) => typeof r.organization_id === 'string' && r.organization_id);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(deps.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const started = deps.now();
+  for (const row of pool.slice(0, AUTO_INDEX_BATCH)) {
+    if (deps.now() - started > AUTO_INDEX_BUDGET_MS) break;
+    try { tick[await indexOneDocument(row, row.organization_id!, deps)] += 1; } catch { tick.deferred += 1; }
+  }
+  return tick;
 }

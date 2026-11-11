@@ -15,6 +15,7 @@ import AppStepResults from '@/components/apps/AppStepResults';
 import AppResultExport from '@/components/apps/AppResultExport';
 import AppResumeLink from '@/components/apps/AppResumeLink';
 import { appStepsCompleted, type AppStepRecord } from '@/lib/apps/pipeline';
+import { APP_DRAFT_BADGE, APP_DRAFT_FOLLOWUP_NOTE } from '@/lib/apps/draft';
 import {
   MAX_CHAT_IMAGES,
   IMAGE_ACCEPT_ATTRIBUTE,
@@ -38,6 +39,8 @@ interface ToolLink {
 
 interface Message {
   appSteps?: AppStepRecord[];
+  /** 시험 판 실행(0053)의 답변 — 이름표를 달고 이어 실행 길을 숨긴다(2026-11-12) */
+  appDraft?: boolean;
   appInputs?: Record<string, string>;
   id: string;
   role: 'user' | 'assistant';
@@ -224,6 +227,7 @@ export default function ChatInterface({
                 number_check?: { unverified?: string[]; rechecked?: unknown };
                 documents_skipped?: boolean;
                 revision?: unknown;
+                app_draft?: unknown;
               };
             }) => ({
               id: m.id,
@@ -237,6 +241,7 @@ export default function ChatInterface({
               sources: m.source_references?.chunks,
               appSteps: m.source_references?.app_steps,
               appInputs: m.source_references?.app_inputs,
+              appDraft: m.role === 'assistant' && m.source_references?.app_draft ? true : undefined,
               links: m.source_references?.links,
               files: m.source_references?.files,
               attachments: m.role === 'user' ? m.source_references?.attachments : undefined,
@@ -719,6 +724,7 @@ export default function ChatInterface({
               numberCheck={msg.numberCheck}
               numberRechecked={msg.numberRechecked}
               documentsSkipped={msg.documentsSkipped}
+              badge={msg.appDraft ? APP_DRAFT_BADGE : undefined}
               refusal={msg.refusal}
               refusalDisabled={isLoading}
               onRetry={() => void resendRefused(false)}
@@ -741,7 +747,7 @@ export default function ChatInterface({
               />
             )}
             {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
-            {conversationId && msg.role === 'assistant' && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
+            {conversationId && msg.role === 'assistant' && !msg.appDraft && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
             {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} defaultTemplateId={(selectedAgent.app_definition as { exportTemplateId?: string } | null | undefined)?.exportTemplateId} />}
             </div>
           ))
@@ -796,6 +802,9 @@ export default function ChatInterface({
           <p role="alert" className="mb-2 text-xs text-red-600">{fileAttach.notice}</p>
         )}
 
+        {messages.some((m) => m.appDraft) && (
+          <p role="note" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{APP_DRAFT_FOLLOWUP_NOTE}</p>
+        )}
         {canAttachFiles && conversationId && (
           <ConversationAttachments conversationId={conversationId} refreshKey={attachmentsRefresh} />
         )}
