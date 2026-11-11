@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-11(밤 3): 외부 연동 비동기 호출·결과 콜백·상태 묻기(0087)
+
+- 2026-11-11 23:28 KST 배포 `dpl_5w8RnPnkH7UbhxDZjBwmvkXvVJZL`(커밋 `ad2525b`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_3aEXhRzAbEPX5ZnNyNin8QRyRawK`(5bcce9c)로 promote한다. 0087은 칸·색인 추가라(옛 코드는 읽지 않음) 그대로 둬도 된다.
+- **운영 DB 먼저**: `npm run db:migrate -- 0087`(23:2x KST). 읽기 전용 확인 — `app_batches.source`(text, NOT NULL, 기본 `'manual'`)·`webhook_id`(uuid, NULL 가능), `app_batches_source_check`(manual·webhook)·`app_batches_webhook_source_check`(`webhook_id IS NULL OR source = 'webhook'`)·외래 키 `app_webhooks(id) ON DELETE SET NULL`, 색인 `app_batches_webhook_idx`·`app_batch_items_message_idx`, RLS 켜짐, 운영 일괄 실행 0행.
+- 들어간 커밋: `47469ff`(직전 배포 기록), `b5737d3` 외부 연동 비동기 호출(`"async": true`·`Prefer: respond-async` → 202와 `batch_id`, 그 직원의 한 줄 일괄 실행 `source='webhook'`, 결과는 앱의 결과 보낼 곳으로 몸에 `run.batch_id`, 파일·문서함 문서 호출 400·실행 중 일괄 실행 3개면 429·같은 `Idempotency-Key`면 같은 `batch_id`·마침 메일 없음)·상태 묻기 `GET /api/apps/webhook/batches/[id]`(같은 토큰, 그 연동이 넣은 묶음만 — [앱 연동](APP_WEBHOOKS.md)), `ad2525b` 문서.
+- **배포 전**: 가지 Preview(`ad2525b`, `workon-gzerlnibx`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 243파일 3,469개 통과(빠진 파일 없음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login` 200, `GET /api/apps/webhook/batches/[id]` 토큰 없이·틀린 토큰 모두 401(토큰 조회까지 돌고 500 없음), `POST /api/apps/webhook` 비동기(본문 `async`·`Prefer`) 토큰 없이·틀린 토큰 401, `/api/v1/budget` 401, `/api/apps/batches` 401. pg_cron 호출 200(23:28~23:30 KST — 23:30은 5분 앱 예약 실행기).
+- **확인하지 못한 것**(사용자 몫): 실제 연동 토큰으로 `"async": true` 호출 → 202·`batch_id` → 5분 안에 실행되고 상태 묻기가 `queued` → `completed`로 바뀌는지, 결과 보낼 곳이 있는 앱이면 받는 쪽 몸에 `run.batch_id`가 오는지(운영에서 직접 부르지 않았다).
+
 ## 2026-11-11(밤 2): 기관 통계 API 끝점 셋(0086)
 
 - 2026-11-11 21:36 KST 배포 `dpl_3aEXhRzAbEPX5ZnNyNin8QRyRawK`(커밋 `5bcce9c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8zi6sUATcdTpaMcNGDm7YsnemviA`(1091e1d)로 promote한다. 0086은 호출 기록 CHECK를 넓힌 것이라(옛 코드는 옛 셋만 씀) 그대로 둬도 된다.
