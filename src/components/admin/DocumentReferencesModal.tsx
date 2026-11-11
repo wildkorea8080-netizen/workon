@@ -195,6 +195,7 @@ export default function DocumentReferencesModal({ documentId, onClose }: { docum
                         {d.name}
                         {d.agentName ? <span className="text-xs text-slate-500"> · {d.agentName}</span> : null}
                         <span className="text-xs text-slate-500"> · {REFERENCE_STATUS_LABEL[d.status]}{d.effectiveFrom ? ` · 시행 ${d.effectiveFrom}` : ''}</span>
+                        {d.similar ? <span className="text-xs text-amber-700"> · 이름 비슷 — 같은 문서를 가리키는지 확인</span> : null}
                       </li>
                     ))}
                   </ul>

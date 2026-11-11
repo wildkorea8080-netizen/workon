@@ -235,10 +235,20 @@ export interface CitingDocument {
   agentName?: string;
   status: CandidateStatus;
   effectiveFrom?: string | null;
+  /** 이름이 같지 않고 비슷하게(한쪽이 다른 쪽을 품음, 4자 이상) 인용 — 같은 문서인지 사람이 확인(2026-11-12) */
+  similar?: true;
 }
 
-/** 이 문서를 인용하는 문서 — 요청자가 볼 수 있는 것만(지운 비서·지우는 중 제외), 자기 문서 빼고, 지금 판 먼저, 상한까지 */
-export function buildCitedBy(actor: ActorScope, rows: ReferenceDocumentRow[], selfId: string): CitingDocument[] {
+/**
+ * 거꾸로 목록의 '이름 비슷'(2026-11-12) — 인용한 쪽 색인 열쇠와 이 문서 이름 열쇠가 같지는 않지만 한쪽이 다른 쪽을 품는가(둘 다 4자 이상).
+ * 나가는 쪽 맞추기(`matchKind`의 부분 일치)와 같은 규칙. 「지방공기업 예산편성기준」이 '예산편성기준' 문서를 가리키는 꼴
+ */
+export function similarCitation(indexKeys: string[], selfKeys: string[]): boolean {
+  return indexKeys.some((k) => k.length >= PARTIAL_MIN && selfKeys.some((s) => s.length >= PARTIAL_MIN && k !== s && (k.includes(s) || s.includes(k))));
+}
+
+/** 이 문서를 인용하는 문서 — 요청자가 볼 수 있는 것만(지운 비서·지우는 중 제외), 자기 문서 빼고, 같은 이름 먼저·지금 판 먼저, 상한까지. `similarIds`는 '이름 비슷' */
+export function buildCitedBy(actor: ActorScope, rows: ReferenceDocumentRow[], selfId: string, similarIds: ReadonlySet<string> = new Set()): CitingDocument[] {
   const seen = new Set<string>();
   const out: CitingDocument[] = [];
   for (const d of rows) {
@@ -246,9 +256,9 @@ export function buildCitedBy(actor: ActorScope, rows: ReferenceDocumentRow[], se
     const agent = agentOf(d);
     if (!agent || agent.deleted_at) continue;
     seen.add(d.id);
-    out.push({ id: d.id, name: d.title?.trim() || d.file_name, agentName: agent.name?.trim() || undefined, status: candidateStatus(d.noda_status, d.retired_at), effectiveFrom: d.effective_from });
+    out.push({ id: d.id, name: d.title?.trim() || d.file_name, agentName: agent.name?.trim() || undefined, status: candidateStatus(d.noda_status, d.retired_at), effectiveFrom: d.effective_from, ...(similarIds.has(d.id) ? { similar: true as const } : {}) });
   }
-  out.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.name.localeCompare(b.name, 'ko'));
+  out.sort((a, b) => Number(Boolean(a.similar)) - Number(Boolean(b.similar)) || STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.name.localeCompare(b.name, 'ko'));
   return out.slice(0, CITED_BY_MAX);
 }
 
@@ -263,6 +273,8 @@ export interface ReferenceDeps {
   saveIndex(id: string, organizationId: string, index: ReferenceIndex): Promise<boolean>;
   /** 색인에 그 열쇠 가운데 하나라도 든 기관 문서(비서 이름 포함) */
   listCiting(organizationId: string, keys: string[]): Promise<ReferenceDocumentRow[]>;
+  /** 색인 열쇠가 그 열쇠와 '이름 비슷'(`similarCitation`)한 기관 문서(같은 이름은 빼도 되고 넣어도 됨). 없으면 같은 이름만 찾는다 */
+  listSimilarCiting?(organizationId: string, keys: string[]): Promise<ReferenceDocumentRow[]>;
   /** 요청자가 볼 수 있는 기관 문서 중 색인된 수·전체 수. 못 세면 null */
   coverage(actor: ActorScope): Promise<{ indexed: number; total: number } | null>;
   now?(): Date;
@@ -330,7 +342,7 @@ export async function documentReferences(id: string, actor: ActorScope, deps: Re
   const [documents, common, citing] = await Promise.all([
     read.ok ? deps.listDocuments(organizationId) : Promise.resolve({ rows: [] as ReferenceDocumentRow[], truncated: false }),
     read.ok ? deps.listCommon(organizationId) : Promise.resolve([] as CommonReferenceRow[]),
-    selfKeys.length ? deps.listCiting(organizationId, selfKeys) : Promise.resolve([] as ReferenceDocumentRow[]),
+    collectCiting(organizationId, selfKeys, deps),
   ]);
   await deps.saveIndex(doc.id, organizationId, read.ok ? buildIndex(citations, now) : skippedIndex(skip!, now)).catch(() => false);
   const coverage = await deps.coverage(actor).catch(() => null);
@@ -344,10 +356,60 @@ export async function documentReferences(id: string, actor: ActorScope, deps: Re
       rows,
       summary: summarizeReferences(rows),
       ...(read.ok ? {} : { outgoingError: read.message }),
-      citedBy: buildCitedBy(actor, citing, doc.id),
+      citedBy: buildCitedBy(actor, citing.rows, doc.id, citing.similarIds),
       coverage,
     },
   };
+}
+
+// ── 공통 기준 문서를 인용하는 기관 문서(2026-11-12) — 관리자 문서 화면 '공통 기준 문서'의 '인용하는 문서' ──
+// 정부 기준이 바뀌면(새 판) 그 기준을 「」로 인용한 기관 문서를 한 번에 본다. 참조 색인으로만 찾는다(같은 이름 열쇠 — 문서를 다시 읽지 않음, 모델 없음).
+
+export interface CommonCitedByRow {
+  id: string;
+  org_type: string;
+  title: string;
+  file_name: string;
+  edition_year: number;
+}
+
+export interface CommonCitedByDeps {
+  loadCommon(id: string): Promise<CommonCitedByRow | null>;
+  /** 요청자 기관의 유형(공통 자료실 열쇠와 같은 표) — 없거나 표 밖이면 null */
+  orgType(organizationId: string): Promise<string | null>;
+  listCiting: ReferenceDeps['listCiting'];
+  listSimilarCiting?: ReferenceDeps['listSimilarCiting'];
+  coverage: ReferenceDeps['coverage'];
+}
+
+export type CommonCitedByOutcome =
+  | { ok: true; data: { document: { id: string; name: string; editionYear: number }; citedBy: CitingDocument[]; coverage: { indexed: number; total: number } | null } }
+  | { ok: false; status: number; message: string };
+
+/** 이 기관 유형의 공통 문서만(다른 유형은 같은 404). 인용 문서는 요청자가 볼 수 있는 이 기관 문서만 — 대화·참조 창과 같은 `buildCitedBy` */
+export async function commonDocumentCitedBy(id: string, actor: ActorScope, deps: CommonCitedByDeps): Promise<CommonCitedByOutcome> {
+  if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
+  const notFound = { ok: false as const, status: 404, message: '문서를 찾을 수 없습니다.' };
+  const [doc, orgType] = await Promise.all([deps.loadCommon(id.toLowerCase()), deps.orgType(actor.organizationId)]);
+  if (!doc || !orgType || doc.org_type !== orgType) return notFound;
+  const keys = candidateKeys(doc.title, doc.file_name);
+  const [citing, coverage] = await Promise.all([
+    collectCiting(actor.organizationId, keys, deps),
+    deps.coverage(actor).catch(() => null),
+  ]);
+  return { ok: true, data: { document: { id: doc.id, name: doc.title, editionYear: doc.edition_year }, citedBy: buildCitedBy(actor, citing.rows, '', citing.similarIds), coverage } };
+}
+
+/** 같은 이름으로 인용한 문서 + '이름 비슷'으로 인용한 문서(같은 이름에 이미 있으면 같은 이름으로). 비슷한 쪽을 못 읽으면 같은 이름만 */
+async function collectCiting(organizationId: string, keys: string[], deps: Pick<ReferenceDeps, 'listCiting' | 'listSimilarCiting'>): Promise<{ rows: ReferenceDocumentRow[]; similarIds: Set<string> }> {
+  if (!keys.length) return { rows: [], similarIds: new Set() };
+  const [exact, similar] = await Promise.all([
+    deps.listCiting(organizationId, keys),
+    deps.listSimilarCiting ? deps.listSimilarCiting(organizationId, keys).catch(() => [] as ReferenceDocumentRow[]) : Promise.resolve([] as ReferenceDocumentRow[]),
+  ]);
+  const exactIds = new Set(exact.map((r) => r.id));
+  const extra = similar.filter((r) => !exactIds.has(r.id));
+  return { rows: [...exact, ...extra], similarIds: new Set(extra.map((r) => r.id)) };
 }
 
 // ── 색인 만들기(관리자 단추 — 한 번에 몇 개씩, 화면이 남은 것이 없을 때까지 다시 부른다) ──

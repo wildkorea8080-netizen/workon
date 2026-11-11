@@ -8,7 +8,7 @@ import { readOriginalText } from '@/lib/source-original';
 import { visibilityFilter } from '@/lib/department-scope';
 import type { ActorScope } from '@/lib/agent-permissions';
 import {
-  REFERENCE_DOCUMENT_COLUMNS,
+  REFERENCE_DOCUMENT_COLUMNS, similarCitation,
   type AutoIndexDeps, type CommonReferenceRow, type IndexDeps, type PendingIndexRow, type ReferenceDeps, type ReferenceDocumentRow, type ReferenceIndex,
 } from '@/lib/document-references';
 
@@ -16,6 +16,8 @@ import {
 const CANDIDATE_CAP = 5000;
 /** 열쇠 하나로 찾는 인용 문서 상한 */
 const CITING_PER_KEY = 200;
+/** '이름 비슷'으로 다시 읽는 인용 문서 상한(2026-11-12) */
+const SIMILAR_MAX = 200;
 
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>;
 
@@ -104,6 +106,31 @@ export function referenceDeps(actor: ActorScope): ReferenceDeps {
         return (data ?? []) as unknown as ReferenceDocumentRow[];
       }));
       return lists.flat();
+    },
+    async listSimilarCiting(organizationId, keys) {
+      // 색인 열쇠만 쪽마다 읽어 '이름 비슷'을 가린 뒤 그 문서만 다시 읽는다(열쇠 부분 일치는 DB가 못 해 앱에서)
+      const indexed = await pagedRows<{ id: string; keys: unknown }>((from, to, withCount) =>
+        supabaseAdmin
+          .from('documents')
+          .select('id, keys:metadata->references->keys', withCount ? { count: 'exact' } : undefined)
+          .eq('organization_id', organizationId)
+          .eq('metadata->references->>status', 'ok')
+          .order('id')
+          .range(from, to) as unknown as Page<{ id: string; keys: unknown }>,
+      { cap: CANDIDATE_CAP });
+      if (indexed.error) throw new Error(`documents: ${indexed.error.message}`);
+      const ids = indexed.data
+        .filter((r) => Array.isArray(r.keys) && similarCitation((r.keys as unknown[]).filter((k): k is string => typeof k === 'string'), keys))
+        .map((r) => r.id)
+        .slice(0, SIMILAR_MAX);
+      if (!ids.length) return [];
+      const { data, error } = await supabaseAdmin
+        .from('documents')
+        .select(`${REFERENCE_DOCUMENT_COLUMNS}, agent:agents(name, deleted_at)`)
+        .eq('organization_id', organizationId)
+        .in('id', ids);
+      if (error) throw new Error(`documents: ${error.message}`);
+      return (data ?? []) as unknown as ReferenceDocumentRow[];
     },
     coverage: () => referenceCoverage(actor),
   };

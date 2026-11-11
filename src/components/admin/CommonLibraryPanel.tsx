@@ -4,6 +4,16 @@ import { useEffect, useState } from 'react';
 import { kstDay } from '@/lib/kst-time';
 import type { AdminCommonLibrary } from '@/lib/common-library-admin';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
+import type { CitingDocument } from '@/lib/document-references';
+
+type CitedState = { loading: true } | { error: string } | { citedBy: CitingDocument[]; coverage: { indexed: number; total: number } | null };
+
+/** 인용하는 문서 칸의 안내 — 색인이 덜 됐으면 빠질 수 있음을 함께 */
+export function citedByNote(count: number, coverage: { indexed: number; total: number } | null): string {
+  const head = count ? `이 기준을 「」로 인용한 기관 문서 ${count}개` : '이 기준을 「」로 인용한 기관 문서를 찾지 못했습니다';
+  if (!coverage || coverage.total === 0) return head;
+  return coverage.indexed < coverage.total ? `${head} — 아직 색인하지 않은 문서 ${coverage.total - coverage.indexed}개는 빠져 있을 수 있습니다(5분마다 채워집니다).` : head;
+}
 
 /**
  * 관리자 문서 화면의 '공통 기준 문서'(2026-11-06) — 이 기관 유형에서 문서 찾기 비서가 기관 문서와 함께 근거로 쓰는
@@ -19,6 +29,16 @@ export default function CommonLibraryPanel() {
   const [data, setData] = useState<AdminCommonLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [compareId, setCompareId] = useState<string | null>(null);
+  const [cited, setCited] = useState<Record<string, CitedState>>({});
+
+  function toggleCited(id: string) {
+    if (cited[id]) { setCited((c) => { const next = { ...c }; delete next[id]; return next; }); return; }
+    setCited((c) => ({ ...c, [id]: { loading: true } }));
+    fetch(`/api/admin/common-documents/${encodeURIComponent(id)}/cited-by`)
+      .then((r) => r.json())
+      .then((body) => setCited((c) => (c[id] ? { ...c, [id]: body?.ok ? { citedBy: body.data.citedBy, coverage: body.data.coverage } : { error: body?.error?.message ?? '불러오지 못했습니다.' } } : c)))
+      .catch(() => setCited((c) => (c[id] ? { ...c, [id]: { error: '불러오지 못했습니다.' } } : c)));
+  }
 
   useEffect(() => {
     let alive = true;
@@ -71,8 +91,42 @@ export default function CommonLibraryPanel() {
                   {d.sizeBytes != null && ` · ${sizeLabel(d.sizeBytes)}`} · 올린 날 {kstDay(d.createdAt)}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-400">이용 조건: {d.usageTerms}</p>
+                {cited[d.id] && (
+                  <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-label={`${d.title}을 인용하는 문서`}>
+                    {'loading' in cited[d.id] && <p role="status">찾는 중…</p>}
+                    {'error' in cited[d.id] && <p role="alert" className="text-red-700">{(cited[d.id] as { error: string }).error}</p>}
+                    {'citedBy' in cited[d.id] && (() => {
+                      const s = cited[d.id] as { citedBy: CitingDocument[]; coverage: { indexed: number; total: number } | null };
+                      return (
+                        <>
+                          <p>{citedByNote(s.citedBy.length, s.coverage)}</p>
+                          {s.citedBy.length > 0 && (
+                            <ul className="mt-1 list-disc pl-4">
+                              {s.citedBy.map((c) => (
+                                <li key={c.id}>
+                                  {c.name}
+                                  {c.agentName ? <span className="text-slate-400"> · {c.agentName}</span> : null}
+                                  {c.status === 'retired' ? <span className="text-slate-400"> · 지난 판</span> : null}
+                                  {c.similar ? <span className="text-amber-700"> · 이름 비슷 — 같은 기준인지 확인</span> : null}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
               <div className="flex flex-shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleCited(d.id)}
+                  aria-expanded={Boolean(cited[d.id])}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                >
+                  인용하는 문서
+                </button>
                 {d.hasPreviousEdition && (
                   <button
                     type="button"
