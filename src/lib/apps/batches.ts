@@ -282,6 +282,14 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
     if (!item.batch.webhook_id || !deps.webhookResult) return;
     await deps.webhookResult(item.batch.webhook_id, patch, nowIso).catch(() => undefined);
   };
+  // 줄 결과 저장 — 잠깐의 DB 오류에 한 번 더 해 본다(2026-11-12). 그래도 못 하면 기록만 남긴다: 줄이 `running`으로 남아 15분 뒤 다시 돌 수 있다(모델 비용 중복)
+  const finish = async (item: BatchItemRun, patch: ItemPatch, nowIso: string) => {
+    try { await deps.finishItem(item.id, patch, nowIso); return; } catch { /* 한 번 더 */ }
+    try { await deps.finishItem(item.id, patch, nowIso); }
+    catch (error) {
+      await deps.log('앱 일괄 실행 줄 결과를 저장하지 못했습니다', { batch_id: item.batch_id, item_id: item.id, status: patch.status, error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' }, item.batch.organization_id).catch(() => {});
+    }
+  };
   /** 기대 핵심어 재기 — 못 읽으면 null(재지 않음). 던지지 않는다 */
   const judge = async (item: BatchItemRun, messageId: string | undefined): Promise<string[] | null> => {
     if (!item.expect || !messageId || !deps.resultText) return null;
@@ -301,7 +309,7 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       const doneAt = iso(deps.now());
       const stopReason = stopReasonFor(outcome);
       if (stopReason) {
-        await deps.finishItem(item.id, { status: 'skipped', attempts, error: stopReason }, doneAt);
+        await finish(item, { status: 'skipped', attempts, error: stopReason }, doneAt);
         await webhookResult(item, { last_status: 'failed', last_error: stopReason, last_conversation_id: null }, doneAt);
         const ended = await deps.stop(item.batch_id, stopReason, doneAt).catch(() => false);
         stoppedBatches.add(item.batch_id);
@@ -312,15 +320,15 @@ export async function runDueBatchItems(deps: BatchDeps): Promise<BatchTick> {
       }
       if (outcome.kind === 'completed') {
         const missing = await judge(item, outcome.messageId);
-        await deps.finishItem(item.id, { status: 'done', attempts, error: null, conversation_id: outcome.conversationId, message_id: outcome.messageId ?? null, ...(missing ? { expect_missing: missing } : {}) }, doneAt);
+        await finish(item, { status: 'done', attempts, error: null, conversation_id: outcome.conversationId, message_id: outcome.messageId ?? null, ...(missing ? { expect_missing: missing } : {}) }, doneAt);
         await webhookResult(item, { last_status: 'completed', last_error: null, last_conversation_id: outcome.conversationId }, doneAt);
         tick.done++;
       } else if (outcome.kind === 'failed' && attempts < BATCH_MAX_ATTEMPTS) {
-        await deps.finishItem(item.id, { status: 'pending', attempts, error: outcome.error.slice(0, 300), conversation_id: outcome.conversationId }, doneAt);
+        await finish(item, { status: 'pending', attempts, error: outcome.error.slice(0, 300), conversation_id: outcome.conversationId }, doneAt);
         tick.retried++;
       } else {
         const error = outcome.kind === 'failed' ? outcome.error : outcome.kind === 'rejected' ? outcome.message : '실행하지 못했습니다.';
-        await deps.finishItem(item.id, { status: 'failed', attempts, error: error.slice(0, 300), ...(outcome.kind === 'failed' ? { conversation_id: outcome.conversationId } : {}) }, doneAt);
+        await finish(item, { status: 'failed', attempts, error: error.slice(0, 300), ...(outcome.kind === 'failed' ? { conversation_id: outcome.conversationId } : {}) }, doneAt);
         await webhookResult(item, { last_status: 'failed', last_error: error.slice(0, 300), last_conversation_id: outcome.kind === 'failed' ? outcome.conversationId : null }, doneAt);
         tick.failed++;
       }
@@ -360,7 +368,8 @@ export function batchDeps(): BatchDeps {
     run: (item, deadlineAt) => runBatchItem(item, deadlineAt),
     async finishItem(id, patch, nowIso) {
       const terminal = patch.status !== 'pending';
-      await supabaseAdmin.from('app_batch_items').update({ ...patch, claimed_at: null, finished_at: terminal ? nowIso : null }).eq('id', id).eq('status', 'running');
+      const { error } = await supabaseAdmin.from('app_batch_items').update({ ...patch, claimed_at: null, finished_at: terminal ? nowIso : null }).eq('id', id).eq('status', 'running');
+      if (error) throw new Error(`app_batch_items finish: ${error.message}`);
     },
     async stop(batchId, reason, nowIso) {
       const { data } = await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');

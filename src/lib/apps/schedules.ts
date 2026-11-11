@@ -78,6 +78,12 @@ export interface ScheduleDeps {
   notifyFailure(row: AppScheduleRow, info: { error: string; paused: boolean; nextRunAt: string | null }): Promise<void>;
   /** 기관 전체 관리자가 예약 실행을 꺼 두었는가(0070) — 읽지 못하면 던진다 */
   orgDisabled(organizationId: string): Promise<boolean>;
+  /**
+   * 멈춘 차지(15분 넘음)를 다시 잡았을 때 — 그 차지(`claimedAt` 이후)의 실행이 이미 끝까지 마쳤는가(2026-11-12).
+   * 결과 저장(`finish`)만 실패해 차지가 남은 경우, 그 실행의 대화에 남긴 도장(`conversations.metadata.app_schedule`)으로 찾는다.
+   * 마친 대화 id 또는 null. 읽지 못하면 던진다(평소처럼 실행 — 예전과 같다)
+   */
+  completedSince?(row: AppScheduleRow, claimedAt: string): Promise<string | null>;
   /** 실행을 마쳤을 때 — 직원이 '완료 메일'을 고른 예약만(0069). 결과 글은 싣지 않고 결과 보기 링크만 */
   notifySuccess(row: AppScheduleRow, info: { conversationId: string | null; nextRunAt: string | null; fileId: string | null }): Promise<void>;
   /** 결과를 한글 파일로도 만든다(0071) — 직원이 고른 예약만. 만든 파일 id(만들 수 없는 결과면 null), DB·저장 오류는 던진다 */
@@ -101,6 +107,8 @@ export interface ScheduleRun {
   partial: boolean;
   /** 멈춘 실행을 다음 차례에 이어 가도록 넘김(0074) — 실패로 세지 않는다 */
   continued: number;
+  /** 결과 저장만 실패했던 지난 실행을 마친 것으로 기록하고 다시 돌리지 않음(2026-11-12) */
+  recovered?: number;
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message.slice(0, 300) : '알 수 없는 오류');
@@ -146,6 +154,10 @@ export function heldPatch(row: AppScheduleRow, nowMs: number): SchedulePatch {
 export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> {
   const started = deps.now();
   const result: ScheduleRun = { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, held: 0, partial: false, continued: 0 };
+  // 결과 저장은 잠깐의 DB 오류에 한 번 더 해 본다 — 남은 차지가 15분 뒤 같은 차례를 다시 돌리지 않게
+  const finishOnce = async (id: string, patch: SchedulePatch) => {
+    try { await deps.finish(id, patch); } catch { await deps.finish(id, patch); }
+  };
   const rows = await deps.due(started, SCHEDULE_BATCH);
   // 기관 스위치(0070)는 한 번 불릴 때 기관마다 한 번만 읽는다
   const switches = new Map<string, Promise<boolean>>();
@@ -176,14 +188,32 @@ export async function runDueSchedules(deps: ScheduleDeps): Promise<ScheduleRun> 
     catch (error) { await deps.log('warning', '앱 예약을 차지하지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id); continue; }
     if (!claimed) { result.skipped++; continue; }
 
+    // 멈춘 차지를 다시 잡았는데 그 차지의 실행이 이미 끝까지 마쳤으면(결과 저장만 실패) 다시 돌리지 않고 마친 것으로 기록한다.
+    // 그 실행이 완료 메일·한글 파일을 이미 처리했으므로 여기서는 다시 하지 않는다. 이어 가는 실행(0074)은 제 상태를 따로 가져 건드리지 않는다
+    if (row.claimed_at && !row.resume_message_id && deps.completedSince) {
+      let prior: string | null = null;
+      try { prior = await deps.completedSince(row, row.claimed_at); }
+      catch (error) { await deps.log('warning', '앱 예약 지난 실행을 확인하지 못함', { schedule_id: row.id, error: errorText(error) }, row.organization_id); }
+      if (prior) {
+        try {
+          await finishOnce(row.id, finishPatch(row, { kind: 'completed', conversationId: prior }, deps.now()));
+          result.recovered = (result.recovered ?? 0) + 1;
+          await deps.log('info', '앱 예약 지난 실행을 마친 것으로 기록함(다시 실행하지 않음)', { schedule_id: row.id, conversation_id: prior }, row.organization_id);
+        } catch (error) {
+          await deps.log('error', '앱 예약 실행 결과를 저장하지 못함', { schedule_id: row.id, outcome: 'recovered', error: errorText(error) }, row.organization_id);
+        }
+        continue;
+      }
+    }
+
     let outcome: ScheduleOutcome;
     try { outcome = await deps.execute(row, started + SCHEDULE_TURN_DEADLINE_MS); }
     catch (error) { outcome = { kind: 'failed', error: errorText(error) }; }
 
     const patch = finishPatch(row, outcome, deps.now());
-    try { await deps.finish(row.id, patch); }
+    try { await finishOnce(row.id, patch); }
     catch (error) {
-      // 차지가 남아 15분 뒤 다시 잡힌다 — 끝난 실행이 한 번 더 돌 수 있어 기록을 남긴다
+      // 차지가 남아 15분 뒤 다시 잡힌다 — 끝까지 마친 실행이면 그때 대화의 도장으로 알아보고 다시 돌리지 않는다(completedSince)
       await deps.log('error', '앱 예약 실행 결과를 저장하지 못함', { schedule_id: row.id, outcome: outcome.kind, error: errorText(error) }, row.organization_id);
     }
 
@@ -223,6 +253,29 @@ export type ExecuteIo = RunAsIo & {
   /** 멈춘 실행의 마지막 답변이 이어 갈 수 있는 기록이면 그 id(0074) — 없으면 자동 이어 실행을 하지 않는다 */
   resumableMessage?(conversationId: string, userId: string): Promise<string | null>;
 };
+
+/** 예약 실행을 마친 대화의 도장 — `metadata.app_schedule = { id, finished_at }`(다른 칸은 그대로 합침) */
+export async function stampScheduleRun(conversationId: string, scheduleId: string, nowMs: number): Promise<void> {
+  const { data, error } = await supabaseAdmin.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
+  if (error || !data) throw new Error(`conversations: ${error?.message ?? 'not found'}`);
+  const metadata = (data as { metadata?: unknown }).metadata;
+  const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? (metadata as Record<string, unknown>) : {};
+  const { error: updateError } = await supabaseAdmin.from('conversations')
+    .update({ metadata: { ...base, app_schedule: { id: scheduleId, finished_at: new Date(nowMs).toISOString() } } }).eq('id', conversationId);
+  if (updateError) throw new Error(`conversations stamp: ${updateError.message}`);
+}
+
+/** 그 예약의 차지(`claimedAt`) 이후에 끝까지 마친 실행의 대화 — 그 직원의 대화·이 예약의 도장만. 없으면 null */
+export async function findCompletedScheduleRun(row: AppScheduleRow, claimedAt: string): Promise<string | null> {
+  const since = new Date(claimedAt);
+  if (Number.isNaN(since.getTime())) return null;
+  const { data, error } = await supabaseAdmin.from('conversations').select('id')
+    .eq('user_id', row.user_id).eq('agent_id', row.agent_id)
+    .eq('metadata->app_schedule->>id', row.id).gte('metadata->app_schedule->>finished_at', since.toISOString())
+    .order('created_at', { ascending: false }).limit(1);
+  if (error) throw new Error(`conversations: ${error.message}`);
+  return ((data ?? [])[0] as { id: string } | undefined)?.id ?? null;
+}
 
 /** 대화의 마지막 답변(그 직원의 대화)이 이어 갈 진행을 남겼으면 그 id */
 export async function findResumableMessage(conversationId: string, userId: string): Promise<string | null> {
@@ -322,7 +375,15 @@ export function scheduleDeps(): ScheduleDeps {
       if (error) throw new Error(`app_schedules claim: ${error.message}`);
       return (data ?? []).length === 1;
     },
-    execute: (row, deadlineAt) => executeSchedule(row, { ...defaultRunAsIo(), resumableMessage: findResumableMessage }, deadlineAt),
+    execute: (row, deadlineAt) => {
+      const base = defaultRunAsIo();
+      // 끝까지 마친 실행의 대화에 이 예약의 도장을 남긴다 — 결과 저장이 실패해 차지가 남아도 다음 실행기가 알아본다(completedSince)
+      return executeSchedule(row, { ...base, resumableMessage: findResumableMessage, async retitle(conversationId, prefix) {
+        await base.retitle(conversationId, prefix);
+        await stampScheduleRun(conversationId, row.id, Date.now()).catch(() => undefined);
+      } }, deadlineAt);
+    },
+    completedSince: findCompletedScheduleRun,
     async finish(id, patch) {
       const { error } = await supabaseAdmin.from('app_schedules').update(patch).eq('id', id);
       if (error) throw new Error(`app_schedules finish: ${error.message}`);

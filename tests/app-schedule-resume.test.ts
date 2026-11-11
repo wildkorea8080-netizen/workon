@@ -126,7 +126,7 @@ describe('runDueSchedules — 이어 감은 실패로 세지 않고 실패 메�
 
 describe('연결·마이그레이션 (원본)', () => {
   it('실행기는 이어 갈 기록 찾기를 붙여 실행하고, 고치기·다시 켜기는 이어 실행 칸을 비운다', () => {
-    expect(readFileSync('src/lib/apps/schedules.ts', 'utf8')).toContain('executeSchedule(row, { ...defaultRunAsIo(), resumableMessage: findResumableMessage }, deadlineAt)');
+    expect(readFileSync('src/lib/apps/schedules.ts', 'utf8')).toContain('return executeSchedule(row, { ...base, resumableMessage: findResumableMessage, async retitle(conversationId, prefix) {');
     const route = readFileSync('src/app/api/apps/schedules/[id]/route.ts', 'utf8');
     expect(route.match(/resume_message_id: null, resume_count: 0/g)?.length).toBe(2);
     expect(readFileSync('src/lib/apps/run-as.ts', 'utf8')).toContain('resume_message_id: input.resumeMessageId');
