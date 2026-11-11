@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-11(밤 2): 기관 통계 API 끝점 셋(0086)
+
+- 2026-11-11 21:36 KST 배포 `dpl_3aEXhRzAbEPX5ZnNyNin8QRyRawK`(커밋 `5bcce9c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 되돌릴 때는 직전 `dpl_8zi6sUATcdTpaMcNGDm7YsnemviA`(1091e1d)로 promote한다. 0086은 호출 기록 CHECK를 넓힌 것이라(옛 코드는 옛 셋만 씀) 그대로 둬도 된다.
+- **운영 DB 먼저**: `npm run db:migrate -- 0086`(21:3x KST). 읽기 전용 확인 — `org_api_key_calls_endpoint_check`가 여섯 값(`feedback-summary`·`app-runs`·`budget` 포함), 상태 코드 CHECK 그대로, RLS 켜짐, 호출 기록 0행.
+- 들어간 커밋: `7272602`(직전 배포 기록), `1a4fbf3` `GET /api/v1/feedback-summary`·`/api/v1/app-runs`·`/api/v1/budget`(범위 usage, 관리자 통계와 같은 읽기 함수 — 앱 실행 현황 읽기를 `run-overview-load.ts`로 뽑아 관리자 라우트와 함께 씀, 개인 앱 이름·개인 한도 없음 — [기관 통계 API](ORG_API.md))·`feedbackPeriod`의 없는 날짜 503 → 400, `5bcce9c` 문서.
+- **배포 전**: 가지 Preview(`5bcce9c`, `workon-4dnofrv8m`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 241파일 3,446개 통과(빠진 파일 없음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login` 200, `/admin/organization`·`/admin/stats` 307, `/api/v1/feedback-summary`·`app-runs`·`budget`·`usage-summary` 키 없이·틀린 키 모두 401, `GET /api/admin/app-overview` 401, `GET /api/admin/feedback-summary` 403. pg_cron 호출 200(21:35~21:37 KST).
+- **확인하지 못한 것**(사용자 몫): 기관 정보 화면에서 이용통계 범위 키를 만들어 세 주소를 실제로 불러 숫자가 관리자 통계 화면과 같은지, 관리자 '앱 실행 현황'이 예전과 같게 나오는지(브라우저로 보지 않았다).
+
 ## 2026-11-11(밤): 예약 지금 실행·다시 보내기·마치지 못한 줄 다시 실행·부서별 줄인 시간(0085)
 
 - 2026-11-11 21:16 KST 배포 `dpl_8zi6sUATcdTpaMcNGDm7YsnemviA`(커밋 `1091e1d`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 작은 항목 넷 묶음). 되돌릴 때는 직전 `dpl_G5H7uyRUMkNQhAg55Lr1TRGHbZ4D`(c551c55)로 promote한다. 0085는 함수에 칸 하나를 더한 것이라(옛 코드는 읽지 않음) 그대로 둬도 된다.
