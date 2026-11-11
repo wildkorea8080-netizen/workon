@@ -124,7 +124,7 @@ export default function OutboundEndpointsPanel() {
               <td className="pr-2">{d.endpointName}</td>
               <td className={`pr-2 ${d.status === 'sent' ? 'text-emerald-700' : d.status === 'gave_up' ? 'text-red-700' : 'text-slate-700'}`}>{OUTBOUND_STATUS_LABELS[d.status]}{d.sentAt ? ` · ${kst(d.sentAt)}` : ''}{d.nextAttemptAt ? ` · 다음 ${kst(d.nextAttemptAt)}` : ''}{d.decidedAt ? ` · 확인 ${kst(d.decidedAt)}${d.decidedByName ? ` ${d.decidedByName}` : ''}` : ''}</td>
               <td className="pr-2">{d.attempts}</td>
-              <td>{d.lastStatus ?? '—'}{d.lastError ? ` · ${d.lastError}` : ''}</td>
+              <td>{d.lastStatus ?? '—'}{d.lastError ? ` · ${d.lastError}` : ''}{d.receiptRef ? ` · 접수 ${d.receiptRef}` : ''}</td>
             </tr>))}
             {!deliveries.length && <tr><td colSpan={6} className="py-2 text-slate-500">보낸 기록이 없습니다.</td></tr>}
           </tbody>

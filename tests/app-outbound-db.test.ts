@@ -92,4 +92,17 @@ describe.skipIf(!url)('앱 결과 보내기 DB (0076)', () => {
       } finally { await db.query('RESET ROLE'); }
     }
   });
+  it('0080 — 접수 정보는 보낸 기록에만, 번호 100자·https 주소 500자', async () => {
+    const e = await endpoint(); const m = await message();
+    const id = (await delivery(e, m, { status: 'sent', sent_at: '2026-11-10T00:00:00Z' })).rows[0].id as string;
+    await db.query("UPDATE app_outbound_deliveries SET receipt_ref = '결재-2026-0042', receipt_url = 'https://gw.example.go.kr/doc/42' WHERE id = $1", [id]);
+    for (const bad of [
+      "receipt_url = 'http://gw.example.go.kr/doc/42'", "receipt_ref = ''", "receipt_ref = repeat('가', 101)", "receipt_url = 'https://x.kr/' || repeat('a', 500)",
+    ]) {
+      await expect(db.query(`UPDATE app_outbound_deliveries SET ${bad} WHERE id = $1`, [id])).rejects.toMatchObject({ code: '23514' });
+    }
+    const m2 = await message();
+    const pending = (await delivery(e, m2)).rows[0].id as string;
+    await expect(db.query("UPDATE app_outbound_deliveries SET receipt_ref = '1' WHERE id = $1", [pending])).rejects.toMatchObject({ code: '23514' });
+  });
 });

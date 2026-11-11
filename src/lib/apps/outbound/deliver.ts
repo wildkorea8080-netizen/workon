@@ -9,7 +9,8 @@
 //   2xx 보냄 · 3xx·4xx(408·429 빼고) 그만둠 · 그 밖·연결 실패는 1·5·30분·2시간 뒤 다시(5번까지).
 // - 결과 한글 파일(2026-11-10): 앱 정의의 `deliverFile`이 켜졌으면 보내기 직전 그 답을 결과 한글 파일로 만들어(예약 결과 파일과 같은 양식 규칙 —
 //   앱 설정 양식, 아니면 표준 보고서, 저장하지 않음) `result.file`에 base64로 싣는다. 5MB를 넘으면 파일 없이 `file_omitted`. 만들지 못하면 다시 보낼 일로 센다.
-// - 리다이렉트는 따르지 않는다(`redirect: 'manual'`) — 따라가면 승인한 주소 밖으로 결과가 간다. 응답 몸은 읽지 않는다.
+// - 리다이렉트는 따르지 않는다(`redirect: 'manual'`) — 따라가면 승인한 주소 밖으로 결과가 간다. 응답 몸은 2xx일 때 앞 4KB만 읽어
+//   받는 쪽 접수 정보(`{"receipt":{"reference","url"}}`, 0080)를 다듬어 남긴다 — 실행한 직원의 '보낸 결과'에 보인다. 그 밖 응답 몸은 버린다.
 // - 남은 위험: 주소를 확인한 뒤 실제 연결 사이에 DNS 답이 바뀌는 경우(DNS rebinding)는 막지 못한다 — 보낼 곳은 기관 전체 관리자가 승인한 주소만이다.
 import { createHash, createHmac, randomBytes } from 'crypto';
 import { lookup } from 'dns/promises';
@@ -20,7 +21,8 @@ import { buildResultHwpxBytes } from '@/lib/apps/schedule-result-file';
 import {
   OUTBOUND_APPROVAL_EXPIRED, OUTBOUND_APPROVAL_MS, OUTBOUND_EVENT, OUTBOUND_HEADERS, OUTBOUND_SECRET_PREFIX, OUTBOUND_STALE_MS, OUTBOUND_TIMEOUT_MS, OUTBOUND_FILE_MAX_BYTES,
   buildOutboundPayload, isIpLiteral, isPrivateAddress, nextAttemptAt, outcomeForStatus, parseOutboundUrl,
-  type AttemptOutcome, type OutboundFile,
+  OUTBOUND_MY_DELIVERIES_LIMIT, OUTBOUND_RECEIPT_MAX_BYTES, parseOutboundReceipt,
+  type AttemptOutcome, type OutboundFile, type OutboundMyDeliveryView, type OutboundStatus,
 } from './spec';
 
 export function generateOutboundSecret(): { secret: string; prefix: string } {
@@ -47,14 +49,36 @@ export async function checkPublicHost(host: string, resolve: Resolve = defaultRe
   return { ok: true };
 }
 
-type FetchLike = (url: string, init: RequestInit) => Promise<{ status: number; body?: { cancel?: () => Promise<void> } | null }>;
+type BodyLike = { cancel?: () => Promise<void>; getReader?: () => { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> } };
+type FetchLike = (url: string, init: RequestInit) => Promise<{ status: number; body?: BodyLike | null }>;
 
-/** 한 번 보내기 — 응답 몸은 읽지 않는다 */
+/** 응답 몸의 앞 `max`바이트만 글로 — 넘으면 멈추고 나머지는 버린다. 못 읽으면 빈 글 */
+export async function readBodyPrefix(body: BodyLike | null | undefined, max = OUTBOUND_RECEIPT_MAX_BYTES): Promise<string> {
+  if (!body?.getReader) { try { await body?.cancel?.(); } catch { /* 버림 */ } return ''; }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < max) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value); size += value.length;
+    }
+  } catch { return ''; } finally { try { await reader.cancel(); } catch { /* 버림 */ } }
+  return new TextDecoder('utf-8', { fatal: false }).decode(Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, max));
+}
+
+/** 한 번 보내기 — 2xx면 응답 몸 앞부분에서 접수 정보를 읽고, 그 밖 응답 몸은 버린다 */
 export async function postOnce(url: string, headers: Record<string, string>, body: string, fetchImpl: FetchLike = fetch as unknown as FetchLike, timeoutMs = OUTBOUND_TIMEOUT_MS): Promise<AttemptOutcome> {
   try {
     const res = await fetchImpl(url, { method: 'POST', headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+    const outcome = outcomeForStatus(res.status);
+    if (outcome.kind === 'sent') {
+      const receipt = parseOutboundReceipt(await readBodyPrefix(res.body));
+      return receipt ? { ...outcome, receipt } : outcome;
+    }
     try { await res.body?.cancel?.(); } catch { /* 몸은 버린다 */ }
-    return outcomeForStatus(res.status);
+    return outcome;
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
     return { kind: 'retry', status: null, error: timedOut ? `받는 쪽이 ${Math.round(timeoutMs / 1000)}초 안에 답하지 않았습니다(잠시 뒤 다시 보냄).` : '받는 쪽에 연결하지 못했습니다(잠시 뒤 다시 보냄).' };
@@ -95,7 +119,7 @@ export interface DeliveryContext {
   message: { content: string; conversation_id: string; created_at: string; role: string; source_references?: Record<string, unknown> | null; agent_version?: number | null } | null;
   agent: { id: string; name: string; app_definition?: { deliverFile?: unknown; exportTemplateId?: unknown } | null } | null;
 }
-export type FinishPatch = { status: 'sent' | 'pending' | 'gave_up'; attempts: number; last_status: number | null; last_error: string | null; next_attempt_at?: string; sent_at?: string };
+export type FinishPatch = { status: 'sent' | 'pending' | 'gave_up'; attempts: number; last_status: number | null; last_error: string | null; next_attempt_at?: string; sent_at?: string; receipt_ref?: string | null; receipt_url?: string | null };
 
 export interface OutboundDeps {
   now(): number;
@@ -190,7 +214,7 @@ export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: 
     }
     const done = deps.now();
     if (outcome.kind === 'sent') {
-      await deps.finish(row.id, { status: 'sent', attempts: attempt, last_status: outcome.status, last_error: null, sent_at: iso(done) });
+      await deps.finish(row.id, { status: 'sent', attempts: attempt, last_status: outcome.status, last_error: null, sent_at: iso(done), ...(outcome.receipt ? { receipt_ref: outcome.receipt.reference, receipt_url: outcome.receipt.url } : {}) });
       result.sent++;
     } else if (outcome.kind === 'retry') {
       const next = nextAttemptAt(attempt, done);
@@ -261,5 +285,35 @@ export function outboundDeps(): OutboundDeps {
       if (error) throw error;
       return data?.length ?? 0;
     },
+  };
+}
+
+/** 이 직원이 실행한 결과의 보낸 기록(0080) — 확인 기다림은 빼고 최근 20개, 앱으로 거를 수 있다. 결과 글·보낼 곳 주소는 싣지 않는다 */
+export async function listMyDeliveries(actor: { userId: string; organizationId: string }, agentId: string | null): Promise<{ ok: true; items: OutboundMyDeliveryView[] } | { ok: false; status: number; message: string }> {
+  if (agentId !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(agentId)) return { ok: false, status: 400, message: '앱을 확인해 주세요.' };
+  let q = supabaseAdmin.from('app_outbound_deliveries').select('id, agent_id, endpoint_id, message_id, status, attempts, created_at, sent_at, next_attempt_at, last_error, receipt_ref, receipt_url')
+    .eq('user_id', actor.userId).eq('organization_id', actor.organizationId).neq('status', 'awaiting_approval');
+  if (agentId) q = q.eq('agent_id', agentId);
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(OUTBOUND_MY_DELIVERIES_LIMIT);
+  if (error) return { ok: false, status: 503, message: '보낸 결과를 불러오지 못했습니다.' };
+  const rows = (data ?? []) as Array<{ id: string; agent_id: string; endpoint_id: string; message_id: string; status: OutboundStatus; attempts: number; created_at: string; sent_at: string | null; next_attempt_at: string | null; last_error: string | null; receipt_ref: string | null; receipt_url: string | null }>;
+  if (!rows.length) return { ok: true, items: [] };
+  const [endpoints, agents, messages] = await Promise.all([
+    supabaseAdmin.from('app_outbound_endpoints').select('id, name').eq('organization_id', actor.organizationId).in('id', [...new Set(rows.map((r) => r.endpoint_id))]),
+    supabaseAdmin.from('agents').select('id, name').eq('organization_id', actor.organizationId).in('id', [...new Set(rows.map((r) => r.agent_id))]),
+    // 대화 링크 — 이 직원의 대화만
+    supabaseAdmin.from('messages').select('id, conversation_id, conversation:conversations!inner(user_id)').in('id', [...new Set(rows.map((r) => r.message_id))]).eq('conversation.user_id', actor.userId),
+  ]);
+  if (endpoints.error || agents.error || messages.error) return { ok: false, status: 503, message: '보낸 결과를 불러오지 못했습니다.' };
+  const endpointNames = new Map(((endpoints.data ?? []) as Array<{ id: string; name: string }>).map((e) => [e.id, e.name]));
+  const agentNames = new Map(((agents.data ?? []) as Array<{ id: string; name: string }>).map((a) => [a.id, a.name]));
+  const conversations = new Map(((messages.data ?? []) as unknown as Array<{ id: string; conversation_id: string }>).map((m) => [m.id, m.conversation_id]));
+  return {
+    ok: true,
+    items: rows.map((r) => ({
+      id: r.id, appName: agentNames.get(r.agent_id) ?? '(앱)', endpointName: endpointNames.get(r.endpoint_id) ?? '(보낼 곳)', status: r.status, attempts: r.attempts,
+      createdAt: r.created_at, sentAt: r.sent_at, nextAttemptAt: r.status === 'pending' ? r.next_attempt_at : null, lastError: r.status === 'sent' ? null : r.last_error,
+      receiptRef: r.receipt_ref, receiptUrl: r.receipt_url && r.receipt_url.startsWith('https://') ? r.receipt_url : null, conversationId: conversations.get(r.message_id) ?? null,
+    })),
   };
 }

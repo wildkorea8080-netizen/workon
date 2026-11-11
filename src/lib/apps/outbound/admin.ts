@@ -34,12 +34,12 @@ export async function listOutbound(actor: ActorScope): Promise<{ ok: true; endpo
   const org = actor.organizationId!;
   const [{ data: endpoints, error }, { data: deliveries, error: deliveryError }] = await Promise.all([
     supabaseAdmin.from('app_outbound_endpoints').select(ENDPOINT_COLUMNS).eq('organization_id', org).order('created_at', { ascending: false }).limit(100),
-    supabaseAdmin.from('app_outbound_deliveries').select('id, endpoint_id, agent_id, status, attempts, last_status, last_error, created_at, sent_at, next_attempt_at, decided_at, decided_by')
+    supabaseAdmin.from('app_outbound_deliveries').select('id, endpoint_id, agent_id, status, attempts, last_status, last_error, created_at, sent_at, next_attempt_at, decided_at, decided_by, receipt_ref')
       .eq('organization_id', org).order('created_at', { ascending: false }).limit(RECENT_DELIVERIES),
   ]);
   if (error || deliveryError) return { ok: false, status: 503, message: '보낼 곳 목록을 불러오지 못했습니다.' };
   const rows = (endpoints ?? []) as EndpointRow[];
-  const sent = (deliveries ?? []) as Array<{ id: string; endpoint_id: string; agent_id: string; status: OutboundStatus; attempts: number; last_status: number | null; last_error: string | null; created_at: string; sent_at: string | null; next_attempt_at: string; decided_at: string | null; decided_by: string | null }>;
+  const sent = (deliveries ?? []) as Array<{ id: string; endpoint_id: string; agent_id: string; status: OutboundStatus; attempts: number; last_status: number | null; last_error: string | null; created_at: string; sent_at: string | null; next_attempt_at: string; decided_at: string | null; decided_by: string | null; receipt_ref?: string | null }>;
   const userIds = [...new Set([...rows.map((r) => r.created_by), ...sent.map((d) => d.decided_by)].filter((v): v is string => Boolean(v)))];
   const agentIds = [...new Set(sent.map((d) => d.agent_id))];
   const [{ data: users }, { data: agents }] = await Promise.all([
@@ -56,7 +56,7 @@ export async function listOutbound(actor: ActorScope): Promise<{ ok: true; endpo
       id: d.id, endpointName: endpointNames.get(d.endpoint_id) ?? '(지운 보낼 곳)', appName: agentNames.get(d.agent_id) ?? '(앱)',
       status: d.status, attempts: d.attempts, lastStatus: d.last_status, lastError: d.last_error, createdAt: d.created_at, sentAt: d.sent_at,
       nextAttemptAt: d.status === 'pending' ? d.next_attempt_at : null,
-      decidedAt: d.decided_at, decidedByName: d.decided_by ? names.get(d.decided_by) ?? '(이름 없음)' : null,
+      decidedAt: d.decided_at, decidedByName: d.decided_by ? names.get(d.decided_by) ?? '(이름 없음)' : null, receiptRef: d.receipt_ref ?? null,
     })),
   };
 }

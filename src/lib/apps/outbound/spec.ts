@@ -13,6 +13,12 @@ export const OUTBOUND_TEXT_MAX = 50_000;
 /** 결과 한글 파일을 함께 실을 때(2026-11-10) 파일 상한 — 넘으면 파일 없이 보내고 `file_omitted: 'too_large'` */
 export const OUTBOUND_FILE_MAX_BYTES = 5 * 1024 * 1024;
 export const OUTBOUND_FILE_CONTENT_TYPE = 'application/hwp+zip';
+/** 받는 쪽 접수 응답(2026-11-10, 0080) — 2xx 응답 몸에서 이만큼만 읽는다 */
+export const OUTBOUND_RECEIPT_MAX_BYTES = 4096;
+export const OUTBOUND_RECEIPT_REF_MAX = 100;
+export const OUTBOUND_RECEIPT_URL_MAX = 500;
+/** 직원의 '보낸 결과' 목록 길이 */
+export const OUTBOUND_MY_DELIVERIES_LIMIT = 20;
 /** 한 번 보낼 때 기다리는 시간 */
 export const OUTBOUND_TIMEOUT_MS = 8_000;
 /** 시도 상한 — 첫 시도 포함 */
@@ -96,6 +102,8 @@ export interface OutboundDeliveryView {
   /** 보내기 전 확인을 누가·언제 했는지(보냄·보내지 않음) */
   decidedAt: string | null;
   decidedByName: string | null;
+  /** 받는 쪽 접수 번호(0080) */
+  receiptRef?: string | null;
 }
 
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
@@ -186,8 +194,11 @@ export function isPrivateAddress(ip: string): boolean {
 
 // ── 보낸 결과 판정 ──────────────────────────────────────────────────────
 
+/** 받는 쪽이 돌려준 접수 정보 — 접수 번호(문서번호 등)·받는 쪽 화면 주소(https). 둘 중 하나 이상 */
+export type OutboundReceipt = { reference: string | null; url: string | null };
+
 export type AttemptOutcome =
-  | { kind: 'sent'; status: number }
+  | { kind: 'sent'; status: number; receipt?: OutboundReceipt }
   | { kind: 'retry'; status: number | null; error: string }
   | { kind: 'give_up'; status: number | null; error: string };
 
@@ -237,5 +248,34 @@ export function buildOutboundPayload(input: {
   });
 }
 
+/**
+ * 받는 쪽 2xx 응답 몸 → 접수 정보. 꼴은 `{"receipt": {"reference": "문서번호", "url": "https://…"}}`만 읽는다(다른 칸·JSON 아님·빈 값은 null).
+ * 번호는 제어·서식 글자를 빼고 100자, 주소는 https·아이디 없음·500자만(그 밖은 버림). 받는 쪽 글이라 다듬은 값만 화면에 보인다
+ */
+export function parseOutboundReceipt(text: string): OutboundReceipt | null {
+  let body: unknown;
+  try { body = JSON.parse(text); } catch { return null; }
+  const receipt = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).receipt : null;
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return null;
+  const r = receipt as Record<string, unknown>;
+  const rawRef = typeof r.reference === 'string' ? r.reference : typeof r.reference === 'number' && Number.isFinite(r.reference) ? String(r.reference) : '';
+  const ref = rawRef.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, OUTBOUND_RECEIPT_REF_MAX);
+  let url: string | null = null;
+  if (typeof r.url === 'string' && r.url.length <= OUTBOUND_RECEIPT_URL_MAX && !CONTROL.test(r.url)) {
+    try {
+      const u = new URL(r.url.trim());
+      if (u.protocol === 'https:' && !u.username && !u.password && u.toString().length <= OUTBOUND_RECEIPT_URL_MAX) url = u.toString();
+    } catch { /* 버림 */ }
+  }
+  return ref || url ? { reference: ref || null, url } : null;
+}
+
+/** 직원이 보는 '보낸 결과' 한 줄(0080) — 자기 결과만. 결과 글·보낼 곳 주소는 싣지 않는다 */
+export interface OutboundMyDeliveryView {
+  id: string; appName: string; endpointName: string; status: OutboundStatus; attempts: number;
+  createdAt: string; sentAt: string | null; nextAttemptAt: string | null; lastError: string | null;
+  receiptRef: string | null; receiptUrl: string | null; conversationId: string | null;
+}
+
 /** 받는 쪽 확인 방법 — 안내 글(화면·문서 공용) */
-export const OUTBOUND_VERIFY_HINT = `받는 쪽은 ${OUTBOUND_HEADERS.signature} 머리글이 sha256=HMAC-SHA256(비밀값, "{${OUTBOUND_HEADERS.timestamp}}." + 받은 본문 그대로)의 16진수와 같은지, 시각이 5분 안인지 보세요. 같은 ${OUTBOUND_HEADERS.delivery}(${OUTBOUND_HEADERS.idempotency})가 다시 오면 한 번만 처리하세요.`;
+export const OUTBOUND_VERIFY_HINT = `받는 쪽은 ${OUTBOUND_HEADERS.signature} 머리글이 sha256=HMAC-SHA256(비밀값, "{${OUTBOUND_HEADERS.timestamp}}." + 받은 본문 그대로)의 16진수와 같은지, 시각이 5분 안인지 보세요. 같은 ${OUTBOUND_HEADERS.delivery}(${OUTBOUND_HEADERS.idempotency})가 다시 오면 한 번만 처리하세요. 받은 뒤 2xx 응답 몸에 {"receipt":{"reference":"접수 번호","url":"https://…"}}를 주면 실행한 직원 화면에 보입니다(선택).`;
