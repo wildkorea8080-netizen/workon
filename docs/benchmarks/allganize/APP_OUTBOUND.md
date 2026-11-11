@@ -16,7 +16,7 @@
 
 - **끝까지 마친 실행만**(멈춘·실패한 단계가 없고 답이 저장됨, `shouldDeliver`). 손 실행·예약 실행·외부 연동 실행 모두. **시험 판 실행(0053)은 보내지 않는다**.
 - 답변을 저장한 뒤 보내기 기록을 넣고(`enqueueOutbound` — 그 기관의 회수되지 않은 곳일 때만, 같은 답변·같은 곳은 한 벌), **앱 예약 실행기(pg_cron 5분마다)** 가 예약 실행과 나란히 보낸다(`dispatchDueDeliveries` — 한 번에 20개·60초). 그래서 결과는 **약 5분 안에** 간다.
-- 보내는 몸(JSON): `event: "app.run.completed"`, `delivery_id`, `sent_at`, `app { id, name }`, `run { message_id, conversation_id, completed_at }`, `result { text, truncated }`(결과 글 50,000자까지). **입력값·중간 단계·첨부·직원 정보는 보내지 않는다.**
+- 보내는 몸(JSON): `event: "app.run.completed"`, `delivery_id`, `sent_at`, `app { id, name }`, `run { message_id, conversation_id, completed_at, batch_id? }`(`batch_id`는 일괄 실행의 줄이 낸 결과일 때만 — 비동기 연동 0087의 202 응답 `batch_id`와 같다), `result { text, truncated }`(결과 글 50,000자까지). **입력값·중간 단계·첨부·직원 정보는 보내지 않는다.**
 - **결과 한글 파일 함께**(2026-11-10, 마이그레이션 없음): 앱 빌더에서 보낼 곳 아래 '결과 한글 파일도 함께 보내기'를 켜면(앱 정의 `deliverFile` — 보낼 곳을 고른 앱에만 남음) 보내기 **직전에** 그 답을 결과 한글 파일로 만들어(예약 결과 한글 파일과 같은 양식 규칙 — 앱의 '결과 한글 파일 양식'이 쓸 수 있으면 그 양식, 아니면 표준 보고서, 모델 없음, `buildResultHwpxBytes`, 저장하지 않음) `result.file = { name, content_type: "application/hwp+zip", size, sha256, encoding: "base64", data }`로 싣는다. 5MB(`OUTBOUND_FILE_MAX_BYTES`)를 넘으면 글만 보내고 `result.file: null`·`file_omitted: "too_large"`. 만들지 못하면(저장소·DB 오류) 보내지 않고 다시 보낼 일로 센다(5번까지). 고르지 않은 앱의 몸은 옛 꼴 그대로(`file` 칸 없음). 설정은 보낼 때의 앱 정의를 따른다(넣을 때가 아니라). 서명은 파일이 든 본문 전체에 건다.
 - 머리글: `X-Workon-Event`, `X-Workon-Delivery`(= `Idempotency-Key`, 기록 id — 다시 보내도 같다), `X-Workon-Timestamp`(초), `X-Workon-Signature: sha256=HMAC-SHA256(비밀값, "{시각}." + 본문)`.
 - **받는 쪽 확인**: 서명이 같은지, 시각이 5분 안인지, 같은 `X-Workon-Delivery`는 한 번만 처리하는지.
