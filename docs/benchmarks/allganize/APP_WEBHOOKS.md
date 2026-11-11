@@ -79,7 +79,7 @@ Idempotency-Key: order-2026-11-03-42      (선택 — 요청마다 다른 값)
 - **결과는 앱의 '결과 보낼 곳'**([결과 보내기](APP_OUTBOUND.md) — 기관 전체 관리자가 승인한 https 주소)이 정해져 있으면 그리로 간다. 몸의 `run.batch_id`가 202 응답의 `batch_id`와 같아 외부 시스템이 맞춰 본다(이것이 콜백 — 임의 콜백 주소는 받지 않는다). `result_delivery: false`면 결과는 직원의 앱 실행 기록에만 남는다.
 - 받지 않는 것: 본문 `files`(400 — 파일은 기다리는 호출로), 문서함 문서를 고른 연동(400). 직원의 실행 중인 일괄 실행이 3개면 429(기록하지 않아 같은 키로 다시 보낼 수 있다).
 - `Idempotency-Key`: 같은 키로 다시 보내면 처음 받은 `batch_id`를 그대로(202, `replayed: true`). 같은 키로 기다리는 호출과 비동기를 섞으면 다른 요청이라 422.
-- 비동기 묶음은 **마침 메일을 보내지 않는다**(호출마다 메일이 가지 않게). 연동 목록의 '마지막 결과'는 기다리는 호출만 바꾼다.
+- 비동기 묶음은 **마침 메일을 보내지 않는다**(호출마다 메일이 가지 않게). 연동 목록의 '마지막 결과'는 그 줄이 끝날 때 일괄 실행 실행기가 바꾼다(2026-11-11 — 마침이면 완료와 대화, 실패·멈춤이면 실패와 이유).
 - **상태 묻기**: `GET /api/apps/webhook/batches/{batch_id}`(같은 연동 토큰 Bearer, `src/lib/apps/webhook-status.ts`) → 200 `{ batch_id, status, conversation_id, error, accepted_at, finished_at, delivery }`(`Cache-Control: no-store`).
   - `status`: `queued`(차례 기다림)·`running`·`completed`·`failed`(그 줄만 실패 — `error`에 안내)·`stopped`(묶음이 멈춤 — 앱 판·권한·한도, `error`에 이유)·`cancelled`. `conversation_id`는 완료·실패일 때만.
   - `delivery`: 결과 보낼 곳이 있을 때 `{ status: pending|awaiting_approval|sent|gave_up|rejected, receipt_reference }`(접수 번호는 보냈을 때만), 아직 보내기 기록이 없으면 null.
