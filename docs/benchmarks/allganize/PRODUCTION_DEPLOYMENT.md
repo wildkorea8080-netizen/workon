@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-11(저녁): 도입 현황 줄인 시간(0083)·일괄 실행 기관 상한(0084)·결과 엑셀 보내기 열
+
+- 2026-11-11 17:24 KST 배포 `dpl_G5H7uyRUMkNQhAg55Lr1TRGHbZ4D`(커밋 `c551c55`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 작은 항목 셋 묶음). 되돌릴 때는 직전 `dpl_3Rd8DR1hd7Y9DmX9Rk5fcpPEQbuA`(7e5d695)로 promote한다. 0083은 함수에 칸 둘을 더한 것이고(옛 코드는 읽지 않음), 0084는 칸 하나 추가라 그대로 둬도 된다(옛 코드는 상한을 보지 않음).
+- **운영 DB 먼저**: `npm run db:migrate -- 0083`, `-- 0084`(17:1x KST). 읽기 전용 확인 — `adoption_report` 정의에 `saved_minutes_reported`·`completed_median_hours` 둘 다, 실행 권한 anon·authenticated 없음·service_role 있음, 기관 하나로 실제 호출해 두 칸이 나옴(값 0·0), `organizations.app_batch_max_rows`(smallint) + CHECK, 상한을 정한 기관 0/2.
+- 들어간 커밋: `35af943`(직전 배포 기록), `aa4c143` 월별 도입 현황 '자기 신고' 묶음(직원이 고른 줄인 시간 합·고른 답 수 — [도입 현황](ADOPTION_REPORT.md)), `0982a00` 일괄 실행 기관 상한(1~100, 사유·보안 로그, 못 읽으면 만들기 닫힘)·결과 엑셀 보내기·접수 번호 열 — [일괄 실행](APP_BATCHES.md), `c551c55` 문서.
+- **배포 전**: 가지 Preview(`c551c55`, `workon-avyuwsdf3`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 239파일 3,428개 통과(빠진 파일 없음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/apps/run` 200, `/admin/stats`·`/admin/app-automations` 307, `PUT /api/admin/app-automations/batch-limit`·`GET /api/v1/adoption-report`·`/api/apps/batches/[id]/export` 401, `GET /api/admin/adoption-report` 403. pg_cron 호출 200(17:25~17:26 KST).
+- **확인하지 못한 것**(사용자 몫): 로그인해 ① 관리자 통계 '월별 도입 현황'의 '자기 신고' 두 줄(줄인 시간을 고른 답이 생긴 뒤) ② '앱 예약·연동'에서 일괄 실행 상한을 바꾸고 직원이 상한을 넘겨 만들면 거절되는지 ③ 외부로 보낸 일괄 실행의 결과 엑셀 '보내기'·'접수 번호' 열(브라우저로 보지 않음).
+
 ## 2026-11-11(오후): 보내기 동작·알림 메일(0081)·답변 평가 줄인 시간(0082)
 
 - 2026-11-11 15:57 KST 배포 `dpl_3Rd8DR1hd7Y9DmX9Rk5fcpPEQbuA`(커밋 `7e5d695`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 작은 항목 넷을 묶어 한 번에). 되돌릴 때는 직전 `dpl_5MsidPkWdMVWjaer8h2xFyb3f4Co`(177ce45)로 promote한다. 0081·0082는 칸·CHECK·색인 추가라 그대로 둬도 된다 — 옛 코드는 새 칸을 읽지도 쓰지도 않는다(동작을 정한 보낼 곳도 동작 없이 보내고, 알림은 안 간다).
