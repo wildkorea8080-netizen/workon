@@ -57,7 +57,7 @@ describe('공통 기준 문서 목록', () => {
       row({ id: 'c0000000-0000-0000-0000-000000000003', title: '경영평가 편람', edition_year: 2026 }),
     ]);
     expect(list.documents.map((d) => `${d.title}${d.editionYear}`)).toEqual(['경영평가 편람2026', '경영평가 편람2025', '회계기준2026']);
-    expect(Object.keys(list.documents[0]).sort()).toEqual(['createdAt', 'editionYear', 'fileName', 'id', 'sizeBytes', 'title', 'usageTerms']);
+    expect(Object.keys(list.documents[0]).sort()).toEqual(['createdAt', 'editionYear', 'fileName', 'hasPreviousEdition', 'id', 'sizeBytes', 'title', 'usageTerms']);
   });
 
   it('저장소 경로·NODA 칸은 읽지도 않는다', () => {

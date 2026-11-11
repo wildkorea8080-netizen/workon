@@ -1,5 +1,5 @@
 import type { RetrievedChunk } from '@/lib/db';
-import { sourceLocationLabel, sourceTitleLabel, sourceNumber } from './source-label';
+import { sourceEffectiveLabel, sourceLocationLabel, sourceTitleLabel, sourceNumber } from './source-label';
 
 interface SourceCitationProps {
   sources: RetrievedChunk[];
@@ -22,17 +22,19 @@ export default function SourceCitation({ sources, onOpen }: SourceCitationProps)
       {sources.map((source, index) => {
         const title = sourceTitleLabel(source);
         const location = sourceLocationLabel(source);
+        const effective = sourceEffectiveLabel(source);
         return (
           <button
             key={index}
             type="button"
             onClick={() => onOpen?.(source)}
-            title={`${title} · ${location}`}
+            title={`${title} · ${location}${effective ? ` · ${effective}` : ''}`}
             className="inline-flex items-center gap-1.5 max-w-[280px] bg-white border border-slate-200 hover:border-ws-accent/40 hover:bg-ws-accent/5 rounded-md px-2 py-1 text-xs text-slate-700 transition-colors"
           >
             <span className="font-semibold text-ws-accent">[{sourceNumber(source)}]</span>
             <span className="truncate">{title}</span>
             {typeof source.page === 'number' && <span className="text-slate-400 flex-shrink-0">p.{source.page}</span>}
+            {effective && <span className="text-slate-400 flex-shrink-0">{effective}</span>}
             {source.ocr && (
               <span className="flex-shrink-0 bg-amber-50 border border-amber-200 text-amber-800 rounded px-1 text-[10px]">스캔</span>
             )}

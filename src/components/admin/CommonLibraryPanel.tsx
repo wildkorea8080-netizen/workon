@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { kstDay } from '@/lib/kst-time';
 import type { AdminCommonLibrary } from '@/lib/common-library-admin';
+import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
 
 /**
  * 관리자 문서 화면의 '공통 기준 문서'(2026-11-06) — 이 기관 유형에서 문서 찾기 비서가 기관 문서와 함께 근거로 쓰는
@@ -17,6 +18,7 @@ function sizeLabel(bytes: number | null): string {
 export default function CommonLibraryPanel() {
   const [data, setData] = useState<AdminCommonLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [compareId, setCompareId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -70,14 +72,25 @@ export default function CommonLibraryPanel() {
                 </p>
                 <p className="mt-0.5 text-xs text-slate-400">이용 조건: {d.usageTerms}</p>
               </div>
-              <a
-                href={`/api/common-documents/${encodeURIComponent(d.id)}/original`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
-              >
-                원본 열기
-              </a>
+              <div className="flex flex-shrink-0 gap-2">
+                {d.hasPreviousEdition && (
+                  <button
+                    type="button"
+                    onClick={() => setCompareId(d.id)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                  >
+                    옛 판과 비교
+                  </button>
+                )}
+                <a
+                  href={`/api/common-documents/${encodeURIComponent(d.id)}/original`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                >
+                  원본 열기
+                </a>
+              </div>
             </li>
           ))}
         </ul>
@@ -86,6 +99,7 @@ export default function CommonLibraryPanel() {
       {data && data.pendingCount > 0 && (
         <p className="mt-2 text-xs text-slate-400">그 밖에 운영자가 준비 중인 문서 {data.pendingCount}개는 아직 근거로 쓰지 않습니다.</p>
       )}
+      {compareId && <EditionCompareModal endpoint={compareEndpoint('admin-common', compareId)} onClose={() => setCompareId(null)} />}
     </section>
   );
 }

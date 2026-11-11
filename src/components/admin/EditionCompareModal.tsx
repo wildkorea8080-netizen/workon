@@ -96,7 +96,8 @@ function Row({ row }: { row: CompareRow }) {
  * 표·그림 배치나 서식 차이는 보이지 않는다 — 머리에 그렇게 적는다.
  */
 /** 비교 주소 — 비서 문서와 공통 자료실(슈퍼관리자)이 같은 창을 쓴다 */
-export function compareEndpoint(scope: 'documents' | 'common', id: string): string {
+export function compareEndpoint(scope: 'documents' | 'common' | 'admin-common', id: string): string {
+  if (scope === 'admin-common') return `/api/admin/common-documents/${id}/compare`;
   return scope === 'common' ? `/api/super/common-documents/${id}/compare` : `/api/documents/${id}/compare`;
 }
 

@@ -35,6 +35,8 @@ export interface AdminCommonDocument {
   fileName: string;
   sizeBytes: number | null;
   createdAt: string;
+  /** 이 판이 바꾼 옛 판이 있으면 참 — '옛 판과 비교'(2026-11-12, `GET /api/admin/common-documents/[id]/compare`) */
+  hasPreviousEdition: boolean;
 }
 
 export interface AdminCommonLibrary {
@@ -60,6 +62,7 @@ export function adminCommonList(orgType: unknown, rows: CommonLibraryRow[]): Adm
       fileName: r.file_name,
       sizeBytes: typeof r.size_bytes === 'number' ? r.size_bytes : null,
       createdAt: r.created_at,
+      hasPreviousEdition: typeof r.replaces_id === 'string' && r.replaces_id.length > 0,
     }))
     .sort((a, b) => a.title.localeCompare(b.title, 'ko') || b.editionYear - a.editionYear);
   return { orgType, documents, pendingCount: current.length - documents.length };

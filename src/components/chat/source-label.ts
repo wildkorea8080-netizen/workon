@@ -66,6 +66,16 @@ export function sourceTitleLabel(c: SourceTitleInput): string {
   return `[공통] ${title || '문서'}${year}`;
 }
 
+/**
+ * 근거 칩의 시행일(2026-11-12) — 기관 문서의 판에 시행일(`effectiveFrom`, YYYY-MM-DD)이 있으면 `시행 2026.1.1.`(공문 날짜 꼴).
+ * 공통 자료실 조각은 기준 연도를 제목에 붙이므로 쓰지 않는다. 꼴이 틀리면 빈 글
+ */
+export function sourceEffectiveLabel(c: { scope?: 'common'; effectiveFrom?: string }): string {
+  if (c.scope === 'common' || typeof c.effectiveFrom !== 'string') return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(c.effectiveFrom);
+  return m ? `시행 ${m[1]}.${Number(m[2])}.${Number(m[3])}.` : '';
+}
+
 export interface SourceLocationInput {
   page?: number | null;
   cellRange?: string | null;
