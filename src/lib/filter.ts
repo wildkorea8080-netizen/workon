@@ -18,6 +18,8 @@ export type SecurityEventType =
   | 'app_batch_stopped'
   /** 기관 전체 관리자가 일괄 실행 한 번 최대 줄 수를 바꿈 (0084) */
   | 'app_batch_limit_changed'
+  /** 직원이 그만둔 앱 결과 보내기를 다시 보냄 (2026-11-10) */
+  | 'app_outbound_result_retried'
   | 'app_webhooks_org_disabled'
   | 'app_webhooks_org_enabled'
   | 'app_schedules_org_disabled'

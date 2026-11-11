@@ -126,6 +126,15 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
     if (!res.ok || !body?.ok) setError(body?.error?.message ?? '그만두지 못했습니다.');
     await load();
   }
+  async function retryUnfinished(batch: BatchView) {
+    if (!window.confirm(`'${batch.name}'에서 마치지 못한 ${batch.failed + batch.skipped}줄(실패·건너뜀)로 새 일괄 실행을 만들까요? 지금 앱 설정으로 다시 실행합니다(줄마다 AI 사용량이 듭니다).`)) return;
+    setError(null); setErrors([]);
+    const res = await fetch(`/api/apps/batches/${encodeURIComponent(batch.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry_unfinished' }) });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) { setError(body?.error?.message ?? '다시 실행하지 못했습니다.'); setErrors(body?.error?.details?.errors ?? []); }
+    else if (body.data?.skippedFiles) setError(`파일마다 한 건의 줄 ${body.data.skippedFiles}개는 빼고 만들었습니다(파일을 다시 올려 실행해 주세요).`);
+    await load();
+  }
   async function readFile(file: File) {
     if (file.size > 400_000) { setError('CSV 파일이 너무 큽니다(400KB까지).'); return; }
     setText(await file.text());
@@ -191,6 +200,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
                   <div className="mt-1 flex gap-3">
                     {(b.done > 0 || b.failed > 0) && <Link href={`/api/apps/batches/${encodeURIComponent(b.id)}/export`} prefetch={false} className="text-ws-accent-text underline">결과 엑셀</Link>}
                     {b.status === 'running' && <button type="button" onClick={() => void cancel(b)} className="text-red-600 underline">그만두기</button>}
+                    {b.status !== 'running' && b.failed + b.skipped > 0 && <button type="button" disabled={disabled} onClick={() => void retryUnfinished(b)} className="text-ws-accent-text underline disabled:opacity-40">마치지 못한 줄 다시 실행</button>}
                   </div>
                 </li>
               ))}

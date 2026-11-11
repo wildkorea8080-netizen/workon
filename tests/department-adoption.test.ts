@@ -16,7 +16,7 @@ import { departmentAdoptionCsv, departmentTotals, hasActivity, readDepartmentAdo
 import { GET } from '@/app/api/admin/adoption-report/departments/route';
 import { DepartmentAdoptionTable } from '@/components/admin/DepartmentAdoption';
 
-const row = (over: Partial<DepartmentAdoption>): DepartmentAdoption => ({ departmentId: 'd', name: '총무과', registered_users: 0, active_users: 0, regular_users: 0, chat_messages: 0, app_runs: 0, documents_generated: 0, tasks_completed: 0, cost_krw: 0, ...over });
+const row = (over: Partial<DepartmentAdoption>): DepartmentAdoption => ({ departmentId: 'd', name: '총무과', registered_users: 0, active_users: 0, regular_users: 0, chat_messages: 0, app_runs: 0, documents_generated: 0, tasks_completed: 0, cost_krw: 0, saved_minutes: 0, ...over });
 
 beforeEach(() => { state.admin = true; state.rpc = { data: [], error: null }; state.calls = []; });
 
@@ -39,9 +39,9 @@ describe('부서별 숫자', () => {
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     const lines = csv.slice(1).split('\n');
     expect(lines[0]).toBe('2026-11 부서별 도입 현황');
-    expect(lines[1]).toBe('부서,등록 직원,쓴 직원,4일 이상 쓴 직원,질문,앱 실행,만든 파일,업무 작업 완료,사용 금액(원)');
+    expect(lines[1]).toBe('부서,등록 직원,쓴 직원,4일 이상 쓴 직원,질문,앱 실행,만든 파일,업무 작업 완료,사용 금액(원),줄인 시간(분·자기 신고)');
     expect(lines[2].startsWith(`"'=HYPERLINK(""x"")"`)).toBe(true);
-    expect(lines[4]).toBe('합계,0,0,0,5,0,0,0,1500');
+    expect(lines[4]).toBe('합계,0,0,0,5,0,0,0,1500,0');
   });
 
   it('표 — 기록 있는 부서 먼저, 끝 줄 합계', () => {

@@ -334,6 +334,19 @@ export interface OutboundMyDeliveryView {
   id: string; appName: string; endpointName: string; status: OutboundStatus; attempts: number;
   createdAt: string; sentAt: string | null; nextAttemptAt: string | null; lastError: string | null;
   receiptRef: string | null; receiptUrl: string | null; conversationId: string | null;
+  /** 직원이 '다시 보내기'를 누를 수 있는지(2026-11-10) — 실제로 보내 보고 그만둔 기록·7일 안·보낼 곳이 아직 쓰임 */
+  retryable?: boolean;
+}
+
+/** 다시 보내기를 받는 기간(그만둔 기록이 만들어진 때부터) */
+export const OUTBOUND_RETRY_WINDOW_MS = OUTBOUND_APPROVAL_MS;
+export const OUTBOUND_RETRY_NOTE = '직원이 다시 보내기를 눌렀습니다.';
+/**
+ * 그만둔 보내기를 직원이 다시 보낼 수 있는지 — **실제로 보내 보고(시도 1번 이상) 그만둔 것만**. 시도 0번인 그만둠(확인 기한 지남·보낼 곳 회수·동작 없어짐)은
+ * 사람이 정한 일이거나 설정을 고쳐야 하는 일이라 받지 않는다(다시 보내기가 보내기 전 확인을 건너뛰지 않게)
+ */
+export function canRetryDelivery(d: { status: string; attempts: number; created_at: string }, endpointActive: boolean, nowMs: number): boolean {
+  return d.status === 'gave_up' && d.attempts >= 1 && endpointActive && Date.parse(d.created_at) > nowMs - OUTBOUND_RETRY_WINDOW_MS;
 }
 
 /** 받는 쪽 확인 방법 — 안내 글(화면·문서 공용) */

@@ -258,3 +258,31 @@ describe('PATCH·DELETE /api/apps/schedules/[id]', () => {
     expect((await DELETE(req, { params: { id: SCHEDULE } })).status).toBe(401);
   });
 });
+
+describe('지금 한 번 실행(2026-11-10)', () => {
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+  it('켜진 내 예약의 다음 실행 시각을 지금으로 — 조건은 내 것·켜짐·잠금 없음·실행기가 잡지 않음', async () => {
+    state.results.app_schedules = [{ data: { ...scheduleRow({ next_run_at: future }), agent: { name: '주간 보고 앱' } } }, { data: scheduleRow({ next_run_at: new Date().toISOString() }) }];
+    const res = await json(await patchReq(SCHEDULE, { action: 'run_now' }));
+    expect(res.status).toBe(200);
+    const update = state.calls.find((c) => c[0] === 'app_schedules' && c[1] === 'update') as unknown[];
+    expect(Object.keys(update[2] as object).sort()).toEqual(['next_run_at', 'updated_at']);
+    for (const cond of [['eq', 'user_id', 'me'], ['eq', 'status', 'active'], ['is', 'admin_paused_at', null], ['is', 'claimed_at', null]]) {
+      expect(state.calls).toContainEqual(['app_schedules', ...cond]);
+    }
+  });
+  it('멈춘 예약 409·방금(10분 안) 실행 429·실행 중이거나 그 사이 바뀜 409·관리자 잠금 403, 이미 차례면 바꾸지 않고 그대로', async () => {
+    state.results.app_schedules = [{ data: { ...scheduleRow({ status: 'paused', next_run_at: future }), agent: null } }];
+    expect((await patchReq(SCHEDULE, { action: 'run_now' })).status).toBe(409);
+    state.results.app_schedules = [{ data: { ...scheduleRow({ next_run_at: future, last_run_at: new Date(Date.now() - 5 * 60_000).toISOString() }), agent: null } }];
+    expect((await patchReq(SCHEDULE, { action: 'run_now' })).status).toBe(429);
+    state.results.app_schedules = [{ data: { ...scheduleRow({ next_run_at: future }), agent: null } }, { data: null }];
+    expect((await patchReq(SCHEDULE, { action: 'run_now' })).status).toBe(409);
+    state.results.app_schedules = [{ data: { ...scheduleRow({ next_run_at: future, admin_paused_at: '2026-11-03T00:00:00Z' }), agent: null } }];
+    expect((await patchReq(SCHEDULE, { action: 'run_now' })).status).toBe(403);
+    state.calls = [];
+    state.results.app_schedules = [{ data: { ...scheduleRow({ next_run_at: new Date(Date.now() - 60_000).toISOString() }), agent: null } }];
+    expect((await patchReq(SCHEDULE, { action: 'run_now' })).status).toBe(200);
+    expect(state.calls.some((c) => c[1] === 'update')).toBe(false);
+  });
+});

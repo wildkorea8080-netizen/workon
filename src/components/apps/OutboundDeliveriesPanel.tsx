@@ -12,6 +12,7 @@ const kst = (iso: string) => new Date(iso).toLocaleString('ko-KR', { timeZone: '
 export default function OutboundDeliveriesPanel({ agentId, refreshKey }: { agentId: string; refreshKey?: string | null }) {
   const [items, setItems] = useState<OutboundMyDeliveryView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/apps/outbound-deliveries?agent=${encodeURIComponent(agentId)}`);
@@ -27,6 +28,17 @@ export default function OutboundDeliveriesPanel({ agentId, refreshKey }: { agent
     const timer = setTimeout(() => void load(), 60_000);
     return () => clearTimeout(timer);
   }, [items, load]);
+
+  async function retry(d: OutboundMyDeliveryView) {
+    if (busy || !window.confirm(`'${d.endpointName}'(으)로 이 결과를 다시 보냅니다(약 5분 안에). 받는 쪽 문제가 고쳐졌는지 확인하셨나요?`)) return;
+    setBusy(d.id); setError(null);
+    try {
+      const res = await fetch(`/api/apps/outbound-deliveries/${encodeURIComponent(d.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry' }) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) setError(body?.error?.message ?? '다시 보내지 못했습니다.');
+      await load();
+    } finally { setBusy(null); }
+  }
 
   if (!items.length && !error) return null;
   return (
@@ -53,6 +65,7 @@ export default function OutboundDeliveriesPanel({ agentId, refreshKey }: { agent
               </p>
             )}
             {d.lastError && d.status !== 'sent' && <p className="mt-1 text-slate-500">{d.lastError}</p>}
+            {d.retryable && <button type="button" disabled={busy !== null} onClick={() => void retry(d)} className="mt-1 text-ws-accent-text underline disabled:opacity-40">{busy === d.id ? '처리 중…' : '다시 보내기'}</button>}
           </li>
         ))}
       </ul>

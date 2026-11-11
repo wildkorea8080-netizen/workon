@@ -163,6 +163,25 @@ export async function cancelBatch(userId: string, id: string, nowMs = Date.now()
   return { ok: true };
 }
 
+/**
+ * 마치지 못한 줄만 다시 실행(2026-11-10, 마이그레이션 없음) — 끝난 내 묶음(마침·멈춤·그만둠)의 실패·건너뛴 줄의 입력으로 **새 일괄 실행**을 만든다.
+ * 만들기와 같은 길(`createBatch`)이라 지금 앱 판·앱 규칙·실행 중 3개·기관 상한을 그대로 본다. 파일마다 한 건의 줄은 사본을 이미 지워 다시 실행할 수 없어 빼고 수를 알린다
+ */
+export async function retryUnfinished(actor: ActorScope, batchId: string): Promise<{ ok: true; batch: BatchView; skippedFiles: number } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
+  const batch = await ownBatch(actor.userId, batchId);
+  if (!batch) return { ok: false, status: 404, message: '일괄 실행을 찾을 수 없습니다.' };
+  if (batch.status === 'running') return { ok: false, status: 409, message: '아직 실행 중인 일괄 실행입니다. 끝난 뒤에 다시 실행할 수 있습니다.' };
+  const { data, error } = await supabaseAdmin.from('app_batch_items').select('position, inputs, file, status').eq('batch_id', batchId).in('status', ['failed', 'skipped']).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  if (error) return { ok: false, status: 503, message: '줄을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+  const rows = (data ?? []) as Array<{ position: number; inputs: Record<string, string>; file?: unknown }>;
+  const tableRows = rows.filter((r) => r.file === null || r.file === undefined);
+  const skippedFiles = rows.length - tableRows.length;
+  if (!tableRows.length) return { ok: false, status: 409, message: skippedFiles ? '파일마다 한 건의 줄은 파일을 다시 올려 새로 실행해 주세요(사본은 일괄 실행이 끝날 때 지웠습니다).' : '다시 실행할 줄(실패·건너뜀)이 없습니다.' };
+  const created = await createBatch(actor, { agent_id: batch.agent_id, name: `${batch.name.slice(0, 74)} 다시`, rows: tableRows.map((r) => r.inputs ?? {}) });
+  if (!created.ok) return created;
+  return { ok: true, batch: created.batch, skippedFiles };
+}
+
 /** 끝난 묶음의 파일 사본 지우기(파일마다 한 건) — 줄의 파일 이름은 남긴다(결과 엑셀). 실패는 기록만, 던지지 않는다 */
 export async function removeBatchFiles(batchId: string): Promise<void> {
   const { data, error } = await supabaseAdmin.from('app_batch_items').select('file').eq('batch_id', batchId).not('file', 'is', null).limit(BATCH_MAX_ROWS);

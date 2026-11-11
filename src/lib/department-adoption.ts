@@ -13,6 +13,8 @@ export interface DepartmentAdoption {
   documents_generated: number;
   tasks_completed: number;
   cost_krw: number;
+  /** (0085) 직원이 답변 평가에서 고른 '줄인 시간'의 합(분) — 자기 신고, 측정·추정 아님. 0085 전이면 0 */
+  saved_minutes: number;
 }
 
 type NumberKey = Exclude<keyof DepartmentAdoption, 'departmentId' | 'name'>;
@@ -27,6 +29,7 @@ export const DEPARTMENT_COLUMNS: { key: NumberKey; label: string; krw?: true }[]
   { key: 'documents_generated', label: '만든 파일' },
   { key: 'tasks_completed', label: '업무 작업 완료' },
   { key: 'cost_krw', label: '사용 금액(원)', krw: true },
+  { key: 'saved_minutes', label: '줄인 시간(분·자기 신고)' },
 ];
 
 const NUMBER_KEYS = DEPARTMENT_COLUMNS.map((c) => c.key);

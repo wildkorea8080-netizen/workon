@@ -21,7 +21,7 @@ import { buildResultHwpxBytes } from '@/lib/apps/schedule-result-file';
 import {
   OUTBOUND_APPROVAL_EXPIRED, OUTBOUND_APPROVAL_MS, OUTBOUND_EVENT, OUTBOUND_HEADERS, OUTBOUND_SECRET_PREFIX, OUTBOUND_STALE_MS, OUTBOUND_TIMEOUT_MS, OUTBOUND_FILE_MAX_BYTES,
   buildOutboundPayload, isIpLiteral, isPrivateAddress, nextAttemptAt, outcomeForStatus, parseOutboundUrl,
-  OUTBOUND_MY_DELIVERIES_LIMIT, OUTBOUND_RECEIPT_MAX_BYTES, actionsOf, parseOutboundReceipt, resolveAction,
+  OUTBOUND_MY_DELIVERIES_LIMIT, OUTBOUND_RECEIPT_MAX_BYTES, OUTBOUND_RETRY_NOTE, actionsOf, canRetryDelivery, parseOutboundReceipt, resolveAction,
   type AttemptOutcome, type OutboundFile, type OutboundMyDeliveryView, type OutboundStatus,
 } from './spec';
 
@@ -305,14 +305,17 @@ export async function listMyDeliveries(actor: { userId: string; organizationId: 
   const rows = (data ?? []) as Array<{ id: string; agent_id: string; endpoint_id: string; message_id: string; status: OutboundStatus; attempts: number; created_at: string; sent_at: string | null; next_attempt_at: string | null; last_error: string | null; receipt_ref: string | null; receipt_url: string | null }>;
   if (!rows.length) return { ok: true, items: [] };
   const [endpoints, agents, messages] = await Promise.all([
-    supabaseAdmin.from('app_outbound_endpoints').select('id, name').eq('organization_id', actor.organizationId).in('id', [...new Set(rows.map((r) => r.endpoint_id))]),
+    supabaseAdmin.from('app_outbound_endpoints').select('id, name, revoked_at').eq('organization_id', actor.organizationId).in('id', [...new Set(rows.map((r) => r.endpoint_id))]),
     supabaseAdmin.from('agents').select('id, name').eq('organization_id', actor.organizationId).in('id', [...new Set(rows.map((r) => r.agent_id))]),
     // 대화 링크 — 이 직원의 대화만
     supabaseAdmin.from('messages').select('id, conversation_id, conversation:conversations!inner(user_id)').in('id', [...new Set(rows.map((r) => r.message_id))]).eq('conversation.user_id', actor.userId),
   ]);
   if (endpoints.error || agents.error || messages.error) return { ok: false, status: 503, message: '보낸 결과를 불러오지 못했습니다.' };
-  const endpointNames = new Map(((endpoints.data ?? []) as Array<{ id: string; name: string }>).map((e) => [e.id, e.name]));
+  const endpointRows = (endpoints.data ?? []) as Array<{ id: string; name: string; revoked_at?: string | null }>;
+  const endpointNames = new Map(endpointRows.map((e) => [e.id, e.name]));
+  const activeEndpoints = new Set(endpointRows.filter((e) => !e.revoked_at).map((e) => e.id));
   const agentNames = new Map(((agents.data ?? []) as Array<{ id: string; name: string }>).map((a) => [a.id, a.name]));
+  const nowMs = Date.now();
   const conversations = new Map(((messages.data ?? []) as unknown as Array<{ id: string; conversation_id: string }>).map((m) => [m.id, m.conversation_id]));
   return {
     ok: true,
@@ -320,6 +323,62 @@ export async function listMyDeliveries(actor: { userId: string; organizationId: 
       id: r.id, appName: agentNames.get(r.agent_id) ?? '(앱)', endpointName: endpointNames.get(r.endpoint_id) ?? '(보낼 곳)', status: r.status, attempts: r.attempts,
       createdAt: r.created_at, sentAt: r.sent_at, nextAttemptAt: r.status === 'pending' ? r.next_attempt_at : null, lastError: r.status === 'sent' ? null : r.last_error,
       receiptRef: r.receipt_ref, receiptUrl: r.receipt_url && r.receipt_url.startsWith('https://') ? r.receipt_url : null, conversationId: conversations.get(r.message_id) ?? null,
+      retryable: canRetryDelivery(r, activeEndpoints.has(r.endpoint_id), nowMs),
     })),
+  };
+}
+
+export interface RetryDeps {
+  now(): number;
+  load(id: string): Promise<{ id: string; organization_id: string; user_id: string | null; endpoint_id: string; agent_id: string; status: string; attempts: number; created_at: string } | null>;
+  endpointActive(endpointId: string, organizationId: string): Promise<boolean>;
+  /** 그만둠·이 직원일 때만 다시 차례로 — 바꿨으면 참 */
+  update(id: string, userId: string, nowIso: string): Promise<boolean>;
+  log(actor: { userId: string; departmentId: string }, details: Record<string, unknown>): Promise<void>;
+}
+
+/**
+ * 그만둔 보내기 다시 보내기(2026-11-10, 마이그레이션 없음) — 그 결과를 실행한 직원만, `canRetryDelivery`인 기록만.
+ * 시도 수를 0으로 되돌려 다음 실행기 차례(5분 안)에 처음부터 다시 보낸다(1·5·30분·2시간 뒤 다시 보내기도 다시). 보안 로그 low
+ */
+export async function retryMyDelivery(actor: { userId: string; organizationId: string; departmentId: string }, id: string, deps: RetryDeps = retryDeps()): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false, status: 404, message: '보낸 기록을 찾을 수 없습니다.' };
+  let row: Awaited<ReturnType<RetryDeps['load']>>;
+  try { row = await deps.load(id); } catch { return { ok: false, status: 503, message: '보낸 기록을 불러오지 못했습니다.' }; }
+  if (!row || row.user_id !== actor.userId || row.organization_id !== actor.organizationId) return { ok: false, status: 404, message: '보낸 기록을 찾을 수 없습니다.' };
+  let active: boolean;
+  try { active = await deps.endpointActive(row.endpoint_id, row.organization_id); } catch { return { ok: false, status: 503, message: '보낼 곳을 확인하지 못했습니다.' }; }
+  if (!canRetryDelivery(row, active, deps.now())) return { ok: false, status: 409, message: active ? '다시 보낼 수 없는 기록입니다(실제로 보내 보고 그만둔 지 7일 안의 기록만 다시 보냅니다).' : '보낼 곳이 회수돼 다시 보낼 수 없습니다.' };
+  let changed: boolean;
+  try { changed = await deps.update(row.id, actor.userId, new Date(deps.now()).toISOString()); } catch { return { ok: false, status: 503, message: '다시 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }; }
+  if (!changed) return { ok: false, status: 409, message: '그 사이 상태가 바뀌었습니다. 목록을 다시 읽어 주세요.' };
+  try { await deps.log(actor, { delivery_id: row.id, endpoint_id: row.endpoint_id, agent_id: row.agent_id }); } catch { /* 기록 실패는 결과를 바꾸지 않는다 */ }
+  return { ok: true };
+}
+
+function retryDeps(): RetryDeps {
+  return {
+    now: () => Date.now(),
+    async load(id) {
+      const { data, error } = await supabaseAdmin.from('app_outbound_deliveries').select('id, organization_id, user_id, endpoint_id, agent_id, status, attempts, created_at').eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data as Awaited<ReturnType<RetryDeps['load']>>;
+    },
+    async endpointActive(endpointId, organizationId) {
+      const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').select('id').eq('id', endpointId).eq('organization_id', organizationId).is('revoked_at', null).maybeSingle();
+      if (error) throw error;
+      return Boolean(data);
+    },
+    async update(id, userId, nowIso) {
+      const { data, error } = await supabaseAdmin.from('app_outbound_deliveries')
+        .update({ status: 'pending', attempts: 0, next_attempt_at: nowIso, claimed_at: null, last_status: null, last_error: OUTBOUND_RETRY_NOTE })
+        .eq('id', id).eq('user_id', userId).eq('status', 'gave_up').gte('attempts', 1).select('id');
+      if (error) throw error;
+      return Boolean(data?.length);
+    },
+    async log(actor, details) {
+      const { logSecurityEvent } = await import('@/lib/filter');
+      await logSecurityEvent(actor.departmentId, actor.userId, 'app_outbound_result_retried', details, 'low');
+    },
   };
 }
