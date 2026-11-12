@@ -11,7 +11,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {
     from(table: string) {
       const q: Record<string, unknown> = {};
-      for (const m of ['select', 'eq']) q[m] = () => q;
+      for (const m of ['select', 'eq', 'in']) q[m] = () => q;
       q.insert = async (row: unknown) => { state.inserts.push([table, row]); return { error: null }; };
       q.then = (resolve: (v: unknown) => unknown) => resolve({ data: state.words, error: state.error });
       return q;

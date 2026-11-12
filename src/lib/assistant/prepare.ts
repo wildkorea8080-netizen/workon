@@ -206,7 +206,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     if (!checked.ok) return reject(checked.message, 403);
   }
 
-  const filterResult = await filterUserInput(actor.departmentId, message);
+  const filterResult = await filterUserInput(actor.departmentId, message, undefined, { departmentIds: actor.visibleDepartmentIds });
   if (!filterResult.isValid) {
     return reject('메시지에 금지된 내용이 포함되어 있습니다.', 400, {
       blockedWords: filterResult.blockedWords,

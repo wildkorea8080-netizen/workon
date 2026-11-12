@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getActorScope } from '@/lib/actor-scope';
+import { listManagedForbiddenWords } from '@/lib/forbidden-words-scope';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,20 +21,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 금지어 목록 조회
-    const { data: forbiddenWords, error } = await supabaseAdmin
-      .from('forbidden_words')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // 금지어 목록 — 관리 범위 부서의 것만(2026-11-12 — 예전에는 조건이 없어 모든 기관의 금지어가 보였다)
+    const actor = await getActorScope(session);
+    if (!actor || !actor.organizationId) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
+        { status: 403 }
+      );
+    }
+    const listed = await listManagedForbiddenWords(actor.managedDepartmentIds);
 
-    if (error) {
+    if ('error' in listed) {
       return NextResponse.json(
         { ok: false, error: { message: '금지어 목록 조회 중 오류가 발생했습니다.' } },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true, data: forbiddenWords });
+    return NextResponse.json({ ok: true, data: listed.rows });
   } catch (error) {
     console.error('금지어 목록 조회 오류:', error);
     return NextResponse.json(

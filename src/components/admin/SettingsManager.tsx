@@ -17,7 +17,8 @@ interface SecurityLog {
 }
 
 export default function SettingsManager() {
-  const [forbiddenWords, setForbiddenWords] = useState<ForbiddenWord[]>([]);
+  // 목록은 관리 범위 부서의 금지어만 온다(2026-11-12) — 부서 이름을 함께 받아 어느 부서에 건 금지어인지 보인다
+  const [forbiddenWords, setForbiddenWords] = useState<(ForbiddenWord & { department_name?: string | null })[]>([]);
   const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -197,7 +198,8 @@ export default function SettingsManager() {
 
       {/* Forbidden words list */}
       <div>
-        <h3 className="text-lg font-medium mb-4">금지어 목록 ({forbiddenWords.length}개)</h3>
+        <h3 className="text-lg font-medium mb-1">금지어 목록 ({forbiddenWords.length}개)</h3>
+        <p className="text-xs text-slate-500 mb-4">관리하는 부서의 금지어만 보입니다. 금지어는 그 부서와 하위 부서 직원의 질문에 걸립니다.</p>
         <div className="space-y-4">
           {forbiddenWords.map((word) => (
             <div key={word.id} className="p-4 border rounded-lg bg-white">
@@ -208,7 +210,7 @@ export default function SettingsManager() {
                     <p className="text-sm text-slate-600 mt-1">{word.context}</p>
                   )}
                   <p className="text-xs text-slate-500 mt-2">
-                    등록일: {new Date(word.created_at).toLocaleDateString('ko-KR')}
+                    {word.department_name ? `${word.department_name}(하위 부서 포함) · ` : ''}등록일: {new Date(word.created_at).toLocaleDateString('ko-KR')}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 ml-4">

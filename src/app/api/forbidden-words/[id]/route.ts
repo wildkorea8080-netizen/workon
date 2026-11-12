@@ -1,188 +1,106 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getActorScope } from '@/lib/actor-scope';
+import { findManagedForbiddenWord } from '@/lib/forbidden-words-scope';
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+/**
+ * 금지어 켜고 끄기·지우기 — 관리 범위(자기 부서 + 하위, 최상위 부서 관리자는 기관 전체) 안의 금지어만.
+ * 금지어는 관리자가 정하는 보안 통제다. 직원이 끄거나 지울 수 있으면 통제 자체가 무의미해진다.
+ * (2026-11-12) 예전에는 관리자 자기 부서의 금지어만 찾아(anon 키로) 하위 부서 금지어를 고칠 수 없었다.
+ * 범위 밖이면 있는지 알리지 않고 404.
+ */
+
+const NOT_FOUND = () => NextResponse.json({ ok: false, error: { message: '금지어를 찾을 수 없습니다.' } }, { status: 404 });
+const NO_DEPARTMENT = () => NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
+const LOOKUP_FAILED = () => NextResponse.json({ ok: false, error: { message: '금지어를 확인하지 못했습니다.' } }, { status: 500 });
+
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '인증이 필요합니다.' } }, { status: 401 });
     }
-
-    // 금지어는 관리자가 정하는 보안 통제다. 직원이 끄거나 지울 수 있으면
-    // 통제 자체가 무의미해진다. POST에는 이 검사가 있었는데 여기만 빠져 있었다.
     if (!isAdminSession(session)) {
-      return NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '관리자 권한이 필요합니다.' } }, { status: 403 });
+    }
+    const actor = await getActorScope(session);
+    if (!actor || !actor.organizationId) return NO_DEPARTMENT();
+
+    const body = await request.json().catch(() => null);
+    const isActive = body && typeof body === 'object' ? (body as { is_active?: unknown }).is_active : undefined;
+    if (typeof isActive !== 'boolean') {
+      return NextResponse.json({ ok: false, error: { message: 'is_active 값은 필수입니다.' } }, { status: 400 });
     }
 
-    const body = await request.json();
-    const { is_active } = body;
+    const found = await findManagedForbiddenWord(params.id, actor.managedDepartmentIds);
+    if (found === 'error') return LOOKUP_FAILED();
+    if (!found) return NOT_FOUND();
 
-    if (typeof is_active !== 'boolean') {
-      return NextResponse.json(
-        { ok: false, error: { message: 'is_active 값은 필수입니다.' } },
-        { status: 400 }
-      );
-    }
-
-    // 사용자의 부서 확인
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('department_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !user?.department_id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
-    }
-
-    // 금지어 존재 및 권한 확인
-    const { data: forbiddenWord, error: findError } = await supabase
+    const { data: updatedWord, error: updateError } = await supabaseAdmin
       .from('forbidden_words')
-      .select('*')
-      .eq('id', params.id)
-      .eq('department_id', user.department_id)
-      .single();
-
-    if (findError || !forbiddenWord) {
-      return NextResponse.json(
-        { ok: false, error: { message: '금지어를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
-
-    // 금지어 상태 업데이트
-    const { data: updatedWord, error: updateError } = await supabase
-      .from('forbidden_words')
-      .update({
-        is_active: is_active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', params.id)
-      .eq('department_id', user.department_id)
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', found.id)
+      .eq('department_id', found.department_id)
       .select()
       .single();
-
     if (updateError) {
-      return NextResponse.json(
-        { ok: false, error: { message: '금지어 업데이트 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '금지어 업데이트 중 오류가 발생했습니다.' } }, { status: 500 });
     }
 
-    // 사용 로그 기록
-    await supabase.from('usage_logs').insert({
-      department_id: user.department_id,
-      user_id: session.user.id,
-      action: is_active ? 'activate_forbidden_word' : 'deactivate_forbidden_word',
+    await supabaseAdmin.from('usage_logs').insert({
+      department_id: actor.departmentId,
+      user_id: actor.userId,
+      action: isActive ? 'activate_forbidden_word' : 'deactivate_forbidden_word',
       resource_type: 'forbidden_word',
-      resource_id: params.id,
-      details: { word: forbiddenWord.word, is_active },
+      resource_id: found.id,
+      details: { word: found.word, is_active: isActive, word_department_id: found.department_id },
     });
 
     return NextResponse.json({ ok: true, data: updatedWord });
   } catch (error) {
     console.error('금지어 업데이트 오류:', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: { message: '서버 오류가 발생했습니다.' } }, { status: 500 });
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerAuthSession();
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '인증이 필요합니다.' } }, { status: 401 });
     }
-
-    // 금지어는 관리자가 정하는 보안 통제다. 직원이 끄거나 지울 수 있으면
-    // 통제 자체가 무의미해진다. POST에는 이 검사가 있었는데 여기만 빠져 있었다.
     if (!isAdminSession(session)) {
-      return NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '관리자 권한이 필요합니다.' } }, { status: 403 });
     }
+    const actor = await getActorScope(session);
+    if (!actor || !actor.organizationId) return NO_DEPARTMENT();
 
-    // 사용자의 부서 확인
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('department_id')
-      .eq('id', session.user.id)
-      .single();
+    const found = await findManagedForbiddenWord(params.id, actor.managedDepartmentIds);
+    if (found === 'error') return LOOKUP_FAILED();
+    if (!found) return NOT_FOUND();
 
-    if (userError || !user?.department_id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      );
-    }
-
-    // 금지어 존재 및 권한 확인
-    const { data: forbiddenWord, error: findError } = await supabase
-      .from('forbidden_words')
-      .select('*')
-      .eq('id', params.id)
-      .eq('department_id', user.department_id)
-      .single();
-
-    if (findError || !forbiddenWord) {
-      return NextResponse.json(
-        { ok: false, error: { message: '금지어를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
-
-    // 금지어 삭제
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from('forbidden_words')
       .delete()
-      .eq('id', params.id)
-      .eq('department_id', user.department_id);
-
+      .eq('id', found.id)
+      .eq('department_id', found.department_id);
     if (deleteError) {
-      return NextResponse.json(
-        { ok: false, error: { message: '금지어 삭제 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: { message: '금지어 삭제 중 오류가 발생했습니다.' } }, { status: 500 });
     }
 
-    // 사용 로그 기록
-    await supabase.from('usage_logs').insert({
-      department_id: user.department_id,
-      user_id: session.user.id,
+    await supabaseAdmin.from('usage_logs').insert({
+      department_id: actor.departmentId,
+      user_id: actor.userId,
       action: 'delete_forbidden_word',
       resource_type: 'forbidden_word',
-      resource_id: params.id,
-      details: { word: forbiddenWord.word },
+      resource_id: found.id,
+      details: { word: found.word, word_department_id: found.department_id },
     });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('금지어 삭제 오류:', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: { message: '서버 오류가 발생했습니다.' } }, { status: 500 });
   }
 }

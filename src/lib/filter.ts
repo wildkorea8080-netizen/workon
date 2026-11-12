@@ -99,7 +99,11 @@ export interface SecurityEvent {
   severity: 'low' | 'medium' | 'high' | 'critical';
 }
 
-export async function filterUserInput(departmentId: string, text: string, userId?: string): Promise<FilterResult> {
+/**
+ * 대화 입력 필터. `options.departmentIds`(직원 부서 + 상위 부서 — `ActorScope.visibleDepartmentIds`)를 주면 그 부서들의 켜진 금지어를 건다
+ * (2026-11-12 — 기관 직속 부서 관리자가 넣은 금지어가 하위 부서 직원에게도 걸리게, `forbidden-words-scope.ts`). 없으면 직원 부서 것만.
+ */
+export async function filterUserInput(departmentId: string, text: string, userId?: string, options: { departmentIds?: string[] } = {}): Promise<FilterResult> {
   const result: FilterResult = {
     isValid: true,
     blockedWords: [],
@@ -108,11 +112,14 @@ export async function filterUserInput(departmentId: string, text: string, userId
     securityEvents: [],
   };
 
-  // 금지어 확인
+  // 금지어 확인 — 직원 부서 + 상위 부서(받았으면)
+  const departmentIds = options.departmentIds && options.departmentIds.length > 0
+    ? Array.from(new Set([departmentId, ...options.departmentIds]))
+    : [departmentId];
   const { data: forbiddenWords, error } = await supabaseAdmin
     .from('forbidden_words')
     .select('word')
-    .eq('department_id', departmentId)
+    .in('department_id', departmentIds)
     .eq('is_active', true);
 
   if (error) {
@@ -121,8 +128,12 @@ export async function filterUserInput(departmentId: string, text: string, userId
   }
 
   if (forbiddenWords) {
+    const seen = new Set<string>();
     for (const fw of forbiddenWords) {
-      if (typeof fw.word === 'string' && containsForbiddenWord(text, fw.word)) {
+      // 상위·하위 부서에 같은 금지어가 있으면 한 번만
+      if (typeof fw.word !== 'string' || seen.has(fw.word)) continue;
+      seen.add(fw.word);
+      if (containsForbiddenWord(text, fw.word)) {
         result.isValid = false;
         result.blockedWords.push(fw.word);
         result.securityEvents.push({
