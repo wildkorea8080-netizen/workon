@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-12(오전): 공통 자료실 인용 기관
+
+- 2026-11-12 10:53 KST 배포 `dpl_87QcnsBwRkxrCyUCCW7PUjWtkM28`(커밋 `82db02f`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_9BWLrtdQiCR9nuqjQdXgAPHrTe86`(9c3b4b6)로 promote한다.
+- 들어간 커밋: `6c8add2`(직전 배포 기록), `d1b478b` 슈퍼관리자 공통 자료실 '인용 기관'(`GET /api/super/common-documents/[id]/cited-by` — 그 유형 기관마다 같은 이름·이름 비슷 인용 문서 수만, 문서 이름 없음 — [참조 관계](DOCUMENT_REFERENCES.md)), `82db02f` 문서.
+- **배포 전**: 가지 Preview(`82db02f`, `workon-l9zq439eq`) Ready를 확인한 뒤 `main`에 올렸다(웹훅이 제때 왔다). 시험 DB를 띄운 전체 시험 250파일 3,521개 통과(불러오지 못한 파일 0)·tsc 0 — 처음 돌린 전체 시험의 1,000행 상한 검사가 같은 이름 조회의 `.limit(5000)`을 잡아 쪽마다 읽기로 고쳤다. 새 조회(`agent:agents(deleted_at)`·`keys:metadata->references->keys`·`contains`)는 운영 API로 읽기 전용으로 한 번 돌려 확인했다(운영 공통 자료실 문서 0개라 실제 숫자는 보지 못함).
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login` 200, `/super/common-library` 307, `GET /api/super/common-documents/[id]/cited-by`·`GET /api/super/common-documents` 401. pg_cron 호출 200(11:00~11:04 KST — 11:00은 5분 앱 예약 실행기).
+- **확인하지 못한 것**(사용자 몫): 슈퍼관리자로 공통 문서를 올린 뒤 '인용 기관'에 기관별 수가 나오는지(브라우저로 보지 않았다).
+
 ## 2026-11-12(아침): 결과 저장 실패 회수·공통 기준 인용 문서·이름 비슷
 
 - 2026-11-12 08:28 KST 배포 `dpl_9BWLrtdQiCR9nuqjQdXgAPHrTe86`(커밋 `9c3b4b6`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영" — 세 묶음). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_5TehzbJByvR8bpS1kXNvNZYqsYoW`(fc5f98a)로 promote한다(예약 도장 `conversations.metadata.app_schedule`은 남아도 해가 없다).
