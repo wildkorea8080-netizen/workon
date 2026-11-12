@@ -412,6 +412,52 @@ async function collectCiting(organizationId: string, keys: string[], deps: Pick<
   return { rows: [...exact, ...extra], similarIds: new Set(extra.map((r) => r.id)) };
 }
 
+// ── 공통 문서를 인용하는 기관 수(2026-11-12) — 슈퍼관리자 공통 자료실의 '인용 기관' ──
+// 운영자가 기준의 새 판을 올릴 때 영향을 받는 기관을 본다. **기관마다 문서 수만** — 기관 문서 이름은 기관 밖(운영자 화면)으로 내지 않는다.
+
+export interface CitationCountRow {
+  id: string;
+  organization_id: string | null;
+  noda_status: string | null;
+  /** 참조 색인 열쇠(이름 비슷을 가릴 때만) */
+  keys?: unknown;
+  agent?: { deleted_at: string | null } | { deleted_at: string | null }[] | null;
+}
+
+export interface OrgCitationCount { organizationId: string; name: string; exact: number; similar: number }
+
+/** 같은 이름으로 인용한 행(`exact`)과 색인 열쇠로 이름 비슷을 가릴 행(`indexed`)을 기관마다 센다 — 그 유형의 기관만, 지우는 중·지운 비서 문서 빼고, 많은 순 */
+export function countCitations(orgs: Array<{ id: string; name: string }>, exact: CitationCountRow[], indexed: CitationCountRow[], selfKeys: string[]): OrgCitationCount[] {
+  const names = new Map(orgs.map((o) => [o.id, o.name]));
+  const alive = (r: CitationCountRow) => {
+    if (!r.organization_id || !names.has(r.organization_id) || r.noda_status === 'deleting') return false;
+    const agent = Array.isArray(r.agent) ? r.agent[0] : r.agent;
+    return !(agent && agent.deleted_at);
+  };
+  const exactIds = new Set<string>();
+  const counts = new Map<string, { exact: number; similar: number }>();
+  const bump = (org: string, kind: 'exact' | 'similar') => {
+    const c = counts.get(org) ?? { exact: 0, similar: 0 };
+    c[kind] += 1;
+    counts.set(org, c);
+  };
+  for (const r of exact) {
+    if (!alive(r) || exactIds.has(r.id)) continue;
+    exactIds.add(r.id);
+    bump(r.organization_id!, 'exact');
+  }
+  const seen = new Set<string>();
+  for (const r of indexed) {
+    if (!alive(r) || exactIds.has(r.id) || seen.has(r.id) || !Array.isArray(r.keys)) continue;
+    if (!similarCitation((r.keys as unknown[]).filter((k): k is string => typeof k === 'string'), selfKeys)) continue;
+    seen.add(r.id);
+    bump(r.organization_id!, 'similar');
+  }
+  return [...counts.entries()]
+    .map(([organizationId, c]) => ({ organizationId, name: names.get(organizationId) ?? '', ...c }))
+    .sort((a, b) => b.exact + b.similar - (a.exact + a.similar) || a.name.localeCompare(b.name, 'ko'));
+}
+
 // ── 색인 만들기(관리자 단추 — 한 번에 몇 개씩, 화면이 남은 것이 없을 때까지 다시 부른다) ──
 
 export interface PendingIndexRow {

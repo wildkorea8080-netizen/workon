@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { ORG_TYPES, type OrgType } from '@/lib/org-types';
 import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL, MAX_UPLOAD_SIZE_LABEL } from '@/lib/file-types';
 import { uploadCommonDocument, startCommonReading, type CommonUploadStage } from '@/lib/common-upload-client';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
+import { citedOrgSummary, type CitedOrgCounts } from '@/lib/common-citations';
 
 /** 목록 행(`GET /api/super/common-documents`). 저장소 경로·NODA 파일 이름은 서버가 떼고 보낸다 */
 interface CommonRow {
@@ -74,6 +75,8 @@ function formatDate(iso: string): string {
 
 const EMPTY_FORM = { file: null as File | null, title: '', year: String(new Date().getFullYear()), usageTerms: '', replacesId: '' };
 
+type CitedCounts = { loading: true } | { error: string } | { data: CitedOrgCounts };
+
 export default function CommonLibraryPage() {
   const [orgType, setOrgType] = useState<OrgType>(ORG_TYPES[0]);
   const [rows, setRows] = useState<CommonRow[]>([]);
@@ -81,6 +84,16 @@ export default function CommonLibraryPage() {
   const [showRetired, setShowRetired] = useState(false);
   // 두 판 비교(신구 대비) — 새 판 id
   const [compareId, setCompareId] = useState<string | null>(null);
+  // 인용 기관(2026-11-12) — 문서마다 펼친 결과(기관마다 문서 수만)
+  const [cited, setCited] = useState<Record<string, CitedCounts>>({});
+  const toggleCited = (id: string) => {
+    if (cited[id]) { setCited((c) => { const next = { ...c }; delete next[id]; return next; }); return; }
+    setCited((c) => ({ ...c, [id]: { loading: true } }));
+    fetch(`/api/super/common-documents/${encodeURIComponent(id)}/cited-by`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((body) => setCited((c) => (c[id] ? { ...c, [id]: body?.ok ? { data: body.data } : { error: body?.error?.message ?? '셀 수 없습니다.' } } : c)))
+      .catch(() => setCited((c) => (c[id] ? { ...c, [id]: { error: '셀 수 없습니다.' } } : c)));
+  };
   const [form, setForm] = useState(EMPTY_FORM);
   const [fileKey, setFileKey] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -289,7 +302,8 @@ export default function CommonLibraryPage() {
             </thead>
             <tbody>
               {current.map((row) => (
-                <tr key={row.id} className="border-b border-slate-700/30 last:border-0 align-top">
+                <Fragment key={row.id}>
+                <tr className="border-b border-slate-700/30 last:border-0 align-top">
                   <td className="px-5 py-3 text-slate-200">
                     <div>{row.title}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{row.file_name}</div>
@@ -304,6 +318,14 @@ export default function CommonLibraryPage() {
                   <td className="px-3 py-3 text-slate-400 whitespace-nowrap">{formatDate(row.created_at)}</td>
                   <td className="px-3 py-3 text-slate-400 whitespace-nowrap">{formatSize(row.size_bytes)}</td>
                   <td className="px-5 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => toggleCited(row.id)}
+                      aria-expanded={Boolean(cited[row.id])}
+                      className="text-xs text-slate-300 hover:text-white mr-3"
+                      title="이 기준을 인용한 문서가 있는 기관(기관마다 문서 수만)"
+                    >
+                      인용 기관
+                    </button>
                     {row.replaces_id && rows.some((r) => r.id === row.replaces_id) && (
                       <button
                         onClick={() => setCompareId(row.id)}
@@ -323,6 +345,30 @@ export default function CommonLibraryPage() {
                     </button>
                   </td>
                 </tr>
+                {cited[row.id] && (
+                  <tr className="border-b border-slate-700/30">
+                    <td colSpan={6} className="px-5 pb-3 text-xs text-slate-300">
+                      {'loading' in cited[row.id] && <span role="status">세는 중…</span>}
+                      {'error' in cited[row.id] && <span role="alert" className="text-red-400">{(cited[row.id] as { error: string }).error}</span>}
+                      {'data' in cited[row.id] && (() => {
+                        const data = (cited[row.id] as { data: CitedOrgCounts }).data;
+                        return (
+                          <div>
+                            <p>{citedOrgSummary(data)}{data.truncated ? ' 색인이 많아 앞의 일부만 셌습니다.' : ''}</p>
+                            {data.organizations.length > 0 && (
+                              <ul className="mt-1 space-y-0.5">
+                                {data.organizations.map((o) => (
+                                  <li key={o.organizationId}>{o.name} — 같은 이름 {o.exact}개{o.similar ? ` · 이름 비슷 ${o.similar}개` : ''}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

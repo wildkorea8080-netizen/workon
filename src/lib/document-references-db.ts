@@ -8,7 +8,8 @@ import { readOriginalText } from '@/lib/source-original';
 import { visibilityFilter } from '@/lib/department-scope';
 import type { ActorScope } from '@/lib/agent-permissions';
 import {
-  REFERENCE_DOCUMENT_COLUMNS, similarCitation,
+  REFERENCE_DOCUMENT_COLUMNS, candidateKeys, countCitations, similarCitation,
+  type CitationCountRow, type OrgCitationCount,
   type AutoIndexDeps, type CommonReferenceRow, type IndexDeps, type PendingIndexRow, type ReferenceDeps, type ReferenceDocumentRow, type ReferenceIndex,
 } from '@/lib/document-references';
 
@@ -134,6 +135,45 @@ export function referenceDeps(actor: ActorScope): ReferenceDeps {
     },
     coverage: () => referenceCoverage(actor),
   };
+}
+
+/**
+ * 공통 문서 하나를 인용하는 기관 수(슈퍼관리자, 2026-11-12) — 그 유형의 기관만, 같은 이름(색인 포함 조회)과 이름 비슷(색인 열쇠를 쪽마다 읽어 앱에서)을 기관마다 센다.
+ * 문서 이름은 읽지도 돌려주지도 않는다. 공통 문서가 없으면 null
+ */
+export async function commonCitationCounts(commonId: string): Promise<{ document: { id: string; title: string; orgType: string; editionYear: number }; organizations: OrgCitationCount[]; orgCount: number; truncated: boolean } | null> {
+  const { data: doc, error } = await supabaseAdmin.from('common_documents').select('id, org_type, title, file_name, edition_year').eq('id', commonId).maybeSingle();
+  if (error) throw new Error(`common_documents: ${error.message}`);
+  if (!doc) return null;
+  const d = doc as { id: string; org_type: string; title: string; file_name: string; edition_year: number };
+  const { data: orgRows, error: orgError } = await supabaseAdmin.from('organizations').select('id, name').eq('type', d.org_type).limit(1000);
+  if (orgError) throw new Error(`organizations: ${orgError.message}`);
+  const orgs = (orgRows ?? []) as Array<{ id: string; name: string }>;
+  const base = { document: { id: d.id, title: d.title, orgType: d.org_type, editionYear: d.edition_year }, orgCount: orgs.length };
+  const keys = candidateKeys(d.title, d.file_name);
+  if (!orgs.length || !keys.length) return { ...base, organizations: [], truncated: false };
+  const orgIds = orgs.map((o) => o.id);
+  const COLUMNS = 'id, organization_id, noda_status, agent:agents(deleted_at)';
+  // API는 한 번에 1,000행까지만 돌려준다 — 쪽마다 끝까지 읽는다
+  const exactLists = await Promise.all(keys.map(async (key) => {
+    const result = await pagedRows<CitationCountRow>((from, to, withCount) =>
+      supabaseAdmin.from('documents').select(COLUMNS, withCount ? { count: 'exact' } : undefined).in('organization_id', orgIds)
+        .contains('metadata', { references: { keys: [key] } }).order('id').range(from, to) as unknown as Page<CitationCountRow>,
+    { cap: 20_000 });
+    if (result.error) throw new Error(`documents: ${result.error.message}`);
+    return result;
+  }));
+  const indexed = await pagedRows<CitationCountRow>((from, to, withCount) =>
+    supabaseAdmin
+      .from('documents')
+      .select(`${COLUMNS}, keys:metadata->references->keys`, withCount ? { count: 'exact' } : undefined)
+      .in('organization_id', orgIds)
+      .eq('metadata->references->>status', 'ok')
+      .order('id')
+      .range(from, to) as unknown as Page<CitationCountRow>,
+  { cap: 20_000 });
+  if (indexed.error) throw new Error(`documents: ${indexed.error.message}`);
+  return { ...base, organizations: countCitations(orgs, exactLists.flatMap((l) => l.data), indexed.data, keys), truncated: indexed.truncated || exactLists.some((l) => l.truncated) };
 }
 
 /** 5분 실행기의 색인 자동 채우기(2026-11-12) — 모든 기관의 색인 없는 문서(최근 것부터), 그 문서의 기관으로만 저장 */
