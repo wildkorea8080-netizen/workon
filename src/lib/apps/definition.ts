@@ -33,7 +33,7 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
  * `doc_search`(2026-11-09)는 공공 데이터가 아니라 **이 앱 비서의 문서 찾기** — 커넥터가 없고(`connector: null`) 앱의 `doc_search` 능력이 켜져 있어야 돈다.
  * 대화와 같은 찾기(비서 문서 + 기관 유형의 공통 자료실)를 조회어로 한 번 하고, 근거가 없으면 멈추지 않고 '정보 공백'으로 다음 단계에 넘긴다
  */
-export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
+export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'admrul_article' | 'interpretation_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
 /** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
 /** `agent`(2026-11-09) — 문서 찾기가 이 앱 비서 대신 찾을 **다른 비서**(그 비서의 문서함·공통 기준). 실행 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */
 /**
@@ -67,10 +67,14 @@ export function refineQueryLines(text: string | undefined, sent: readonly string
   return out;
 }
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
-export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; article?: true; capability?: 'doc_search' }> = {
+// `body` = 검색해 이름이 같은 결과(없으면 첫 결과)의 본문을 읽는 단계(더 찾기·줄마다 찾기 없음), `article` = 그중 조문 번호로 좁힐 수 있는 것(법령·자치법규)
+export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; body?: true; article?: true; capability?: 'doc_search' }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
-  law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
-  ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, article: true },
+  law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
+  ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
+  // 행정규칙(훈령·예규·고시)·법령해석례 본문(2026-11-12) — 조문 번호로 좁히지 않는다(행정규칙은 조문 구조가 일정하지 않고 해석례는 조문이 없다)
+  admrul_article: { connector: 'law', label: '행정규칙 본문(훈령·예규·고시, 국가법령정보)', param: 'query', appOnly: true, body: true },
+  interpretation_article: { connector: 'law', label: '법령해석례 본문(정부 유권해석, 국가법령정보)', param: 'query', appOnly: true, body: true },
   kosis_search_tables: { connector: 'kosis', label: '통계표 검색(국가통계포털)', param: 'query' },
   g2b_search_bids: { connector: 'g2b', label: '입찰공고 검색(나라장터)', param: 'keyword' },
   doc_search: { connector: null, label: '문서 찾기(이 앱 비서의 문서함·공통 기준)', param: 'query', appOnly: true, capability: 'doc_search' },
@@ -410,7 +414,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         }
         if (lookup.refine !== undefined && lookup.refine !== null && lookup.refine !== 0) {
           // 더 찾기 — 검색 도구만(조문 칸을 받는 본문 도구는 아님), 1~2번
-          if (APP_LOOKUP_TOOLS[lookup.tool].article || typeof lookup.refine !== 'number' || !Number.isInteger(lookup.refine) || lookup.refine < 1 || lookup.refine > APP_LOOKUP_REFINE_MAX) return { ok: false, message: `${step.name.trim()}: 더 찾기는 검색 단계에서 1~${APP_LOOKUP_REFINE_MAX}번만 둘 수 있습니다.` };
+          if (APP_LOOKUP_TOOLS[lookup.tool].body || typeof lookup.refine !== 'number' || !Number.isInteger(lookup.refine) || lookup.refine < 1 || lookup.refine > APP_LOOKUP_REFINE_MAX) return { ok: false, message: `${step.name.trim()}: 더 찾기는 검색 단계에서 1~${APP_LOOKUP_REFINE_MAX}번만 둘 수 있습니다.` };
           normalized.lookup.refine = lookup.refine;
         }
         if (lookup.article !== undefined && lookup.article !== '') {

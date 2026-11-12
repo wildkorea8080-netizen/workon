@@ -55,6 +55,17 @@ interface ResourceSpec {
   describe: (row: Record<string, string | undefined>) => string[];
 }
 
+/**
+ * 국가법령정보가 요청 자체를 거절한 응답 — `{ result, msg }`(예: '사용자 정보 검증에 실패하였습니다' — OC가 이 서버 주소에 등록되지 않음).
+ * 예전에는 봉투가 없다는 이유로 '응답을 해석할 수 없습니다'만 보여 원인을 알 수 없었다(2026-11-12). 거절이 아니면 null
+ */
+export function lawApiRejection(payload: Record<string, unknown> | null | undefined): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const msg = typeof payload.msg === 'string' ? payload.msg.trim() : '';
+  if (!msg || !('result' in payload)) return null;
+  return `국가법령정보가 요청을 거절했습니다: ${msg.slice(0, 120)}${/검증|인증|OC/i.test(msg) ? ' (기관 OC가 이 서버 주소에 등록됐는지 확인하세요)' : ''}`;
+}
+
 function formatDate(value?: string) {
   if (!value || value.length !== 8) return value ?? '';
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
@@ -228,7 +239,8 @@ async function searchRows(query: string, typeKey: string, limit: number): Promis
 
   const body = payload[spec.searchEnvelope];
   if (!body) {
-    return toolError(`${typeKey} 검색 응답을 해석할 수 없습니다.`);
+    const rejected = lawApiRejection(payload);
+    return toolError(rejected ?? `${typeKey} 검색 응답을 해석할 수 없습니다.`);
   }
   return { spec, rows: toArray<SearchRow>(body[spec.listKey]), total: body.totalCnt };
 }
@@ -356,6 +368,8 @@ async function getContent(input: Record<string, unknown>): Promise<ToolResult> {
     return toolError(`${typeKey} 본문 조회에 실패했습니다: ${err?.message ?? '알 수 없는 오류'}`);
   }
 
+  const rejected = lawApiRejection(payload);
+  if (rejected) return toolError(rejected);
   // 조회 실패는 { "Law": "일치하는 …이 없습니다" } 형태의 문자열로 온다
   if (typeof payload.Law === 'string') {
     return toolError(`${typeKey} 본문 조회 실패: ${payload.Law.trim()}`);
@@ -517,7 +531,7 @@ const sameName = (a: string, b: string) => a.replace(/[\s·ㆍ]/g, '') === b.rep
  * 모델이 고르는 도구가 아니라 `tools`에 넣지 않는다(대화 도구 목록은 그대로). 어느 결과를 골랐는지와 다른 결과를 글 머리·끝에 적어
  * 엉뚱한 법령을 집었을 때 사람이 알아보게 한다. 조문 번호를 주면 그 조만
  */
-export async function readFirstLawHit(input: { query: string; type: '법령' | '자치법규'; article?: string }): Promise<ToolResult> {
+export async function readFirstLawHit(input: { query: string; type: '법령' | '자치법규' | '행정규칙' | '법령해석례'; article?: string }): Promise<ToolResult> {
   const query = input.query.trim();
   if (!query) return toolError('검색어가 필요합니다.');
   const found = await searchRows(query, input.type, 5);
@@ -527,7 +541,9 @@ export async function readFirstLawHit(input: { query: string; type: '법령' | '
   if (withId.length === 0) return toolError(`"${query}"에 해당하는 ${input.type}을(를) 찾지 못했습니다.`);
   const exact = withId.find((row) => sameName(row[spec.titleField] ?? '', query));
   const chosen = exact ?? withId[0];
-  const content = await getContent({ id: chosen[spec.idField], type: input.type, ...(input.article ? { article: input.article } : {}) });
+  // 조문 번호는 법령·자치법규만 — 행정규칙·해석례는 본문 전체(2026-11-12)
+  const article = input.article && (input.type === '법령' || input.type === '자치법규') ? input.article : undefined;
+  const content = await getContent({ id: chosen[spec.idField], type: input.type, ...(article ? { article } : {}) });
   if (content.isError) return content;
   const others = withId.filter((row) => row !== chosen).map((row) => row[spec.titleField]).filter(Boolean);
   return {

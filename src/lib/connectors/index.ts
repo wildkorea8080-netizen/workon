@@ -86,6 +86,8 @@ export async function executeTool(
 const APP_ONLY_TOOLS: Record<string, { connector: Connector; run: (input: Record<string, unknown>) => Promise<ToolResult> }> = {
   law_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '법령', article: typeof input.article === 'string' ? input.article : undefined }) },
   ordinance_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '자치법규', article: typeof input.article === 'string' ? input.article : undefined }) },
+  admrul_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '행정규칙' }) },
+  interpretation_article: { connector: lawConnector, run: (input) => readFirstLawHit({ query: String(input.query ?? ''), type: '법령해석례' }) },
 };
 
 export async function executeAppLookup(toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
