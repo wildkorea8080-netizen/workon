@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-13(아침): 보안 고침 넷(금지어 범위·로그인 소속·초대 링크·슈퍼관리자 인증)·법령 본문 조회·예산 빠른 확인
+
+- 2026-11-13 08:46 KST 배포 `dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`(커밋 `b53cd9f`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_FU8PY7wDumqiRZMb2pQnhwz5Z5Zn`(2bad33c — 08:20에 같은 커밋을 다시 배포한 것, 그 전 `dpl_D8b2uKspFxPu3VNTzcUvahiNcQFy`)으로 promote한다. 되돌리면 아래 보안 구멍이 다시 열린다.
+- 들어간 커밋: `cb59101`(직전 배포 기록), `46b903e` 조회 단계 행정규칙·법령해석례 본문·국가법령정보 거절 까닭([조회 단계](APP_LOOKUP_STEPS.md)), `99d28e0` 앱 예약 실행기의 15분 예산 알림 빠른 확인([예산 알림](BUDGET_ALERTS.md)), `2af2d8b` 금지어 목록·고치기를 관리 범위로·대화 필터는 상위 부서 금지어까지(목록에 기관 조건이 없어 **모든 기관의 금지어가 보였다**), `f94d88a` 로그인이 소속을 추측하지 않음(공개 가입한 Auth 계정이 **가장 오래된 부서 = 첫 기관 직원**이 되던 길·하드코딩 관리자 이메일 제거), `741a0bb` 초대 가입은 초대받은 이메일로만·한 링크 한 계정, `5778778` 슈퍼관리자 설정 막이(운영 슈퍼관리자가 둘이라 `maybeSingle()` 막이가 열려 있었다)·비활성 슈퍼관리자 로그인 거절·운영에서 서명 비밀값 고정 값 거절, `b53cd9f` 문서.
+- **배포 전**: 운영 DB 읽기 전용 확인 — 금지어는 한 기관 6개(모두 최상위 부서), 부서 없는 사용자 0, `users` 행 없는 Auth 계정 1(이제 로그인 못 함 — 의도), Supabase 공개 가입 켜짐(`disable_signup: false`)·메일 확인 필요, 슈퍼관리자 2명. Vercel 운영 환경 변수 `SUPER_JWT_SECRET`·`SUPER_ADMIN_SETUP_KEY` 있음(이름만 확인). 가지 Preview(`b53cd9f`, `workon-c4inxjxfq`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB를 띄운 전체 시험 257파일 3,567개 통과·tsc 0. 08:20 KST의 운영 배포(`dpl_FU8PY7…`)는 같은 커밋 `2bad33c`의 재배포(사용자 — 법령 OC 키 반영으로 보임)라 그대로 진행했다.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/signup`·`/super/login` 200, `/super` 307(위조 토큰도 307), `GET /api/forbidden-words` 401, `POST /api/chat`·`/api/apps/webhook`·`GET /api/super/accounts/users`·`/api/cron/app-schedules` 401, `POST /api/super/auth/setup`(틀린 키) 403, `POST /api/super/auth/login`(틀린 계정) 401, `POST /api/signup`(빈 몸) 400. pg_cron 호출 200(08:48~08:50 KST, 실행기 하트비트 08:50).
+- **확인하지 못한 것**(사용자 몫): 로그인해 관리자 금지어 화면(부서 이름 표시)·초대 링크 가입(이메일 칸 잠김)·슈퍼관리자 로그인을 브라우저로 보지 않았다. 예산 빠른 확인은 KST :00·:15·:30·:45 차례에만 돌아 배포 뒤 첫 차례(09:00)는 보지 않았다. 법령 본문 조회는 국가법령정보에 서버 주소를 등록하기 전까지 실제 응답으로 확인할 수 없다. 이미 발급된 슈퍼관리자 토큰은 비활성화해도 24시간 남는다(남은 공백).
+
 ## 2026-11-12(밤): 문서 찾기 평가 — 같은 세트로 잰 다른 비서
 
 - 2026-11-12 21:47 KST 배포 `dpl_D8b2uKspFxPu3VNTzcUvahiNcQFy`(커밋 `2bad33c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_87QcnsBwRkxrCyUCCW7PUjWtkM28`(82db02f)로 promote한다(새 실행의 `summary.setKey`는 남아도 해가 없다).
