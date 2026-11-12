@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
+import { claimInvitation, invitationEmailMatches, releaseInvitation } from '@/lib/invitation-claim';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -40,7 +41,8 @@ async function resolveDepartmentByEmailDomain(email: string) {
   return (root ?? departments[0]).id as string;
 }
 
-async function createUserRecord(userId: string, email: string, fullName: string, role: string, departmentId: string | null) {
+/** users 행을 만든다 — 만들었으면(또는 일반 가입에서 이미 있으면) true. 초대 가입은 겹침(23505)도 실패로 본다 */
+async function createUserRecord(userId: string, email: string, fullName: string, role: string, departmentId: string | null, strict = false): Promise<boolean> {
   const insertData = {
     id: userId,
     email,
@@ -51,11 +53,13 @@ async function createUserRecord(userId: string, email: string, fullName: string,
 
   const { error } = await supabaseAdmin.from('users').insert(insertData);
   if (error) {
-    if (error.code === '23505') {
-      return;
+    if (error.code === '23505' && !strict) {
+      return true;
     }
     console.warn('[signup] users insert failed:', error.message);
+    return false;
   }
+  return true;
 }
 
 export async function POST(request: Request) {
@@ -92,6 +96,7 @@ export async function POST(request: Request) {
     let inviteDeptId: string | null = null;
     let inviteRole = 'USER';
     let inviteId: string | null = null;
+    let inviteClaimedAt: string | null = null;
 
     if (inviteToken) {
       const { data: inv } = await supabaseAdmin
@@ -118,9 +123,32 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+      // 초대받은 이메일로만 가입한다(2026-11-12 — 예전에는 맞춰 보지 않아 초대 링크로 아무 이메일이나 가입됐다)
+      if (!invitationEmailMatches(inv.email, email)) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '초대받은 이메일 주소로만 가입할 수 있습니다.' } },
+          { status: 400 }
+        );
+      }
+      // 소속 없는 초대로 가입하지 않는다(도메인으로 부서를 짐작하면 초대한 역할이 엉뚱한 부서에 붙는다)
+      if (!inv.department_id) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '초대의 소속 부서를 확인할 수 없습니다. 새 초대 링크를 요청하세요.' } },
+          { status: 400 }
+        );
+      }
       inviteDeptId = inv.department_id;
       inviteRole   = inv.role ?? 'USER';
       inviteId     = inv.id;
+
+      // 계정을 만들기 전에 초대를 차지한다 — 같은 링크로 거의 동시에 둘이 가입하지 못하게
+      inviteClaimedAt = await claimInvitation(inv.id);
+      if (!inviteClaimedAt) {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: '이미 사용됐거나 만료된 초대 링크입니다.' } },
+          { status: 400 }
+        );
+      }
     }
 
     // ── 2단계: Supabase Auth 사용자 생성 ─────────────────────
@@ -136,6 +164,7 @@ export async function POST(request: Request) {
       });
 
       if (authErr) {
+        if (inviteId && inviteClaimedAt) await releaseInvitation(inviteId, inviteClaimedAt);
         if (authErr.message?.includes('already registered') || authErr.message?.includes('already been registered')) {
           return NextResponse.json<ApiResponse<null>>(
             { ok: false, error: { message: '이미 가입된 이메일입니다. 로그인 페이지를 이용하세요.' } },
@@ -202,15 +231,17 @@ export async function POST(request: Request) {
         );
       }
 
-      await createUserRecord(authUserId, email, fullName, role, departmentId);
-
-      // 초대 수락 처리
-      if (inviteId) {
-        await supabaseAdmin
-          .from('invitations')
-          .update({ accepted_at: new Date().toISOString() })
-          .eq('id', inviteId);
+      // users 행을 못 만들면 Auth 계정을 지우고(소속 없는 계정은 로그인도 못 한다) 초대 차지를 푼다 — 다시 가입할 수 있게
+      const created = await createUserRecord(authUserId, email, fullName, role, departmentId, Boolean(inviteId));
+      if (!created) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+        if (inviteId && inviteClaimedAt) await releaseInvitation(inviteId, inviteClaimedAt);
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: inviteId ? '가입하지 못했습니다. 이미 가입된 이메일인지 확인하고 다시 시도해 주세요.' : '가입하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+          { status: 500 }
+        );
       }
+      // 초대는 위에서 차지할 때 이미 쓴 것으로 표시했다
     }
 
     return NextResponse.json<ApiResponse<{ message: string }>>(

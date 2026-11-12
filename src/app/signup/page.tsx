@@ -25,7 +25,7 @@ function SignupForm() {
       .then(d => {
         if (d.ok) {
           setInviteInfo(d.data);
-          // 초대 이메일이 있으면 기본값으로 채워주되 수정 가능
+          // 초대 이메일로 채우고 고치지 못하게 한다(초대받은 이메일로만 가입 — 서버가 맞춰 봄)
           if (d.data?.email) setEmail(d.data.email);
         }
       })
@@ -93,9 +93,11 @@ function SignupForm() {
             ].map(({ label, val, set, type, ph }) => (
               <div key={label}>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">{label}</label>
+                {/* 초대 가입은 초대받은 이메일로만 된다(서버가 맞춰 봄) — 초대에서 받은 이메일은 고치지 못하게 */}
                 <input type={type} value={val} onChange={e => set(e.target.value)} required
+                  readOnly={type === 'email' && Boolean(inviteToken && inviteInfo?.email)}
                   minLength={type === 'password' ? 8 : undefined} placeholder={ph}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/30 focus:border-[#003087]" />
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/30 focus:border-[#003087] read-only:text-slate-500" />
               </div>
             ))}
             <button type="submit" disabled={loading}

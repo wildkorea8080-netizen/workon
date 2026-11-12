@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { claimInvitation, releaseInvitation } from '@/lib/invitation-claim';
 
 export async function POST(request: NextRequest) {
   try {
@@ -63,6 +64,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!invitation.department_id) {
+      return NextResponse.json(
+        { ok: false, error: { message: '초대의 소속 부서를 확인할 수 없습니다. 새 초대 링크를 요청하세요.' } },
+        { status: 400 }
+      );
+    }
+
+    // 계정을 만들기 전에 초대를 차지한다(2026-11-12) — 같은 링크로 거의 동시에 둘이 가입하지 못하게
+    const claimedAt = await claimInvitation(invitation.id);
+    if (!claimedAt) {
+      return NextResponse.json(
+        { ok: false, error: { message: '이미 사용됐거나 만료된 초대 링크입니다.' } },
+        { status: 400 }
+      );
+    }
+
     // 비밀번호 해싱
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -80,6 +97,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (userError) {
+      await releaseInvitation(invitation.id, claimedAt);
       console.error('[register] 사용자 생성 오류:', userError);
       return NextResponse.json(
         { ok: false, error: { message: '회원가입에 실패했습니다.' } },
@@ -87,11 +105,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 초대 수락 처리
-    await supabaseAdmin
-      .from('invitations')
-      .update({ accepted_at: new Date().toISOString() })
-      .eq('id', invitation.id);
+    // 초대는 위에서 차지할 때 이미 쓴 것으로 표시했다
 
     return NextResponse.json({
       ok: true,
