@@ -90,6 +90,8 @@ export interface RagEvalSummary {
   commonEvidenceQuestions?: number;
   /** 답변까지 평가한 실행에만 */
   answers?: RagEvalAnswerSummary;
+  /** 세트의 지문(2026-11-12, `ragEvalSetKey`) — 같은 세트로 잰 다른 비서의 실행을 찾는다. 옛 기록에는 없다(결과에서 다시 셈) */
+  setKey?: string;
 }
 
 const clean = (v: unknown) => (typeof v === 'string' ? v.normalize('NFC').replace(/[\u0000-\u001f\u007f\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim() : '');
@@ -211,6 +213,52 @@ export function scopeChangeNote(previous: Pick<RagEvalSummary, 'searchScope'>, c
  * 지난 실행의 결과에서 세트를 다시 만든다(탭 구분, 머리글 포함) — 같은 질문으로 다시 재기 위한 '세트 불러오기'.
  * `parseRagEvalSet`으로 다시 읽으면 같은 질문·기대 문서·기대 쪽이 나온다. 세트는 따로 저장하지 않는다(실행 기록이 세트를 품는다)
  */
+// ── 같은 세트로 잰 다른 비서와 견주기(2026-11-12, 마이그레이션 없음) ──
+// 세트는 기관 단위라(0059) 여러 비서를 같은 세트로 잴 수 있는데, 기록은 비서마다 따로 보여 어느 비서가 나은지 보려면 오가야 했다.
+// 질문·기대 문서·기대 쪽을 다듬어 이은 글의 지문으로 같은 세트를 알아본다(핵심어는 빼지 않고 넣는다 — 답변 판정이 달라지므로).
+
+/** 세트 지문 — 순서까지 같은 질문·기대 문서·기대 쪽·핵심어. FNV-1a 두 겹(64비트 남짓)이라 아무것도 가져오지 않는다(화면도 읽는다) */
+export function ragEvalSetKey(rows: Array<Pick<RagEvalResult, 'question' | 'expected' | 'page'> & { keywords?: string[] }>): string {
+  const text = rows.map((r) => [clean(r.question).toLowerCase(), clean(r.expected ?? '').toLowerCase(), r.page ?? '', (r.keywords ?? []).map((k) => clean(k)).join(';')].join('\u0001')).join('\u0002');
+  let a = 0x811c9dc5; let b = 0x01000193 ^ 0x9e3779b9;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x01000193 ^ 0x5bd1e995) >>> 0;
+  }
+  return `v1:${rows.length}:${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}`;
+}
+
+export interface AcrossRunRow {
+  id: string;
+  agent_id: string;
+  agent_version: number;
+  created_at: string;
+  summary: RagEvalSummary;
+  /** 지문이 없는 옛 기록만 결과를 함께 읽어 지문을 다시 센다 */
+  results?: RagEvalResult[] | null;
+}
+
+export interface AcrossEntry { runId: string; agentId: string; agentName: string; agentVersion: number; createdAt: string; summary: RagEvalSummary; current: boolean }
+
+/** 같은 지문의 실행 중 비서마다 가장 최근 것 — 기준 실행의 비서는 기준 실행 그대로. 찾음 비율·평균 순위 점수 순 */
+export function pickAcrossAgents(base: AcrossRunRow, key: string, runs: AcrossRunRow[], names: Map<string, string>): AcrossEntry[] {
+  const keyOf = (r: AcrossRunRow) => r.summary?.setKey ?? (r.results?.length ? ragEvalSetKey(r.results) : null);
+  const latest = new Map<string, AcrossRunRow>([[base.agent_id, base]]);
+  for (const r of runs) {
+    if (r.agent_id === base.agent_id || keyOf(r) !== key || !names.has(r.agent_id)) continue;
+    const seen = latest.get(r.agent_id);
+    if (!seen || seen.created_at < r.created_at) latest.set(r.agent_id, r);
+  }
+  const score = (s: RagEvalSummary) => [s.hitRate ?? -1, s.mrr ?? -1, s.offTopicRejectRate ?? -1];
+  return [...latest.values()]
+    .map((r) => ({ runId: r.id, agentId: r.agent_id, agentName: names.get(r.agent_id) ?? '', agentVersion: r.agent_version, createdAt: r.created_at, summary: r.summary, current: r.id === base.id }))
+    .sort((x, y) => {
+      const [a, b] = [score(x.summary), score(y.summary)];
+      return b[0] - a[0] || b[1] - a[1] || b[2] - a[2] || x.agentName.localeCompare(y.agentName, 'ko');
+    });
+}
+
 export function ragEvalSetText(results: Array<Pick<RagEvalResult, 'question' | 'expected' | 'page'> & { keywords?: string[] }>): string {
   const cell = (v: string) => (/["\t\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
   // 핵심어를 적은 줄이 있을 때만 넷째 칸을 둔다(옛 세트는 그대로 세 칸)

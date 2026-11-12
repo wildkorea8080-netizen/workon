@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Agent } from '@/lib/db';
 import {
   RAG_EVAL_MAX_QUESTIONS, RAG_EVAL_VERDICT_LABELS, answerNote, compareRagEvalRuns, parseRagEvalSet, ragEvalCsv, ragEvalSetText, scopeChangeNote,
-  type RagEvalResult, type RagEvalSummary,
+  type AcrossEntry, type RagEvalResult, type RagEvalSummary,
 } from '@/lib/rag-eval';
 import { RAG_EVAL_ANSWER_MAX_QUESTIONS, compareAnswers } from '@/lib/rag-eval-answer';
 import { RAG_EVAL_GRADES, RAG_EVAL_JUDGE_LABELS, agreementNote, isJudgeGrade, judgeNote, type RagEvalJudgeGrade } from '@/lib/rag-eval-judge';
@@ -26,6 +26,9 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; dat
     return { ok: false, message: '네트워크 오류가 발생했습니다.' };
   }
 }
+
+/** 같은 세트로 잰 다른 비서가 없을 때 */
+export const acrossEmptyNote = '이 세트로 잰 다른 비서가 아직 없습니다. 위에서 비서를 바꾸고 같은 세트로 평가하면 여기서 함께 봅니다.';
 
 /** 요약 한 줄 — 실행 결과와 기록 목록이 함께 쓴다 */
 export function summaryLine(s: RagEvalSummary): string {
@@ -142,6 +145,13 @@ export default function RagEvalPanel() {
     if (!r.ok) { setError(r.message); return; }
     setSets((list) => list.filter((x) => x.id !== row.id)); setSetId(''); setSetNotice(`'${row.name}' 세트를 지웠습니다.`);
   }
+  // 같은 세트로 잰 다른 비서(2026-11-12) — 비서마다 가장 최근 실행의 요약
+  const [across, setAcross] = useState<{ runId: string; entries: AcrossEntry[] } | null>(null);
+  async function loadAcross(row: RunRow) {
+    const r = await call<{ entries: AcrossEntry[] }>(`/api/admin/rag-eval?across=${encodeURIComponent(row.id)}`);
+    if (!r.ok) { setError(r.message); return; }
+    setAcross({ runId: row.id, entries: r.data.entries });
+  }
   async function compareWith(base: RunRow) {
     if (!run?.results) return;
     const r = await call<RunRow>(`/api/admin/rag-eval?id=${encodeURIComponent(base.id)}`);
@@ -227,8 +237,19 @@ export default function RagEvalPanel() {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-slate-800">{kst(run.created_at)} · 판 {run.agent_version} — {summaryLine(run.summary)}</p>
-            <button type="button" onClick={download} className="text-xs text-[#003087] underline">결과 CSV 내려받기</button>
+            <span className="flex gap-3">
+              <button type="button" onClick={() => void loadAcross(run)} className="text-xs text-[#003087] underline">같은 세트로 잰 다른 비서</button>
+              <button type="button" onClick={download} className="text-xs text-[#003087] underline">결과 CSV 내려받기</button>
+            </span>
           </div>
+          {across?.runId === run.id && (
+            <div aria-label="같은 세트로 잰 비서" className="rounded-lg bg-slate-50 p-3 text-xs leading-6">
+              {across.entries.length <= 1
+                ? <p className="text-slate-600">{acrossEmptyNote}</p>
+                : <ul className="space-y-0.5">{across.entries.map((e) => (
+                  <li key={e.runId} className={e.current ? 'font-semibold text-slate-900' : 'text-slate-700'}>{e.agentName || '(이름 없음)'} · 판 {e.agentVersion} · {kst(e.createdAt)}{e.current ? ' (지금 보는 실행)' : ''} — {summaryLine(e.summary)}</li>))}</ul>}
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="text-slate-500"><tr><th className="py-1 pr-2">질문</th><th className="pr-2">기대</th><th className="pr-2">판정</th><th className="pr-2">순위</th><th className="pr-2">쪽</th><th className="pr-2">상위 문서</th>{run.results.some((r) => r.answer) && <th>답변</th>}</tr></thead>

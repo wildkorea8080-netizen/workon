@@ -6,7 +6,7 @@ import type { ActorScope } from '@/lib/agent-permissions';
 import { loadAgentAccess } from '@/lib/agent-store';
 import { prepareLikeChat } from '@/lib/capabilities/doc-search';
 import { logSystem } from '@/lib/logger';
-import { parseRagEvalSet, summarizeRagEval } from '@/lib/rag-eval';
+import { parseRagEvalSet, pickAcrossAgents, ragEvalSetKey, summarizeRagEval, type AcrossRunRow } from '@/lib/rag-eval';
 import { RAG_EVAL_ANSWER_MAX_QUESTIONS, summarizeAnswers } from '@/lib/rag-eval-answer';
 import { applyHumanLabel, isJudgeGrade } from '@/lib/rag-eval-judge';
 import type { RagEvalResult } from '@/lib/rag-eval';
@@ -33,6 +33,8 @@ export const maxDuration = 300;
  *   파일을 만드는 도구·첨부 도구는 빼고), 도구가 보여 준 숫자는 숫자 확인의 '본 숫자', 답마다 부른 도구를 기록. 켜진 공공 데이터 도구가 없으면 400.
  *   한 질문의 NODA 실패는 그 질문만 '찾기 실패'로 두고, 모두 실패면 저장하지 않고 503.
  * - GET `?agentId=`: 그 비서의 지난 실행 20개(요약만). `?id=`: 실행 하나(결과 포함).
+ *   `?across=<실행 id>`(2026-11-12): 그 실행과 **같은 세트**(질문·기대 문서·쪽·핵심어의 지문 `summary.setKey` — 옛 기록은 결과에서 다시 셈)로 잰
+ *   다른 비서마다 가장 최근 실행의 요약 — 요청자가 지금 평가할 수 있는 비서만(관리 범위 밖·지운 비서는 빠짐), 결과 원문 없음.
  * - PATCH `{ id, line, grade }`(2026-11-09): 실행 하나의 답 한 줄에 **사람 판정**(correct·partial·incorrect, null이면 지움)을 남기고
  *   요약의 맞대기(`summary.answers.agreement` — AI 채점 일치율·후하게/짜게 본 수)를 다시 센다. 답을 만든 질문만. 모델을 부르지 않는다.
  *   두 관리자가 동시에 매겨도 서로 지우지 않게 `summary.labelRevision`으로 조건부 저장(어긋나면 다시 읽어 최대 3번).
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
       now: () => Date.now(),
     });
 
-    const summary = { ...summarizeRagEval(results, 'chat'), ...(withAnswers ? { answers: summarizeAnswers(results) } : {}) };
+    const summary = { ...summarizeRagEval(results, 'chat'), ...(withAnswers ? { answers: summarizeAnswers(results) } : {}), setKey: ragEvalSetKey(results) };
     if (summary.errors === results.length) {
       await logSystem({ level: 'warning', category: 'api', message: '문서 찾기 평가 — 모든 질문의 찾기가 실패했습니다', details: { agent_id: agent.id, questions: results.length, noda_failures: nodaFailures }, orgId: actor.organizationId });
       return jsonError('참고 문서를 지금 불러오지 못했습니다 — 잠시 뒤 다시 평가해 주세요.', 503);
@@ -182,6 +184,45 @@ export async function GET(request: NextRequest) {
     if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
     const actor = await getActorScope(session!);
     if (!actor?.organizationId) return jsonError('소속 부서가 지정되지 않았습니다.', 403);
+
+    const across = request.nextUrl.searchParams.get('across');
+    if (across) {
+      if (!UUID.test(across)) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
+      const { data: base } = await supabaseAdmin
+        .from('rag_eval_runs')
+        .select('id, agent_id, agent_version, created_at, summary, results')
+        .eq('id', across)
+        .eq('organization_id', actor.organizationId)
+        .maybeSingle();
+      if (!base || !(await evaluableAgent(base.agent_id, actor))) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
+      const baseRow = base as AcrossRunRow;
+      const key = baseRow.summary?.setKey ?? ragEvalSetKey(baseRow.results ?? []);
+      // 지문이 있는 실행은 지문으로, 옛 실행(지문 없음)은 최근 100개만 결과를 읽어 다시 센다
+      const [keyed, legacy] = await Promise.all([
+        supabaseAdmin.from('rag_eval_runs').select('id, agent_id, agent_version, created_at, summary')
+          .eq('organization_id', actor.organizationId).eq('summary->>setKey', key).neq('agent_id', baseRow.agent_id)
+          .order('created_at', { ascending: false }).limit(200),
+        supabaseAdmin.from('rag_eval_runs').select('id, agent_id, agent_version, created_at, summary, results')
+          .eq('organization_id', actor.organizationId).is('summary->setKey', null).neq('agent_id', baseRow.agent_id)
+          .eq('question_count', (baseRow.results ?? []).length || 0)
+          .order('created_at', { ascending: false }).limit(100),
+      ]);
+      if (keyed.error || legacy.error) return jsonError('평가 기록을 불러오지 못했습니다.', 500);
+      const runs = [...((keyed.data ?? []) as AcrossRunRow[]), ...((legacy.data ?? []) as AcrossRunRow[])];
+      // 요청자가 지금 평가할 수 있는 비서만 — 비서마다 한 번 본다
+      const agentIds = [...new Set([baseRow.agent_id, ...runs.map((r) => r.agent_id)])];
+      const names = new Map<string, string>();
+      await Promise.all(agentIds.map(async (agentId) => {
+        const agent = await evaluableAgent(agentId, actor);
+        if (agent) names.set(agentId, (agent as { name?: string }).name ?? '');
+      }));
+      const missing = agentIds.filter((a) => names.get(a) === '');
+      if (missing.length) {
+        const { data: rows } = await supabaseAdmin.from('agents').select('id, name').in('id', missing);
+        for (const row of (rows ?? []) as Array<{ id: string; name: string }>) names.set(row.id, row.name);
+      }
+      return NextResponse.json({ ok: true, data: { setKey: key, entries: pickAcrossAgents(baseRow, key, runs, names) } });
+    }
 
     const id = request.nextUrl.searchParams.get('id');
     if (id) {
