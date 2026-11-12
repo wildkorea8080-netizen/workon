@@ -5,61 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NEXTAUTH_SECRET } from '@/lib/config';
 import { canSignIn } from '@/lib/user-withdrawal';
-
-const ADMIN_EMAILS = ['admin@welfare.org', 'admin@researchcenter.kr'];
-const ADMIN_DEPARTMENT_SLUG = 'admin-team';
-
-async function getDepartmentIdBySlug(slug: string) {
-  const { data: department, error } = await supabaseAdmin
-    .from('departments')
-    .select('id')
-    .eq('slug', slug)
-    .maybeSingle();
-
-  if (error) {
-    console.warn('[nextAuth] department lookup failed:', error.message);
-    return null;
-  }
-
-  return department?.id ?? null;
-}
-
-async function getDefaultDepartmentId() {
-  const { data: departments, error } = await supabaseAdmin
-    .from('departments')
-    .select('id')
-    .order('created_at', { ascending: true })
-    .limit(1);
-
-  if (error || !departments?.length) {
-    console.warn('[nextAuth] default department lookup failed:', error?.message);
-    return null;
-  }
-
-  return departments[0].id;
-}
-
-async function assignDefaultDepartmentToUser(userId: string, isAdminEmail: boolean) {
-  const defaultDepartmentId = isAdminEmail
-    ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
-    : await getDefaultDepartmentId();
-
-  if (!defaultDepartmentId) {
-    return null;
-  }
-
-  const { error } = await supabaseAdmin
-    .from('users')
-    .update({ department_id: defaultDepartmentId })
-    .eq('id', userId);
-
-  if (error) {
-    console.warn('[nextAuth] default department assign failed:', error.message);
-    return null;
-  }
-
-  return defaultDepartmentId;
-}
+import { decideSignIn } from '@/lib/sign-in-user';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -86,9 +32,9 @@ export const authOptions: AuthOptions = {
           return await authorizeWithPasswordHash(credentials.email, credentials.password);
         }
 
-        // 이메일 확인되지 않은 계정도 허용
+        // 소속·역할은 users 행만 정한다(2026-11-12, `sign-in-user.ts`) — 행이 없거나 부서가 비면 들이지 않는다.
+        // 예전에는 가장 오래된 부서(어느 기관이든)를 배정해 행을 만들었다(공개 가입 → 첫 기관 직원).
         const authUser = authData.user;
-        const isAdminEmail = ADMIN_EMAILS.includes(authUser.email ?? '');
         const { data: existingUser, error: fetchError } = await supabaseAdmin
           .from('users')
           .select('id, email, role, full_name, department_id, is_active, deleted_at')
@@ -98,77 +44,18 @@ export const authOptions: AuthOptions = {
         // 비활성·삭제(탈퇴) 계정은 Supabase Auth가 통과시켜도 들이지 않는다
         if (existingUser && !canSignIn(existingUser)) return null;
 
-        if (fetchError) {
-          console.warn('[nextAuth] users table access failed, continue with auth user only:', fetchError.message);
-        }
-
-        let role = 'USER';
-        let fullName = authUser.user_metadata?.full_name || authUser.email || undefined;
-        let departmentId: string | null = null;
-
-        if (existingUser) {
-          role = (existingUser.role ?? 'USER').toString().toUpperCase();
-          fullName = existingUser.full_name || fullName;
-          departmentId = existingUser.department_id ?? null;
-
-          if (!departmentId) {
-            departmentId = await assignDefaultDepartmentToUser(authUser.id, isAdminEmail);
-          }
-        }
-
-        if (!existingUser && !fetchError) {
-          const defaultDepartmentId = isAdminEmail
-            ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
-            : await getDefaultDepartmentId();
-
-          const insertData = {
-            id: authUser.id,
-            email: authUser.email,
-            full_name: fullName,
-            role: isAdminEmail ? 'ADMIN' : 'USER',
-            department_id: defaultDepartmentId,
-          };
-
-          const { error: createError } = await supabaseAdmin.from('users').insert(insertData);
-          if (createError) {
-            console.warn('[nextAuth] users insert failed:', createError.message);
-          }
-
-          role = isAdminEmail ? 'ADMIN' : 'USER';
-          departmentId = defaultDepartmentId;
-        }
-
-        if (!existingUser && fetchError && isAdminEmail) {
-          role = 'ADMIN';
-        }
-
-        if (!departmentId) {
-          departmentId = isAdminEmail
-            ? await getDepartmentIdBySlug(ADMIN_DEPARTMENT_SLUG)
-            : await getDefaultDepartmentId();
-        }
-
-        // 사용자 최종 정보 재조회
-        if (authUser.id) {
-          const { data: finalUser, error: finalFetchError } = await supabaseAdmin
-            .from('users')
-            .select('id, email, role, full_name, department_id')
-            .eq('id', authUser.id)
-            .maybeSingle();
-
-          if (!finalFetchError && finalUser) {
-            role = (finalUser.role ?? role).toString().toUpperCase();
-            fullName = finalUser.full_name || fullName;
-            departmentId = finalUser.department_id ?? departmentId;
-          }
+        const decision = decideSignIn(existingUser ?? null, Boolean(fetchError));
+        if (!decision.ok) {
+          console.warn('[nextAuth] 로그인 거절 — 소속을 확인할 수 없음:', decision.reason);
+          return null;
         }
 
         return {
           id: authUser.id,
           email: authUser.email ?? '',
-          name: fullName,
-          role: role === 'ADMIN' ? 'ADMIN' : 'USER',
-          departmentId: departmentId
+          name: decision.name || authUser.user_metadata?.full_name || authUser.email || undefined,
+          role: decision.role,
+          departmentId: decision.departmentId,
         };
       }
     })
@@ -220,11 +107,15 @@ async function authorizeWithPasswordHash(email: string, password: string) {
   const isValid = await bcrypt.compare(password, user.password_hash);
   if (!isValid) return null;
 
+  // 부서가 없는 계정은 들이지 않는다(위 Supabase Auth 경로와 같은 규칙)
+  const decision = decideSignIn(user, false);
+  if (!decision.ok) return null;
+
   return {
     id: user.id,
     email: user.email ?? '',
-    name: user.full_name ?? user.email ?? '',
-    role: (user.role ?? 'USER').toString().toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER',
-    departmentId: user.department_id ?? null,
+    name: decision.name ?? '',
+    role: decision.role,
+    departmentId: decision.departmentId,
   } as any;
 }
