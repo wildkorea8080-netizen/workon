@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
 import { logAccess } from '@/lib/logger';
+import { canSignIn } from '@/lib/user-withdrawal';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,12 +47,13 @@ export async function POST(request: NextRequest) {
     // 2) users 테이블에서 is_super_admin 확인 (service role로 조회)
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select('id, email, full_name, is_super_admin')
+      .select('id, email, full_name, is_super_admin, is_active, deleted_at')
       .eq('id', authData.user.id)
       .eq('is_super_admin', true)
       .maybeSingle();
 
-    if (userError || !user) {
+    // 비활성화한 슈퍼관리자는 들이지 않는다(2026-11-13 — 예전에는 '비활성화'가 is_active만 바꾸고 로그인은 보지 않았다)
+    if (userError || !user || !canSignIn(user)) {
       return NextResponse.json(
         { ok: false, error: '슈퍼관리자 권한이 없습니다.' },
         { status: 403 }

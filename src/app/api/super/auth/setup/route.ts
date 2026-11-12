@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { constantTimeEqual } from '@/lib/super-secret';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ export async function POST(request: NextRequest) {
 
     // 1) 셋업 키 검증
     const validSetupKey = process.env.SUPER_ADMIN_SETUP_KEY;
-    if (!validSetupKey || setupKey !== validSetupKey) {
+    if (!validSetupKey || typeof setupKey !== 'string' || !constantTimeEqual(setupKey, validSetupKey)) {
       return NextResponse.json(
         { ok: false, error: '셋업 키가 올바르지 않습니다.' },
         { status: 403 }
@@ -32,14 +33,22 @@ export async function POST(request: NextRequest) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // 3) 이미 슈퍼관리자가 존재하는지 확인
-    const { data: existing } = await supabaseAdmin
+    // 3) 이미 슈퍼관리자가 존재하는지 확인 — 수로 센다(2026-11-13).
+    //    예전에는 maybeSingle()이라 슈퍼관리자가 둘 이상이면 오류(여러 행)로 data가 비어 이 막이가 열렸다 —
+    //    설정 키만 있으면 아무 계정의 비밀번호를 바꾸고 슈퍼관리자로 올릴 수 있었다. 세지 못하면 닫는다.
+    const { count: superCount, error: countError } = await supabaseAdmin
       .from('users')
-      .select('id, email')
-      .eq('is_super_admin', true)
-      .maybeSingle();
+      .select('id', { count: 'exact', head: true })
+      .eq('is_super_admin', true);
 
-    if (existing) {
+    if (countError || superCount === null) {
+      return NextResponse.json(
+        { ok: false, error: '슈퍼관리자 계정을 확인하지 못했습니다. 잠시 뒤 다시 시도하세요.' },
+        { status: 503 }
+      );
+    }
+
+    if (superCount > 0) {
       return NextResponse.json(
         { ok: false, error: '이미 슈퍼관리자 계정이 존재합니다. 추가 생성은 슈퍼관리자 포털에서 진행하세요.' },
         { status: 409 }

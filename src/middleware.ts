@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
+import { superJwtSecret } from '@/lib/super-secret';
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? '';
 
@@ -104,11 +105,11 @@ async function loadIpPolicy(): Promise<Map<string, string[]>> {
 /**
  * Edge Runtime 호환 JWT 서명 검증 (Web Crypto API)
  */
-const SUPER_JWT_FALLBACK = 'dev-fallback-super-secret-change-in-prod';
-
+// 운영에서 SUPER_JWT_SECRET이 비면 거절한다(2026-11-13 — 예전에는 소스에 적힌 고정 값으로 검증해 누구나 토큰을 만들 수 있었다)
 async function verifySuperTokenEdge(token: string): Promise<boolean> {
   try {
-    const secret = process.env.SUPER_JWT_SECRET || SUPER_JWT_FALLBACK;
+    const secret = superJwtSecret();
+    if (!secret) return false;
 
     const parts = token.split('.');
     if (parts.length !== 3) return false;

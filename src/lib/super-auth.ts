@@ -8,6 +8,7 @@
  */
 import { cookies } from 'next/headers';
 import { createHmac } from 'crypto';
+import { constantTimeEqual, superJwtSecret } from '@/lib/super-secret';
 
 export interface SuperAdminPayload {
   sub: string;   // user id
@@ -19,8 +20,9 @@ export interface SuperAdminPayload {
 
 const COOKIE_NAME = 'super_token';
 
-function getSecret(): string {
-  return process.env.SUPER_JWT_SECRET || 'dev-fallback-super-secret-change-in-prod';
+// 운영에서 SUPER_JWT_SECRET이 비면 서명하지 않고 검증도 거절한다(2026-11-13, `super-secret.ts`)
+function getSecret(): string | null {
+  return superJwtSecret();
 }
 
 function b64url(str: string): string {
@@ -41,6 +43,7 @@ export function signSuperJWT(
   name: string
 ): string {
   const secret = getSecret();
+  if (!secret) throw new Error('SUPER_JWT_SECRET이 설정되지 않았습니다.');
   const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const now = Math.floor(Date.now() / 1000);
   const payload = b64url(JSON.stringify({
@@ -60,13 +63,14 @@ export function signSuperJWT(
 export function verifySuperJWT(token: string): SuperAdminPayload | null {
   try {
     const secret = getSecret();
+    if (!secret) return null;
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const [header, payload, sig] = parts;
     const expected = createHmac('sha256', secret)
       .update(`${header}.${payload}`)
       .digest('base64url');
-    if (sig !== expected) return null;
+    if (!constantTimeEqual(sig, expected)) return null;
     const data = JSON.parse(b64urlDecode(payload)) as SuperAdminPayload;
     if (data.exp < Math.floor(Date.now() / 1000)) return null;
     return data;
