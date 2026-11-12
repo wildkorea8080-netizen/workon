@@ -27,6 +27,9 @@ import {
  * - **개인 월 한도(0024, 0052)**: 기준 80·90·100. 받는 사람은 **그 직원 본인**뿐(활성·탈퇴 아님·같은 기관). 기관 안 한도가 있는
  *   직원의 한도·사용액은 DB 함수 하나(`organization_user_budget_usage`)로 한 번에 읽는다. 대상 키 `user:{id}`, 기간은 KST 달.
  *   관리자에게는 보내지 않는다(관리자는 이용 현황 화면에서 본다 — 직원 한 사람 한 사람의 사용률을 메일로 돌리지 않는다).
+ * - **빠른 확인(2026-11-12)**: 하루 한 번만 보면 오후에 넘은 한도를 다음 날 아침에야 안다. 앱 예약 실행기(pg_cron 5분)가 15분마다
+ *   (`quickBudgetAlertDue` — KST :00·:15·:30·:45 차례) 같은 확인을 **새 알림만**(`{ retake: false }` — 실패·멈춘 차지를 다시 잡는 일은 하루 한 번 실행이 맡는다)
+ *   **조용히**(사용률을 못 읽은 경고는 남기지 않음 — 15분마다 같은 경고가 쌓이지 않게) 돌린다. 기준마다 한 번만 보내는 규칙은 같다(유일 키).
  */
 
 export const MAX_ALERT_ATTEMPTS = 3;
@@ -128,8 +131,8 @@ export interface BudgetAlertDeps {
   recipients(organizationId: string, subject: string): Promise<string[]>;
   /** 개인 알림의 받는 사람 — 같은 기관의 활성(탈퇴 아님) 직원 본인. 아니면 null */
   person(organizationId: string, userId: string): Promise<{ email: string; name: string | null } | null>;
-  /** 이 알림을 보낼 차례면 true — 새로 넣었거나, 실패·멈춘 차지를 조건부로 다시 잡았다 */
-  claim(claim: BudgetAlertClaim): Promise<boolean>;
+  /** 이 알림을 보낼 차례면 true — 새로 넣었거나, 실패·멈춘 차지를 조건부로 다시 잡았다(`retake: false`면 새로 넣을 때만) */
+  claim(claim: BudgetAlertClaim, options?: { retake?: boolean }): Promise<boolean>;
   finish(claim: BudgetAlertClaim, result: { status: 'sent' | 'failed' | 'no_recipients'; recipients: number }): Promise<void>;
   send(to: string, mail: { subject: string; html: string }): Promise<MailResult>;
   log(level: 'info' | 'warning', message: string, details: Record<string, unknown>, organizationId: string): Promise<void>;
@@ -150,13 +153,13 @@ export interface BudgetAlertRun {
 const errorText = (error: unknown) => (error instanceof Error ? error.message.slice(0, 200) : 'unknown');
 
 /** 대상 하나 — 보냈으면 'sent', 모두 실패면 'failed', 보낼 것 없음·이미 보냄·받는 사람 없음은 'none' */
-async function alertSubject(deps: BudgetAlertDeps, org: { id: string; name: string }, status: BudgetSubjectStatus): Promise<'sent' | 'failed' | 'none'> {
+async function alertSubject(deps: BudgetAlertDeps, org: { id: string; name: string }, status: BudgetSubjectStatus, retake = true): Promise<'sent' | 'failed' | 'none'> {
   const threshold = thresholdToSend(status.percent, budgetThresholds(status.alertPercent));
   if (threshold === null) return 'none';
   const claim: BudgetAlertClaim = {
     organizationId: org.id, subject: status.subject, periodKey: status.periodKey, threshold, kind: status.kind, percent: status.percent,
   };
-  if (!(await deps.claim(claim))) return 'none';
+  if (!(await (retake ? deps.claim(claim) : deps.claim(claim, { retake: false })))) return 'none';
   const facts = { subject: status.subject, threshold, percent: status.percent, kind: status.kind };
   if (status.kind === 'user_monthly') {
     // 직원 본인에게만. 주소가 없거나(꼴이 틀림) 그 사이 비활성·탈퇴했으면 받을 사람 없음으로 닫는다
@@ -206,8 +209,17 @@ async function alertSubject(deps: BudgetAlertDeps, org: { id: string; name: stri
   return delivered ? 'sent' : 'failed';
 }
 
-export async function runBudgetAlerts(deps: BudgetAlertDeps, budgetMs = 50_000): Promise<BudgetAlertRun> {
+/** 빠른 확인 차례인가 — 5분마다 불리는 실행기가 KST 15분 단위(:00·:15·:30·:45)의 첫 호출에서만 */
+export function quickBudgetAlertDue(nowMs: number): boolean {
+  const minute = new Date(nowMs + 9 * 60 * 60 * 1000).getUTCMinutes();
+  return minute % 15 < 5;
+}
+
+export async function runBudgetAlerts(deps: BudgetAlertDeps, budgetMs = 50_000, options: { quick?: boolean } = {}): Promise<BudgetAlertRun> {
   const run: BudgetAlertRun = { checked: 0, sent: 0, failed: 0, skipped: null, partial: false };
+  const quick = options.quick === true;
+  // 빠른 확인은 사용률을 못 읽은 경고를 남기지 않는다(하루 한 번 실행이 남긴다)
+  const warn: BudgetAlertDeps['log'] = quick ? async () => {} : deps.log;
   if (!deps.mailConfigured()) return { ...run, skipped: 'not_configured' };
   const started = deps.now();
   const organizations = await deps.organizations();
@@ -220,28 +232,28 @@ export async function runBudgetAlerts(deps: BudgetAlertDeps, budgetMs = 50_000):
       if (status) subjects.push(organizationSubject(status));
     } catch (error) {
       run.failed += 1;
-      await deps.log('warning', '기관 예산 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
+      await warn('warning', '기관 예산 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
     }
     try {
       const departments = await deps.departmentStatuses(org.id);
       subjects.push(...departments.statuses.map(departmentSubject));
       if (departments.failed) {
         run.failed += departments.failed;
-        await deps.log('warning', '부서 예산 사용률을 확인하지 못했습니다', { departments: departments.failed }, org.id);
+        await warn('warning', '부서 예산 사용률을 확인하지 못했습니다', { departments: departments.failed }, org.id);
       }
     } catch (error) {
       run.failed += 1;
-      await deps.log('warning', '부서 예산 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
+      await warn('warning', '부서 예산 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
     }
     try {
       subjects.push(...(await deps.userStatuses(org.id)).map(userSubject));
     } catch (error) {
       run.failed += 1;
-      await deps.log('warning', '개인 한도 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
+      await warn('warning', '개인 한도 사용률을 확인하지 못했습니다', { error: errorText(error) }, org.id);
     }
     for (const status of subjects) {
       try {
-        const result = await alertSubject(deps, org, status);
+        const result = await alertSubject(deps, org, status, !quick);
         if (result === 'sent') run.sent += 1;
         if (result === 'failed') run.failed += 1;
       } catch (error) {
@@ -314,7 +326,7 @@ export function budgetAlertDeps(): BudgetAlertDeps {
       const admins = await activeAdminEmails((roots ?? []).map((d: { id: string }) => d.id));
       return cleanRecipients([org?.contact_email, ...admins]);
     },
-    async claim(c) {
+    async claim(c, options) {
       const row = {
         organization_id: c.organizationId, subject: c.subject, period_key: c.periodKey, threshold: c.threshold,
         kind: c.kind, percent: c.percent, status: 'sending',
@@ -322,6 +334,7 @@ export function budgetAlertDeps(): BudgetAlertDeps {
       const inserted = await supabaseAdmin.from('budget_alerts').insert(row).select('id');
       if (!inserted.error) return true;
       if (inserted.error.code !== '23505') throw new Error(`budget_alerts: ${inserted.error.message}`);
+      if (options?.retake === false) return false;
       const { data: existing, error } = await supabaseAdmin
         .from('budget_alerts')
         .select('id, status, attempts, updated_at')

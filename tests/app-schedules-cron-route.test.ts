@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** 앱 예약 실행기 라우트의 자격 — 업무 작업자 비밀값(pg_cron이 Vault로 싣는 값) 또는 CRON_SECRET, 둘 다 없으면 503 */
-const state = vi.hoisted(() => ({ worker: 'w'.repeat(64) as string | undefined, cron: 'c'.repeat(40) as string | undefined, runs: 0, beats: 0, dispatches: 0, batches: 0, references: 0 }));
+const state = vi.hoisted(() => ({ worker: 'w'.repeat(64) as string | undefined, cron: 'c'.repeat(40) as string | undefined, runs: 0, beats: 0, dispatches: 0, batches: 0, references: 0, budget: 0 }));
 vi.mock('@/lib/config', () => ({
   get WORK_WORKER_SECRET() { return state.worker; },
   get CRON_SECRET() { return state.cron; },
@@ -19,13 +19,15 @@ vi.mock('@/lib/apps/outbound/notices', () => ({ runOutboundNotices: async () => 
 // 문서 참조 색인 자동 채우기(2026-11-12) — 같은 차례에 나란히
 vi.mock('@/lib/document-references', () => ({ autoIndexReferences: async () => { state.references++; return { indexed: 0, skipped: 0, deferred: 0 }; } }));
 vi.mock('@/lib/document-references-db', () => ({ autoIndexDeps: () => ({}) }));
+// 예산 알림 빠른 확인(2026-11-12) — 15분 차례에만, 자격이 없으면 돌지 않음
+vi.mock('@/lib/budget-alerts', () => ({ budgetAlertDeps: () => ({}), quickBudgetAlertDue: () => true, runBudgetAlerts: async () => { state.budget++; return { checked: 0, sent: 0, failed: 0, skipped: null, partial: false }; } }));
 
 import { GET, POST } from '@/app/api/cron/app-schedules/route';
 
 const call = (method: 'GET' | 'POST', auth?: string) =>
   (method === 'GET' ? GET : POST)(new Request('http://localhost/api/cron/app-schedules', { method, headers: auth ? { Authorization: auth } : {} }));
 
-beforeEach(() => { state.worker = 'w'.repeat(64); state.cron = 'c'.repeat(40); state.runs = 0; state.beats = 0; state.dispatches = 0; state.batches = 0; state.references = 0; });
+beforeEach(() => { state.worker = 'w'.repeat(64); state.cron = 'c'.repeat(40); state.runs = 0; state.beats = 0; state.dispatches = 0; state.batches = 0; state.references = 0; state.budget = 0; });
 
 describe('/api/cron/app-schedules 자격', () => {
   it('업무 작업자 비밀값·CRON_SECRET 어느 쪽이든 실행하고, GET·POST가 같다', async () => {
@@ -35,6 +37,7 @@ describe('/api/cron/app-schedules 자격', () => {
     expect(state.dispatches).toBe(2);
     expect(state.batches).toBe(2);
     expect(state.references).toBe(2);
+    expect(state.budget).toBe(2);
     expect(state.beats).toBe(2);
   });
   it('비밀값이 없거나 틀리거나 꼴이 다르면 401(머리글 앞뒤 공백은 Headers가 지운다)이고 실행하지 않는다', async () => {
@@ -45,6 +48,7 @@ describe('/api/cron/app-schedules 자격', () => {
     expect(state.dispatches).toBe(0);
     expect(state.batches).toBe(0);
     expect(state.references).toBe(0);
+    expect(state.budget).toBe(0);
     expect(state.runs).toBe(0);
   });
   it('한쪽만 설정돼도 그쪽으로 열리고, 빈 비밀값은 자격이 아니다', async () => {
