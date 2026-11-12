@@ -1138,7 +1138,7 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
   상태 칩 + 실패 시 '다시 시도' · 지우기. 목록은 앞 응답 뒤에 다음을 예약하고 늦은 옛 응답은 버린다(문서 화면과 같다). 올리기는 `common-upload-client.ts`(발급 → 저장소 직접 → 확인 → 읽기를 `keepalive`로 걺)
 - **운영자 API `/api/super/common-documents/…`**(모든 핸들러 첫 줄에서 `getSuperAdminFromRequest` — `route-auth.test.ts`가 본다): `GET` 목록(+ `reconcileReading` 맞추기, 멈춘 행 하나에 `kick`, 실패해 남은 판 바꾸기 다시 걸기, `storage_path`·`noda_filename`·시각 칸은 안 내보냄) ·
   `POST upload-url`(발급 — 형식·크기·위험한 이름 검사는 `document-upload.ts`의 `checkUploadFile`을 같이 쓴다, 상한 `MAX_UPLOAD_BYTES`) · `POST`(확인 — 이용 조건·연도 2000~2100·유형 밖 거절, 발급 10분 창 `410`, 저장소 크기·형식 다시 검사, 위 409) ·
-  `POST [id]/read`(`maxDuration = 300`) · `DELETE [id]`
+  `POST [id]/read`(`maxDuration = 300`) · `DELETE [id]` · `GET [id]/cited-by`(2026-11-12 — 그 유형 기관마다 이 기준을 인용한 문서 수만, 문서 이름 없음, `commonCitationCounts`)
 
 **알려진 한계**: 문서 하나는 유형 하나. 유형 표가 거칠다 — 지방공기업은 2026-11-08에 '공공기관'에서 나눴다(0072, 열쇠 `lpe`, 보관함 `workon-c-lpe` — 기존 기관의 유형은 슈퍼관리자가 기관 화면에서 고친다). 지방 출자·출연기관 등 더 나누려면 `ORG_TYPES`·CHECK·열쇠 표를 함께 늘린다. 비서마다 공통 자료실을 끄는 설정은 없다(`doc_search`가 켜진 비서는 모두 찾고 유사도 하한 0.80이 엉뚱한 근거를 거른다).
 기관 관리자는 문서 화면 '공통 기준 문서'(2026-11-06, 2026-11-12부터 바꾼 옛 판이 있으면 '옛 판과 비교' — 이 기관 유형만, 같은 날 '인용하는 문서' — 그 기준을 「」로 인용한 이 기관 문서를 참조 색인으로 `GET /api/admin/common-documents/[id]/cited-by`, `CommonLibraryPanel` → `GET /api/admin/common-documents`, `src/lib/common-library-admin.ts`)에서 이 기관 유형의 비서가 **지금 근거로 쓰는** 공통 문서(대화와 같은 `citableCommonIds` — 이름·기준 연도·이용 조건·원본 열기)를 읽기만 한다. 아직 근거로 쓰지 않는 현재 판(읽는 중·실패·판 바뀌는 중)은 개수만, 저장소 경로·NODA 칸은 내보내지 않는다(직원은 여전히 답의 `[공통]` 칩으로 안다). **공통 문서별 이용 조건의 실제 확인은 사람 몫이다**(서비스 정의서 10.3) — 화면은 기록 칸만 강제한다. 한글·실서버 확인은 아래 배포 순서 3~5.
