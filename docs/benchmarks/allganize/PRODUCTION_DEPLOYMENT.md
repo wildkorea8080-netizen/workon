@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-13(오후): 공개 키로 열려 있던 DB 닫기(0090)·미들웨어 서비스 키·비활성 슈퍼관리자 토큰
+
+- **먼저 운영 DB에 0090 적용**(2026-11-13 16:0x KST, 사용자 "운영반영") — 코드와 상관없이 적용만으로 누출이 닫힌다. 적용 전 운영 확인(읽기 전용·수만): 브라우저에 실린 공개 키(anon)로 PostgREST를 부르면 RLS가 꺼진 표 여섯(`agent_history` 48행 — 비서 판 사본·지시문, `chat_attachments` 3행 — 첨부 이름·요약, `schema_migrations` 88행, `agent_templates`·`common_documents`·`generated_files` 0행)을 읽을 수 있었고 이 표들에 INSERT·UPDATE·DELETE·TRUNCATE 권한까지 있었다. 뷰 `v_organization_summary`(기관 2행 — 담당자 이름·메일·요금)·`v_monthly_billing`, 대시보드에서 만든 정책 `departments_select_all`이 걸린 `departments`(4행)도 읽혔다. 공개 역할 정책은 10개(마이그레이션 밖에서 만든 것).
+- 적용 뒤 확인(읽기 전용): RLS 꺼진 public 표 0, public·anon·authenticated 정책 0, anon·authenticated 표 권한 0, 뷰 anon 읽기 없음, service_role 권한 59 그대로, 적용 기록 있음. 공개 키로 다시 부르면 표·뷰 모두 401(42501), 서비스 키는 그대로 읽힘. 옛 코드가 도는 운영 주소 `/login`·`/signup`·`/api/system/maintenance`·`/api/branding` 200.
+- 그다음 코드 배포 `dpl_EZBC35Zxpf8zfC9yFLUrAgchEmeF`(커밋 `5dab6f2`, 2026-11-13 16:12 KST, `main` fast-forward — GitHub 연동). 들어간 커밋: `205cf4f`(직전 배포 기록), `2cad4a6` 0090·업무 DB 시험의 거절 코드(트리거 23514 또는 권한 42501), `cde9c6e` 미들웨어가 점검 모드·접속 허용 IP를 서비스 키로 읽기(예전엔 공개 키라 RLS에 막혀 **두 기능이 한 번도 걸리지 않았다** — 운영은 점검 모드 꺼짐·허용 IP 쓰는 기관 없음이라 동작 변화 없음)·`/super` 화면·`/api/super` API·점검 모드 통과 때 슈퍼관리자 계정 상태를 DB로 다시 보기(30초 기억 — 비활성화하면 30초 안에 막힘), `5dab6f2` 문서. 되돌릴 때는 직전 `dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`(b53cd9f)로 promote한다 — 0090은 되돌리지 않는다(앱은 서비스 키로만 표를 써 영향 없음).
+- **배포 전**: 가지 Preview(`5dab6f2`, `workon-k9erfta2w`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0090)를 띄운 전체 시험 258파일 3,577개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/login`·`/signup`·`/super/login`·`/api/system/maintenance`·`/api/branding` 200, `/super` 307, `/api/super/accounts/users`(토큰 없음·위조 토큰) 401, `POST /api/chat`·`GET /api/forbidden-words` 401. pg_cron 호출 200(16:13~16:15 KST, 실행기 하트비트 16:15).
+- **확인하지 못한 것**(사용자 몫): 로그인한 화면(직원·관리자·슈퍼관리자)을 이 배포 뒤 브라우저로 보지 않았다. 슈퍼관리자 비활성화 → 30초 안에 막힘은 운영에서 재현하지 않았다(자동 시험만).
+
 ## 2026-11-13(아침): 보안 고침 넷(금지어 범위·로그인 소속·초대 링크·슈퍼관리자 인증)·법령 본문 조회·예산 빠른 확인
 
 - 2026-11-13 08:46 KST 배포 `dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`(커밋 `b53cd9f`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_FU8PY7wDumqiRZMb2pQnhwz5Z5Zn`(2bad33c — 08:20에 같은 커밋을 다시 배포한 것, 그 전 `dpl_D8b2uKspFxPu3VNTzcUvahiNcQFy`)으로 promote한다. 되돌리면 아래 보안 구멍이 다시 열린다.
