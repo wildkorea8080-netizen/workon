@@ -217,15 +217,19 @@ describe.skipIf(!url)('업무 도메인 DB (0034)', () => {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE authenticated');
+      // 막히기만 하면 된다 — 0090이 departments에도 RLS를 켜 BEFORE 트리거(부서·기관 맞춤 검사)가 부서를 못 보고 먼저 23514로 막거나,
+      // 권한이 없으면 42501(운영 — 0090이 anon·authenticated 권한을 거둠). 어느 쪽이든 행은 들어가지 않는다
       expect(
-        await code(
-          db.query(
-            `INSERT INTO work_tasks (organization_id, department_id, owner_id, workflow_key, workflow_version, title)
-             VALUES ($1, $2, $3, 'report', '1', 'x')`,
-            [a.orgId, a.deptId, a.userId]
-          )
+        ['42501', '23514'].includes(
+          (await code(
+            db.query(
+              `INSERT INTO work_tasks (organization_id, department_id, owner_id, workflow_key, workflow_version, title)
+               VALUES ($1, $2, $3, 'report', '1', 'x')`,
+              [a.orgId, a.deptId, a.userId]
+            )
+          )) as string
         )
-      ).toBe('42501');
+      ).toBe(true);
     } finally {
       await db.query('ROLLBACK');
     }
