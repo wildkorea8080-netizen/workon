@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
+import { readIpPolicy, readMaintenance, readSuperAdminStatus, restConfig, superAdminActive, superTokenSub } from '@/lib/middleware-db';
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? '';
 
@@ -17,25 +18,10 @@ async function checkMaintenance(): Promise<{ on: boolean; message: string }> {
   if (maintenanceCache && Date.now() - maintenanceCache.ts < CACHE_TTL) {
     return { on: maintenanceCache.value, message: maintenanceCache.message };
   }
-  try {
-    const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) return { on: false, message: '' };
-
-    const res  = await fetch(
-      `${url}/rest/v1/system_settings?key=in.(maintenance_mode,maintenance_message)&select=key,value`,
-      { headers: { apikey: key, Authorization: `Bearer ${key}` } }
-    );
-    if (!res.ok) return { on: false, message: '' };
-    const data = await res.json() as { key: string; value: string }[];
-    const map  = Object.fromEntries(data.map(r => [r.key, r.value]));
-    const on   = map.maintenance_mode === 'true';
-    const msg  = map.maintenance_message ?? '';
-    maintenanceCache = { value: on, message: msg, ts: Date.now() };
-    return { on, message: msg };
-  } catch {
-    return { on: false, message: '' };
-  }
+  // 서비스 키로 읽는다(2026-11-13, `middleware-db.ts`) — 공개 키로는 RLS 때문에 언제나 0행이라 점검 모드가 걸린 적이 없었다
+  const read = await readMaintenance(restConfig(), fetch);
+  if (read.ok) maintenanceCache = { value: read.on, message: read.message, ts: Date.now() };
+  return { on: read.on, message: read.message };
 }
 
 // ── 접속 IP 제한 (0023) ─────────────────────────────────────
@@ -57,49 +43,17 @@ async function allowedIpsForDepartment(departmentId: string | null): Promise<str
   return ipCache.byDept.get(departmentId) ?? [];
 }
 
+// 서비스 키로 읽는다(2026-11-13, `middleware-db.ts`) — 공개 키로는 RLS 때문에 기관이 0행이라 접속 허용 IP가 걸린 적이 없었다.
+// 조회 실패는 "제한 없음"으로 떨어진다(IP 제한은 인증 위에 얹는 두 번째 층 — 부서 범위·커넥터 범위는 반대로 닫는다).
 async function loadIpPolicy(): Promise<Map<string, string[]>> {
-  const byDept = new Map<string, string[]>();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return byDept;
+  return readIpPolicy(restConfig(), fetch);
+}
 
-  const headers = { apikey: key, Authorization: `Bearer ${key}` };
-
-  try {
-    const orgRes = await fetch(
-      `${url}/rest/v1/organizations?select=id,allowed_ips&allowed_ips=not.is.null`,
-      { headers }
-    );
-    if (!orgRes.ok) return byDept;
-
-    const orgs = (await orgRes.json()) as { id: string; allowed_ips: string[] | null }[];
-    const active = orgs.filter((o) => (o.allowed_ips?.length ?? 0) > 0);
-    // 아무 기관도 제한을 켜지 않았다. 부서를 조회할 이유가 없다.
-    if (active.length === 0) return byDept;
-
-    const ids = active.map((o) => o.id).join(',');
-    const deptRes = await fetch(
-      `${url}/rest/v1/departments?select=id,organization_id&organization_id=in.(${ids})`,
-      { headers }
-    );
-    if (!deptRes.ok) return byDept;
-
-    const depts = (await deptRes.json()) as { id: string; organization_id: string }[];
-    const byOrg = new Map(active.map((o) => [o.id, o.allowed_ips ?? []]));
-    for (const d of depts) {
-      const list = byOrg.get(d.organization_id);
-      if (list) byDept.set(d.id, list);
-    }
-  } catch {
-    // 조회 실패는 "제한 없음"으로 떨어진다. 여기서 전부 막으면 DB가 잠깐
-    // 흔들릴 때 기관 전체가 못 들어온다. IP 제한은 인증 위에 얹는 두 번째
-    // 층이라, 근거를 못 얻었을 때는 인증만으로 통과시키는 편이 낫다.
-    // (부서 범위·커넥터 범위는 반대로 닫는다 — 그쪽은 실패가 곧 타 기관
-    //  자료 노출이라 위험의 종류가 다르다.)
-    return byDept;
-  }
-
-  return byDept;
+// 슈퍼관리자 계정이 지금도 활성인가(2026-11-13) — 토큰은 24시간이라 비활성화해도 만료까지 쓰이던 공백을 닫는다
+const superStatusCache = new Map<string, { active: boolean; at: number }>();
+async function superTokenActive(token: string): Promise<boolean> {
+  if (!(await verifySuperTokenEdge(token))) return false;
+  return superAdminActive(superStatusCache, superTokenSub(token), (sub) => readSuperAdminStatus(restConfig(), sub, fetch));
 }
 
 /**
@@ -159,7 +113,7 @@ export async function middleware(req: NextRequest) {
     if (isMaintenance) {
       // 슈퍼관리자 토큰 있으면 통과
       const superToken = req.cookies.get(SUPER_COOKIE)?.value;
-      const isSuperAdmin = superToken ? await verifySuperTokenEdge(superToken) : false;
+      const isSuperAdmin = superToken ? await superTokenActive(superToken) : false;
       if (!isSuperAdmin) {
         // API에 리디렉션을 주면 fetch가 점검 안내 HTML을 받아 "알 수 없는
         // 오류"가 된다. matcher에 /api를 넣으면서 이 경로가 처음으로
@@ -183,6 +137,19 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith('/static') ||
     PUBLIC_FILE.test(pathname)
   ) {
+    return NextResponse.next();
+  }
+
+  // ── 슈퍼관리자 API(2026-11-13) — 서명이 맞는 토큰이어도 비활성화·삭제된 슈퍼관리자면 막는다.
+  // 라우트의 getSuperAdminFromRequest는 서명만 보므로(DB를 안 봄) 여기서 계정 상태를 한 번 더 본다.
+  // 토큰이 없거나 서명이 틀리면 라우트가 401로 막으니 그대로 넘긴다.
+  if (pathname.startsWith('/api/super')) {
+    const superToken = req.cookies.get(SUPER_COOKIE)?.value;
+    if (superToken && (await verifySuperTokenEdge(superToken)) && !(await superTokenActive(superToken))) {
+      const res = NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
+      res.cookies.set({ name: SUPER_COOKIE, value: '', maxAge: 0, path: '/' });
+      return res;
+    }
     return NextResponse.next();
   }
 
@@ -244,7 +211,8 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    const valid = await verifySuperTokenEdge(superToken);
+    // 서명·만료에 더해 계정이 지금도 활성 슈퍼관리자인지(2026-11-13)
+    const valid = await superTokenActive(superToken);
     if (!valid) {
       const url = req.nextUrl.clone();
       url.pathname = '/super/login';
