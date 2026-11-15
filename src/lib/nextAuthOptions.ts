@@ -6,6 +6,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NEXTAUTH_SECRET } from '@/lib/config';
 import { canSignIn } from '@/lib/user-withdrawal';
 import { decideSignIn } from '@/lib/sign-in-user';
+import { ACCOUNT_LOCKED, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -15,9 +16,16 @@ export const authOptions: AuthOptions = {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' }
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) {
           return null;
+        }
+
+        // 로그인 실패 잠금(2026-11-13, `sign-in-throttle.ts`) — 30분 안에 5번 틀린 계정·30번 틀린 IP는 맞는 비밀번호도 받지 않는다
+        const throttle = throttleDeps();
+        const ip = requestIp(req?.headers as Record<string, unknown> | undefined);
+        if (!(await signInAllowed(throttle, 'user', credentials.email, ip))) {
+          throw new Error(ACCOUNT_LOCKED);
         }
 
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -29,8 +37,13 @@ export const authOptions: AuthOptions = {
         // 관리자 초대로 생성된 사용자는 Supabase Auth에 없고 password_hash만 가짐
         // ⚠️ 구 SHA-256 해시로 저장된 계정은 로그인 불가 — 비밀번호 재설정 필요
         if (authError || !authData?.user) {
-          return await authorizeWithPasswordHash(credentials.email, credentials.password);
+          const local = await authorizeWithPasswordHash(credentials.email, credentials.password);
+          if (local) await noteSignInSuccess(throttle, 'user', credentials.email);
+          else await noteSignInFailure(throttle, 'user', credentials.email, ip);
+          return local;
         }
+        // 비밀번호는 맞았다 — 실패 기록을 지운다(소속 확인은 아래에서 따로)
+        await noteSignInSuccess(throttle, 'user', credentials.email);
 
         // 소속·역할은 users 행만 정한다(2026-11-12, `sign-in-user.ts`) — 행이 없거나 부서가 비면 들이지 않는다.
         // 예전에는 가장 오래된 부서(어느 기관이든)를 배정해 행을 만들었다(공개 가입 → 첫 기관 직원).

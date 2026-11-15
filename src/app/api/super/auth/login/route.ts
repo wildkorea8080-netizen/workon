@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
 import { logAccess } from '@/lib/logger';
 import { canSignIn } from '@/lib/user-withdrawal';
+import { LOCKED_MESSAGE, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,14 @@ export async function POST(request: NextRequest) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
+    // 로그인 실패 잠금(2026-11-13, `sign-in-throttle.ts`) — 30분 안에 5번 틀린 계정·30번 틀린 IP는 맞는 비밀번호도 받지 않는다
+    const throttle = throttleDeps();
+    const ip = requestIp(request.headers);
+    if (!(await signInAllowed(throttle, 'super', normalizedEmail, ip))) {
+      logAccess({ action: 'login_locked', path: '/super/login', ipAddress: ip, userAgent: request.headers.get('user-agent'), statusCode: 429 });
+      return NextResponse.json({ ok: false, error: LOCKED_MESSAGE }, { status: 429 });
+    }
+
     // 1) anon key 클라이언트로 비밀번호 검증
     //    service role 키는 signInWithPassword 용도에 적합하지 않음
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -34,6 +43,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (authError || !authData.user) {
+      await noteSignInFailure(throttle, 'super', normalizedEmail, ip);
       logAccess({ action: 'login_failed', path: '/super/login',
         ipAddress: request.headers.get('x-forwarded-for'),
         userAgent: request.headers.get('user-agent'),
@@ -65,6 +75,8 @@ export async function POST(request: NextRequest) {
       .from('users')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', user.id);
+
+    await noteSignInSuccess(throttle, 'super', normalizedEmail);
 
     // 4) 커스텀 JWT 발급
     const jwt = signSuperJWT(

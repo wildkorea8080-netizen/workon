@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
+import { ACCOUNT_LOCKED, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
 
 /**
  * 로그인 폼.
@@ -41,7 +42,8 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
     const res = await signIn('credentials', { redirect: false, email, password });
     setLoading(false);
     if (res?.error) {
-      setMessage('이메일 또는 비밀번호가 올바르지 않습니다.');
+      // 로그인 실패 잠금(2026-11-13) — 서버가 ACCOUNT_LOCKED를 던지면 잠김 안내
+      setMessage(res.error === ACCOUNT_LOCKED ? LOCKED_MESSAGE : '이메일 또는 비밀번호가 올바르지 않습니다.');
       return;
     }
     router.push(isAdminLogin ? '/admin' : '/');
