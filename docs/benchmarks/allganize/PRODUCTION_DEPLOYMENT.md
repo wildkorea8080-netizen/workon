@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-16(아침): 로그인 실패 잠금(0091)
+
+- **먼저 운영 DB에 0091 적용**(2026-11-16 08:3x KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `sign_in_failures` 칸 다섯(`ip_hash`만 비어도 됨)·CHECK 셋·색인 셋(기본 키 포함)·RLS 켜짐·정책 0, anon·authenticated 읽기·쓰기·지우기 권한 없음, service_role 읽기·쓰기·지우기 있음, RLS 꺼진 public 표 0.
+- 그다음 코드 배포 `dpl_EmY2ubUhpVJziZ7iyKJ2VaX3Cc1Q`(커밋 `a66381c`, 2026-11-16 08:38 KST, `main` fast-forward — GitHub 연동). 들어간 커밋: `dfdcc1a`(직전 배포 기록), `d1f0382` 로그인 실패 잠금(직원 로그인 두 길·슈퍼관리자 로그인 — 한 계정 30분 5번·한 IP 30번이면 잠금, 이메일·IP는 SHA-256만, 실패 기록을 못 읽으면 막지 않음), `a66381c` 문서. 되돌릴 때는 직전 `dpl_EZBC35Zxpf8zfC9yFLUrAgchEmeF`(5dab6f2)로 promote한다 — 0091은 되돌리지 않아도 된다(옛 코드는 이 표를 읽지 않는다).
+- **배포 전**: 가지 Preview(`a66381c`, `workon-m36z87d6h`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0091)를 띄운 전체 시험 259파일 3,588개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/super/dashboard` 401. 없는 계정(`nobody@example.invalid`)으로 `POST /api/super/auth/login` 401 → 운영 `sign_in_failures`에 한 줄(그 이메일의 해시만) 쌓인 것을 확인 — 실패 기록이 실제로 남는다(이 줄은 30분 뒤 판정에서 빠지고 하루 뒤 치워진다). pg_cron 호출 200(08:44~08:46 KST, 실행기 하트비트 08:45).
+- **확인하지 못한 것**(사용자 몫): 직원 로그인 화면에서 다섯 번 틀린 뒤 잠김 안내가 보이는지 브라우저로 보지 않았다(자동 시험만). 관리자가 잠금을 직접 푸는 화면은 없다(30분 기다림).
+
 ## 2026-11-13(오후): 공개 키로 열려 있던 DB 닫기(0090)·미들웨어 서비스 키·비활성 슈퍼관리자 토큰
 
 - **먼저 운영 DB에 0090 적용**(2026-11-13 16:0x KST, 사용자 "운영반영") — 코드와 상관없이 적용만으로 누출이 닫힌다. 적용 전 운영 확인(읽기 전용·수만): 브라우저에 실린 공개 키(anon)로 PostgREST를 부르면 RLS가 꺼진 표 여섯(`agent_history` 48행 — 비서 판 사본·지시문, `chat_attachments` 3행 — 첨부 이름·요약, `schema_migrations` 88행, `agent_templates`·`common_documents`·`generated_files` 0행)을 읽을 수 있었고 이 표들에 INSERT·UPDATE·DELETE·TRUNCATE 권한까지 있었다. 뷰 `v_organization_summary`(기관 2행 — 담당자 이름·메일·요금)·`v_monthly_billing`, 대시보드에서 만든 정책 `departments_select_all`이 걸린 `departments`(4행)도 읽혔다. 공개 역할 정책은 10개(마이그레이션 밖에서 만든 것).
