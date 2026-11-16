@@ -197,7 +197,7 @@ assets/templates/         # 표준 양식 HWPX 7종(공문·보고서·회의록
 | `npm test` | 순수 함수·실행기 회귀 (`tests/`, 현재 1922개 통과 — `WORK_TEST_DATABASE_URL`을 주면 업무 DB 시험 포함) | 아니오 |
 | `npm run hwpx:probe -- 입력 출력` | 한글·Word 호환 확인 — 입력은 `.hwpx`·`.hwp`·`.docx`, 실제 입구(`readTemplate`·`fillTemplate`)로 표시·자동 자리·DOCX·대체 경로를 모두 태운다. 출력 파일을 한글(Word)에서 연다 | 아니오 |
 | `npm run db:check` | 스키마·데이터·트리거·과금 규약·비서 카탈로그 | 예 |
-| `npm run db:drift` | **운영 DB 스키마 ↔ 마이그레이션 어긋남**(2026-11-16, `src/lib/schema-drift.ts`·`scripts/db-drift.mjs`) — 기준은 시험 DB(먼저 `npm run work:testdb -- reset`), 대상은 `DATABASE_URL`. public의 표·뷰·칸 형식/NULL 허용·함수(인자 형식)·RLS 꺼진 표를 **읽기 전용 트랜잭션**으로 읽어 맞댄다(행 값은 안 읽음, 시험 DB의 vector→text는 같게 봄). 대상에 없는 것·형식 다름·RLS 꺼짐이면 종료 코드 1, 대상에만 있는 것은 정보. 계기: 운영에 `users.password_hash`·`security_logs`가 없던 것(0097) — 단위 시험은 가짜 DB, 시험 DB는 마이그레이션만이라 못 잡았다. **새 마이그레이션을 운영에 적용한 뒤와 배포 전에 돌린다.** 2026-11-16 0097 뒤 운영: 표·뷰 61·칸 798·함수 33, 어긋남 없음. 짝이 되는 **코드 쪽 검사**는 `tests/batch-0116.test.ts`(2026-11-17 — `src`·`scripts`의 `.from('표')`·그 사슬의 select/필터 칸·`.rpc('함수')`를 어림해 시험 DB(= 마이그레이션 전부)에 없으면 실패. 내장 관계·`*`·별칭·insert/update 몸의 키는 보지 않음 — 틀린 경보 쪽으로 좁힘. `password_hash` 칸을 빼 보면 실제로 잡는 것까지 확인) | 예 (시험 DB + 운영) |
+| `npm run db:drift` | **운영 DB 스키마 ↔ 마이그레이션 어긋남**(2026-11-16, `src/lib/schema-drift.ts`·`scripts/db-drift.mjs`) — 기준은 시험 DB(먼저 `npm run work:testdb -- reset`), 대상은 `DATABASE_URL`. public의 표·뷰·칸 형식/NULL 허용·함수(인자 형식)·RLS 꺼진 표를 **읽기 전용 트랜잭션**으로 읽어 맞댄다(행 값은 안 읽음, 시험 DB의 vector→text는 같게 봄). 대상에 없는 것·형식 다름·RLS 꺼짐이면 종료 코드 1, 대상에만 있는 것은 정보. 계기: 운영에 `users.password_hash`·`security_logs`가 없던 것(0097) — 단위 시험은 가짜 DB, 시험 DB는 마이그레이션만이라 못 잡았다. **새 마이그레이션을 운영에 적용한 뒤와 배포 전에 돌린다.** 2026-11-16 0097 뒤 운영: 표·뷰 61·칸 798·함수 33, 어긋남 없음. 짝이 되는 **코드 쪽 검사**는 `tests/batch-0116.test.ts`(2026-11-17 — `src`·`scripts`의 `.from('표')`·그 사슬의 select/필터 칸·`.rpc('함수')`를 어림해 시험 DB(= 마이그레이션 전부)에 없으면 실패. 내장 관계·`*`·별칭·insert/update 몸의 키는 보지 않음 — 틀린 경보 쪽으로 좁힘. `password_hash` 칸을 빼 보면 실제로 잡는 것까지 확인. 2026-11-17부터 내장 관계 `별칭:외래키(칸)`의 칸과 여러 줄 백틱 select도 봄 — 관리자 설정 화면 보안 로그 조회가 없는 `users.name`을 골라 늘 실패하던 것을 찾아 `full_name`으로 고침) | 예 (시험 DB + 운영) |
 | `npm run isolation:check` | 테넌트 격리 (기관 2개 이상일 때) | 예 |
 | `npm run connector:probe` | 외부 API 4종 실호출 | 아니오 (키 필요) |
 | `npm run db:migrate` | 마이그레이션 직접 적용 (`DATABASE_URL` 필요). 번호 없이 돌리면 **0028·0032는 건너뛰고** 안내만 한다(`scripts/migrate-select.mjs` `MANUAL_ONLY`) — 번호로 지정해야 적용 | 예 |
@@ -1343,7 +1343,7 @@ MAIL_FROM=
    **읽고 쓰고 지울 수 있었고**(운영에서 비서 판 사본 48행·첨부 이름·요약이 읽힘), 뷰(`v_organization_summary` — 담당자 이름·메일·요금,
    `v_monthly_billing`)와 대시보드에서 만든 정책이 걸린 `departments`도 읽혔습니다. 0090이 public 스키마의 **모든 표에 RLS를 켜고**,
    public·anon·authenticated 역할에 걸린 정책을 지우고, anon·authenticated의 표·뷰·시퀀스 권한을 거두고 기본 권한도 거둡니다.
-   **새 표를 만들면 RLS를 켜고(정책 없음) 공개 키 권한을 주지 마세요** — 앱은 서비스 키로만 표를 읽고, 공개 키는 로그인·가입(`supabase.auth`)과
+   **보안 로그는 `logSecurityEvent`(`src/lib/security-log.ts`)로만 쓰세요**(2026-11-17) — 운영에 `security_logs` 표가 없던 동안(0097) 모든 보안 로그가 조용히 사라졌다. Supabase는 실패를 던지지 않고 `{ error }`로 돌려주는데 쓰던 곳마다 `try/catch`로만 감쌌기 때문이다. 이제 실패하면 `system_logs`(security, error)에 사건 종류·오류 코드가 남고, 직접 insert는 `tests/batch-0117.test.ts`가 막는다(`filter.ts`의 같은 이름은 다시 내보냄). **새 표를 만들면 RLS를 켜고(정책 없음) 공개 키 권한을 주지 마세요** — 앱은 서비스 키로만 표를 읽고, 공개 키는 로그인·가입(`supabase.auth`)과
    저장소 서명 올리기에만 씁니다. 미들웨어도 같은 날부터 서비스 키로 읽습니다(`src/lib/middleware-db.ts` — 예전엔 공개 키라 RLS에 막혀
    **점검 모드와 기관 접속 허용 IP가 한 번도 걸리지 않았습니다**). `tests/batch-0102.test.ts`
 
