@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(새벽 2): 보안 로그 한 곳·실패를 운영 기록에·설정 화면 보안 로그 조회 고침 — 마이그레이션 없음
+
+- 코드 배포 `dpl_GdB3cPcMcp3CrPmkEvKRU3uo4CuP`(커밋 `688b022`, 2026-11-17 00:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `3e54a07`(새벽 배포 기록), `08168fe` 보안 로그를 `logSecurityEvent`(`src/lib/security-log.ts`) 한 곳으로(직접 insert 11곳 — 돌려준 `{ error }`를 보지 않아 `security_logs`가 없던 동안 모두 조용히 버려졌다), 실패하면 `system_logs`(security, error)에 종류·코드, IP 차단 기록은 실제로 남겼을 때만 `logged:true`, 관리자 설정 화면 '보안 로그' 조회가 없는 `users.name`을 고르던 것을 `full_name`으로, 코드 쪽 스키마 검사가 내장 관계 칸·여러 줄 백틱 select도 봄, `688b022` 문서. 가지 Preview(`workon-p27ja38y0`) Ready 뒤 `main`. 배포 전 전체 시험 273파일 3,724개 통과·tsc 0(처음 돌린 전체 시험에서 원문 문자열을 보던 옛 시험 4개가 걸려 고친 뒤 다시 돌림).
+- 되돌릴 때는 직전 `dpl_Hm5NiTn73wmwCUCJ7UDB9g1MZJH9`(48d3a0e)로 promote.
+- 배포 뒤 확인(로그인 없이 + 읽기 전용): `/`·`/login`·`/forgot-password`·`/api/system/maintenance`·`/api/branding` 200, `/admin` 307, `/api/users` 403, `/api/security-logs` 401. 운영 DB에서 새 조회(`users:user_id (full_name, email)`)는 됨, 옛 조회(`name`)는 42703 — 이 화면은 늘 실패했었다. 0097 뒤 보안 로그 0행·기록 실패 0. pg_cron 호출 200(00:26~00:28 KST).
+- **확인하지 못한 것**(사용자 몫): 관리자 설정 화면의 '보안 로그' 목록이 실제로 뜨는지, 보안 사건(비밀번호 바꾸기 등) 뒤 감사 화면에 쌓이는지 — 로그인한 화면.
+
 ## 2026-11-17(새벽): 코드 쪽 스키마 이름 검사 — 시험·문서만, 마이그레이션 없음
 
 - 코드 배포 `dpl_Hm5NiTn73wmwCUCJ7UDB9g1MZJH9`(커밋 `48d3a0e`, 2026-11-17 00:08 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `43bb96b`(밤 8 배포 기록), `869097c` 시험 `tests/batch-0116.test.ts`·`tests/helpers/code-schema-refs.ts`(코드가 부르는 표·칸·함수가 시험 DB = 마이그레이션 전부에 있는지 — 앱 동작은 바뀌지 않음), `48d3a0e` 문서. 가지 Preview(`workon-7xypgwk4p`) Ready 뒤 `main`. 배포 전 전체 시험 272파일 3,715개 통과·tsc 0. 시험 DB에서 `users.password_hash`를 빼 보면 이 시험이 그 칸과 쓰는 파일을 짚고 실패하는 것을 확인(다시 넣음).
