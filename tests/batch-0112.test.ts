@@ -81,8 +81,7 @@ describe('연결(원본)', () => {
     expect(src).toContain('scope?.managesWholeOrganization');
     expect(src).toContain('if (session.user.isImpersonating)');
     expect(src).toContain('dormant_lock_since: before.dormant_lock_since ?? new Date().toISOString()');
-    expect(src).toContain("event_type: 'dormant_lock_changed'");
-    expect(src).toContain("severity: 'high'");
+    expect(src).toContain("logSecurityEvent(scope.departmentId, session.user.id, 'dormant_lock_changed', { before_days: before.dormant_lock_days ?? null, after_days: days }, 'high')");
   });
   it('기관 정보 PATCH는 기관 전체 관리자만', () => {
     const src = readFileSync('src/app/api/admin/organization/route.ts', 'utf8');

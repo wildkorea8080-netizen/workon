@@ -121,8 +121,8 @@ describe('연결(원본)', () => {
     expect(src).toContain('userId: session.user.id');
     expect(src).not.toMatch(/body\??\.(user_?id|id)\b/);
     expect(src).toContain('if (session.user.isImpersonating)');
-    expect(src).toContain("event_type: 'password_changed'");
-    expect(src).toContain('details: result.sessionsKept ? { sessions_kept: true } : {}');
+    expect(src).toContain("logSecurityEvent(session.user.departmentId ?? null, session.user.id, 'password_changed'");
+    expect(src).toContain("'password_changed', result.sessionsKept ? { sessions_kept: true } : {}, 'low')");
     expect(src).toContain('locked: [429, LOCKED_MESSAGE]');
   });
   it('화면 — 규칙은 잎 파일에서, 사용자 메뉴에 링크, 감사 화면 이름표', () => {

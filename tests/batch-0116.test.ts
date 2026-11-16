@@ -29,6 +29,19 @@ describe('어림 규칙', () => {
       'table:system_settings', 'column:system_settings.value', 'column:system_settings.key',
     ]);
   });
+  it('내장 관계의 칸도 본다 — 별칭:외래키 중 표인 쪽으로(예전 security-logs의 users.name)', () => {
+    const src = `db.from('security_logs').select('*, users:user_id (name, email), departments(name, organizations(type))')`;
+    const schema = {
+      columns: new Map([
+        ['security_logs', new Set(['id'])],
+        ['users', new Set(['id', 'full_name', 'email'])],
+        ['departments', new Set(['id', 'name'])],
+        ['organizations', new Set(['id', 'type'])],
+      ]),
+      functions: new Set<string>(),
+    };
+    expect(Array.from(missingRefs(extractRefs(src, 'x.ts'), schema).keys())).toEqual(['칸 users.name (내장 관계)']);
+  });
   it('없는 이름만 모은다', () => {
     const schema = { columns: new Map([['users', new Set(['id', 'email'])]]), functions: new Set(['f']) };
     const refs = extractRefs(`db.from('users').select('id, password_hash'); db.from('security_logs').insert({}); db.rpc('g')`, 'x.ts');

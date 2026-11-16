@@ -104,8 +104,7 @@ describe('연결(원본)', () => {
     expect(src).toContain(".eq('is_super_admin', false)");
     expect(src).toContain("unlockSignIn('user', target.email)");
     expect(src).not.toContain("unlockSignIn('super'");
-    expect(src).toContain("event_type: 'sign_in_unlocked'");
-    expect(src).toContain('details: { target_user_id: target.id }');
+    expect(src).toContain("logSecurityEvent(adminDeptId, session.user.id, 'sign_in_unlocked', { target_user_id: target.id }, 'medium')");
     expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("sign_in_unlocked: '로그인 잠금 풀기(관리자)'");
   });
   it('슈퍼관리자 — 두 잠금을 함께 풀고 기록', () => {

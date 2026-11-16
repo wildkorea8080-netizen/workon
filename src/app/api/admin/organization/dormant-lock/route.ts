@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import { validDormantDays } from '@/lib/dormant-lock';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,16 +57,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ ok: false, error: { message: '저장하지 못했습니다.' } }, { status: 500 });
   }
 
-  try {
-    await supabaseAdmin.from('security_logs').insert({
-      department_id: scope.departmentId,
-      user_id: session.user.id,
-      event_type: 'dormant_lock_changed',
-      details: { before_days: before.dormant_lock_days ?? null, after_days: days },
-      severity: 'high',
-      created_at: new Date().toISOString(),
-    });
-  } catch { /* 보안 로그 실패는 되돌리지 않는다 */ }
+  // 보안 로그 실패는 되돌리지 않는다(실패는 운영 기록에 남는다)
+  await logSecurityEvent(scope.departmentId, session.user.id, 'dormant_lock_changed', { before_days: before.dormant_lock_days ?? null, after_days: days }, 'high');
 
   return NextResponse.json({ ok: true, data });
 }

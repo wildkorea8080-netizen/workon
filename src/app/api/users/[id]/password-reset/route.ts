@@ -5,6 +5,7 @@ import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { passwordResetDeps, resetUserPassword } from '@/lib/password-reset';
 import { sendPasswordResetEmail } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,16 +60,8 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       loginUrl: `${APP_URL}/login`,
     }).catch(() => ({ sent: false }));
 
-    try {
-      await supabaseAdmin.from('security_logs').insert({
-        department_id: adminDeptId,
-        user_id: session.user.id,
-        event_type: 'password_reset_by_admin',
-        details: { target_user_id: target.id, email_sent: mail.sent, sessions_kept: result.sessionsKept },
-        severity: 'high',
-        created_at: new Date().toISOString(),
-      });
-    } catch { /* 보안 로그 실패는 재발급을 되돌리지 않는다 */ }
+    // 보안 로그 실패는 재발급을 되돌리지 않는다(실패는 운영 기록에 남는다)
+    await logSecurityEvent(adminDeptId, session.user.id, 'password_reset_by_admin', { target_user_id: target.id, email_sent: mail.sent, sessions_kept: result.sessionsKept }, 'high');
 
     return NextResponse.json({ ok: true, data: { tempPassword: result.tempPassword, emailSent: mail.sent } });
   } catch (err) {

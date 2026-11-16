@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,16 +69,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ ok: false, error: { message: '계정 상태를 바꾸지 못했습니다.' } }, { status: 500 });
     }
 
-    try {
-      await supabaseAdmin.from('security_logs').insert({
-        department_id: adminDeptId,
-        user_id: session.user.id,
-        event_type: body.active ? 'user_reactivated' : 'user_deactivated',
-        details: { target_user_id: target.id, reason: reason || null },
-        severity: 'high',
-        created_at: new Date().toISOString(),
-      });
-    } catch { /* 보안 로그 실패는 되돌리지 않는다 */ }
+    // 보안 로그 실패는 되돌리지 않는다(실패는 운영 기록에 남는다)
+    await logSecurityEvent(adminDeptId, session.user.id, body.active ? 'user_reactivated' : 'user_deactivated', { target_user_id: target.id, reason: reason || null }, 'high');
 
     return NextResponse.json({ ok: true, data: { id: updated.id, is_active: updated.is_active } });
   } catch (err) {

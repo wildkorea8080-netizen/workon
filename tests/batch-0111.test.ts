@@ -39,8 +39,7 @@ describe('연결(원본)', () => {
     expect(src).toContain('managedDeptIds.includes(target.department_id)');
     expect(src).toContain(".eq('is_super_admin', false)");
     expect(src).toContain('{ is_active: true, reactivated_at: new Date().toISOString() } : { is_active: false }');
-    expect(src).toContain("event_type: body.active ? 'user_reactivated' : 'user_deactivated'");
-    expect(src).toContain("severity: 'high'");
+    expect(src).toContain("body.active ? 'user_reactivated' : 'user_deactivated', { target_user_id: target.id, reason: reason || null }, 'high')");
   });
   it('끄면 로그인이 막히고 열린 로그인도 끝난다(이미 있는 장치)', () => {
     expect(readFileSync('src/lib/user-withdrawal.ts', 'utf8')).toMatch(/is_active/);

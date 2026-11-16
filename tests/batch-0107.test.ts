@@ -139,8 +139,7 @@ describe('연결(원본)', () => {
     expect(src).toContain('managedDeptIds.includes(target.department_id)');
     expect(src).toContain(".eq('is_super_admin', false)");
     expect(src).toContain('if (target.is_active === false)');
-    expect(src).toContain("event_type: 'password_reset_by_admin'");
-    expect(src).toContain("severity: 'high'");
+    expect(src).toContain("logSecurityEvent(adminDeptId, session.user.id, 'password_reset_by_admin', { target_user_id: target.id, email_sent: mail.sent, sessions_kept: result.sessionsKept }, 'high')");
     expect(src).not.toMatch(/details: \{[^}]*tempPassword/);
   });
   it('화면·문구', () => {

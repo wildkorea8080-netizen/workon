@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,20 +67,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, data: { logged: false } });
     }
 
-    await supabaseAdmin.from('security_logs').insert({
-      department_id: departmentId,
-      user_id: session.user.id,
-      event_type: 'ip_blocked',
-      severity: 'high',
-      details: {
-        ip,
-        // 어떤 대역이 걸려 있었는지 함께 남긴다. 나중에 목록이 바뀌면
-        // 그때 왜 막혔는지 알 수 없게 된다.
-        allowed_at_the_time: allowed,
-      },
-    });
+    const logged = await logSecurityEvent(departmentId, session.user.id, 'ip_blocked', {
+      ip,
+      // 어떤 대역이 걸려 있었는지 함께 남긴다. 나중에 목록이 바뀌면
+      // 그때 왜 막혔는지 알 수 없게 된다.
+      allowed_at_the_time: allowed,
+    }, 'high');
 
-    return NextResponse.json({ ok: true, data: { logged: true } });
+    return NextResponse.json({ ok: true, data: { logged } });
   } catch (error) {
     console.error('[access-denied]', error);
     // 기록 실패가 화면을 깨뜨릴 이유는 없다

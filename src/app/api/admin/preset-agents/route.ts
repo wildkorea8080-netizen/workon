@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { installChosenPresets, presetStatus, updateChosenPresets } from '@/lib/preset-install-admin';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,23 +60,14 @@ export async function POST(request: Request) {
       const result = await updateChosenPresets({ organizationId: actor.organizationId, organizationType: org.type, names: names as string[] });
       if (!result.ok) return jsonError(result.message, 400);
       if (result.updated.length) {
-        await supabaseAdmin.from('security_logs').insert({
-          department_id: actor.departmentId, user_id: actor.userId, event_type: 'preset_agents_updated', severity: 'low',
-          details: { names: result.updated, failed: result.failed },
-        });
+        await logSecurityEvent(actor.departmentId, actor.userId, 'preset_agents_updated', { names: result.updated, failed: result.failed }, 'low');
       }
       return NextResponse.json({ ok: true, data: { updated: result.updated, skipped: result.skipped, failed: result.failed } });
     }
     const result = await installChosenPresets({ organizationId: actor.organizationId, organizationType: org.type, departmentId: actor.departmentId, names: names as string[] });
     if (!result.ok) return jsonError(result.message, 400);
     if (result.installed.length) {
-      await supabaseAdmin.from('security_logs').insert({
-        department_id: actor.departmentId,
-        user_id: actor.userId,
-        event_type: 'preset_agents_installed',
-        severity: 'low',
-        details: { names: result.installed, failed: result.failed },
-      });
+      await logSecurityEvent(actor.departmentId, actor.userId, 'preset_agents_installed', { names: result.installed, failed: result.failed }, 'low');
     }
     return NextResponse.json({ ok: true, data: { installed: result.installed, skipped: result.skipped, failed: result.failed } });
   } catch {

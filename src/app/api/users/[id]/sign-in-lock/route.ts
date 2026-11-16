@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { unlockSignIn } from '@/lib/sign-in-throttle';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,16 +43,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
       return NextResponse.json({ ok: false, error: { message: '잠금을 풀지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 500 });
     }
 
-    try {
-      await supabaseAdmin.from('security_logs').insert({
-        department_id: adminDeptId,
-        user_id: session.user.id,
-        event_type: 'sign_in_unlocked',
-        details: { target_user_id: target.id },
-        severity: 'medium',
-        created_at: new Date().toISOString(),
-      });
-    } catch { /* 보안 로그 실패는 풀기를 되돌리지 않는다 */ }
+    // 보안 로그 실패는 풀기를 되돌리지 않는다(실패는 운영 기록에 남는다)
+    await logSecurityEvent(adminDeptId, session.user.id, 'sign_in_unlocked', { target_user_id: target.id }, 'medium');
 
     return NextResponse.json({ ok: true });
   } catch (err) {

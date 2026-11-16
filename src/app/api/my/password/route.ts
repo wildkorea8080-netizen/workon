@@ -3,6 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { changeOwnPassword, passwordChangeDeps } from '@/lib/password-change';
 import { LOCKED_MESSAGE, requestIp, throttleDeps } from '@/lib/sign-in-throttle';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,16 +48,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: { message: result.message ?? fallback, code: result.code } }, { status });
   }
 
-  try {
-    await supabaseAdmin.from('security_logs').insert({
-      department_id: session.user.departmentId ?? null,
-      user_id: session.user.id,
-      event_type: 'password_changed',
-      details: result.sessionsKept ? { sessions_kept: true } : {},
-      severity: 'low',
-      created_at: new Date().toISOString(),
-    });
-  } catch { /* 보안 로그 실패는 바꾸기를 되돌리지 않는다 */ }
+  // 보안 로그 실패는 바꾸기를 되돌리지 않는다(실패는 운영 기록에 남는다)
+  await logSecurityEvent(session.user.departmentId ?? null, session.user.id, 'password_changed', result.sessionsKept ? { sessions_kept: true } : {}, 'low');
 
   // 바꾼 때를 적었으면 이 브라우저를 포함한 모든 로그인이 곧 끝난다 — 화면이 로그아웃하고 로그인 화면으로 보낸다
   return NextResponse.json({ ok: true, data: { signedOut: !result.sessionsKept } });

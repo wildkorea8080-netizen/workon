@@ -149,7 +149,8 @@ describe('라우트', () => {
     const body = await (await post({ names: ['사업 위험 검토', '안내 메일 초안'] })).json();
     expect(lib.install).toHaveBeenCalledWith({ organizationId: 'o1', organizationType: '공공기관', departmentId: 'd-top', names: ['사업 위험 검토', '안내 메일 초안'] });
     expect(body).toEqual({ ok: true, data: { installed: ['사업 위험 검토'], skipped: ['안내 메일 초안'], failed: [] } });
-    expect(state.logs).toEqual([{ department_id: 'd-top', user_id: 'u1', event_type: 'preset_agents_installed', severity: 'low', details: { names: ['사업 위험 검토'], failed: [] } }]);
+    // 보안 로그는 logSecurityEvent로(2026-11-17) — 쓴 때(created_at)가 함께 실린다
+    expect(state.logs).toEqual([expect.objectContaining({ department_id: 'd-top', user_id: 'u1', event_type: 'preset_agents_installed', severity: 'low', details: { names: ['사업 위험 검토'], failed: [] } })]);
   });
 
   it('mode=update는 갱신 함수로, 갱신한 것이 있으면 보안 기록(preset_agents_updated) — 모르는 mode는 400', async () => {
@@ -159,7 +160,7 @@ describe('라우트', () => {
     expect(lib.update).toHaveBeenCalledWith({ organizationId: 'o1', organizationType: '공공기관', names: ['사업 위험 검토', '안내 메일 초안'] });
     expect(lib.install).not.toHaveBeenCalled();
     expect(body).toEqual({ ok: true, data: { updated: ['사업 위험 검토'], skipped: [], failed: ['안내 메일 초안'] } });
-    expect(state.logs).toEqual([{ department_id: 'd-top', user_id: 'u1', event_type: 'preset_agents_updated', severity: 'low', details: { names: ['사업 위험 검토'], failed: ['안내 메일 초안'] } }]);
+    expect(state.logs).toEqual([expect.objectContaining({ department_id: 'd-top', user_id: 'u1', event_type: 'preset_agents_updated', severity: 'low', details: { names: ['사업 위험 검토'], failed: ['안내 메일 초안'] } })]);
     state.whole = false;
     expect((await post({ names: ['a'], mode: 'update' })).status).toBe(403);
   });

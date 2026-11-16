@@ -10,10 +10,11 @@ interface SecurityLog {
   severity: 'low' | 'medium' | 'high' | 'critical';
   details: Record<string, any>;
   created_at: string;
+  // users에는 name 칸이 없다(full_name) — 예전 name을 고르던 조회는 늘 실패했다(2026-11-17)
   users: {
-    name: string;
+    full_name: string | null;
     email: string;
-  };
+  } | null;
 }
 
 export default function SettingsManager() {
@@ -277,7 +278,7 @@ export default function SettingsManager() {
                     </span>
                   </div>
                   <p className="text-sm text-slate-600">
-                    사용자: {log.users?.name || '알 수 없음'} ({log.users?.email || '알 수 없음'})
+                    사용자: {log.users?.full_name || '알 수 없음'} ({log.users?.email || '알 수 없음'})
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
                     발생 시간: {new Date(log.created_at).toLocaleString('ko-KR')}

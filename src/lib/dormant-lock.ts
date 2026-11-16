@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSecurityEvent } from '@/lib/security-log';
 
 /**
  * 장기 미접속 계정 잠금(2026-11-16, 0095) — 기관이 켤 때만.
@@ -81,14 +82,7 @@ export function dormantDeps(): DormantDeps {
     async lock(userId, departmentId, days) {
       const { error } = await supabaseAdmin.from('users').update({ is_active: false }).eq('id', userId).is('deleted_at', null);
       if (error) throw new Error(error.message);
-      await supabaseAdmin.from('security_logs').insert({
-        department_id: departmentId,
-        user_id: userId,
-        event_type: 'user_dormant_locked',
-        details: { days },
-        severity: 'medium',
-        created_at: new Date().toISOString(),
-      }).then(() => undefined, () => undefined);
+      await logSecurityEvent(departmentId, userId, 'user_dormant_locked', { days }, 'medium');
     },
   };
 }

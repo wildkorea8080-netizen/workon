@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { confirmPasswordReset, resetDeps } from '@/lib/password-reset-mail';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,15 +19,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: false, error: { message: result.message ?? '요청을 처리하지 못했습니다.', code: result.code } }, { status: 400 });
   }
-  try {
-    await supabaseAdmin.from('security_logs').insert({
-      department_id: result.departmentId,
-      user_id: result.userId,
-      event_type: 'password_reset_by_email',
-      details: result.sessionsKept ? { sessions_kept: true } : {},
-      severity: 'medium',
-      created_at: new Date().toISOString(),
-    });
-  } catch { /* 보안 로그 실패는 바꾸기를 되돌리지 않는다 */ }
+  // 보안 로그 실패는 바꾸기를 되돌리지 않는다(실패는 운영 기록에 남는다)
+  await logSecurityEvent(result.departmentId, result.userId, 'password_reset_by_email', result.sessionsKept ? { sessions_kept: true } : {}, 'medium');
   return NextResponse.json({ ok: true, data: {} });
 }

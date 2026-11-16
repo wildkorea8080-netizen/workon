@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
       .select(`
         *,
         users:user_id (
-          name,
+          full_name,
           email
         )
       `)

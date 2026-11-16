@@ -1,61 +1,9 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { containsForbiddenWord } from '@/lib/forbidden-match';
 
-// 보안 이벤트 타입
-export type SecurityEventType =
-  | 'forbidden_word_detected'
-  | 'personal_info_detected'
-  | 'file_upload_blocked'
-  | 'suspicious_content'
-  | 'rate_limit_exceeded'
-  /** 관리자가 감사 화면에서 직원 질문 원문을 열람함 (D1) */
-  | 'query_revealed'
-  /** 관리자가 직원의 앱 연동을 회수함 / 예약을 멈춤(잠금) / 잠금을 풂 (0050) */
-  | 'app_webhook_revoked'
-  | 'app_schedule_paused'
-  | 'app_schedule_unlocked'
-  /** 관리자가 직원의 앱 일괄 실행을 멈춤 (2026-11-10) */
-  | 'app_batch_stopped'
-  /** 기관 전체 관리자가 일괄 실행 한 번 최대 줄 수를 바꿈 (0084) */
-  | 'app_batch_limit_changed'
-  /** 직원이 그만둔 앱 결과 보내기를 다시 보냄 (2026-11-10) */
-  | 'app_outbound_result_retried'
-  | 'app_webhooks_org_disabled'
-  | 'app_webhooks_org_enabled'
-  | 'app_schedules_org_disabled'
-  | 'app_schedules_org_enabled'
-  /** 기관 전체 관리자가 기관 통계 API 키를 만듦 / 회수함 (0075) */
-  | 'org_api_key_created'
-  | 'org_api_key_revoked'
-  /** 기관 전체 관리자가 앱 결과를 보낼 곳을 만듦 / 회수함 (0076) */
-  | 'app_outbound_endpoint_created'
-  | 'app_outbound_endpoint_revoked'
-  | 'app_outbound_endpoint_updated'
-  | 'app_outbound_result_approved'
-  | 'app_outbound_result_rejected';
-
-// 보안 감사 로그 기록 함수
-export async function logSecurityEvent(
-  departmentId: string,
-  userId: string,
-  eventType: SecurityEventType,
-  details: Record<string, any>,
-  severity: 'low' | 'medium' | 'high' | 'critical' = 'medium'
-) {
-  try {
-    await supabaseAdmin.from('security_logs').insert({
-      department_id: departmentId,
-      user_id: userId,
-      event_type: eventType,
-      details,
-      severity,
-      created_at: new Date().toISOString(),
-    });
-  } catch (error) {
-    // 보안 로그 기록 실패는 애플리케이션 실행을 중단하지 않음
-    console.error('보안 로그 기록 실패:', error);
-  }
-}
+// 보안 로그는 한 곳(security-log.ts)에서 쓴다 — 예전 이름으로도 부를 수 있게 다시 내보낸다
+export { logSecurityEvent, type SecurityEventType } from '@/lib/security-log';
+import { logSecurityEvent, type SecurityEventType } from '@/lib/security-log';
 
 /** 금액·수량 단위 — 이 단위가 바로 뒤에 붙은 긴 숫자는 개인정보(계좌번호)가 아니라 값으로 본다 */
 const AMOUNT_UNITS = '(?:천원|만원|백만원|천만원|억원|조원|원|억|조|만|천|명|건|개|톤|㎡|평|%|퍼센트|회|대|가구|kg|km)';

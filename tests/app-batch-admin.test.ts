@@ -132,7 +132,8 @@ describe('메일·연결', () => {
     expect(mail.html).toContain('2026-11-10 12:00');
   });
   it('보안 로그 종류·감사 화면 이름·알림 대상·화면', () => {
-    expect(readFileSync('src/lib/filter.ts', 'utf8')).toContain("| 'app_batch_stopped'");
+    // 보안 로그 종류는 security-log.ts 한 곳(2026-11-17) — filter.ts는 다시 내보냄
+    expect(readFileSync('src/lib/security-log.ts', 'utf8')).toContain("| 'app_batch_stopped'");
     expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("app_batch_stopped: '앱 일괄 실행 멈춤(관리자)'");
     const notice = readFileSync('src/lib/apps/automation-notice.ts', 'utf8');
     expect(notice).toContain("n.kind === 'batch_stopped' ? `/apps/run?agent=${encodeURIComponent(n.agentId)}`");
