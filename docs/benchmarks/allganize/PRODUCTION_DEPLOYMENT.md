@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-16(밤 2): 임시 비밀번호는 비밀번호부터 바꾸기·슈퍼관리자 재발급(0093)
+
+- **먼저 운영 DB에 0093 적용**(2026-11-16 22:32 KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `users.password_must_change` boolean·NOT NULL·기본 false, 참인 행 0(소급 없음), `users` RLS 켜짐, anon 읽기 권한 없음, 적용 기록 있음.
+- 그다음 코드 배포 `dpl_BiMX4HKJTBX3uLw8Af2rtRvFT8Gc`(커밋 `cdec0d8`, 2026-11-16 22:34 KST, `main` fast-forward — GitHub 연동). 되돌릴 때는 직전 `dpl_HbaCwRm7YpZFn21ZSpeCSXtvSvSo`(d464175)로 promote한다(0093은 남겨도 옛 코드가 읽지 않는다 — 임시 비밀번호로도 다른 화면이 다시 열린다).
+- 들어간 커밋: `3904ae6`(직전 배포 기록), `30b9c5e` 임시 비밀번호 표시(관리자 등록·CSV 일괄 등록·재발급이 켜고 본인 바꾸기가 끔 — 켜진 동안 미들웨어가 비밀번호 바꾸기 화면·API·로그인 화면·점검·브랜딩만 열고 화면은 `/my/password?required=1`, API는 403, 대리 접근은 묶지 않음) + 슈퍼관리자 '비밀번호 재발급'(`POST /api/super/accounts/users/[id]/password-reset` — 직원 계정만·비활성 막음·`super_admin_logs`), `cdec0d8` 문서.
+- **배포 전**: 가지 Preview(`cdec0d8`, `workon-66zxayl8j`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0093)를 띄운 전체 시험 264파일 3,653개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/my/password`·`/api/system/maintenance`·`/api/branding` 200, `GET /api/users` 403, `POST /api/users/{id}/password-reset` 403, `POST /api/super/accounts/users/{id}/password-reset` 401, `POST /api/my/password` 401. pg_cron 호출 200(22:35·22:36 KST, 실행기 하트비트 22:35).
+- **확인하지 못한 것**(사용자 몫): 로그인한 화면을 브라우저로 보지 않았다 — 평소 로그인이 그대로 쓰이는지, 임시 비밀번호(새로 등록하거나 재발급한 시험 계정)로 들어오면 '비밀번호 바꾸기'로 가고 다른 화면·API가 막히는지, 바꾼 뒤 새 비밀번호로 다시 들어오면 평소처럼 쓰이는지, 슈퍼관리자 '비밀번호 재발급'이 임시 비밀번호를 보이는지.
+
 ## 2026-11-16(밤): 비밀번호를 바꾸면 모든 로그인 끝내기·관리자 임시 비밀번호 재발급(0092)
 
 - **먼저 운영 DB에 0092 적용**(2026-11-16 22:16 KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `users.password_changed_at` timestamptz·비어도 됨, `users` RLS 켜짐, anon 읽기 권한 없음, 값이 있는 행 0, 적용 기록 있음.
