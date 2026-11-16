@@ -90,6 +90,7 @@ const SECURITY_LABEL: Record<string, string> = {
   sign_in_unlocked: '로그인 잠금 풀기(관리자)',
   password_changed: '비밀번호 바꾸기(본인)',
   password_reset_by_admin: '임시 비밀번호 재발급(관리자)',
+  password_reset_by_email: '비밀번호 재설정(메일 링크)',
   user_deactivated: '계정 사용 중지(관리자)',
   user_reactivated: '계정 다시 사용(관리자)',
   user_dormant_locked: '장기 미접속으로 사용 중지(자동)',

@@ -39,6 +39,8 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/super/auth/logout', '쿠키를 지우는 것뿐이라 인증 여부와 무관하다'],
   ['/super/auth/setup', '최초 슈퍼관리자 생성. SUPER_ADMIN_SETUP_KEY로 보호'],
   ['/system/maintenance', '점검 모드 상태 조회'],
+  ['/password-reset', '비밀번호 찾기 요청(0096) — 로그인 전에 부른다. 계정이 있든 없든 같은 응답(등록 여부를 드러내지 않음), IP마다 1시간 10번·계정마다 3번, 링크는 그 계정의 등록된 메일로만 간다'],
+  ['/password-reset/confirm', '메일 링크로 새 비밀번호 정하기(0096) — 로그인 전에 부른다. 링크 열쇠(32바이트 난수·DB에는 SHA-256만·30분·한 번)가 유일한 자격이고 쓸 수 있는 직원 계정만'],
   ['/noda/webhook', 'NODA가 읽기 결과를 알리는 곳. NODA_WEBHOOK_SECRET HMAC 서명·5분 시각 검사가 자격이고, 그 비서의 행만 바꾼다'],
   ['/work/worker', '업무 작업자 엔드포인트 — Vercel 예약 작업·Supabase pg_cron이 부른다. WORK_WORKER_SECRET Bearer 상수 시간 비교가 자격이고(없으면 503), 하는 일은 DB에 이미 있는 대기 실행을 lease로 가져가 처리하는 것뿐(요청값으로 대상을 고르지 않음)'],
   ['/cron/budget-alerts', 'Vercel 예약 작업이 부르는 곳(하루 한 번 기관 예산 알림 메일). CRON_SECRET Bearer 상수 시간 비교가 자격이고, 하는 일은 사용률을 보고 기관 관리자에게 기준마다 한 번 메일을 보내는 것뿐'],

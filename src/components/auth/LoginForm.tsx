@@ -153,6 +153,10 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
               />
             </div>
 
+            <div className="-mt-1 text-right">
+              <Link href="/forgot-password" className={`text-xs text-slate-500 ${c.link} transition-colors`}>비밀번호를 잊으셨나요?</Link>
+            </div>
+
             <button
               type="submit"
               disabled={loading}

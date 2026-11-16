@@ -59,7 +59,7 @@ const superStatusCache = new Map<string, { active: boolean; at: number }>();
 const userStatusCache: Parameters<typeof userSessionVerdict>[0] = new Map();
 
 /** 로그인 화면들 — 끝난 세션이면 쿠키만 지우고 그대로 보인다(로그인 화면으로 다시 보내면 돌기만 한다) */
-const SIGN_IN_PAGES = /^\/(login|signin|signup|register)(\/|$)/;
+const SIGN_IN_PAGES = /^\/(login|signin|signup|register|forgot-password|reset-password)(\/|$)/;
 
 /** 끝난 직원 세션 — 쿠키를 지우고 API는 401, 화면은 로그인으로 */
 function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerdict | 'impersonation'): NextResponse {

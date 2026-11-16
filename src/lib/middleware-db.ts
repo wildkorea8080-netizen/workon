@@ -215,7 +215,7 @@ export async function userSessionVerdict(
  * (/api/auth·정적 파일은 미들웨어가 먼저 내보낸다)
  */
 export function allowedWhileMustChange(pathname: string): boolean {
-  return /^\/(my\/password|api\/my\/password|login|signin|signup|register|maintenance|blocked|api\/branding|api\/system\/maintenance)(\/|$)/.test(pathname);
+  return /^\/(my\/password|api\/my\/password|login|signin|signup|register|forgot-password|reset-password|api\/password-reset|maintenance|blocked|api\/branding|api\/system\/maintenance)(\/|$)/.test(pathname);
 }
 
 /** 지울 NextAuth 세션 쿠키 이름 — 보안 접두어 둘·나눠 담긴 조각(.0 .1 …)까지 */

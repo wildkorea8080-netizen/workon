@@ -151,6 +151,27 @@ export function sendPasswordResetEmail(params: {
   );
 }
 
+/** 직원 비밀번호 찾기 — 재설정 링크 메일(2026-11-16, 0096). 링크는 한 번만 쓰고 정해진 분 뒤 끝난다 */
+export function sendPasswordResetLinkEmail(params: {
+  to: string;
+  fullName: string;
+  resetUrl: string;
+  minutes: number;
+}): Promise<MailResult> {
+  const { to, fullName, resetUrl, minutes } = params;
+  return sendMail(
+    to,
+    `[${APP_NAME}] 비밀번호 재설정 링크`,
+    layout(
+      `${fullName}님, 비밀번호 재설정 링크입니다`,
+      `<p style="font-size:15px;line-height:1.7">로그인 화면에서 비밀번호 찾기를 요청하셨습니다. 아래 버튼을 눌러 새 비밀번호를 정해 주세요.
+       새 비밀번호를 정하면 이전 비밀번호와 열려 있던 로그인은 더 쓸 수 없습니다.</p>
+       ${button(resetUrl, '새 비밀번호 정하기')}
+       <p style="font-size:13px;color:#64748b">이 링크는 ${minutes}분 동안 한 번만 쓸 수 있습니다. 직접 요청하지 않았다면 이 메일을 무시하세요 — 비밀번호는 바뀌지 않습니다.</p>`
+    )
+  );
+}
+
 /** 기관·부서 예산 알림 메일의 글(보내지 않음 — 시험이 글을 본다). 개인별 사용 내역은 싣지 않는다 */
 export function budgetAlertMail(params: {
   organizationName: string;
