@@ -25,6 +25,8 @@ export type User = {
   monthly_budget_krw?: number | null;
   /** 로그인 실패로 잠겨 있으면 풀리는 때(ISO) — 관리자 목록 응답에만 (0091) */
   sign_in_locked_until?: string | null;
+  /** 마지막 로그인(0094) — 관리자 목록 응답에만 */
+  last_sign_in_at?: string | null;
   department_id?: string;
   created_at: string;
   updated_at: string;

@@ -72,7 +72,7 @@ describe('연결(원본)', () => {
     expect(gate).toBeGreaterThan(0);
     expect(gate).toBeLessThan(src.indexOf('supabase.auth.signInWithPassword('));
     expect(src).toContain('throw new Error(ACCOUNT_LOCKED);');
-    expect(src).toContain("else await noteSignInFailure(throttle, 'user', credentials.email, ip);");
+    expect(src).toMatch(/\} else \{\s*await noteSignInFailure\(throttle, 'user', credentials\.email, ip\);/);
     expect(src.match(/noteSignInSuccess\(throttle, 'user', credentials\.email\)/g)).toHaveLength(2);
   });
   it('슈퍼관리자 로그인 — 잠기면 429, 틀리면 세고, 다 통과하면 지운다', () => {

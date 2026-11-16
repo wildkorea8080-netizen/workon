@@ -24,7 +24,7 @@ interface Member {
   department_name?: string | null;
 }
 
-type Kind = 'usage' | 'security';
+type Kind = 'usage' | 'security' | 'access';
 
 /** 기본 조회 기간: 최근 30일 */
 function defaultRange() {
@@ -123,6 +123,7 @@ export default function AuditLogsManager() {
           >
             <option value="usage">AI 사용 내역</option>
             <option value="security">보안 이벤트</option>
+            <option value="access">접속 기록(로그인)</option>
           </select>
         </div>
         <div>

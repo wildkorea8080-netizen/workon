@@ -42,7 +42,7 @@ function maskQuery(text: string): string {
 }
 const DEFAULT_PAGE_SIZE = 100;
 
-type LogKind = 'usage' | 'security';
+type LogKind = 'usage' | 'security' | 'access';
 
 interface AuditRow {
   일시: string;
@@ -110,6 +110,14 @@ const SECURITY_LABEL: Record<string, string> = {
   rate_limit: '요청 제한',
 };
 
+/** 직원 접속 기록(0094) */
+const ACCESS_LABEL: Record<string, string> = {
+  login: '로그인',
+  login_failed: '로그인 실패',
+  login_locked: '로그인 잠김(실패 반복)',
+  login_rejected: '로그인 거절(비활성·소속 없음)',
+};
+
 const SEVERITY_LABEL: Record<string, string> = {
   low: '낮음',
   medium: '보통',
@@ -159,7 +167,8 @@ export async function GET(request: NextRequest) {
     const managedDeptIds = await getManagedDepartmentIds(adminDeptId);
 
     const { searchParams } = new URL(request.url);
-    const kind = (searchParams.get('kind') ?? 'usage') as LogKind;
+    const kindParam = searchParams.get('kind') ?? 'usage';
+    const kind: LogKind = kindParam === 'security' || kindParam === 'access' ? kindParam : 'usage';
     const userId = searchParams.get('userId') ?? '';
     const format = searchParams.get('format') ?? 'json';
     // 질문 원문 열람. 사유를 함께 받아 보안 로그에 남긴다.
@@ -248,7 +257,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const table = kind === 'security' ? 'security_logs' : 'usage_logs';
+    const table = kind === 'security' ? 'security_logs' : kind === 'access' ? 'access_logs' : 'usage_logs';
 
     const build = (withCount: boolean) => {
       let query = supabaseAdmin
@@ -256,7 +265,9 @@ export async function GET(request: NextRequest) {
         .select(
           kind === 'security'
             ? 'id, user_id, department_id, event_type, severity, details, created_at'
-            : 'id, user_id, department_id, action, resource_type, details, created_at',
+            : kind === 'access'
+              ? 'id, user_id, department_id, action, ip_address, user_agent, created_at'
+              : 'id, user_id, department_id, action, resource_type, details, created_at',
           withCount ? { count: 'exact' } : undefined
         )
         .in('department_id', managedDeptIds)
@@ -288,6 +299,22 @@ export async function GET(request: NextRequest) {
     const rows: AuditRow[] = (logs ?? []).map((log: any) => {
       const member = memberMap.get(log.user_id) ?? { name: '(삭제된 계정)', email: '-', dept: '-' };
       const details = log.details ?? {};
+
+      if (kind === 'access') {
+        return {
+          일시: formatDateTime(log.created_at),
+          구분: '접속',
+          직원: member.name,
+          이메일: member.email,
+          부서: member.dept,
+          활동: ACCESS_LABEL[log.action] ?? log.action,
+          상세: `IP ${log.ip_address ?? '-'}${log.user_agent ? ` / ${String(log.user_agent).slice(0, 80)}` : ''}`,
+          모델: '',
+          입력토큰: '',
+          출력토큰: '',
+          '비용(원)': '',
+        };
+      }
 
       if (kind === 'security') {
         return {
@@ -330,7 +357,7 @@ export async function GET(request: NextRequest) {
 
     if (isExport) {
       const period = `${from.toISOString().slice(0, 10)}_${to.toISOString().slice(0, 10)}`;
-      const filename = `사용내역_${kind === 'security' ? '보안' : '사용'}_${period}.csv`;
+      const filename = `사용내역_${kind === 'security' ? '보안' : kind === 'access' ? '접속' : '사용'}_${period}.csv`;
 
       // Excel이 한글을 깨뜨리지 않도록 UTF-8 BOM을 붙인다
       const body = '﻿' + toCsv(rows);

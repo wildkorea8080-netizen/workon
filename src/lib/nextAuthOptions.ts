@@ -7,6 +7,7 @@ import { NEXTAUTH_SECRET } from '@/lib/config';
 import { canSignIn } from '@/lib/user-withdrawal';
 import { decideSignIn } from '@/lib/sign-in-user';
 import { ACCOUNT_LOCKED, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
+import { recordSignIn, signInRecordDeps, type SignInOutcome } from '@/lib/sign-in-record';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -24,7 +25,12 @@ export const authOptions: AuthOptions = {
         // 로그인 실패 잠금(2026-11-13, `sign-in-throttle.ts`) — 30분 안에 5번 틀린 계정·30번 틀린 IP는 맞는 비밀번호도 받지 않는다
         const throttle = throttleDeps();
         const ip = requestIp(req?.headers as Record<string, unknown> | undefined);
+        // 직원 접속 기록(2026-11-16, 0094) — 성공·실패·잠김·거절. 입력한 이메일은 남기지 않는다(계정이 있으면 그 사람으로)
+        const uaRaw = (req?.headers as Record<string, unknown> | undefined)?.['user-agent'];
+        const record = (outcome: SignInOutcome, user?: { id: string; departmentId: string | null } | null) =>
+          recordSignIn(signInRecordDeps(), { outcome, email: credentials.email, ip, userAgent: typeof uaRaw === 'string' ? uaRaw : null, user });
         if (!(await signInAllowed(throttle, 'user', credentials.email, ip))) {
+          await record('login_locked');
           throw new Error(ACCOUNT_LOCKED);
         }
 
@@ -38,8 +44,13 @@ export const authOptions: AuthOptions = {
         // ⚠️ 구 SHA-256 해시로 저장된 계정은 로그인 불가 — 비밀번호 재설정 필요
         if (authError || !authData?.user) {
           const local = await authorizeWithPasswordHash(credentials.email, credentials.password);
-          if (local) await noteSignInSuccess(throttle, 'user', credentials.email);
-          else await noteSignInFailure(throttle, 'user', credentials.email, ip);
+          if (local) {
+            await noteSignInSuccess(throttle, 'user', credentials.email);
+            await record('login', { id: local.id, departmentId: local.departmentId ?? null });
+          } else {
+            await noteSignInFailure(throttle, 'user', credentials.email, ip);
+            await record('login_failed');
+          }
           return local;
         }
         // 비밀번호는 맞았다 — 실패 기록을 지운다(소속 확인은 아래에서 따로)
@@ -55,13 +66,18 @@ export const authOptions: AuthOptions = {
           .maybeSingle();
 
         // 비활성·삭제(탈퇴) 계정은 Supabase Auth가 통과시켜도 들이지 않는다
-        if (existingUser && !canSignIn(existingUser)) return null;
+        if (existingUser && !canSignIn(existingUser)) {
+          await record('login_rejected', { id: existingUser.id, departmentId: existingUser.department_id ?? null });
+          return null;
+        }
 
         const decision = decideSignIn(existingUser ?? null, Boolean(fetchError));
         if (!decision.ok) {
           console.warn('[nextAuth] 로그인 거절 — 소속을 확인할 수 없음:', decision.reason);
+          await record('login_rejected', existingUser ? { id: existingUser.id, departmentId: existingUser.department_id ?? null } : null);
           return null;
         }
+        await record('login', { id: authUser.id, departmentId: decision.departmentId });
 
         return {
           id: authUser.id,

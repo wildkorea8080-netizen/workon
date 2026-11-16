@@ -336,7 +336,9 @@ export default function UsersManager() {
                         >
                           비밀번호 재발급
                         </button>
-                        <span className="text-xs text-slate-400">{formatDate(user.created_at)}</span>
+                        <span className="text-xs text-slate-400" title="가입일 · 마지막 로그인">
+                          {formatDate(user.created_at)} · {user.last_sign_in_at ? `최근 ${formatDate(user.last_sign_in_at)}` : '로그인 기록 없음'}
+                        </span>
                       </div>
                     </div>
                   ))}
