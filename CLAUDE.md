@@ -369,7 +369,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 슈퍼관리자 로그인이 실패마다 한 줄(이메일·IP는 SHA-256만)을 남기고, **한 계정이 30분 안에 5번 틀리면(한 IP가 30번) 잠근다** — 잠긴 동안은 맞는 비밀번호도 받지 않고
 실패를 더 세지 않으며(가장 오래된 실패가 30분을 넘기면 풀림), 성공하면 그 계정의 줄을 지운다. 직원 로그인은 `ACCOUNT_LOCKED`를 던져 화면이 잠김 안내(`sign-in-lock-spec.ts` — 잎 파일)를,
 슈퍼관리자는 429. 실패 기록을 못 읽으면 막지 않는다(열림 — 잠금은 비밀번호 위의 두 번째 층). 예전에는 실패를 세지 않아, 관리자가 등록한 `password_hash` 계정은 Supabase Auth의 횟수 제한도 없이
-비밀번호를 끝없이 맞춰 볼 수 있었다. 관리자가 잠금을 직접 푸는 화면은 아직 없다(30분 기다림). `tests/batch-0103.test.ts`
+비밀번호를 끝없이 맞춰 볼 수 있었다. `tests/batch-0103.test.ts`
+**잠금 풀기**(2026-11-16, 마이그레이션 없음): 기관 관리자 '사용자 관리' 목록이 잠긴 직원에 '로그인 잠김 · 12:25 풀림'(`accountLocks`·`lockedUntil` — 창 안 실패가 5번 아래로 떨어지는 때, 화면 글은 잎 파일 `lockUntilLabel`)과 '잠금 풀기'를 보인다(`DELETE /api/users/[id]/sign-in-lock` — 관리 범위 직원만·직원 로그인 잠금만, `security_logs` `sign_in_unlocked` medium·대상 id만). 슈퍼관리자 '계정 관리'의 직원·슈퍼관리자 두 표도 같고(`DELETE /api/super/accounts/users/[id]/sign-in-lock` — 직원·슈퍼관리자 두 잠금을 함께, `super_admin_logs`). 잠김 표시를 못 읽으면 표시만 빠진다. **IP 잠금(한 IP 30번)은 풀지 않는다** — 30분 기다림. `tests/batch-0104.test.ts`
 
 ---
 
