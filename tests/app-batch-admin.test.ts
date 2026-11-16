@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type Result = { data?: unknown; error?: { message: string } | null; count?: number };
 const state = vi.hoisted(() => ({
   session: 'admin' as 'admin' | 'user' | null,
-  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][], notices: [] as Record<string, unknown>[], removed: [] as string[],
+  results: {} as Record<string, Result[]>, calls: [] as unknown[][], security: [] as unknown[][], notices: [] as Record<string, unknown>[], removed: [] as string[], skipped: [] as unknown[][],
 }));
 vi.mock('@/lib/auth', () => ({
   getServerAuthSession: async () => (state.session ? { user: { id: 'adm', role: state.session === 'user' ? 'USER' : 'ADMIN', departmentId: 'dept' } } : null),
@@ -19,7 +19,7 @@ vi.mock('@/lib/actor-scope', () => ({
 }));
 vi.mock('@/lib/filter', () => ({ logSecurityEvent: async (...args: unknown[]) => { state.security.push(args); } }));
 vi.mock('@/lib/apps/automation-notice', () => ({ notifyAutomationOwner: async (n: Record<string, unknown>) => { state.notices.push(n); } }));
-vi.mock('@/lib/apps/batches', () => ({ removeBatchFiles: async (id: string) => { state.removed.push(id); } }));
+vi.mock('@/lib/apps/batches', () => ({ removeBatchFiles: async (id: string) => { state.removed.push(id); }, skipPendingItems: async (...args: unknown[]) => { state.skipped.push(args); return true; } }));
 vi.mock('@/lib/apps/schedule-health', () => ({ readScheduleHealth: async () => { throw new Error('skip'); } }));
 vi.mock('@/lib/apps/webhook-switch', () => ({ readWebhookSwitch: async () => { throw new Error('skip'); }, readScheduleSwitch: async () => { throw new Error('skip'); }, webhookSwitchView: () => null }));
 vi.mock('@/lib/supabaseAdmin', () => ({
@@ -50,7 +50,7 @@ const batchRow = (patch: Record<string, unknown> = {}) => ({
 });
 const items = [{ batch_id: BATCH, status: 'done' }, { batch_id: BATCH, status: 'failed' }, { batch_id: BATCH, status: 'pending' }];
 
-beforeEach(() => { state.session = 'admin'; state.results = {}; state.calls = []; state.security = []; state.notices = []; state.removed = []; });
+beforeEach(() => { state.session = 'admin'; state.results = {}; state.calls = []; state.security = []; state.notices = []; state.removed = []; state.skipped = []; });
 const patch = (body: unknown, id = BATCH) => PATCH(new NextRequest(`http://localhost/api/admin/app-automations/batches/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), { params: { id } });
 
 describe('보기(순수)', () => {
@@ -98,7 +98,7 @@ describe('멈추기', () => {
   it('실행 중인 묶음 — 조건부로 멈추고 남은 줄 건너뜀·사본 지움·보안 로그·직원 메일', async () => {
     state.results = {
       app_batches: [{ data: { id: BATCH, user_id: 'u1', agent_id: 'a1', status: 'running' } }, { data: [{ id: BATCH }] }, { data: batchRow({ status: 'stopped', stop_reason: '관리자가 멈췄습니다 — 비용 점검 중입니다' }) }],
-      app_batch_items: [{ data: null }, { data: items, count: 3 }], departments: [{ data: { name: '민원과' } }],
+      app_batch_items: [{ data: items, count: 3 }], departments: [{ data: { name: '민원과' } }],
     };
     const res = await patch({ action: 'stop', reason: '비용 점검 중입니다' });
     const body = await res.json();
@@ -106,8 +106,8 @@ describe('멈추기', () => {
     expect(body.data).toMatchObject({ status: 'stopped', stopReason: '관리자가 멈췄습니다 — 비용 점검 중입니다' });
     expect(state.calls).toContainEqual(['app_batches', 'update', expect.objectContaining({ status: 'stopped', stop_reason: '관리자가 멈췄습니다 — 비용 점검 중입니다' })]);
     expect(state.calls).toContainEqual(['app_batches', 'eq', 'status', 'running']);
-    expect(state.calls).toContainEqual(['app_batch_items', 'update', expect.objectContaining({ status: 'skipped' })]);
-    expect(state.calls).toContainEqual(['app_batch_items', 'eq', 'status', 'pending']);
+    // 남은 줄 건너뛰기는 batches.ts의 skipPendingItems 한 곳(2026-11-17 — 실패하면 한 번 더·운영 기록)
+    expect(state.skipped).toEqual([[BATCH, expect.any(String), '관리자가 멈췄습니다 — 비용 점검 중입니다']]);
     expect(state.removed).toEqual([BATCH]);
     expect(state.security[0]).toEqual(['dept', 'adm', 'app_batch_stopped', expect.objectContaining({ batch_id: BATCH, owner_user_id: 'u1', reason: '비용 점검 중입니다' }), 'medium']);
     expect(state.notices[0]).toMatchObject({ kind: 'batch_stopped', userId: 'u1', agentId: 'a1', targetId: BATCH, reason: '비용 점검 중입니다' });

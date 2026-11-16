@@ -76,10 +76,12 @@ export async function PATCH(request: NextRequest) {
   const prefix    = keyValue.slice(0, 10);
 
   // 기존 시스템 키 비활성화
-  await supabaseAdmin.from('api_keys')
+  // 못 끄고 새 키를 넣으면 시스템 키가 둘 다 켜진다 — 넣지 않는다(2026-11-17)
+  const off = await supabaseAdmin.from('api_keys')
     .update({ is_active: false })
     .is('organization_id', null)
     .eq('provider', provider);
+  if (off.error) return NextResponse.json({ ok: false, error: 'API 키를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 500 });
 
   // 신규 삽입
   const { error } = await supabaseAdmin.from('api_keys').insert({
@@ -92,7 +94,7 @@ export async function PATCH(request: NextRequest) {
     label: `시스템 기본 키 - ${provider}`,
   });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: 'API 키를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 500 });
   logSystem({ level: 'warning', category: 'security',
     message: `시스템 API 키 변경: ${provider}`,
     details: { provider, prefix } });

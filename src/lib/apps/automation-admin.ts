@@ -4,7 +4,7 @@ import { logSecurityEvent } from '@/lib/filter';
 import { readScheduleHealth } from '@/lib/apps/schedule-health';
 import { readScheduleSwitch, readWebhookSwitch, webhookSwitchView } from '@/lib/apps/webhook-switch';
 import { notifyAutomationOwner } from '@/lib/apps/automation-notice';
-import { removeBatchFiles } from '@/lib/apps/batches';
+import { removeBatchFiles, skipPendingItems } from '@/lib/apps/batches';
 import { pagedRows } from '@/lib/paged-select';
 import { batchLimitView, readBatchLimit } from '@/lib/apps/batch-limit';
 import {
@@ -209,7 +209,7 @@ export async function stopBatchByAdmin(admin: AdminActor, id: string, reason: st
       .eq('id', id).eq('organization_id', actor.organizationId).eq('status', 'running').select('id');
     if (error) return { ok: false, status: 503, message: '일괄 실행을 멈추지 못했습니다.' };
     if (changed?.length) {
-      await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: now, error: stopReason.slice(0, 300) }).eq('batch_id', id).eq('status', 'pending');
+      await skipPendingItems(id, now, stopReason);
       await removeBatchFiles(id).catch(() => undefined);
       await audit(admin, 'app_batch_stopped', { batch_id: id, owner_user_id: target.user_id, agent_id: target.agent_id, reason });
       await notifyAutomationOwner({ kind: 'batch_stopped', organizationId: actor.organizationId, userId: target.user_id, agentId: target.agent_id, targetId: id, reason, at: new Date(nowMs) });

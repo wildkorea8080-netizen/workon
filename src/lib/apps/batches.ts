@@ -181,9 +181,29 @@ export async function cancelBatch(userId: string, id: string, nowMs = Date.now()
   const { data, error } = await supabaseAdmin.from('app_batches').update({ status: 'cancelled', finished_at: now }).eq('id', id).eq('user_id', userId).eq('status', 'running').select('id');
   if (error) return { ok: false, status: 503, message: '그만두지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!data?.length) return { ok: false, status: 409, message: '이미 끝났거나 멈춘 일괄 실행입니다.' };
-  await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: now, error: '직원이 그만뒀습니다.' }).eq('batch_id', id).eq('status', 'pending');
+  await skipPendingItems(id, now, '직원이 그만뒀습니다.');
   await removeBatchFiles(id).catch(() => undefined);
   return { ok: true };
+}
+
+export const PENDING_NOT_SKIPPED = '끝난 일괄 실행의 기다리던 줄을 건너뜀으로 바꾸지 못했습니다(대기로 남음 — 다시 실행에서 빠짐)';
+
+/**
+ * 끝낸(그만둠·멈춤) 묶음의 기다리던 줄을 건너뜀으로(2026-11-17). 실행기는 실행 중 묶음의 줄만 집어 해는 없지만, 바꾸지 못하면
+ * 그 줄이 '대기'로 영영 남아 목록·엑셀 수가 틀리고 '마치지 못한 줄 다시 실행'(실패·건너뜀만)에서 빠진다 — 한 번 더 해 보고 운영 기록에.
+ * 던지지 않는다
+ */
+export async function skipPendingItems(batchId: string, nowIso: string, reason: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { error } = await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: nowIso, error: reason.slice(0, 300) }).eq('batch_id', batchId).eq('status', 'pending');
+      if (!error) return true;
+      if (attempt === 1) await logSystem({ level: 'warning', category: 'database', message: PENDING_NOT_SKIPPED, details: { batch_id: batchId, code: error.code ?? 'error' } });
+    } catch {
+      if (attempt === 1) await logSystem({ level: 'warning', category: 'database', message: PENDING_NOT_SKIPPED, details: { batch_id: batchId, code: 'exception' } });
+    }
+  }
+  return false;
 }
 
 /**
@@ -373,7 +393,7 @@ export function batchDeps(): BatchDeps {
     },
     async stop(batchId, reason, nowIso) {
       const { data } = await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
-      await supabaseAdmin.from('app_batch_items').update({ status: 'skipped', finished_at: nowIso, error: reason }).eq('batch_id', batchId).eq('status', 'pending');
+      await skipPendingItems(batchId, nowIso, reason);
       return Boolean(data?.length);
     },
     async settle(batchId, nowIso) {

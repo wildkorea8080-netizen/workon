@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSystem } from '@/lib/logger';
 import { getActorScope } from '@/lib/actor-scope';
 import { canEditAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, saveAgentSettings, saveFailureResponse } from '@/lib/agent-store';
@@ -117,7 +118,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       version = saved.version;
     }
     // 같은 시험 판일 때만 비운다(배포 직후 누가 새 시험 판을 저장했으면 그것은 남긴다)
-    await supabaseAdmin.from('agents').update({ app_draft: null }).eq('id', params.id).eq('app_draft->>saved_at', draft.saved_at);
+    // 못 비우면 배포는 됐어도 시험 판이 남는다(다음 저장·배포가 기준 판이 달라 409) — 운영 기록에(2026-11-17)
+    const cleared = await supabaseAdmin.from('agents').update({ app_draft: null }).eq('id', params.id).eq('app_draft->>saved_at', draft.saved_at);
+    if (cleared.error) await logSystem({ level: 'warning', category: 'database', message: '배포한 시험 판을 비우지 못했습니다', details: { agent_id: params.id, code: cleared.error.code ?? 'error' } });
     const { data: agentRow } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
     return NextResponse.json({ ok: true, data: agentRow, meta: { version, changed } });
   } catch (error) {
