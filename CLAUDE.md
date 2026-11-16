@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-17 아침) 쓰기 실패를 운영 기록에(사용 기록 `writeUsageLog`·감사 기록 `writeAuditRow`·계약·기관 맞추기·앱 결과 보내기 기록)·슈퍼관리자 대시보드 critical 띠·운영 기록 주소 거르기·critical 메일 알림(`2d80737`까지 2개 커밋, 마이그레이션 없음)을 `dpl_2BwTFMpkQMfZBuhyi6UqxNF7Nwfs`로 배포했다.
 - (2026-11-17 새벽 2) 보안 로그 한 곳(`logSecurityEvent`)·실패를 운영 기록에·관리자 설정 화면 보안 로그 조회의 없는 칸 고침(`688b022`까지 2개 커밋, 마이그레이션 없음)을 `dpl_GdB3cPcMcp3CrPmkEvKRU3uo4CuP`로 배포했다.
 - (2026-11-17 새벽) 코드 쪽 스키마 이름 검사 시험(`48d3a0e`까지 2개 커밋, 앱 동작 변화·마이그레이션 없음)을 `dpl_Hm5NiTn73wmwCUCJ7UDB9g1MZJH9`로 배포했다.
 - (2026-11-16 밤 8) 운영 스키마 어긋남 검사 `npm run db:drift`(`bef20e7`까지 2개 커밋, 마이그레이션 없음 — 0097 파일도 함께)를 `dpl_8Up8xsGcuas2fgoKa5PczKJNEYtf`로 배포했다. 배포 뒤 운영 스키마 어긋남 없음.

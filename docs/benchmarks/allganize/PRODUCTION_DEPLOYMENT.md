@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(아침): 조용히 사라지던 쓰기 실패를 운영 기록에·슈퍼관리자 critical 알림 — 마이그레이션 없음
+
+- 코드 배포 `dpl_2BwTFMpkQMfZBuhyi6UqxNF7Nwfs`(커밋 `2d80737`, 2026-11-17 08:02 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `7c118f4`(새벽 2 배포 기록), `d2304ff` — 사용 기록 쓰기 실패를 `system_logs` critical·payment로(`writeUsageLog`·업무 `writeUsage`, 비서·금지어 라우트가 직접 쓰던 곳도), 슈퍼관리자 조작·모델 정책 변경·로그인 기록 쓰기는 `writeAuditRow`(돌려준 오류를 실패로), 계약·기관 맞추기(옛 계약을 끝내지 못하면 새 계약 안 만듦·맞추기 실패는 화면 경고와 critical·다시 활성화는 계약 하나만·초대 저장 실패 안내), 앱 결과 보내기의 결과 기록 실패는 한 번 더·그래도 안 되면 critical, 대리 접근 끝낸 때 기록 오류, 슈퍼관리자 대시보드 최근 24시간 critical 띠·운영 기록 화면 주소 거르기(payment 카테고리), 5분 실행기의 critical 메일 알림(`src/lib/critical-alert.ts` — 한 시간에 한 번까지, `system_settings` `critical_log_alert` 조건부 차지), `2d80737` 문서. 가지 Preview(`workon-2tl7ofjqs`) Ready 뒤 `main`. 배포 전 전체 시험 279파일 3,763개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_GdB3cPcMcp3CrPmkEvKRU3uo4CuP`(688b022)로 promote.
+- 배포 뒤 확인(로그인 없이 + 읽기 전용): `/login`·`/forgot-password`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/api/super/dashboard`·`/api/cron/app-schedules`·`/api/chat` 무인증 401. 실행기 하트비트 08:10 KST(배포 뒤 첫 차례)·pg_cron 호출 200(08:10~08:13 KST). 최근 24시간 critical 기록 0건이라 알림 행(`critical_log_alert`)은 아직 없음(보낼 것이 없어 차지하지 않음 — 기대대로), 최근 20분 warning 이상 0건.
+- **확인하지 못한 것**(사용자 몫): 슈퍼관리자 대시보드 띠·운영 기록 화면 주소 거르기·계약/기관 화면 경고(로그인한 화면), critical 알림 메일의 실제 도착(critical 기록이 생겨야 감).
+
 ## 2026-11-17(새벽 2): 보안 로그 한 곳·실패를 운영 기록에·설정 화면 보안 로그 조회 고침 — 마이그레이션 없음
 
 - 코드 배포 `dpl_GdB3cPcMcp3CrPmkEvKRU3uo4CuP`(커밋 `688b022`, 2026-11-17 00:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `3e54a07`(새벽 배포 기록), `08168fe` 보안 로그를 `logSecurityEvent`(`src/lib/security-log.ts`) 한 곳으로(직접 insert 11곳 — 돌려준 `{ error }`를 보지 않아 `security_logs`가 없던 동안 모두 조용히 버려졌다), 실패하면 `system_logs`(security, error)에 종류·코드, IP 차단 기록은 실제로 남겼을 때만 `logged:true`, 관리자 설정 화면 '보안 로그' 조회가 없는 `users.name`을 고르던 것을 `full_name`으로, 코드 쪽 스키마 검사가 내장 관계 칸·여러 줄 백틱 select도 봄, `688b022` 문서. 가지 Preview(`workon-p27ja38y0`) Ready 뒤 `main`. 배포 전 전체 시험 273파일 3,724개 통과·tsc 0(처음 돌린 전체 시험에서 원문 문자열을 보던 옛 시험 4개가 걸려 고친 뒤 다시 돌림).
