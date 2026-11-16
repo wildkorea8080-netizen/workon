@@ -102,6 +102,16 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
     else onToast(data.error?.message ?? '잠금 풀기 실패');
   };
 
+  // 임시 비밀번호 재발급 — 새 비밀번호는 이 화면에 한 번만 보인다(저장하지 않음)
+  const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null);
+  const handleResetPassword = async (id: string, email: string) => {
+    if (!confirm(`${email}의 임시 비밀번호를 다시 발급할까요?\n지금 비밀번호와 열려 있는 로그인은 모두 쓸 수 없게 되고, 다음 로그인에 비밀번호부터 바꿔야 합니다.`)) return;
+    const res  = await fetch(`/api/super/accounts/users/${id}/password-reset`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) { setResetInfo({ email, tempPassword: data.data.tempPassword, emailSent: Boolean(data.data.emailSent) }); fetchUsers(page); }
+    else onToast(data.error?.message ?? '재발급 실패');
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -126,6 +136,20 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
 
   return (
     <div className="space-y-5">
+      {resetInfo && (
+        <div className="bg-amber-900/20 border border-amber-700/50 rounded-2xl p-4 text-sm text-amber-200 space-y-2">
+          <p className="font-semibold">{resetInfo.email}의 임시 비밀번호를 발급했습니다</p>
+          <div className="flex items-center gap-2">
+            <code className="px-2 py-1 bg-slate-900 rounded font-mono text-base text-white">{resetInfo.tempPassword}</code>
+            <CopyBtn value={resetInfo.tempPassword} />
+          </div>
+          <p className="text-xs text-amber-300/80">
+            {resetInfo.emailSent ? '본인 메일로도 보냈습니다. ' : '메일 발송이 설정돼 있지 않아 직접 전해 주세요. '}
+            이 안내를 닫으면 다시 볼 수 없습니다. 직원은 다음 로그인에 비밀번호부터 바꿉니다.
+          </p>
+          <button onClick={() => setResetInfo(null)} className="text-xs text-amber-400 hover:text-amber-200">닫기</button>
+        </div>
+      )}
       {/* 통계 카드 */}
       <div className="grid grid-cols-4 gap-4">
         {STATS.map(s => (
@@ -221,6 +245,13 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
                         onClick={() => handlePatch(u.id, { role: u.role === 'ADMIN' ? 'USER' : 'ADMIN' })}
                         className="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-700 hover:bg-purple-900/40 text-slate-300 hover:text-purple-400 transition-colors">
                         {u.role === 'ADMIN' ? '권한 해제' : '관리자 권한'}
+                      </button>
+                      <button
+                        onClick={() => handleResetPassword(u.id, u.email)}
+                        disabled={u.is_active === false}
+                        title="임시 비밀번호를 다시 발급합니다"
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-700 hover:bg-amber-900/40 text-slate-300 hover:text-amber-300 transition-colors disabled:opacity-40">
+                        비밀번호 재발급
                       </button>
                       <button
                         onClick={() => setDeleteTarget({ id: u.id, name: u.full_name || u.email, email: u.email })}

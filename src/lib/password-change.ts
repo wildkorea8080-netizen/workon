@@ -29,8 +29,11 @@ export interface PasswordChangeDeps {
   updateAuthPassword(id: string, password: string): Promise<'ok' | 'not_found' | 'error'>;
   hash(password: string): Promise<string>;
   setPasswordHash(id: string, hash: string): Promise<boolean>;
-  /** 비밀번호를 바꾼 때를 적는다(0092) — 미들웨어가 그 전에 로그인한 토큰(다른 기기 포함)을 끝낸다 */
-  markPasswordChanged(id: string): Promise<boolean>;
+  /**
+   * 비밀번호를 바꾼 때를 적는다(0092) — 미들웨어가 그 전에 로그인한 토큰(다른 기기 포함)을 끝낸다.
+   * `mustChange`(0093): 관리자가 임시 비밀번호를 줬으면 참(본인이 바꿀 때까지 '비밀번호 바꾸기'만), 본인이 바꿨으면 거짓
+   */
+  markPasswordChanged(id: string, mustChange?: boolean): Promise<boolean>;
 }
 
 export async function changeOwnPassword(
@@ -69,7 +72,7 @@ export async function changeOwnPassword(
     if (!ok) return { ok: false, code: 'error' };
   }
   // 바꾼 때를 못 적어도 비밀번호는 이미 바뀌었다 — 성공으로 두고(다른 기기 로그인만 남는다) 기록은 라우트가 남긴다
-  const marked = await deps.markPasswordChanged(userId).catch(() => false);
+  const marked = await deps.markPasswordChanged(userId, false).catch(() => false);
   return marked ? { ok: true } : { ok: true, sessionsKept: true };
 }
 
@@ -103,8 +106,11 @@ export function passwordChangeDeps(throttle: ThrottleDeps): PasswordChangeDeps {
       const { error } = await supabaseAdmin.from('users').update({ password_hash: hash }).eq('id', id);
       return !error;
     },
-    async markPasswordChanged(id) {
-      const { error } = await supabaseAdmin.from('users').update({ password_changed_at: new Date().toISOString() }).eq('id', id);
+    async markPasswordChanged(id, mustChange = false) {
+      const { error } = await supabaseAdmin
+        .from('users')
+        .update({ password_changed_at: new Date().toISOString(), password_must_change: mustChange })
+        .eq('id', id);
       return !error;
     },
   };

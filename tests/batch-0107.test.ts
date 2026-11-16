@@ -67,7 +67,7 @@ describe('본인 바꾸기도 바꾼 때를 적는다', () => {
   it('적으면 ok, 못 적어도 비밀번호는 바뀐 것 — 다른 로그인이 남았다고 알림', async () => {
     const d = deps(true);
     expect(await changeOwnPassword(d, { userId: SUB, current: 'Old-pass1', next: 'New-pass12', ip: null })).toEqual({ ok: true });
-    expect(d.markPasswordChanged).toHaveBeenCalledWith(SUB);
+    expect(d.markPasswordChanged).toHaveBeenCalledWith(SUB, false);
     expect(await changeOwnPassword(deps(false), { userId: SUB, current: 'Old-pass1', next: 'New-pass12', ip: null })).toEqual({ ok: true, sessionsKept: true });
   });
 });
@@ -104,7 +104,7 @@ describe('재발급', () => {
       updateAuthPassword: async (_id, pw) => { calls.push(`auth:${pw}`); return o.auth ?? 'ok'; },
       hash: async (pw) => `h(${pw})`,
       setPasswordHash: async (_id, h) => { calls.push(`hash:${h}`); return o.set ?? true; },
-      markPasswordChanged: async () => { calls.push('marked'); return o.mark ?? true; },
+      markPasswordChanged: async (_id, must) => { calls.push(must ? 'marked:must' : 'marked'); return o.mark ?? true; },
       unlock: async (email) => { calls.push(`unlock:${email}`); },
     };
     return { d, calls };
@@ -113,7 +113,7 @@ describe('재발급', () => {
   it('Auth·해시를 함께 바꾸고 바꾼 때를 적고 잠금을 푼다', async () => {
     const { d, calls } = deps();
     expect(await resetUserPassword(d, target)).toEqual({ ok: true, tempPassword: 'Temp1234abcd', sessionsKept: false });
-    expect(calls).toEqual(['auth:Temp1234abcd', 'hash:h(Temp1234abcd)', 'marked', 'unlock:a@x.go.kr']);
+    expect(calls).toEqual(['auth:Temp1234abcd', 'hash:h(Temp1234abcd)', 'marked:must', 'unlock:a@x.go.kr']);
   });
   it('Auth 계정이 없는(관리자가 등록한) 계정도 해시로', async () => {
     const { d } = deps({ auth: 'not_found' });

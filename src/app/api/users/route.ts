@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
         role: role || 'USER',
         department_id: departmentId,
         password_hash: hashedPassword,
+        password_must_change: true, // 임시 비밀번호 — 첫 로그인 때 바꾸게 한다(0093)
       })
       .select()
       .single();

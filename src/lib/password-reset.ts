@@ -40,7 +40,8 @@ export async function resetUserPassword(deps: PasswordResetDeps, target: { id: s
   if (auth === 'error') return { ok: false };
   // Auth 계정이 있어도 해시를 함께 바꾼다 — 옛 해시가 남으면 옛 비밀번호가 두 번째 길로 통과한다
   if (!(await deps.setPasswordHash(target.id, await deps.hash(temp)))) return { ok: false };
-  const marked = await deps.markPasswordChanged(target.id).catch(() => false);
+  // 임시 비밀번호 — 본인이 바꿀 때까지 '비밀번호 바꾸기'만 열린다(0093)
+  const marked = await deps.markPasswordChanged(target.id, true).catch(() => false);
   await deps.unlock(target.email).catch(() => {});
   return { ok: true, tempPassword: temp, sessionsKept: !marked };
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { PASSWORD_RULE_TEXT, passwordPolicyError } from '@/lib/password-policy';
@@ -8,6 +8,10 @@ import { PASSWORD_RULE_TEXT, passwordPolicyError } from '@/lib/password-policy';
 /** 내 비밀번호 바꾸기(2026-11-16) — 검사는 서버가 다시 한다(`/api/my/password`) */
 export default function MyPasswordPage() {
   const { data: session } = useSession();
+  // 임시 비밀번호로 들어와 미들웨어가 보낸 경우(0093) — 바꾸기 전에는 다른 화면이 열리지 않는다
+  // (useSearchParams는 Suspense 경계가 필요해 주소에서 직접 읽는다)
+  const [required, setRequired] = useState(false);
+  useEffect(() => { setRequired(new URLSearchParams(window.location.search).get('required') === '1'); }, []);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -56,6 +60,12 @@ export default function MyPasswordPage() {
           </div>
           <Link href="/" className="text-sm font-medium text-slate-600 hover:text-slate-900">← 홈</Link>
         </div>
+
+        {required && (
+          <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            관리자가 준 임시 비밀번호로 로그인했습니다. 새 비밀번호로 바꿔야 다른 화면을 쓸 수 있습니다.
+          </p>
+        )}
 
         <form onSubmit={submit} className="space-y-4 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
           <label className="block">

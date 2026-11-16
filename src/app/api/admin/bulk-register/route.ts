@@ -210,6 +210,7 @@ export async function POST(request: NextRequest) {
             role,
             department_id: deptId,
             position: row.직책?.trim() || null,
+            password_must_change: true, // 임시 비밀번호 — 첫 로그인 때 바꾸게 한다(0093)
           });
 
         if (insertError) {

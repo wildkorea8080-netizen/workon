@@ -135,7 +135,7 @@ export default function UsersManager() {
   const [resetResult, setResetResult] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null);
   const handleResetPassword = async (userId: string, email: string) => {
     if (!confirm(`${email}의 임시 비밀번호를 다시 발급할까요?
-지금 비밀번호와 열려 있는 로그인은 모두 쓸 수 없게 됩니다. 본인 확인을 먼저 하세요.`)) return;
+지금 비밀번호와 열려 있는 로그인은 모두 쓸 수 없게 되고, 다음 로그인에 비밀번호부터 바꿔야 합니다. 본인 확인을 먼저 하세요.`)) return;
     setMovingId(userId);
     setError(null);
     setResetResult(null);
@@ -248,7 +248,7 @@ export default function UsersManager() {
           </p>
           <p className="text-xs text-amber-800">
             {resetResult.emailSent ? '본인 메일로도 보냈습니다. ' : '메일 발송이 설정돼 있지 않아 직접 전해 주세요. '}
-            이 화면을 닫으면 다시 볼 수 없습니다. 직원은 로그인한 뒤 바로 비밀번호를 바꿔야 합니다.
+            이 화면을 닫으면 다시 볼 수 없습니다. 직원은 다음 로그인에 비밀번호부터 바꿉니다.
           </p>
           <button type="button" onClick={() => setResetResult(null)} className="text-xs text-amber-700 hover:text-amber-900">닫기</button>
         </div>

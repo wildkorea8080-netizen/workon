@@ -4,7 +4,7 @@ import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
 import {
-  readIpPolicy, readMaintenance, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenSub, userSessionVerdict,
+  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenSub, userSessionVerdict,
   type SessionVerdict,
 } from '@/lib/middleware-db';
 
@@ -196,7 +196,22 @@ export async function middleware(req: NextRequest) {
     // 대리 접근 토큰은 들어온 슈퍼관리자도 아직 활성인지 본다(비활성화한 슈퍼관리자의 대리 접근 2시간을 끊는다).
     if (ipToken?.sub) {
       const verdict = await userSessionVerdict(userStatusCache, ipToken, (sub) => readUserStatus(restConfig(), sub, fetch));
-      if (verdict !== 'ok') return endUserSession(req, pathname, verdict);
+      // 임시 비밀번호(0093) — 로그인은 살려 두고 '비밀번호 바꾸기'로만 보낸다
+      if (verdict === 'must_change_password') {
+        if (!allowedWhileMustChange(pathname)) {
+          if (pathname.startsWith('/api')) {
+            return NextResponse.json(
+              { ok: false, error: { message: '임시 비밀번호로 로그인했습니다. 먼저 비밀번호를 바꿔 주세요.', code: 'password_change_required' } },
+              { status: 403 }
+            );
+          }
+          const url = req.nextUrl.clone();
+          url.pathname = '/my/password';
+          url.search = '';
+          url.searchParams.set('required', '1');
+          return NextResponse.redirect(url);
+        }
+      } else if (verdict !== 'ok') return endUserSession(req, pathname, verdict);
       if (ipToken.isImpersonating) {
         const by = ipToken.impersonatedBy;
         const superOk = await superAdminActive(superStatusCache, by, (sub) => readSuperAdminStatus(restConfig(), sub, fetch));

@@ -14,8 +14,8 @@ const reply = (body: unknown, ok = true) => vi.fn(async (_url: string, _init?: {
 describe('계정 상태 읽기', () => {
   it('서비스 키로 그 id 한 줄만, 역할은 로그인과 같은 규칙으로', async () => {
     const f = reply([{ role: 'admin', department_id: DEPT, is_active: true, deleted_at: null }]);
-    expect(await readUserStatus(cfg, SUB, f)).toEqual({ kind: 'active', role: 'ADMIN', departmentId: DEPT, passwordChangedAt: null });
-    expect(f.mock.calls[0][0]).toBe(`https://x.supabase.co/rest/v1/users?id=eq.${SUB}&select=role,department_id,is_active,deleted_at,password_changed_at`);
+    expect(await readUserStatus(cfg, SUB, f)).toEqual({ kind: 'active', role: 'ADMIN', departmentId: DEPT, passwordChangedAt: null, mustChangePassword: false });
+    expect(f.mock.calls[0][0]).toBe(`https://x.supabase.co/rest/v1/users?id=eq.${SUB}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change`);
     expect(f.mock.calls[0][1]).toEqual({ headers: { apikey: 'k', Authorization: 'Bearer k' } });
     expect(await readUserStatus(cfg, SUB, reply([{ role: null, department_id: DEPT }]))).toMatchObject({ role: 'USER' });
   });
