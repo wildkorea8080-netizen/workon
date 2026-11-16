@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(새벽): 코드 쪽 스키마 이름 검사 — 시험·문서만, 마이그레이션 없음
+
+- 코드 배포 `dpl_Hm5NiTn73wmwCUCJ7UDB9g1MZJH9`(커밋 `48d3a0e`, 2026-11-17 00:08 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `43bb96b`(밤 8 배포 기록), `869097c` 시험 `tests/batch-0116.test.ts`·`tests/helpers/code-schema-refs.ts`(코드가 부르는 표·칸·함수가 시험 DB = 마이그레이션 전부에 있는지 — 앱 동작은 바뀌지 않음), `48d3a0e` 문서. 가지 Preview(`workon-7xypgwk4p`) Ready 뒤 `main`. 배포 전 전체 시험 272파일 3,715개 통과·tsc 0. 시험 DB에서 `users.password_hash`를 빼 보면 이 시험이 그 칸과 쓰는 파일을 짚고 실패하는 것을 확인(다시 넣음).
+- 되돌릴 때는 직전 `dpl_8Up8xsGcuas2fgoKa5PczKJNEYtf`(bef20e7)로 promote.
+- 배포 뒤 확인(로그인 없이): `/`·`/login`·`/forgot-password`·`/api/system/maintenance`·`/api/branding` 200, `/admin` 307, `/api/users` 403. pg_cron 호출 200(00:06~00:09 KST).
+
 ## 2026-11-16(밤 8): 운영 스키마 어긋남 검사(db:drift) — 마이그레이션 없음
 
 - 코드 배포 `dpl_8Up8xsGcuas2fgoKa5PczKJNEYtf`(커밋 `bef20e7`, 2026-11-16 23:57 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `fa4f63f`(0097 파일·재발 방지 시험 — 운영 DB에는 밤 7에 이미 적용), `5484b00`(밤 7 배포 기록), `d42e7f9` `npm run db:drift`(`src/lib/schema-drift.ts`·`scripts/db-drift.mjs` — 운영자 명령, 앱 동작은 바뀌지 않음), `bef20e7` 문서. 가지 Preview(`workon-dmodhs442`) Ready 뒤 `main`. 배포 전 전체 시험 271파일 3,711개 통과·tsc 0.
