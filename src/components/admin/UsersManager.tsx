@@ -131,6 +131,27 @@ export default function UsersManager() {
     }
   };
 
+  /** 임시 비밀번호 재발급 — 새 비밀번호는 이 화면에 한 번만 보인다(저장하지 않음) */
+  const [resetResult, setResetResult] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null);
+  const handleResetPassword = async (userId: string, email: string) => {
+    if (!confirm(`${email}의 임시 비밀번호를 다시 발급할까요?
+지금 비밀번호와 열려 있는 로그인은 모두 쓸 수 없게 됩니다. 본인 확인을 먼저 하세요.`)) return;
+    setMovingId(userId);
+    setError(null);
+    setResetResult(null);
+    try {
+      const res = await fetch(`/api/users/${userId}/password-reset`, { method: 'POST' });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setResetResult({ email, tempPassword: result.data.tempPassword, emailSent: Boolean(result.data.emailSent) });
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, sign_in_locked_until: null } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '비밀번호를 재발급하지 못했습니다.');
+    } finally {
+      setMovingId(null);
+    }
+  };
+
   /** 로그인 실패 잠금 풀기(0091) — 그 계정의 실패 기록을 지운다 */
   const handleUnlock = async (userId: string) => {
     if (!confirm('이 직원의 로그인 잠금을 풀까요? 본인이 비밀번호를 여러 번 틀린 것인지 먼저 확인하세요.')) return;
@@ -216,6 +237,23 @@ export default function UsersManager() {
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">{error}</div>
       )}
 
+      {resetResult && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900 space-y-2">
+          <p className="font-semibold">{resetResult.email}의 임시 비밀번호를 발급했습니다</p>
+          <p className="flex items-center gap-2">
+            <code className="px-2 py-1 bg-white border border-amber-200 rounded font-mono text-base">{resetResult.tempPassword}</code>
+            <button type="button" onClick={() => handleCopy(resetResult.tempPassword)} className="text-xs font-medium text-amber-800 hover:text-amber-950">
+              {copied ? '복사됨' : '복사'}
+            </button>
+          </p>
+          <p className="text-xs text-amber-800">
+            {resetResult.emailSent ? '본인 메일로도 보냈습니다. ' : '메일 발송이 설정돼 있지 않아 직접 전해 주세요. '}
+            이 화면을 닫으면 다시 볼 수 없습니다. 직원은 로그인한 뒤 바로 비밀번호를 바꿔야 합니다.
+          </p>
+          <button type="button" onClick={() => setResetResult(null)} className="text-xs text-amber-700 hover:text-amber-900">닫기</button>
+        </div>
+      )}
+
       {/* ── 탭 1: 직원 목록 ── */}
       {tab === 'list' && (
         <div className="space-y-8">
@@ -289,6 +327,15 @@ export default function UsersManager() {
                         }`}>
                           {user.role === 'ADMIN' ? '관리자' : '일반 직원'}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => handleResetPassword(user.id, user.email)}
+                          disabled={movingId === user.id}
+                          title="임시 비밀번호를 다시 발급합니다(지금 비밀번호와 로그인은 모두 끝남)"
+                          className="text-xs font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                        >
+                          비밀번호 재발급
+                        </button>
                         <span className="text-xs text-slate-400">{formatDate(user.created_at)}</span>
                       </div>
                     </div>

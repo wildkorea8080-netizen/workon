@@ -85,6 +85,8 @@ export const authOptions: AuthOptions = {
         token.id = user.id;
         token.role = user.role;
         token.departmentId = user.departmentId ?? null;
+        // 로그인한 때 — 토큰을 다시 쓸 때(세션 갱신) 바뀌는 iat와 달리 그대로 남는다. 비밀번호를 바꾼 뒤 옛 로그인을 끝내는 기준(미들웨어)
+        token.authAt = Date.now();
       }
       return token;
     },

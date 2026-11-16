@@ -34,5 +34,7 @@ declare module 'next-auth/jwt' {
     impersonateOrgId?: string;
     impersonateOrgName?: string;
     impersonateLogId?: string;
+    /** 로그인한 때(ms, 2026-11-16) — 세션을 다시 쓸 때 바뀌는 iat 대신 비밀번호 바꾼 때와 맞댄다 */
+    authAt?: number;
   }
 }

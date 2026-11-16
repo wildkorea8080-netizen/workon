@@ -52,11 +52,12 @@ export async function POST(request: NextRequest) {
       department_id: session.user.departmentId ?? null,
       user_id: session.user.id,
       event_type: 'password_changed',
-      details: {},
+      details: result.sessionsKept ? { sessions_kept: true } : {},
       severity: 'low',
       created_at: new Date().toISOString(),
     });
   } catch { /* 보안 로그 실패는 바꾸기를 되돌리지 않는다 */ }
 
-  return NextResponse.json({ ok: true });
+  // 바꾼 때를 적었으면 이 브라우저를 포함한 모든 로그인이 곧 끝난다 — 화면이 로그아웃하고 로그인 화면으로 보낸다
+  return NextResponse.json({ ok: true, data: { signedOut: !result.sessionsKept } });
 }

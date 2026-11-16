@@ -126,6 +126,31 @@ export function sendTempPasswordEmail(params: {
   );
 }
 
+/** 관리자의 임시 비밀번호 재발급 안내 메일(2026-11-16) */
+export function sendPasswordResetEmail(params: {
+  to: string;
+  fullName: string;
+  tempPassword: string;
+  loginUrl: string;
+}): Promise<MailResult> {
+  const { to, fullName, tempPassword, loginUrl } = params;
+  return sendMail(
+    to,
+    `[${APP_NAME}] 임시 비밀번호가 발급되었습니다`,
+    layout(
+      `${fullName}님, 임시 비밀번호가 발급되었습니다`,
+      `<p style="font-size:15px;line-height:1.7">관리자가 비밀번호를 다시 발급했습니다. 이전 비밀번호와 열려 있던 로그인은 더 쓸 수 없습니다.
+       아래 임시 비밀번호로 로그인한 뒤 사용자 메뉴의 '비밀번호 바꾸기'에서 바로 바꿔 주세요.</p>
+       <table style="margin:20px 0;font-size:15px">
+         <tr><td style="padding:6px 16px 6px 0;color:#64748b">아이디</td><td style="font-weight:600">${escapeHtml(to)}</td></tr>
+         <tr><td style="padding:6px 16px 6px 0;color:#64748b">임시 비밀번호</td><td style="font-family:monospace;font-weight:700;color:#003087">${escapeHtml(tempPassword)}</td></tr>
+       </table>
+       <p style="font-size:13px;color:#64748b">직접 요청하지 않았다면 기관 관리자에게 알려 주세요.</p>
+       ${button(loginUrl, '로그인하기')}`
+    )
+  );
+}
+
 /** 기관·부서 예산 알림 메일의 글(보내지 않음 — 시험이 글을 본다). 개인별 사용 내역은 싣지 않는다 */
 export function budgetAlertMail(params: {
   organizationName: string;

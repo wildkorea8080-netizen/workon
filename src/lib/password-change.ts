@@ -17,7 +17,7 @@ import { noteSignInFailure, noteSignInSuccess, signInAllowed, type ThrottleDeps 
  */
 
 export type PasswordChangeResult =
-  | { ok: true }
+  | { ok: true; sessionsKept?: boolean }
   | { ok: false; code: 'locked' | 'wrong' | 'same' | 'policy' | 'not_found' | 'error'; message?: string };
 
 export interface PasswordChangeDeps {
@@ -29,6 +29,8 @@ export interface PasswordChangeDeps {
   updateAuthPassword(id: string, password: string): Promise<'ok' | 'not_found' | 'error'>;
   hash(password: string): Promise<string>;
   setPasswordHash(id: string, hash: string): Promise<boolean>;
+  /** 비밀번호를 바꾼 때를 적는다(0092) — 미들웨어가 그 전에 로그인한 토큰(다른 기기 포함)을 끝낸다 */
+  markPasswordChanged(id: string): Promise<boolean>;
 }
 
 export async function changeOwnPassword(
@@ -66,7 +68,9 @@ export async function changeOwnPassword(
     const ok = await deps.setPasswordHash(userId, await deps.hash(next));
     if (!ok) return { ok: false, code: 'error' };
   }
-  return { ok: true };
+  // 바꾼 때를 못 적어도 비밀번호는 이미 바뀌었다 — 성공으로 두고(다른 기기 로그인만 남는다) 기록은 라우트가 남긴다
+  const marked = await deps.markPasswordChanged(userId).catch(() => false);
+  return marked ? { ok: true } : { ok: true, sessionsKept: true };
 }
 
 export function passwordChangeDeps(throttle: ThrottleDeps): PasswordChangeDeps {
@@ -97,6 +101,10 @@ export function passwordChangeDeps(throttle: ThrottleDeps): PasswordChangeDeps {
     hash: (password) => bcrypt.hash(password, 12),
     async setPasswordHash(id, hash) {
       const { error } = await supabaseAdmin.from('users').update({ password_hash: hash }).eq('id', id);
+      return !error;
+    },
+    async markPasswordChanged(id) {
+      const { error } = await supabaseAdmin.from('users').update({ password_changed_at: new Date().toISOString() }).eq('id', id);
       return !error;
     },
   };

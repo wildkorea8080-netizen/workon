@@ -139,26 +139,30 @@ export function superTokenSub(token: string): string | null {
  * - 'inactive': 행이 없거나 비활성·탈퇴
  * - 'error': 못 읽음
  */
-export type UserStatus = { kind: 'active'; role: string | null; departmentId: string | null } | { kind: 'inactive' } | { kind: 'error' };
+export type UserStatus =
+  | { kind: 'active'; role: string | null; departmentId: string | null; passwordChangedAt?: number | null }
+  | { kind: 'inactive' }
+  | { kind: 'error' };
 
 export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<UserStatus> {
   if (typeof sub !== 'string' || !UUID.test(sub)) return { kind: 'inactive' };
   if (!cfg) return { kind: 'error' };
   try {
-    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at`, { headers: headers(cfg) });
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at,password_changed_at`, { headers: headers(cfg) });
     if (!res.ok) return { kind: 'error' };
-    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null }[];
+    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null }[];
     if (!Array.isArray(rows)) return { kind: 'error' };
     const row = rows[0];
     if (!row || row.is_active === false || row.deleted_at) return { kind: 'inactive' };
     // 로그인이 토큰에 싣는 역할과 같은 규칙(sign-in-user.ts — 대소문자·빈 값은 USER)
-    return { kind: 'active', role: String(row.role ?? 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: typeof row.department_id === 'string' ? row.department_id : null };
+    return { kind: 'active', role: String(row.role ?? 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: typeof row.department_id === 'string' ? row.department_id : null,
+      passwordChangedAt: row.password_changed_at ? Date.parse(row.password_changed_at) || null : null };
   } catch {
     return { kind: 'error' };
   }
 }
 
-export type SessionVerdict = 'ok' | 'inactive' | 'changed';
+export type SessionVerdict = 'ok' | 'inactive' | 'changed' | 'password_changed';
 type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: number };
 
 /**
@@ -170,7 +174,7 @@ type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: numb
  */
 export async function userSessionVerdict(
   cache: Map<string, UserCacheEntry>,
-  token: { sub?: unknown; role?: unknown; departmentId?: unknown },
+  token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown },
   read: (sub: unknown) => Promise<UserStatus>,
   now = Date.now(),
 ): Promise<SessionVerdict> {
@@ -194,6 +198,12 @@ export async function userSessionVerdict(
   const tokenRole = typeof token.role === 'string' ? token.role : null;
   const tokenDept = typeof token.departmentId === 'string' ? token.departmentId : null;
   if (status.role !== tokenRole || status.departmentId !== tokenDept) return 'changed';
+  // 비밀번호를 바꾼 뒤(본인·관리자 재발급, 0092) 그 전에 로그인한 토큰은 끝낸다. 로그인한 때는 authAt(ms), 없는 옛 토큰은 iat(초).
+  // 같은 초 안에 다시 로그인한 토큰을 잘못 끝내지 않게 초 단위로 맞댄다
+  if (status.passwordChangedAt) {
+    const loginSec = typeof token.authAt === 'number' ? Math.floor(token.authAt / 1000) : typeof token.iat === 'number' ? token.iat : null;
+    if (loginSec !== null && loginSec < Math.floor(status.passwordChangedAt / 1000)) return 'password_changed';
+  }
   return 'ok';
 }
 

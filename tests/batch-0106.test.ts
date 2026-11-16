@@ -55,6 +55,7 @@ function makeDeps(opts: {
     updateAuthPassword: vi.fn(async (_id: string, pw: string) => { calls.push(`auth:${pw}`); return opts.auth ?? 'ok'; }),
     hash: vi.fn(async (pw: string) => `h(${pw})`),
     setPasswordHash: vi.fn(async (_id: string, h: string) => { calls.push(`hash:${h}`); return opts.setOk ?? true; }),
+    markPasswordChanged: vi.fn(async () => { calls.push('marked'); return true; }),
   };
   return { d, calls };
 }
@@ -66,18 +67,18 @@ describe('비밀번호 바꾸기', () => {
     const { d, calls } = makeDeps();
     expect(await run(d)).toEqual({ ok: true });
     expect(d.verifyAuth).toHaveBeenCalledWith('a@x.go.kr', 'Old-pass1');
-    expect(calls).toEqual([`clear:${signInKey('a@x.go.kr')}`, 'auth:New-pass12']);
+    expect(calls).toEqual([`clear:${signInKey('a@x.go.kr')}`, 'auth:New-pass12', 'marked']);
   });
   it('Auth 계정에 옛 해시도 있으면 해시도 새 비밀번호로 — 옛 비밀번호가 두 번째 길로 통과하지 않게', async () => {
     const { d, calls } = makeDeps({ row: { email: 'a@x.go.kr', password_hash: 'old', is_active: true } });
     expect(await run(d)).toEqual({ ok: true });
-    expect(calls.slice(1)).toEqual(['auth:New-pass12', 'hash:h(New-pass12)']);
+    expect(calls.slice(1)).toEqual(['auth:New-pass12', 'hash:h(New-pass12)', 'marked']);
   });
   it('관리자가 등록한 계정(Auth 없음) — 해시로 확인하고 해시를 바꾼다', async () => {
     const { d, calls } = makeDeps({ row: { email: 'a@x.go.kr', password_hash: 'old' }, authOk: null, hashOk: true, auth: 'not_found' });
     expect(await run(d)).toEqual({ ok: true });
     expect(d.compareHash).toHaveBeenCalledWith('Old-pass1', 'old');
-    expect(calls.slice(1)).toEqual(['auth:New-pass12', 'hash:h(New-pass12)']);
+    expect(calls.slice(1)).toEqual(['auth:New-pass12', 'hash:h(New-pass12)', 'marked']);
   });
   it('Auth가 다른 계정 id를 돌려주면 본인 확인이 아니다', async () => {
     const { d } = makeDeps({ authOk: 'other-id' });
@@ -121,7 +122,7 @@ describe('연결(원본)', () => {
     expect(src).not.toMatch(/body\??\.(user_?id|id)\b/);
     expect(src).toContain('if (session.user.isImpersonating)');
     expect(src).toContain("event_type: 'password_changed'");
-    expect(src).toContain('details: {}');
+    expect(src).toContain('details: result.sessionsKept ? { sessions_kept: true } : {}');
     expect(src).toContain('locked: [429, LOCKED_MESSAGE]');
   });
   it('화면 — 규칙은 잎 파일에서, 사용자 메뉴에 링크, 감사 화면 이름표', () => {

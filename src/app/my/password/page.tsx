@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useSession } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import { PASSWORD_RULE_TEXT, passwordPolicyError } from '@/lib/password-policy';
 
 /** 내 비밀번호 바꾸기(2026-11-16) — 검사는 서버가 다시 한다(`/api/my/password`) */
@@ -35,6 +35,8 @@ export default function MyPasswordPage() {
       if (!data?.ok) { setError(data?.error?.message ?? '비밀번호를 바꾸지 못했습니다.'); return; }
       setDone(true);
       setCurrent(''); setNext(''); setConfirm('');
+      // 바꾼 때가 적혔으면 모든 기기의 로그인이 끝난다 — 여기서도 로그아웃하고 새 비밀번호로 다시 들어오게 한다
+      if (data.data?.signedOut) setTimeout(() => { void signOut({ callbackUrl: '/login?error=password_changed' }); }, 1500);
     } catch {
       setError('비밀번호를 바꾸지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
     } finally {
@@ -71,7 +73,7 @@ export default function MyPasswordPage() {
           </label>
 
           {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
-          {done && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요.</p>}
+          {done && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">비밀번호를 바꿨습니다. 다른 기기를 포함해 모든 로그인이 끝납니다 — 새 비밀번호로 다시 로그인해 주세요.</p>}
 
           <button
             type="submit"

@@ -64,14 +64,14 @@ const SIGN_IN_PAGES = /^\/(login|signin|signup|register)(\/|$)/;
 /** 끝난 직원 세션 — 쿠키를 지우고 API는 401, 화면은 로그인으로 */
 function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerdict | 'impersonation'): NextResponse {
   const res = pathname.startsWith('/api')
-    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
+    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : verdict === 'password_changed' ? '비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
     : SIGN_IN_PAGES.test(pathname)
       ? NextResponse.next()
       : (() => {
           const url = req.nextUrl.clone();
           url.pathname = '/login';
           url.search = '';
-          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : 'session_ended');
+          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : 'session_ended');
           return NextResponse.redirect(url);
         })();
   for (const name of sessionCookieNames(req.cookies.getAll().map((c) => c.name))) {
