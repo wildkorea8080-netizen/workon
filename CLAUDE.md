@@ -373,6 +373,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 비밀번호를 끝없이 맞춰 볼 수 있었다. `tests/batch-0103.test.ts`
 **잠금 풀기**(2026-11-16, 마이그레이션 없음): 기관 관리자 '사용자 관리' 목록이 잠긴 직원에 '로그인 잠김 · 12:25 풀림'(`accountLocks`·`lockedUntil` — 창 안 실패가 5번 아래로 떨어지는 때, 화면 글은 잎 파일 `lockUntilLabel`)과 '잠금 풀기'를 보인다(`DELETE /api/users/[id]/sign-in-lock` — 관리 범위 직원만·직원 로그인 잠금만, `security_logs` `sign_in_unlocked` medium·대상 id만). 슈퍼관리자 '계정 관리'의 직원·슈퍼관리자 두 표도 같고(`DELETE /api/super/accounts/users/[id]/sign-in-lock` — 직원·슈퍼관리자 두 잠금을 함께, `super_admin_logs`). 잠김 표시를 못 읽으면 표시만 빠진다. **IP 잠금(한 IP 30번)은 풀지 않는다** — 30분 기다림. `tests/batch-0104.test.ts`
 
+**직원 세션 계정 확인**(2026-11-16, 마이그레이션 없음, `src/lib/middleware-db.ts` `readUserStatus`·`userSessionVerdict`): 직원 세션은 NextAuth JWT(30일)라 서명만 보면 비활성화·탈퇴·권한/소속 변경 뒤에도 만료까지 쓰였다. 미들웨어가 토큰이 있는 요청마다(IP 판정보다 먼저) 계정을 서비스 키로 다시 본다(30초 기억) — 비활성·탈퇴면 끝내고, **역할·부서가 토큰과 다르면 끝내 다시 로그인하게 한다**(강등된 관리자의 옛 토큰·부서를 옮긴 직원의 옛 범위). 끝내면 세션 쿠키(조각 포함)를 지우고 API는 401, 로그인 화면들은 그대로, 그 밖은 `/login?error=session_ended|session_changed`. 못 읽으면 10분 안의 마지막 값, 그것도 없으면 **받는다**(열림 — 슈퍼관리자는 닫힘). 대리 접근 토큰은 들어온 슈퍼관리자도 활성이어야 한다. 대리 접근은 활성·탈퇴 안 한 관리자로만 들어가고, 서명 비밀값은 `config.ts`에서(예전엔 비면 소스의 고정 값). `tests/batch-0105.test.ts`
+
 ---
 
 ## RAG 파이프라인
@@ -1899,7 +1901,7 @@ details: {
   가지 `claude/compassionate-volhard-252086`(2026-10-17, 마이그레이션 번호 0030)을 2026-11-02에 합치며 **0047로 번호를 바꾸고** 첨부 정리를 더했다.
   **이름·부서는 남깁니다** (사용 기록의 귀속). 대화를 도장보다 먼저 지우는 이유는, 도장 뒤에 실패하면 '이미 삭제됨'이라 다시 시도할 수 없어서입니다
 - **로그인은 `canSignIn`이 막습니다** — 비활성(`is_active=false`)도 같이. 예전에는 로그인이 `is_active`를 보지 않아
-  슈퍼관리자 화면의 '비활성'이 표시뿐이었습니다. 이미 발급된 세션(JWT)은 만료까지 남습니다
+  슈퍼관리자 화면의 '비활성'이 표시뿐이었습니다. 이미 발급된 세션(JWT)은 2026-11-16부터 미들웨어가 30초 안에 끊습니다(위 '직원 세션 계정 확인')
 - 사용자 목록·인원 수는 `.is('deleted_at', null)`로 거릅니다. 감사·사용 기록 조회는 거르지 않습니다
 - 슈퍼관리자 계정은 이 경로로 처리하지 않습니다(슈퍼관리자 탭에서 비활성화). `super_admin_logs.admin_user_id`가
   SET NULL인데 NOT NULL이라 행 삭제는 어차피 23502로 막힙니다
