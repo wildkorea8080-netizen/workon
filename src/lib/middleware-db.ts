@@ -131,3 +131,73 @@ export function superTokenSub(token: string): string | null {
     return null;
   }
 }
+
+/**
+ * 직원 세션 계정 상태(2026-11-16) — NextAuth 토큰(JWT, 30일)은 서명만 보면 비활성화·탈퇴·권한/소속 변경 뒤에도 만료까지 쓰였다
+ * (예전엔 "이미 발급된 세션은 만료까지 남는다"). 미들웨어가 토큰이 있는 요청마다 계정을 DB로 다시 본다(30초 기억).
+ * - 'active': 행이 있고 활성·탈퇴 안 함 — 지금 역할·부서를 함께 돌려줘 토큰과 맞대 본다
+ * - 'inactive': 행이 없거나 비활성·탈퇴
+ * - 'error': 못 읽음
+ */
+export type UserStatus = { kind: 'active'; role: string | null; departmentId: string | null } | { kind: 'inactive' } | { kind: 'error' };
+
+export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<UserStatus> {
+  if (typeof sub !== 'string' || !UUID.test(sub)) return { kind: 'inactive' };
+  if (!cfg) return { kind: 'error' };
+  try {
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at`, { headers: headers(cfg) });
+    if (!res.ok) return { kind: 'error' };
+    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null }[];
+    if (!Array.isArray(rows)) return { kind: 'error' };
+    const row = rows[0];
+    if (!row || row.is_active === false || row.deleted_at) return { kind: 'inactive' };
+    // 로그인이 토큰에 싣는 역할과 같은 규칙(sign-in-user.ts — 대소문자·빈 값은 USER)
+    return { kind: 'active', role: String(row.role ?? 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: typeof row.department_id === 'string' ? row.department_id : null };
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+export type SessionVerdict = 'ok' | 'inactive' | 'changed';
+type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: number };
+
+/**
+ * 이 토큰을 지금도 받아도 되는가.
+ * - 비활성·탈퇴 → 'inactive', 역할·부서가 토큰과 다름 → 'changed'(다시 로그인해야 새 권한·소속이 토큰에 실린다 — 강등된 관리자가
+ *   옛 토큰으로 관리자 화면을 쓰거나, 다른 부서로 옮긴 직원이 옛 부서 범위로 보지 않게)
+ * - 못 읽으면 10분 안의 마지막 값, 그것도 없으면 **받는다**(직원 전체가 DB 흔들림에 쫓겨나지 않게 — 라우트의 권한 검사는 그대로다).
+ *   슈퍼관리자(닫힘)와 다른 까닭이다.
+ */
+export async function userSessionVerdict(
+  cache: Map<string, UserCacheEntry>,
+  token: { sub?: unknown; role?: unknown; departmentId?: unknown },
+  read: (sub: unknown) => Promise<UserStatus>,
+  now = Date.now(),
+): Promise<SessionVerdict> {
+  const key = typeof token.sub === 'string' ? token.sub : '';
+  const hit = cache.get(key);
+  let status: Exclude<UserStatus, { kind: 'error' }> | null = hit && now - hit.at < SUPER_STATUS_TTL_MS ? hit.status : null;
+  if (!status) {
+    const read1 = await read(token.sub);
+    if (read1.kind === 'error') {
+      status = hit && now - hit.at < SUPER_STATUS_STALE_MS ? hit.status : null;
+      if (!status) return 'ok';
+    } else {
+      status = read1;
+      if (key) {
+        if (cache.size > 2000) cache.clear();
+        cache.set(key, { status, at: now });
+      }
+    }
+  }
+  if (status.kind === 'inactive') return 'inactive';
+  const tokenRole = typeof token.role === 'string' ? token.role : null;
+  const tokenDept = typeof token.departmentId === 'string' ? token.departmentId : null;
+  if (status.role !== tokenRole || status.departmentId !== tokenDept) return 'changed';
+  return 'ok';
+}
+
+/** 지울 NextAuth 세션 쿠키 이름 — 보안 접두어 둘·나눠 담긴 조각(.0 .1 …)까지 */
+export function sessionCookieNames(names: string[]): string[] {
+  return names.filter((n) => /^(__Secure-)?next-auth\.session-token(\.\d+)?$/.test(n));
+}

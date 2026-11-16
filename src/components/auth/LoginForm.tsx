@@ -51,7 +51,9 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
 
   const errorMsg =
     redirectError === 'unauthorized' ? '관리자 권한이 필요합니다.' :
-    redirectError === 'unauthenticated' ? '다시 로그인해주세요.' : null;
+    redirectError === 'unauthenticated' ? '다시 로그인해주세요.' :
+    redirectError === 'session_changed' ? '권한이나 소속이 바뀌어 로그아웃되었습니다. 다시 로그인해 주세요.' :
+    redirectError === 'session_ended' ? '로그인이 끝났습니다. 다시 로그인해 주세요.' : null;
 
   return (
     <main className={`min-h-screen bg-gradient-to-br ${c.bg} flex items-center justify-center px-4`} style={(theme ?? undefined) as CSSProperties | undefined}>

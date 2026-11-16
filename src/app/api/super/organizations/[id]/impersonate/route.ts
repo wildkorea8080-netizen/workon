@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encode } from 'next-auth/jwt';
 import { logSystem } from '@/lib/logger';
+import { NEXTAUTH_SECRET } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,10 @@ export async function POST(
     .select('id, email, full_name, department_id')
     .in('department_id', deptIds)
     .eq('role', 'ADMIN')
+    .eq('is_super_admin', false)
+    .eq('is_active', true) // 비활성·탈퇴한 관리자로 들어가지 않는다(2026-11-16 — 미들웨어가 바로 끊는다)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
     .limit(5);
 
   if (adminErr) {
@@ -83,7 +88,8 @@ export async function POST(
     .maybeSingle();
 
   // 5) NextAuth 호환 임시 세션 토큰 생성 (2시간)
-  const secret = process.env.NEXTAUTH_SECRET ?? 'fallback-secret';
+  // 예전엔 환경 변수가 비면 소스에 적힌 고정 값으로 서명했다(2026-11-16 — config.ts가 값이 없으면 시작에서 멈춘다)
+  const secret = NEXTAUTH_SECRET;
   const sessionToken = await encode({
     token: {
       sub: adminUser.id,

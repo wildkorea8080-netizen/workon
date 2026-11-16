@@ -3,7 +3,10 @@ import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
-import { readIpPolicy, readMaintenance, readSuperAdminStatus, restConfig, superAdminActive, superTokenSub } from '@/lib/middleware-db';
+import {
+  readIpPolicy, readMaintenance, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenSub, userSessionVerdict,
+  type SessionVerdict,
+} from '@/lib/middleware-db';
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? '';
 
@@ -51,6 +54,31 @@ async function loadIpPolicy(): Promise<Map<string, string[]>> {
 
 // 슈퍼관리자 계정이 지금도 활성인가(2026-11-13) — 토큰은 24시간이라 비활성화해도 만료까지 쓰이던 공백을 닫는다
 const superStatusCache = new Map<string, { active: boolean; at: number }>();
+
+// 직원 세션 계정 상태 기억(2026-11-16) — 30초
+const userStatusCache: Parameters<typeof userSessionVerdict>[0] = new Map();
+
+/** 로그인 화면들 — 끝난 세션이면 쿠키만 지우고 그대로 보인다(로그인 화면으로 다시 보내면 돌기만 한다) */
+const SIGN_IN_PAGES = /^\/(login|signin|signup|register)(\/|$)/;
+
+/** 끝난 직원 세션 — 쿠키를 지우고 API는 401, 화면은 로그인으로 */
+function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerdict | 'impersonation'): NextResponse {
+  const res = pathname.startsWith('/api')
+    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
+    : SIGN_IN_PAGES.test(pathname)
+      ? NextResponse.next()
+      : (() => {
+          const url = req.nextUrl.clone();
+          url.pathname = '/login';
+          url.search = '';
+          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : 'session_ended');
+          return NextResponse.redirect(url);
+        })();
+  for (const name of sessionCookieNames(req.cookies.getAll().map((c) => c.name))) {
+    res.cookies.set({ name, value: '', maxAge: 0, path: '/' });
+  }
+  return res;
+}
 async function superTokenActive(token: string): Promise<boolean> {
   if (!(await verifySuperTokenEdge(token))) return false;
   return superAdminActive(superStatusCache, superTokenSub(token), (sub) => readSuperAdminStatus(restConfig(), sub, fetch));
@@ -163,6 +191,19 @@ export async function middleware(req: NextRequest) {
   // 없고, 어차피 그다음 인증 검사에서 막힌다.
   if (!pathname.startsWith('/super') && !pathname.startsWith('/blocked')) {
     const ipToken = await getToken({ req, secret: NEXTAUTH_SECRET });
+
+    // ── 직원 세션 계정 상태(2026-11-16) — 비활성·탈퇴·권한/소속이 바뀐 계정의 옛 토큰을 끝낸다.
+    // 대리 접근 토큰은 들어온 슈퍼관리자도 아직 활성인지 본다(비활성화한 슈퍼관리자의 대리 접근 2시간을 끊는다).
+    if (ipToken?.sub) {
+      const verdict = await userSessionVerdict(userStatusCache, ipToken, (sub) => readUserStatus(restConfig(), sub, fetch));
+      if (verdict !== 'ok') return endUserSession(req, pathname, verdict);
+      if (ipToken.isImpersonating) {
+        const by = ipToken.impersonatedBy;
+        const superOk = await superAdminActive(superStatusCache, by, (sub) => readSuperAdminStatus(restConfig(), sub, fetch));
+        if (!superOk) return endUserSession(req, pathname, 'impersonation');
+      }
+    }
+
     const ipDeptId = (ipToken?.departmentId as string | null | undefined) ?? null;
 
     if (ipToken?.sub && ipDeptId) {
