@@ -16,7 +16,11 @@ export async function PATCH(
     const body = await request.json();
     const update: Record<string, unknown> = {};
 
-    if (body.isActive !== undefined) update.is_active = body.isActive;
+    if (body.isActive !== undefined) {
+      update.is_active = body.isActive;
+      // 다시 켜면 그때부터 장기 미접속을 센다(0095)
+      if (body.isActive === true) update.reactivated_at = new Date().toISOString();
+    }
     if (body.role !== undefined) {
       if (!['ADMIN', 'USER'].includes(body.role))
         return NextResponse.json({ ok: false, error: '유효하지 않은 role' }, { status: 400 });

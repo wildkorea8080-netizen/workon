@@ -38,7 +38,7 @@ describe('연결(원본)', () => {
     expect(src).toContain('if (!body.active && reason.length < 2)');
     expect(src).toContain('managedDeptIds.includes(target.department_id)');
     expect(src).toContain(".eq('is_super_admin', false)");
-    expect(src).toContain(".update({ is_active: body.active })");
+    expect(src).toContain('{ is_active: true, reactivated_at: new Date().toISOString() } : { is_active: false }');
     expect(src).toContain("event_type: body.active ? 'user_reactivated' : 'user_deactivated'");
     expect(src).toContain("severity: 'high'");
   });

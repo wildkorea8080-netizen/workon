@@ -92,6 +92,8 @@ const SECURITY_LABEL: Record<string, string> = {
   password_reset_by_admin: '임시 비밀번호 재발급(관리자)',
   user_deactivated: '계정 사용 중지(관리자)',
   user_reactivated: '계정 다시 사용(관리자)',
+  user_dormant_locked: '장기 미접속으로 사용 중지(자동)',
+  dormant_lock_changed: '장기 미접속 잠금 설정 바꾸기(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
   app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_outbound_result_retried: '앱 결과 다시 보내기(직원)',

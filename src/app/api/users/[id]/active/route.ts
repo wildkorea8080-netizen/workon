@@ -58,7 +58,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('users')
-      .update({ is_active: body.active })
+      // 다시 사용하게 하면 그때부터 장기 미접속을 센다(0095 — 풀자마자 다시 잠기지 않게)
+      .update(body.active ? { is_active: true, reactivated_at: new Date().toISOString() } : { is_active: false })
       .eq('id', target.id)
       .is('deleted_at', null)
       .select('id, is_active')

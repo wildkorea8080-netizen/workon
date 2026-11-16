@@ -8,6 +8,8 @@ import { canSignIn } from '@/lib/user-withdrawal';
 import { decideSignIn } from '@/lib/sign-in-user';
 import { ACCOUNT_LOCKED, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
 import { recordSignIn, signInRecordDeps, type SignInOutcome } from '@/lib/sign-in-record';
+import { dormantDeps, lockIfDormant } from '@/lib/dormant-lock';
+import { ACCOUNT_DORMANT } from '@/lib/sign-in-lock-spec';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -46,6 +48,11 @@ export const authOptions: AuthOptions = {
           const local = await authorizeWithPasswordHash(credentials.email, credentials.password);
           if (local) {
             await noteSignInSuccess(throttle, 'user', credentials.email);
+            // 장기 미접속 잠금(0095, 기관이 켰을 때) — 비밀번호가 맞아도 사용 중지로 돌리고 막는다
+            if (await lockIfDormant(dormantDeps(), local.id)) {
+              await record('login_rejected', { id: local.id, departmentId: local.departmentId ?? null });
+              throw new Error(ACCOUNT_DORMANT);
+            }
             await record('login', { id: local.id, departmentId: local.departmentId ?? null });
           } else {
             await noteSignInFailure(throttle, 'user', credentials.email, ip);
@@ -76,6 +83,10 @@ export const authOptions: AuthOptions = {
           console.warn('[nextAuth] 로그인 거절 — 소속을 확인할 수 없음:', decision.reason);
           await record('login_rejected', existingUser ? { id: existingUser.id, departmentId: existingUser.department_id ?? null } : null);
           return null;
+        }
+        if (await lockIfDormant(dormantDeps(), authUser.id)) {
+          await record('login_rejected', { id: authUser.id, departmentId: decision.departmentId });
+          throw new Error(ACCOUNT_DORMANT);
         }
         await record('login', { id: authUser.id, departmentId: decision.departmentId });
 
