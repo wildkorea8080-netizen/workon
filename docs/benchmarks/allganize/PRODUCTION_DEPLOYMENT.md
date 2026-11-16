@@ -5,6 +5,16 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-16(밤 6): 장기 미접속 계정 잠금(0095, 기관이 켤 때만)·기관 정보는 기관 전체 관리자만
+
+- **배포 전 운영 확인(읽기 전용)**: 기관 정보 수정을 기관 전체 관리자만으로 좁혀 잃는 사람이 있는지 — 두 기관 모두 최상위 부서 관리자 1명·하위 부서 관리자 0명(잃는 사람 없음).
+- **먼저 운영 DB에 0095 적용**(2026-11-16 23:22 KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `organizations.dormant_lock_days` smallint·`dormant_lock_since` timestamptz·`users.reactivated_at` timestamptz, CHECK(30~365·켤 때 켠 때 필수), 켠 기관 0, 두 표 RLS 켜짐, anon 읽기 권한 없음, 적용 기록 있음.
+- 그다음 코드 배포 `dpl_2A4EFi272R697p988fngEwKxmx3r`(커밋 `be7968f`, 2026-11-16 23:24 KST, `main` fast-forward — GitHub 연동). 되돌릴 때는 직전 `dpl_6MHzJw12fr5g1zyYMusMxTiAGJ9Q`(c77acd2)로 promote한다(0095는 남겨도 옛 코드가 읽지 않는다 — 잠금이 다시 꺼지고, 기관 정보 수정이 하위 부서 관리자에게도 다시 열린다).
+- 들어간 커밋: `23e06f4`(직전 배포 기록), `c5ebae6` 장기 미접속 잠금(기관 전체 관리자 '기관 정보' 화면에서 30~365일로 켬·켠 때부터 셈, 직원 로그인 두 길이 비밀번호 확인 뒤 기간이 지났으면 사용 중지로 돌리고 `ACCOUNT_DORMANT`, '다시 사용'은 `reactivated_at`부터 다시 셈) + 기관 정보 PATCH는 기관 전체 관리자만, `be7968f` 문서.
+- **배포 전**: 가지 Preview(`be7968f`, `workon-3hxm9ytee`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0095)를 띄운 전체 시험 268파일 3,685개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `/admin/organization` 307, `GET·PATCH /api/admin/organization`·`PUT /api/admin/organization/dormant-lock` 403, 없는 계정으로 직원 로그인 401(로그인 길이 그대로 돎). pg_cron 호출 200(23:24~23:26 KST, 실행기 하트비트 23:25).
+- **확인하지 못한 것**(사용자 몫): 로그인한 화면을 브라우저로 보지 않았다 — 평소 로그인이 그대로 되는지(가장 중요 — 성공 로그인마다 잠금 확인 한 번), 기관 정보 화면의 '장기 미접속 계정 잠금' 켜기·끄기. 잠금이 실제로 걸리는 것은 기간(최소 30일)이 지나야 보인다 — 자동 시험만.
+
 ## 2026-11-16(밤 5): 기관 관리자의 계정 사용 중지·다시 사용
 
 - 2026-11-16 23:11 KST 배포 `dpl_6MHzJw12fr5g1zyYMusMxTiAGJ9Q`(커밋 `c77acd2`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_Faj9374W424prRDUKK44tmWyRbKu`(c9a7f4c)로 promote한다(기관 관리자의 사용 중지·다시 사용 단추만 빠진다 — 이미 끈 계정은 꺼진 채, 슈퍼관리자가 켤 수 있다).
