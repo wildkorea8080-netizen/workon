@@ -32,7 +32,7 @@ export async function GET(_request: NextRequest) {
     // 직원이 1,000명을 넘어도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)
     const { data: users, error } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('users')
-      .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, last_sign_in_at, departments(id, name)', w ? { count: 'exact' } : undefined)
+      .select('id, email, full_name, role, created_at, department_id, monthly_budget_krw, last_sign_in_at, is_active, departments(id, name)', w ? { count: 'exact' } : undefined)
       .in('department_id', managedDeptIds)
       .is('deleted_at', null) // 삭제(탈퇴)한 계정은 행만 남아 있다 (0047)
       .order('created_at', { ascending: false })

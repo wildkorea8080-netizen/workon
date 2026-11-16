@@ -90,6 +90,8 @@ const SECURITY_LABEL: Record<string, string> = {
   sign_in_unlocked: '로그인 잠금 풀기(관리자)',
   password_changed: '비밀번호 바꾸기(본인)',
   password_reset_by_admin: '임시 비밀번호 재발급(관리자)',
+  user_deactivated: '계정 사용 중지(관리자)',
+  user_reactivated: '계정 다시 사용(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
   app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_outbound_result_retried: '앱 결과 다시 보내기(직원)',

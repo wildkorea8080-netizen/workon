@@ -27,6 +27,8 @@ export type User = {
   sign_in_locked_until?: string | null;
   /** 마지막 로그인(0094) — 관리자 목록 응답에만 */
   last_sign_in_at?: string | null;
+  /** 계정 사용 여부 — 관리자 목록 응답에만(끄면 로그인 막힘) */
+  is_active?: boolean | null;
   department_id?: string;
   created_at: string;
   updated_at: string;

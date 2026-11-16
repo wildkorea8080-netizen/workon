@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/db';
 import CsvRegisterTab from './CsvRegisterTab';
 import { lockUntilLabel } from '@/lib/sign-in-lock-spec';
+import { USER_LIST_FILTERS, matchesUserFilter, type UserListFilter } from '@/lib/user-list-filter';
 
 interface Invitation {
   id: string;
@@ -126,6 +127,36 @@ export default function UsersManager() {
     } catch (err) {
       setError(err instanceof Error ? err.message : '한도 저장에 실패했습니다.');
       await loadData();
+    } finally {
+      setMovingId(null);
+    }
+  };
+
+  // 목록 거르기 — 사용 중지·장기 미접속(2026-11-16)
+  const [listFilter, setListFilter] = useState<UserListFilter>('all');
+  const shownUsers = users.filter(u => matchesUserFilter(u, listFilter));
+
+  /** 계정 사용 중지·다시 사용 — 끄면 로그인이 막히고 열린 로그인도 30초 안에 끝난다 */
+  const handleActive = async (userId: string, email: string, active: boolean) => {
+    let reason = '';
+    if (!active) {
+      const r = prompt(`${email} 계정을 사용 중지합니다. 사유를 적어 주세요(예: 퇴직, 전출).`);
+      if (r === null) return;
+      reason = r.trim();
+    } else if (!confirm(`${email} 계정을 다시 사용하게 할까요?`)) return;
+    setMovingId(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}/active`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active, reason }),
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, is_active: result.data.is_active } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '계정 상태를 바꾸지 못했습니다.');
     } finally {
       setMovingId(null);
     }
@@ -265,9 +296,20 @@ export default function UsersManager() {
           ) : (
             <>
               <section>
+                <div className="mb-3 flex items-center gap-2">
+                  <select
+                    value={listFilter}
+                    onChange={e => setListFilter(e.target.value as UserListFilter)}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700"
+                    title="목록 거르기"
+                  >
+                    {USER_LIST_FILTERS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </select>
+                  {listFilter !== 'all' && <span className="text-xs text-slate-400">{shownUsers.length}명</span>}
+                </div>
                 <div className="space-y-2">
-                  {users.map(user => (
-                    <div key={user.id} className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow">
+                  {shownUsers.map(user => (
+                    <div key={user.id} className={`flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow ${user.is_active === false ? 'opacity-60' : ''}`}>
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-[#003087] font-bold text-sm">
                           {(user.full_name || user.email).charAt(0).toUpperCase()}
@@ -278,6 +320,9 @@ export default function UsersManager() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
+                        {user.is_active === false && (
+                          <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-slate-200 text-slate-600">사용 중지됨</span>
+                        )}
                         {user.sign_in_locked_until && (
                           <span className="flex items-center gap-1.5">
                             <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-red-50 text-red-600" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
@@ -336,12 +381,24 @@ export default function UsersManager() {
                         >
                           비밀번호 재발급
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => handleActive(user.id, user.email, user.is_active === false)}
+                          disabled={movingId === user.id}
+                          title={user.is_active === false ? '계정을 다시 사용하게 합니다' : '계정을 사용 중지합니다(로그인이 막히고 열린 로그인도 끝남)'}
+                          className={`text-xs font-medium disabled:opacity-50 ${user.is_active === false ? 'text-emerald-600 hover:text-emerald-800' : 'text-slate-500 hover:text-red-600'}`}
+                        >
+                          {user.is_active === false ? '다시 사용' : '사용 중지'}
+                        </button>
                         <span className="text-xs text-slate-400" title="가입일 · 마지막 로그인">
                           {formatDate(user.created_at)} · {user.last_sign_in_at ? `최근 ${formatDate(user.last_sign_in_at)}` : '로그인 기록 없음'}
                         </span>
                       </div>
                     </div>
                   ))}
+                  {users.length > 0 && shownUsers.length === 0 && (
+                    <div className="text-center py-8 text-slate-400 text-sm">조건에 맞는 직원이 없습니다.</div>
+                  )}
                   {users.length === 0 && (
                     <div className="text-center py-8 text-slate-400 text-sm">등록된 사용자가 없습니다.</div>
                   )}
