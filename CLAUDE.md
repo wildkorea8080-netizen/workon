@@ -394,6 +394,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 **내 로그인 기록**(2026-11-16, 마이그레이션 없음): 사용자 메뉴 '비밀번호·로그인 기록'(`/my/password`) 아래 '최근 로그인 기록'(`components/my/MySignIns.tsx` ← `GET /api/my/sign-ins` — 세션 본인의 `access_logs` 직원 로그인만, 최근 90일·30건, 대리 접근 중 403, 브라우저 정보는 '윈도우 · 크롬' 같은 짧은 꼴만 — 잎 파일 `my-sign-ins-spec.ts` `deviceLabel`). 최근 30일 틀림·잠김 수를 경고로 보인다. 임시 비밀번호로 묶인 동안은 숨긴다. `tests/batch-0110.test.ts`
 
+**기관 관리자의 계정 사용 중지·다시 사용**(2026-11-16, 마이그레이션 없음, `POST /api/users/[id]/active { active, reason }`): 예전엔 슈퍼관리자만 계정을 꺼 퇴직·전출 직원을 기관이 막지 못했다. 관리 범위 직원만·본인 안 됨·대리 접근 403·슈퍼관리자 계정 제외, 끌 때 사유 2자 이상, 보안 로그 `user_deactivated`·`user_reactivated` high. 끄면 로그인이 막히고(`canSignIn`) 열린 로그인은 미들웨어가 30초 안에 끝낸다. 탈퇴(행·기록 정리)는 그대로 슈퍼관리자 '계정 삭제'. 사용자 관리 목록에 '사용 중지됨' 표시·'사용 중지/다시 사용' 단추와 거르기(전체·사용 중지·90일 넘게 로그인 안 함·로그인 기록 없음 — 잎 파일 `user-list-filter.ts`, 로그인 기록은 2026-11-16부터라 '기록 없음'은 그 뒤로 안 들어온 사람). 장기 미접속 자동 잠금은 아직 없다. `tests/batch-0111.test.ts`
+
 ---
 
 ## RAG 파이프라인
