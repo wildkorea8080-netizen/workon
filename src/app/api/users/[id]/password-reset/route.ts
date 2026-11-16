@@ -23,7 +23,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
       return NextResponse.json({ ok: false, error: { message: '대리 접근 중에는 비밀번호를 재발급할 수 없습니다.' } }, { status: 403 });
     }
     if (params.id === session.user.id) {
-      return NextResponse.json({ ok: false, error: { message: '본인 비밀번호는 사용자 메뉴의 \'비밀번호 바꾸기\'에서 바꿔 주세요.' } }, { status: 400 });
+      return NextResponse.json({ ok: false, error: { message: '본인 비밀번호는 사용자 메뉴의 \'비밀번호·로그인 기록\'에서 바꿔 주세요.' } }, { status: 400 });
     }
     const adminDeptId = session.user.departmentId;
     if (!adminDeptId) {

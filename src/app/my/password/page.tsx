@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { signOut, useSession } from 'next-auth/react';
 import { PASSWORD_RULE_TEXT, passwordPolicyError } from '@/lib/password-policy';
+import MySignIns from '@/components/my/MySignIns';
 
 /** 내 비밀번호 바꾸기(2026-11-16) — 검사는 서버가 다시 한다(`/api/my/password`) */
 export default function MyPasswordPage() {
@@ -93,6 +94,9 @@ export default function MyPasswordPage() {
             {saving ? '바꾸는 중…' : '비밀번호 바꾸기'}
           </button>
         </form>
+
+        {/* 임시 비밀번호로 묶인 동안은 다른 API가 막혀 있어 보이지 않는다 */}
+        {!required && <MySignIns />}
       </div>
     </div>
   );

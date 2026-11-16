@@ -140,7 +140,7 @@ export function sendPasswordResetEmail(params: {
     layout(
       `${fullName}님, 임시 비밀번호가 발급되었습니다`,
       `<p style="font-size:15px;line-height:1.7">관리자가 비밀번호를 다시 발급했습니다. 이전 비밀번호와 열려 있던 로그인은 더 쓸 수 없습니다.
-       아래 임시 비밀번호로 로그인한 뒤 사용자 메뉴의 '비밀번호 바꾸기'에서 바로 바꿔 주세요.</p>
+       아래 임시 비밀번호로 로그인한 뒤 사용자 메뉴의 '비밀번호·로그인 기록'에서 바로 바꿔 주세요(임시 비밀번호로 들어오면 그 화면이 먼저 열립니다).</p>
        <table style="margin:20px 0;font-size:15px">
          <tr><td style="padding:6px 16px 6px 0;color:#64748b">아이디</td><td style="font-weight:600">${escapeHtml(to)}</td></tr>
          <tr><td style="padding:6px 16px 6px 0;color:#64748b">임시 비밀번호</td><td style="font-family:monospace;font-weight:700;color:#003087">${escapeHtml(tempPassword)}</td></tr>
