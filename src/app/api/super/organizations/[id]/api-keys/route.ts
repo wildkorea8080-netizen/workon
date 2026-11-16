@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encryptApiKey, decryptApiKey, maskKey } from '@/lib/crypto';
 import { UNSUPPORTED_PROVIDER_MESSAGE, isApiKeyProvider } from '@/lib/api-key-providers';
 
+const KEY_SAVE_FAILED = 'API 키를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
+
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -40,10 +42,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   // useSystemDefault ON → 기존 키 비활성화
   if (useSystemDefault === true) {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('api_keys')
       .update({ is_active: false })
       .eq('organization_id', params.id);
+    // Supabase는 실패를 던지지 않고 돌려준다 — 예전엔 실패해도 성공으로 답했다(2026-11-17)
+    if (error) return NextResponse.json({ ok: false, error: KEY_SAVE_FAILED }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
 
@@ -58,13 +62,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const prefix = keyValue.slice(0, 8);
 
   // upsert (기존 키 비활성화 후 새로 삽입)
-  await supabaseAdmin
+  const off = await supabaseAdmin
     .from('api_keys')
     .update({ is_active: false })
     .eq('organization_id', params.id)
     .eq('provider', provider);
+  if (off.error) return NextResponse.json({ ok: false, error: KEY_SAVE_FAILED }, { status: 500 });
 
-  await supabaseAdmin.from('api_keys').insert({
+  const added = await supabaseAdmin.from('api_keys').insert({
     organization_id: params.id,
     provider,
     key_prefix: prefix,
@@ -73,6 +78,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     is_default: true,
     created_by: admin.sub,
   });
+  if (added.error) return NextResponse.json({ ok: false, error: KEY_SAVE_FAILED }, { status: 500 });
 
   return NextResponse.json({ ok: true });
 }

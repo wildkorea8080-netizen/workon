@@ -116,7 +116,7 @@ export async function requestPasswordReset(
     expires_at: new Date(now.getTime() + RESET_LINK_MINUTES * 60_000).toISOString(),
   }).catch(() => null);
   if (!id) return { ok: false, code: 'error' };
-  await deps.expireOpen(user.id, now.toISOString(), id).catch(() => {});
+  await deps.expireOpen(user.id, now.toISOString(), id).catch(() => deps.log(OPEN_LINKS_NOT_EXPIRED, { user_id: user.id, step: 'request' }).catch(() => {}));
 
   const sent = await deps.sendLink(user.email, user.full_name || user.email, resetLink(token)).catch(() => false);
   if (!sent) {
@@ -152,7 +152,7 @@ export async function confirmPasswordReset(
   if (!(await deps.claimToken(row.id, now.toISOString()).catch(() => false))) return invalid;
 
   const fail = async (): Promise<ResetConfirmResult> => {
-    await deps.releaseToken(row.id).catch(() => {});
+    await deps.releaseToken(row.id).catch(() => deps.log(TOKEN_NOT_RELEASED, { user_id: user.id }).catch(() => {}));
     return { ok: false, code: 'error' };
   };
   const auth = await deps.updateAuthPassword(user.id, next).catch(() => 'error' as const);
@@ -162,10 +162,14 @@ export async function confirmPasswordReset(
     if (!(await deps.setPasswordHash(user.id, hashed).catch(() => false))) return fail();
   }
   const marked = await deps.markPasswordChanged(user.id, false).catch(() => false);
-  await deps.expireOpen(user.id, now.toISOString()).catch(() => {});
+  // 바꾼 뒤 남은 링크를 끝내지 못하면 그 링크로 30분 안에 다시 바꿀 수 있다 — 운영 기록에(2026-11-17)
+  await deps.expireOpen(user.id, now.toISOString()).catch(() => deps.log(OPEN_LINKS_NOT_EXPIRED, { user_id: user.id, step: 'confirm' }).catch(() => {}));
   await deps.unlock(user.email).catch(() => {});
   return { ok: true, userId: user.id, departmentId: user.department_id ?? null, sessionsKept: !marked };
 }
+
+export const OPEN_LINKS_NOT_EXPIRED = '비밀번호 재설정 링크를 끝내지 못했습니다(남은 링크가 기한까지 쓰일 수 있음)';
+export const TOKEN_NOT_RELEASED = '비밀번호 재설정 링크를 돌려놓지 못했습니다(그 링크는 쓴 것으로 남음)';
 
 const USER_COLUMNS = 'id, email, full_name, department_id, password_hash, is_active, deleted_at, is_super_admin';
 
@@ -217,7 +221,8 @@ export function resetDeps(): ResetDeps {
         .is('used_at', null)
         .gt('expires_at', nowIso);
       if (exceptId) q = q.neq('id', exceptId);
-      await q;
+      const { error } = await q;
+      if (error) throw error;
     },
     async findToken(hash) {
       const { data, error } = await supabaseAdmin
@@ -239,7 +244,8 @@ export function resetDeps(): ResetDeps {
       return !error && Array.isArray(data) && data.length === 1;
     },
     async releaseToken(id) {
-      await supabaseAdmin.from('password_reset_requests').update({ used_at: null }).eq('id', id);
+      const { error } = await supabaseAdmin.from('password_reset_requests').update({ used_at: null }).eq('id', id);
+      if (error) throw error;
     },
     unlock: (email) => unlockSignIn('user', email),
     async sendLink(to, fullName, link) {

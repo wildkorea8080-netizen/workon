@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSystem } from '@/lib/logger';
 
 /**
  * 로그인 실패 잠금(2026-11-13, 0091).
@@ -50,12 +51,23 @@ export async function signInAllowed(deps: ThrottleDeps, scope: SignInScope, emai
   return true;
 }
 
+/** 실패 기록을 남기지 못했을 때 — 로그인은 막지 않고 운영 기록에(2026-11-17). 못 남기면 잠금이 걸리지 않는다 */
+export const FAILURE_NOT_RECORDED = '로그인 실패를 세지 못했습니다(잠금이 걸리지 않을 수 있음)';
+export const FAILURES_NOT_CLEARED = '로그인 성공 뒤 실패 기록을 지우지 못했습니다';
+
+function errorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && code ? code.slice(0, 40) : 'error';
+}
+
 export async function noteSignInFailure(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null): Promise<void> {
-  await deps.recordFailure(scope, signInKey(email), ipKey(ip)).catch(() => {});
+  await deps.recordFailure(scope, signInKey(email), ipKey(ip)).catch((error) =>
+    logSystem({ level: 'error', category: 'security', message: FAILURE_NOT_RECORDED, details: { scope, code: errorCode(error) } }));
 }
 
 export async function noteSignInSuccess(deps: ThrottleDeps, scope: SignInScope, email: unknown): Promise<void> {
-  await deps.clearFailures(scope, signInKey(email)).catch(() => {});
+  await deps.clearFailures(scope, signInKey(email)).catch((error) =>
+    logSystem({ level: 'warning', category: 'security', message: FAILURES_NOT_CLEARED, details: { scope, code: errorCode(error) } }));
 }
 
 export function throttleDeps(): ThrottleDeps {
@@ -70,14 +82,17 @@ export function throttleDeps(): ThrottleDeps {
       return error ? null : count ?? 0;
     },
     async recordFailure(scope, keyHash, ipHash) {
-      await supabaseAdmin.from('sign_in_failures').insert({ scope, key_hash: keyHash, ip_hash: ipHash });
+      // Supabase는 실패를 던지지 않고 돌려준다 — 던져서 noteSignInFailure가 운영 기록에 남기게(2026-11-17)
+      const { error } = await supabaseAdmin.from('sign_in_failures').insert({ scope, key_hash: keyHash, ip_hash: ipHash });
+      if (error) throw error;
       // 하루 지난 기록은 가끔 치운다(표가 끝없이 자라지 않게)
       if (Math.random() < 0.05) {
         await supabaseAdmin.from('sign_in_failures').delete().lt('created_at', new Date(Date.now() - 24 * 60 * 60_000).toISOString());
       }
     },
     async clearFailures(scope, keyHash) {
-      await supabaseAdmin.from('sign_in_failures').delete().eq('scope', scope).eq('key_hash', keyHash);
+      const { error } = await supabaseAdmin.from('sign_in_failures').delete().eq('scope', scope).eq('key_hash', keyHash);
+      if (error) throw error;
     },
   };
 }

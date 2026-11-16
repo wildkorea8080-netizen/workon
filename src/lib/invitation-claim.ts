@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSystem } from '@/lib/logger';
 
 /**
  * 초대 링크 쓰기(2026-11-12).
@@ -36,9 +37,15 @@ export async function claimInvitation(id: string, nowMs = Date.now()): Promise<s
 
 /** 차지를 푼다 — 그 차지(같은 시각)일 때만. 던지지 않는다 */
 export async function releaseInvitation(id: string, claimedAt: string): Promise<void> {
+  // 풀지 못하면 그 초대는 쓴 것으로 남는다 — 관리자가 새 초대를 보낸다. 운영 기록에 남긴다(2026-11-17 — 예전엔 돌려준 오류를 보지 않았다)
+  let code: string | null = null;
   try {
-    await supabaseAdmin.from('invitations').update({ accepted_at: null }).eq('id', id).eq('accepted_at', claimedAt);
+    const { error } = await supabaseAdmin.from('invitations').update({ accepted_at: null }).eq('id', id).eq('accepted_at', claimedAt);
+    if (error) code = error.code ?? 'error';
   } catch {
-    // 풀지 못하면 그 초대는 쓴 것으로 남는다 — 관리자가 새 초대를 보낸다
+    code = 'exception';
   }
+  if (code) await logSystem({ level: 'warning', category: 'auth', message: INVITATION_NOT_RELEASED, details: { invitation_id: id, code } });
 }
+
+export const INVITATION_NOT_RELEASED = '초대 링크 차지를 풀지 못했습니다(그 링크는 쓴 것으로 남음 — 새 초대 필요)';

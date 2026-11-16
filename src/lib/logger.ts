@@ -38,12 +38,14 @@ export async function logAccess(params: AccessLogParams): Promise<void> {
 
 export async function logSystem(params: SystemLogParams): Promise<void> {
   try {
-    await supabaseAdmin.from('system_logs').insert({
+    const { error } = await supabaseAdmin.from('system_logs').insert({
       level:    params.level,
       category: params.category,
       message:  params.message,
       details:  params.details ?? {},
       org_id:   params.orgId   ?? null,
     });
-  } catch { /* 로깅 실패는 조용히 무시 */ }
+    // 운영 기록마저 못 남기면 남길 곳은 함수 로그(Vercel)뿐이다 — 문구·코드만(2026-11-17)
+    if (error) console.error('[system_logs 기록 실패]', params.level, params.category, params.message, error.code ?? 'error');
+  } catch { /* 로깅 실패는 부른 일을 막지 않는다 */ }
 }

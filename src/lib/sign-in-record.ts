@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { writeAuditRow } from '@/lib/audit-write';
+import { logSystem } from '@/lib/logger';
 
 /**
  * 직원 접속 기록(2026-11-16, 0094). 직원 로그인은 성공·실패 모두 어디에도 남지 않았다 — 슈퍼관리자 로그인만 `access_logs`에 남았다.
@@ -61,6 +62,8 @@ export async function recordSignIn(
   }
 }
 
+export const LAST_SIGN_IN_NOT_SAVED = '마지막 로그인 시각을 적지 못했습니다(장기 미접속 잠금이 잘못 걸릴 수 있음)';
+
 export function signInRecordDeps(): SignInRecordDeps {
   return {
     async findUser(email) {
@@ -82,7 +85,9 @@ export function signInRecordDeps(): SignInRecordDeps {
       await writeAuditRow('access_logs', row, String(row.action));
     },
     async touchLastSignIn(userId, at) {
-      await supabaseAdmin.from('users').update({ last_sign_in_at: at }).eq('id', userId);
+      // 못 적으면 장기 미접속 잠금(0095)이 방금 들어온 사람을 잠글 수 있다 — 운영 기록에(2026-11-17)
+      const { error } = await supabaseAdmin.from('users').update({ last_sign_in_at: at }).eq('id', userId);
+      if (error) await logSystem({ level: 'error', category: 'auth', message: LAST_SIGN_IN_NOT_SAVED, details: { user_id: userId, code: error.code ?? 'error' } });
     },
   };
 }
