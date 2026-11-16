@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-16(밤 3): 직원 접속 기록(0094)
+
+- **먼저 운영 DB에 0094 적용**(2026-11-16 22:46 KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `access_logs.department_id` uuid(부서 외래 키 — 지우면 비움)·색인 `access_logs_department_created_idx`, `users.last_sign_in_at` timestamptz, 두 표 RLS 켜짐, anon 읽기 권한 없음, 적용 기록 있음.
+- 그다음 코드 배포 `dpl_GLbdYZDaKuAn5VhAuzxCfFdLo7vj`(커밋 `f40aad7`, 2026-11-16 22:48 KST, `main` fast-forward — GitHub 연동). 되돌릴 때는 직전 `dpl_BiMX4HKJTBX3uLw8Af2rtRvFT8Gc`(cdec0d8)로 promote한다(0094는 남겨도 옛 코드가 읽지 않는다 — 직원 접속 기록만 다시 안 남는다).
+- 들어간 커밋: `ab6f624`(직전 배포 기록), `9f00146` 직원 접속 기록(로그인 두 길의 성공·실패·잠김·거절을 `access_logs`에 사람·부서·기관·IP·브라우저로, 성공이면 `users.last_sign_in_at`, 입력한 이메일은 남기지 않음, 기관 관리자 감사 '접속 기록(로그인)'·사용자 목록 '최근 로그인'), `f40aad7` 문서.
+- **배포 전**: 가지 Preview(`f40aad7`, `workon-2jhenebra`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0094)를 띄운 전체 시험 265파일 3,661개 통과·1개 실패(`batch-0103`이 바뀐 줄 모양을 글자 그대로 찾던 것 — 시험만 고쳐 통과, 동작은 같음)·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `GET /api/users`·`/api/admin/audit-logs?kind=access` 403. **없는 계정(`nobody-check@example.invalid`)으로 직원 로그인 한 번**(NextAuth credentials, 401) → 운영 `access_logs`에 `login_failed`·사람 없음·부서 없음·IP 있음·`/login` 한 줄(이메일은 남지 않음 — 그 이메일 해시의 로그인 실패 한 줄도 `sign_in_failures`에 남고 하루 뒤 정리). pg_cron 호출 200(22:49·22:50 KST, 실행기 하트비트 22:50).
+- **확인하지 못한 것**(사용자 몫): 실제 계정으로 로그인한 뒤 관리자 감사 화면 '접속 기록(로그인)'에 그 로그인이 보이는지, 사용자 관리 목록에 '최근 …'이 보이는지 브라우저로 보지 않았다.
+
 ## 2026-11-16(밤 2): 임시 비밀번호는 비밀번호부터 바꾸기·슈퍼관리자 재발급(0093)
 
 - **먼저 운영 DB에 0093 적용**(2026-11-16 22:32 KST, 사용자 "운영반영"). 적용 뒤 확인(읽기 전용): `users.password_must_change` boolean·NOT NULL·기본 false, 참인 행 0(소급 없음), `users` RLS 켜짐, anon 읽기 권한 없음, 적용 기록 있음.
