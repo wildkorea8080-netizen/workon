@@ -391,6 +391,8 @@ const departmentId = (session.user as any).departmentId; // 타입 캐스팅 필
 
 **직원 접속 기록**(2026-11-16, 0094, `src/lib/sign-in-record.ts`): 예전엔 직원 로그인이 성공·실패 모두 어디에도 남지 않았다(슈퍼관리자 로그인만 `access_logs`). 직원 로그인(`nextAuthOptions.ts`)이 성공(`login`, 두 길)·실패(`login_failed`)·잠김(`login_locked`)·거절(`login_rejected` — 비활성·소속 없음)을 `access_logs`에 사람·부서(0094 `department_id`)·기관·IP(`requestIp`)·브라우저(300자)로 남기고, 성공이면 `users.last_sign_in_at`을 적는다. **입력한 이메일은 남기지 않는다** — 계정이 있으면 그 사람으로, 없으면 사람 없이 시각·IP만. 기록 실패는 로그인을 막지 않는다. 기관 관리자 감사 화면 '접속 기록(로그인)'(`kind=access` — 관리 범위 부서만, CSV '접속')과 사용자 관리 목록의 '최근 로그인'. 장기 미접속 계정 잠금·접속 기록 보관 기간 정리는 아직 없다. `tests/batch-0109.test.ts`
 
+**내 로그인 기록**(2026-11-16, 마이그레이션 없음): 사용자 메뉴 '비밀번호·로그인 기록'(`/my/password`) 아래 '최근 로그인 기록'(`components/my/MySignIns.tsx` ← `GET /api/my/sign-ins` — 세션 본인의 `access_logs` 직원 로그인만, 최근 90일·30건, 대리 접근 중 403, 브라우저 정보는 '윈도우 · 크롬' 같은 짧은 꼴만 — 잎 파일 `my-sign-ins-spec.ts` `deviceLabel`). 최근 30일 틀림·잠김 수를 경고로 보인다. 임시 비밀번호로 묶인 동안은 숨긴다. `tests/batch-0110.test.ts`
+
 ---
 
 ## RAG 파이프라인
