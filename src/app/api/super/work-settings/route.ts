@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { createSupabaseWorkStore } from '@/lib/work/store/supabase';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,13 +48,13 @@ export async function PATCH(request: NextRequest) {
   const before = await store.getOrgSettings(body.organizationId);
   // updated_by는 기관 사용자 칸이라 슈퍼관리자 id는 기록(super_admin_logs)에만 남긴다
   const after = await store.upsertOrgSettings(body.organizationId, { homeEnabled: body.homeEnabled, newTasksEnabled: body.newTasksEnabled, updatedBy: null });
-  await supabaseAdmin.from('super_admin_logs').insert({
+  await writeAuditRow('super_admin_logs', {
     admin_user_id: admin.sub,
     action: 'work_settings_changed',
     target_type: 'organization',
     target_id: body.organizationId,
     before_data: before,
     after_data: after,
-  });
+  }, 'work_settings_changed');
   return NextResponse.json({ ok: true, data: after });
 }

@@ -109,7 +109,7 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
       body: JSON.stringify({ status: 'cancelled' }),
     });
     const d = await res.json();
-    if (d.ok) { load(); onToast('계약이 해지됐습니다.'); }
+    if (d.ok) { load(); onToast(d.warning ?? '계약이 해지됐습니다.'); }
     else onToast(d.error);
   };
 
@@ -271,7 +271,8 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
       }),
     });
     const d = await res.json();
-    if (d.ok) onCreated(); else setError(d.error);
+    // 계약은 만들었지만 기관 한도를 맞추지 못했으면 알린다(2026-11-17)
+    if (d.ok) { if (d.warning) alert(d.warning); onCreated(); } else setError(d.error);
     setSaving(false);
   };
 
@@ -405,7 +406,7 @@ function RenewModal({ contract: c, onClose, onSaved }: { contract: any; onClose:
       body: JSON.stringify({ endDate: endDate || undefined, planType: plan, monthlyFee: fee, notes }),
     });
     const d = await res.json();
-    if (d.ok) onSaved(); setSaving(false);
+    if (d.ok) { if (d.warning) alert(d.warning); onSaved(); } setSaving(false);
   };
 
   return (

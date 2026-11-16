@@ -276,7 +276,15 @@ export function outboundDeps(): OutboundDeps {
     },
     async finish(id, patch) {
       const row: Row = { ...patch, claimed_at: null };
-      await supabaseAdmin.from('app_outbound_deliveries').update(row).eq('id', id).eq('status', 'sending');
+      // 결과를 못 적으면 기록이 'sending'에 남아 10분 뒤 다시 집혀 **받는 쪽에 같은 결과가 또 간다**(같은 Idempotency-Key라 받는 쪽이 거를 수는 있다).
+      // 예전에는 돌려준 오류를 보지 않았다 — 한 번 더 해 보고, 그래도 안 되면 운영 기록에 남긴다(2026-11-17)
+      let code = 'error';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { error } = await supabaseAdmin.from('app_outbound_deliveries').update(row).eq('id', id).eq('status', 'sending');
+        if (!error) return;
+        code = error.code ?? 'error';
+      }
+      await logSystem({ level: 'critical', category: 'api', message: '앱 결과 보내기의 결과를 기록하지 못했습니다(10분 뒤 다시 보낼 수 있음)', details: { delivery_id: id, status: patch.status, code } });
     },
     decrypt: (enc) => decryptApiKey(enc),
     checkHost: (host) => checkPublicHost(host),

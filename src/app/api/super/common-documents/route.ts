@@ -11,6 +11,7 @@ import { checkCommonConfirm, parseCommonStoragePath } from '@/lib/common-upload'
 import { ORG_TYPES, commonNodaFilename, isOrgType } from '@/lib/org-types';
 import { logSystem } from '@/lib/logger';
 import { replayNodaEvents } from '@/lib/noda-events';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -314,7 +315,7 @@ export async function POST(request: NextRequest) {
       return jsonError('문서를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
     }
 
-    await supabaseAdmin.from('super_admin_logs').insert({
+    await writeAuditRow('super_admin_logs', {
       admin_user_id: admin.sub,
       action: 'common_document_uploaded',
       target_type: 'common_document',
@@ -326,7 +327,7 @@ export async function POST(request: NextRequest) {
         usage_terms: input.usage_terms,
         replaces_id: input.replaces_id,
       },
-    });
+    }, 'common_document_uploaded');
 
     return NextResponse.json({ ok: true, data: { id } }, { status: 201 });
   } catch (error) {

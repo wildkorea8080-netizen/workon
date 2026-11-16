@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
+import { reportContractSync } from '@/lib/contract-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,24 +50,29 @@ export async function PATCH(
 
     if (error) throw error;
 
+    // 기관 맞추기 실패는 계약 변경을 되돌리지 않고 경고로(2026-11-17)
+    const warnings: string[] = [];
+
     // 해지 시 기관 suspended 처리
     if (status === 'cancelled' && contract.organization_id) {
-      await supabaseAdmin.from('organizations')
+      const { error: suspendErr } = await supabaseAdmin.from('organizations')
         .update({ status: 'suspended' }).eq('id', contract.organization_id);
+      if (suspendErr) warnings.push(await reportContractSync('org_suspend_after_cancel', contract.organization_id, suspendErr.code ?? 'error'));
     }
 
     // 플랜 변경 시 organizations 동기화
     if (planType && contract.organization_id) {
       const plan = getPlan(planType);
-      await supabaseAdmin.from('organizations').update({
+      const { error: planErr } = await supabaseAdmin.from('organizations').update({
         plan: planType,
         max_users: plan.maxUsers,
         max_agents: plan.maxAgents,
         monthly_token_limit: plan.maxTokensPerMonth,
       }).eq('id', contract.organization_id);
+      if (planErr) warnings.push(await reportContractSync('org_plan_after_contract_change', contract.organization_id, planErr.code ?? 'error'));
     }
 
-    return NextResponse.json({ ok: true, data: contract });
+    return NextResponse.json({ ok: true, data: contract, ...(warnings.length ? { warning: warnings.join(' ') } : {}) });
   } catch (err: any) {
     console.error('[super/contracts PATCH]', err);
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });

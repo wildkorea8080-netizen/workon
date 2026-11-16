@@ -1,6 +1,7 @@
 // src/lib/assistant/persist.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { estimateCostUsd, estimateCostKrw } from '@/lib/models';
+import { reportUsageLogFailure } from '@/lib/usage-log-failure';
 import type { LlmUsage } from '@/lib/llm/types';
 import type { ToolSource } from '@/lib/connectors';
 import type { GeneratedFileRef } from '@/lib/capabilities/types';
@@ -182,5 +183,6 @@ export async function writeUsageLog(row: {
     resource_id: row.resourceId,
     details: row.details,
   });
-  if (error) console.error('[assistant] 사용 로그 기록 실패', row.action, error.message);
+  // 실패는 운영 기록(critical·payment)에 — 사용 기록이 빠지면 청구·한도에서 조용히 빠진다(2026-11-17)
+  if (error) await reportUsageLogFailure({ departmentId: row.departmentId, action: row.action, details: row.details }, error.code ?? 'error');
 }

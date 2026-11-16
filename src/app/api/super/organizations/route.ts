@@ -4,6 +4,8 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
 import { logSystem } from '@/lib/logger';
+import { writeAuditRow } from '@/lib/audit-write';
+import { reportContractSync } from '@/lib/contract-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -184,7 +186,8 @@ export async function POST(request: NextRequest) {
     const inviteToken = crypto.randomBytes(32).toString('hex');
     const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
 
-    await supabaseAdmin.from('invitations').insert({
+    // 초대를 저장하지 못하면 링크가 동작하지 않는다 — 예전에는 그래도 링크를 돌려줘 기관 관리자가 가입할 수 없었다(2026-11-17)
+    const { error: inviteErr } = await supabaseAdmin.from('invitations').insert({
       email: adminEmail.trim().toLowerCase(),
       department_id: dept?.id ?? null,
       role: 'ADMIN',
@@ -192,23 +195,25 @@ export async function POST(request: NextRequest) {
       invited_by: admin.sub,
       expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
     });
+    const inviteWarning = inviteErr ? await reportContractSync('org_admin_invitation', org.id, inviteErr.code ?? 'error') : undefined;
 
-    const inviteUrl = `${baseUrl}/signup?invite=${inviteToken}`;
+    const inviteUrl = inviteErr ? null : `${baseUrl}/signup?invite=${inviteToken}`;
 
     // 슈퍼관리자 로그 기록
-    await supabaseAdmin.from('super_admin_logs').insert({
+    await writeAuditRow('super_admin_logs', {
       admin_user_id: admin.sub,
       action: 'org_created',
       target_type: 'organization',
       target_id: org.id,
       after_data: { name: org.name, plan, adminEmail, presetAgents: presetResult.installed },
-    });
+    }, 'org_created');
     logSystem({ level: 'info', category: 'admin',
       message: `기관 등록: ${org.name}`, details: { plan, adminEmail }, orgId: org.id });
 
     return NextResponse.json({
       ok: true,
       data: { org, inviteUrl, presetAgents: presetResult.installed },
+      ...(inviteWarning ? { warning: inviteWarning } : {}),
     });
   } catch (err: any) {
     console.error('[super/organizations POST]', err);

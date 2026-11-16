@@ -6,6 +6,7 @@ import { splitAgentBody } from '@/lib/agent-patch';
 import { getActorScope } from '@/lib/actor-scope';
 import { jsonError, knownIds, validateModelForOrganization } from '@/lib/agent-route-helpers';
 import { withoutAppDraft } from '@/lib/apps/draft';
+import { writeUsageLog } from '@/lib/assistant/persist';
 
 /** 목록에는 시험 판(0053)을 싣지 않는다 — 고칠 수 없는 사람에게 배포 전 설정이 가지 않게(시험 판은 편집 창 GET /api/agents/[id]만) */
 const listRows = (rows: Array<Record<string, unknown>> | null) => (rows ?? []).map(withoutAppDraft);
@@ -258,12 +259,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 사용 로그 기록
-    await supabaseAdmin.from('usage_logs').insert({
-      department_id: actor.departmentId,
-      user_id: session!.user.id,
+    await writeUsageLog({
+      departmentId: actor.departmentId,
+      userId: session!.user.id,
       action: 'create_agent',
-      resource_type: 'agent',
-      resource_id: agent.id,
+      resourceType: 'agent',
+      resourceId: agent.id,
       details: { name: agent.name },
     });
 

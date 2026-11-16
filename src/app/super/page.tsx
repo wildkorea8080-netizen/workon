@@ -6,6 +6,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
+import { CRITICAL_LOGS_LINK } from '@/lib/super-log-links';
 
 const fmt = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` :
@@ -81,6 +82,25 @@ export default function SuperDashboard() {
           새로고침
         </button>
       </div>
+
+      {/* 심각한 운영 기록(2026-11-17) — 사용 기록·감사 기록·계약 맞추기 실패 등 critical, 최근 24시간 */}
+      {al.critical24h === null && (
+        <div className="p-4 bg-amber-950/30 border border-amber-700/40 rounded-2xl text-sm text-amber-300">심각한 운영 기록 수를 읽지 못했습니다 — 로그 화면에서 직접 확인해 주세요.</div>
+      )}
+      {al.critical24h?.count > 0 && (
+        <div className="flex items-start gap-4 p-4 bg-red-950/30 border border-red-700/40 rounded-2xl">
+          <span className="text-xl">🛑</span>
+          <div className="flex-1 text-sm text-red-300">
+            <p className="font-semibold">최근 24시간 심각한(CRITICAL) 운영 기록 {al.critical24h.count}건</p>
+            <ul className="mt-1 space-y-0.5 text-xs text-red-200/80">
+              {(al.critical24h.top ?? []).map((t: { message: string; count: number }) => (
+                <li key={t.message} className="truncate">· {t.message} — {t.count}건</li>
+              ))}
+            </ul>
+          </div>
+          <Link href={CRITICAL_LOGS_LINK} className="flex-shrink-0 px-3 py-1.5 bg-red-700/40 hover:bg-red-700/60 text-red-300 text-xs font-semibold rounded-lg transition-colors">기록 보기</Link>
+        </div>
+      )}
 
       {/* 알림 배너 */}
       {(al.tokenExceeded > 0 || al.expiringContracts > 0) && (

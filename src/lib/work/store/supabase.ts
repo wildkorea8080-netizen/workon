@@ -1,6 +1,7 @@
 // src/lib/work/store/supabase.ts
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { reportUsageLogFailure } from '@/lib/usage-log-failure';
 import { mapDbError } from './errors';
 import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow, WorkflowInstallationRow, LegacyFileRow, WorkStatsRow } from './types';
 import type {
@@ -521,7 +522,8 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
         resource_id: u.resourceId,
         details: u.details,
       });
-      if (error) console.error('[work] 사용 기록 실패', u.action, error.message);
+      // 실패는 운영 기록(critical·payment)에 — 사용 기록이 빠지면 청구·한도에서 조용히 빠진다(2026-11-17)
+      if (error) await reportUsageLogFailure({ departmentId: u.departmentId, action: u.action, details: u.details as Record<string, unknown> }, error.code ?? 'error');
     },
   };
   return store;

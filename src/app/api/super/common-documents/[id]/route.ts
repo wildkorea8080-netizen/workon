@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { deleteCommonDocument } from '@/lib/common-documents';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       return jsonError(NODA_DELETE_FAILED_MESSAGE, 502);
     }
 
-    await supabaseAdmin.from('super_admin_logs').insert({
+    await writeAuditRow('super_admin_logs', {
       admin_user_id: admin.sub,
       action: 'common_document_deleted',
       target_type: 'common_document',
@@ -46,7 +47,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
             usage_terms: before.usage_terms,
           }
         : {},
-    });
+    }, 'common_document_deleted');
 
     return NextResponse.json({ ok: true, data: { id: params.id } });
   } catch (error) {

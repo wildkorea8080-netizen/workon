@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { passwordResetDeps, resetUserPassword } from '@/lib/password-reset';
 import { sendPasswordResetEmail } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,13 +44,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }).catch(() => ({ sent: false }));
 
     try {
-      await supabaseAdmin.from('super_admin_logs').insert({
+      await writeAuditRow('super_admin_logs', {
         admin_user_id: admin.sub,
         action: 'password_reset',
         target_type: 'user',
         target_id: target.id,
         after_data: { email_sent: mail.sent, sessions_kept: result.sessionsKept },
-      });
+      }, 'password_reset');
     } catch { /* 감사 로그 실패는 무시 */ }
 
     return NextResponse.json({ ok: true, data: { tempPassword: result.tempPassword, emailSent: mail.sent } });

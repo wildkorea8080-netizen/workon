@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { withdrawUser } from '@/lib/user-withdrawal';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,13 +74,13 @@ export async function DELETE(
 
     // 감사 로그 (오류 무시)
     try {
-      await supabaseAdmin.from('super_admin_logs').insert({
+      await writeAuditRow('super_admin_logs', {
         admin_user_id: admin.sub,
         action: 'user_deleted',
         target_type: 'user',
         target_id: params.id,
         before_data: { email: result.before.email, name: result.before.full_name },
-      });
+      }, 'user_deleted');
     } catch { /* 감사 로그 실패는 무시 */ }
 
     return NextResponse.json({ ok: true });

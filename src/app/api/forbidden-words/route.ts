@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import { listManagedForbiddenWords } from '@/lib/forbidden-words-scope';
+import { writeUsageLog } from '@/lib/assistant/persist';
 
 export async function GET(request: NextRequest) {
   try {
@@ -130,12 +131,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 사용 로그 기록
-    await supabaseAdmin.from('usage_logs').insert({
-      department_id: user.department_id,
-      user_id: session.user.id,
+    await writeUsageLog({
+      departmentId: user.department_id,
+      userId: session.user.id,
       action: 'add_forbidden_word',
-      resource_type: 'forbidden_word',
-      resource_id: newWord.id,
+      resourceType: 'forbidden_word',
+      resourceId: newWord.id,
       details: { word: word.trim() },
     });
 

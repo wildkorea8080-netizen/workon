@@ -74,12 +74,14 @@ export default function OrgDetailPage() {
   useEffect(() => { fetchOrg(); }, [fetchOrg]);
 
   const handleStatusChange = async (status: string) => {
-    await fetch(`/api/super/organizations/${id}`, {
+    const res = await fetch(`/api/super/organizations/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const d = await res.json().catch(() => null);
     fetchOrg();
-    showToast(status === 'suspended' ? '기관이 정지됐습니다.' : '기관이 활성화됐습니다.');
+    // 계약을 맞추지 못했으면 그 경고를(2026-11-17)
+    showToast(d?.warning ?? (status === 'suspended' ? '기관이 정지됐습니다.' : '기관이 활성화됐습니다.'));
   };
 
   if (loading) return (

@@ -21,6 +21,8 @@ vi.mock('@/lib/document-references', () => ({ autoIndexReferences: async () => {
 vi.mock('@/lib/document-references-db', () => ({ autoIndexDeps: () => ({}) }));
 // 예산 알림 빠른 확인(2026-11-12) — 15분 차례에만, 자격이 없으면 돌지 않음
 vi.mock('@/lib/budget-alerts', () => ({ budgetAlertDeps: () => ({}), quickBudgetAlertDue: () => true, runBudgetAlerts: async () => { state.budget++; return { checked: 0, sent: 0, failed: 0, skipped: null, partial: false }; } }));
+// 심각한 운영 기록 메일(2026-11-17) — 실행기는 부르기만 한다
+vi.mock('@/lib/critical-alert', () => ({ criticalAlertDeps: () => ({}), runCriticalAlert: async () => ({ skipped: 'none' }) }));
 
 import { GET, POST } from '@/app/api/cron/app-schedules/route';
 

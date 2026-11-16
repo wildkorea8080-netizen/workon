@@ -59,6 +59,12 @@ export const USAGE_ACTION_LABELS: Record<string, string> = {
   answer_revised: '근거로 고쳐 쓰기(AI)',
   rag_eval_answer: '문서 찾기 평가 답변(AI)',
   rag_eval_judge: '문서 찾기 평가 채점(AI)',
+  // 토큰을 쓰지 않는 관리 활동도 같은 기록에 남는다(2026-11-17, writeUsageLog로 모음) — 이용통계에 코드가 그대로 나가지 않게
+  create_agent: '비서 생성',
+  add_forbidden_word: '금지어 추가',
+  delete_forbidden_word: '금지어 삭제',
+  activate_forbidden_word: '금지어 활성화',
+  deactivate_forbidden_word: '금지어 비활성화',
 };
 
 const num = (v: unknown) => {

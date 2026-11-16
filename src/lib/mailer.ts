@@ -439,6 +439,33 @@ export function sendScheduleRunnerAlertEmail(to: string, mail: { subject: string
   return sendMail(to, mail.subject, mail.html);
 }
 
+/** 심각한(critical) 운영 기록 알림의 글(슈퍼관리자에게, 2026-11-17) — 수·문구·시각만(사람·상세 없음) */
+export function criticalLogAlertMail(params: {
+  count: number;
+  top: Array<{ message: string; count: number }>;
+  since: Date;
+  checkedAt: Date;
+  url: string;
+}): { subject: string; html: string } {
+  const { count, top, since, checkedAt, url } = params;
+  const kst = (d: Date) => new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const list = top.map((t) => `<li style="margin:4px 0">${escapeHtml(t.message)} — ${t.count}건</li>`).join('');
+  return {
+    subject: `[${APP_NAME}] 심각한 운영 기록 ${count}건 — 확인 필요`,
+    html: layout(
+      `심각한 운영 기록이 ${count}건 생겼습니다`,
+      `<p style="font-size:15px;line-height:1.7">${escapeHtml(kst(since))} 이후 ${escapeHtml(kst(checkedAt))}까지(한국 시간) 남은 CRITICAL 기록입니다. 많이 나온 문구:</p>
+       <ul style="font-size:15px;line-height:1.7;padding-left:20px">${list}</ul>
+       <p style="font-size:14px;line-height:1.7;color:#475569">사용 기록이 빠지면 청구·한도에서 빠지고, 계약·기관 상태가 어긋나면 한도가 틀릴 수 있습니다. 같은 알림은 한 시간에 한 번까지 옵니다.</p>
+       ${button(url, '운영 기록 보기')}`
+    ),
+  };
+}
+
+export function sendCriticalLogAlertEmail(to: string, mail: { subject: string; html: string }): Promise<MailResult> {
+  return sendMail(to, mail.subject, mail.html);
+}
+
 /**
  * 입력형 앱 일괄 실행(0077)을 마쳤다는 안내의 글(보내지 않음 — 시험이 글을 본다). 만든 직원에게 한 번.
  * 줄 수·멈춘 이유·보내기 전 확인을 기다리는 결과 수만 싣고, 입력값·결과 글은 싣지 않는다

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
+import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       todayUsage, monthUsage,
       revenueThis, revenueLast,
       tokenAlerts, tokenExceeded,
-      recentOrgs, recentLogs,
+      recentOrgs, recentLogs, criticalRecent,
     ] = await Promise.all([
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -70,6 +71,9 @@ export async function GET(request: NextRequest) {
       })(),
       supabaseAdmin.from('organizations').select('id, name, plan, status, created_at').order('created_at', { ascending: false }).limit(5),
       supabaseAdmin.from('system_logs').select('level, message, created_at').in('level', ['error', 'critical']).order('created_at', { ascending: false }).limit(5),
+      // 최근 24시간 critical — 문구별로 세어 알림 띠에(2026-11-17). 수는 정확히, 문구 묶기는 500줄까지
+      supabaseAdmin.from('system_logs').select('message', { count: 'exact' }).eq('level', 'critical')
+        .gte('created_at', new Date(Date.now() - CRITICAL_WINDOW_MS).toISOString()).order('created_at', { ascending: false }).limit(500),
     ]);
 
     // ── 사용량 집계 ──────────────────────────────────────
@@ -157,6 +161,8 @@ export async function GET(request: NextRequest) {
           tokenWarnings:     typeof tokenAlerts === 'number' ? tokenAlerts : 0,
           tokenExceeded:     typeof tokenExceeded === 'number' ? tokenExceeded : 0,
           expiringContracts: orgExpiring.count ?? 0,
+          // 못 읽으면 null(0으로 보이면 '문제 없음'으로 읽힌다)
+          critical24h: criticalRecent.error ? null : { count: criticalRecent.count ?? 0, top: criticalSummary((criticalRecent.data ?? []) as Array<{ message: string | null }>) },
         },
         recentOrgs:     recentOrgs.data ?? [],
         topUsageOrgs,

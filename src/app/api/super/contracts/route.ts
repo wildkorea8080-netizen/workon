@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { reportContractSync } from '@/lib/contract-sync';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
@@ -84,9 +85,13 @@ export async function POST(request: NextRequest) {
 
     const plan = getPlan(planType);
 
-    // 기존 active 계약 종료
-    await supabaseAdmin.from('contracts').update({ status: 'cancelled' })
+    // 기존 active 계약 종료 — 못 끝내면 새 계약을 만들지 않는다(둘 다 active로 남지 않게, 2026-11-17)
+    const { error: cancelErr } = await supabaseAdmin.from('contracts').update({ status: 'cancelled' })
       .eq('organization_id', orgId).eq('status', 'active');
+    if (cancelErr) {
+      await reportContractSync('cancel_previous_contract', orgId, cancelErr.code ?? 'error');
+      return NextResponse.json({ ok: false, error: '기존 계약을 끝내지 못해 새 계약을 만들지 않았습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 500 });
+    }
 
     // 새 계약 INSERT
     const { data: contract, error: cErr } = await supabaseAdmin
@@ -119,16 +124,17 @@ export async function POST(request: NextRequest) {
 
     if (cErr) throw cErr;
 
-    // organizations 플랜 + 한도 동기화
-    await supabaseAdmin.from('organizations').update({
+    // organizations 플랜 + 한도 동기화 — 실패하면 계약은 둔 채 경고(2026-11-17)
+    const { error: orgErr } = await supabaseAdmin.from('organizations').update({
       plan: planType,
       max_users: plan.maxUsers,
       max_agents: plan.maxAgents,
       monthly_token_limit: plan.maxTokensPerMonth,
       status: 'active',
     }).eq('id', orgId);
+    const warning = orgErr ? await reportContractSync('org_limits_after_contract', orgId, orgErr.code ?? 'error') : undefined;
 
-    return NextResponse.json({ ok: true, data: contract });
+    return NextResponse.json({ ok: true, data: contract, ...(warning ? { warning } : {}) });
   } catch (err: any) {
     console.error('[super/contracts POST]', err);
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });

@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import { findManagedForbiddenWord } from '@/lib/forbidden-words-scope';
+import { writeUsageLog } from '@/lib/assistant/persist';
 
 /**
  * 금지어 켜고 끄기·지우기 — 관리 범위(자기 부서 + 하위, 최상위 부서 관리자는 기관 전체) 안의 금지어만.
@@ -48,12 +49,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       return NextResponse.json({ ok: false, error: { message: '금지어 업데이트 중 오류가 발생했습니다.' } }, { status: 500 });
     }
 
-    await supabaseAdmin.from('usage_logs').insert({
-      department_id: actor.departmentId,
-      user_id: actor.userId,
+    await writeUsageLog({
+      departmentId: actor.departmentId,
+      userId: actor.userId,
       action: isActive ? 'activate_forbidden_word' : 'deactivate_forbidden_word',
-      resource_type: 'forbidden_word',
-      resource_id: found.id,
+      resourceType: 'forbidden_word',
+      resourceId: found.id,
       details: { word: found.word, is_active: isActive, word_department_id: found.department_id },
     });
 
@@ -89,12 +90,12 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
       return NextResponse.json({ ok: false, error: { message: '금지어 삭제 중 오류가 발생했습니다.' } }, { status: 500 });
     }
 
-    await supabaseAdmin.from('usage_logs').insert({
-      department_id: actor.departmentId,
-      user_id: actor.userId,
+    await writeUsageLog({
+      departmentId: actor.departmentId,
+      userId: actor.userId,
       action: 'delete_forbidden_word',
-      resource_type: 'forbidden_word',
-      resource_id: found.id,
+      resourceType: 'forbidden_word',
+      resourceId: found.id,
       details: { word: found.word, word_department_id: found.department_id },
     });
 

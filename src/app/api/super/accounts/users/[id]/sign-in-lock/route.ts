@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { unlockSignIn } from '@/lib/sign-in-throttle';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,12 +28,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     await unlockSignIn('super', target.email);
 
     try {
-      await supabaseAdmin.from('super_admin_logs').insert({
+      await writeAuditRow('super_admin_logs', {
         admin_user_id: admin.sub,
         action: 'sign_in_unlocked',
         target_type: 'user',
         target_id: target.id,
-      });
+      }, 'sign_in_unlocked');
     } catch { /* 감사 로그 실패는 무시 */ }
 
     return NextResponse.json({ ok: true });

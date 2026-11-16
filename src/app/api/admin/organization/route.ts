@@ -7,6 +7,7 @@ import { isValidIpPattern, parseIpList, clientIpFrom } from '@/lib/ip-access';
 import { getAllowedModelIds } from '@/lib/model-policy';
 import { DEFAULT_THEME_COLOR, normalizeHex, themeColorProblem } from '@/lib/theme-color';
 import { getActorScope } from '@/lib/actor-scope';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -310,12 +311,12 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (update.allowed_models !== undefined) {
-    await supabaseAdmin.from('model_policy_logs').insert({
+    await writeAuditRow('model_policy_logs', {
       organization_id: ctx.organizationId,
       changed_by: ctx.session.user.id,
       before_models: beforeModels,
       after_models: (update.allowed_models as string[] | null) ?? null,
-    });
+    }, 'allowed_models_changed');
   }
 
   return NextResponse.json({ ok: true, data });

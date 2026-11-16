@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { writeAuditRow } from '@/lib/audit-write';
 
 /**
  * 직원 접속 기록(2026-11-16, 0094). 직원 로그인은 성공·실패 모두 어디에도 남지 않았다 — 슈퍼관리자 로그인만 `access_logs`에 남았다.
@@ -77,8 +78,8 @@ export function signInRecordDeps(): SignInRecordDeps {
       return data?.organization_id ?? null;
     },
     async insert(row) {
-      const { error } = await supabaseAdmin.from('access_logs').insert(row);
-      if (error) throw new Error(error.message);
+      // 실패는 운영 기록에(writeAuditRow — 2026-11-17). 예전에는 던져서 recordSignIn이 조용히 삼켰다
+      await writeAuditRow('access_logs', row, String(row.action));
     },
     async touchLastSignIn(userId, at) {
       await supabaseAdmin.from('users').update({ last_sign_in_at: at }).eq('id', userId);

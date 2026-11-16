@@ -3,6 +3,8 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { kstMonthStart } from '@/lib/kst-time';
+import { writeAuditRow } from '@/lib/audit-write';
+import { contractToRestore, reportContractSync, type ContractLite } from '@/lib/contract-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,33 +43,41 @@ export async function PATCH(
 
     if (error) throw error;
 
-    // 정지 시 contracts도 suspended로
+    // 정지 시 active 계약을 해지, 다시 활성화하면 계약 하나만 되살린다(2026-11-17 — 예전에는 해지된 계약을 모두 되살려
+    // 오래전에 끝난 계약까지 active가 되고 매출 합계가 부풀었다). 실패는 기관 변경을 되돌리지 않고 경고로
+    let warning: string | undefined;
     if (status === 'suspended') {
-      await supabaseAdmin
+      const { error: cancelErr } = await supabaseAdmin
         .from('contracts')
         .update({ status: 'cancelled' })
         .eq('organization_id', id)
         .eq('status', 'active');
+      if (cancelErr) warning = await reportContractSync('contract_cancel_after_org_suspend', id, cancelErr.code ?? 'error');
     }
     if (status === 'active') {
-      await supabaseAdmin
+      const { data: contracts, error: readErr } = await supabaseAdmin
         .from('contracts')
-        .update({ status: 'active' })
+        .select('id, status, started_at, expires_at')
         .eq('organization_id', id)
-        .eq('status', 'cancelled');
+        .in('status', ['active', 'cancelled']);
+      const restoreId = readErr ? null : contractToRestore((contracts ?? []) as ContractLite[]);
+      const { error: restoreErr } = restoreId
+        ? await supabaseAdmin.from('contracts').update({ status: 'active' }).eq('id', restoreId).eq('status', 'cancelled')
+        : { error: readErr };
+      if (restoreErr) warning = await reportContractSync('contract_restore_after_org_active', id, restoreErr.code ?? 'error');
     }
 
     // 감사 로그
-    await supabaseAdmin.from('super_admin_logs').insert({
+    await writeAuditRow('super_admin_logs', {
       admin_user_id: admin.sub,
       action: status === 'suspended' ? 'org_suspended' : 'org_updated',
       target_type: 'organization',
       target_id: id,
       before_data: before,
       after_data: updateData,
-    });
+    }, status === 'suspended' ? 'org_suspended' : 'org_updated');
 
-    return NextResponse.json({ ok: true, data: updated });
+    return NextResponse.json({ ok: true, data: updated, ...(warning ? { warning } : {}) });
   } catch (err: any) {
     console.error('[super/organizations PATCH]', err);
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });

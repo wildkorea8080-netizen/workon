@@ -299,7 +299,7 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  const [result, setResult]         = useState<{ inviteUrl: string } | null>(null);
+  const [result, setResult]         = useState<{ inviteUrl: string | null; warning?: string } | null>(null);
   const [copied, setCopied]         = useState(false);
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }));
@@ -327,7 +327,7 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
       });
       const data = await res.json();
       if (!data.ok) { setError(data.error); return; }
-      setResult({ inviteUrl: data.data.inviteUrl });
+      setResult({ inviteUrl: data.data.inviteUrl ?? null, warning: data.warning });
     } catch (err: any) { setError(err.message); }
     finally { setSubmitting(false); }
   };
@@ -352,12 +352,19 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
             </div>
             <div className="w-full p-4 bg-[#0F172A] rounded-xl border border-slate-700">
               <p className="text-xs text-slate-500 mb-2">관리자 초대 링크 (7일 유효)</p>
+              {/* 초대를 저장하지 못했으면 링크 대신 안내(2026-11-17) */}
+              {result.inviteUrl ? (
+              <>
               <p className="text-xs text-slate-300 font-mono break-all mb-3">{result.inviteUrl}</p>
               <button
-                onClick={async () => { await navigator.clipboard.writeText(result.inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                onClick={async () => { if (!result.inviteUrl) return; await navigator.clipboard.writeText(result.inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                 className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-colors ${copied ? 'bg-emerald-700 text-white' : 'bg-[#7C3AED] hover:bg-[#6D28D9] text-white'}`}>
                 {copied ? '✓ 복사됨' : '링크 복사'}
               </button>
+              </>
+              ) : (
+                <p className="text-xs text-amber-300">{result.warning ?? '관리자 초대를 저장하지 못했습니다. 기관 상세의 초대에서 새로 만들어 주세요.'}</p>
+              )}
             </div>
             <button onClick={onCreated} className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-xl">
               목록으로 돌아가기

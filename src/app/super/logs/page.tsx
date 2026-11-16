@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
+import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState } from '@/lib/super-log-links';
 
 type Tab = 'access' | 'system' | 'impersonation';
 
@@ -42,6 +43,13 @@ function exportCsv(rows: any[], filename: string) {
 // ═══════════════════════════════════════════════════════════
 export default function LogsPage() {
   const [tab, setTab] = useState<Tab>('access');
+  // 주소의 tab·level·category·period로 연다(2026-11-17 — 대시보드 '전체 보기'·알림 띠 링크). useSearchParams는 Suspense가 필요해 주소에서 직접 읽는다
+  const [link, setLink] = useState<LogLinkState | null>(null);
+  useEffect(() => {
+    const parsed = parseLogLink(window.location.search);
+    setLink(parsed);
+    setTab(parsed.tab);
+  }, []);
   return (
     <div className="space-y-6">
       <div>
@@ -57,7 +65,7 @@ export default function LogsPage() {
         ))}
       </div>
       {tab === 'access'        && <AccessLogsTab />}
-      {tab === 'system'        && <SystemLogsTab />}
+      {tab === 'system'        && <SystemLogsTab key={link ? 'linked' : 'plain'} initial={link} />}
       {tab === 'impersonation' && <ImpersonationLogsTab />}
     </div>
   );
@@ -198,13 +206,13 @@ function AccessLogsTab() {
 }
 
 // ─── 시스템 로그 ──────────────────────────────────────────
-function SystemLogsTab() {
+function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
   const [rows, setRows]       = useState<any[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [filterLevel, setFilterLevel]       = useState('all');
-  const [filterCategory, setFilterCategory] = useState('all');
-  const [period, setPeriod]   = useState('month');
+  const [filterLevel, setFilterLevel]       = useState(initial?.level ?? 'all');
+  const [filterCategory, setFilterCategory] = useState(initial?.category ?? 'all');
+  const [period, setPeriod]   = useState(initial?.period ?? 'month');
   const [page, setPage]       = useState(1);
   const [detail, setDetail]   = useState<any>(null);
   const LIMIT = 50;
@@ -250,12 +258,12 @@ function SystemLogsTab() {
         <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)}
           className="px-3 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="all">레벨 전체</option>
-          {['info','warning','error','critical'].map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+          {SYSTEM_LOG_LEVELS.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
         </select>
         <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
           className="px-3 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="all">카테고리 전체</option>
-          {['auth','api','database','security','admin'].map(c => <option key={c} value={c}>{c}</option>)}
+          {SYSTEM_LOG_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <button onClick={() => load(1)} className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-semibold rounded-xl">조회</button>
       </div>
