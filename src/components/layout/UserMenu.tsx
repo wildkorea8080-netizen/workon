@@ -63,6 +63,7 @@ export default function UserMenu({ up = false, compact = false, wide = false }: 
             <p className="truncate text-xs text-slate-400">{session?.user?.email}</p>
           </div>
           <Link role="menuitem" href="/my/stats" className="block px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50" onClick={() => setOpen(false)}>내 사용현황</Link>
+          <Link role="menuitem" href="/my/password" className="block px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50" onClick={() => setOpen(false)}>비밀번호 바꾸기</Link>
           {isAdmin && <Link role="menuitem" href="/admin" className="block px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50" onClick={() => setOpen(false)}>관리자 포털</Link>}
           <button
             role="menuitem"
