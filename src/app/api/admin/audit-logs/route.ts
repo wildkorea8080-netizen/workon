@@ -87,6 +87,7 @@ const SECURITY_LABEL: Record<string, string> = {
   app_webhook_revoked: '앱 연동 회수(관리자)',
   app_schedule_paused: '앱 예약 멈춤(관리자)',
   app_schedule_unlocked: '앱 예약 잠금 풀기(관리자)',
+  sign_in_unlocked: '로그인 잠금 풀기(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
   app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_outbound_result_retried: '앱 결과 다시 보내기(직원)',

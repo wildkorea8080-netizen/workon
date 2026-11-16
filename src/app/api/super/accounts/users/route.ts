@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { kstMonthStart } from '@/lib/kst-time';
 import { pagedRows } from '@/lib/paged-select';
+import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,9 +67,12 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
+    // 로그인 실패로 잠긴 계정(0091) — 풀리는 때. 못 읽으면 표시만 빠진다
+    const locks = await accountLocks(lockReadDeps(), 'user', (users ?? []).map((u: any) => u.email)).catch(() => new Map<string, string>());
     // is_active 컬럼이 없을 경우 대비 안전 처리
     const enriched = (users ?? []).map((u: any) => ({
       ...u,
+      sign_in_locked_until: locks.get(u.email) ?? null,
       is_active: u.is_active ?? true,
       department_name: deptMap[u.department_id]?.deptName ?? '—',
       organization_name: deptMap[u.department_id]?.orgName ?? '—',

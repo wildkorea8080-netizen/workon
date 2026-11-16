@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
+import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,9 @@ export async function GET(request: NextRequest) {
     .order('created_at', { ascending: true });
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, data: data ?? [] });
+  // 슈퍼관리자 로그인 실패로 잠긴 계정(0091) — 풀리는 때
+  const locks = await accountLocks(lockReadDeps(), 'super', (data ?? []).map((u: { email: string }) => u.email)).catch(() => new Map<string, string>());
+  return NextResponse.json({ ok: true, data: (data ?? []).map((u: { email: string }) => ({ ...u, sign_in_locked_until: locks.get(u.email) ?? null })) });
 }
 
 // POST: 슈퍼관리자 추가

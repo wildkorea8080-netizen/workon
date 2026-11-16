@@ -23,6 +23,8 @@ export type User = {
   role: UserRole;
   /** 개인 월 한도(원). null이면 소속 부서의 기본값을 따른다 (0024) */
   monthly_budget_krw?: number | null;
+  /** 로그인 실패로 잠겨 있으면 풀리는 때(ISO) — 관리자 목록 응답에만 (0091) */
+  sign_in_locked_until?: string | null;
   department_id?: string;
   created_at: string;
   updated_at: string;

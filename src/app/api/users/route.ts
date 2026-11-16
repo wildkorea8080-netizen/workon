@@ -5,6 +5,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -47,9 +48,11 @@ export async function GET(_request: NextRequest) {
     }
 
     // Supabase 조인은 객체 또는 배열로 오므로 정규화한다
+    // 로그인 실패로 잠긴 직원(0091) — 풀리는 때. 못 읽으면 표시만 빠진다
+    const locks = await accountLocks(lockReadDeps(), 'user', (users ?? []).map((u: any) => u.email)).catch(() => new Map<string, string>());
     const normalized = (users ?? []).map((user: any) => {
       const dept = Array.isArray(user.departments) ? user.departments[0] : user.departments;
-      return { ...user, departments: undefined, department_name: dept?.name ?? null };
+      return { ...user, departments: undefined, department_name: dept?.name ?? null, sign_in_locked_until: locks.get(user.email) ?? null };
     });
 
     return NextResponse.json({ ok: true, data: normalized });

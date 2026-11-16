@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
+import { lockUntilLabel } from '@/lib/sign-in-lock-spec';
 
 type Tab = 'users' | 'superadmins';
 
@@ -92,6 +93,13 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
     const data = await res.json();
     if (data.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
     else onToast(data.error);
+  };
+
+  const handleUnlock = async (id: string) => {
+    const res  = await fetch(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) { fetchUsers(page); onToast('로그인 잠금을 풀었습니다.'); }
+    else onToast(data.error?.message ?? '잠금 풀기 실패');
   };
 
   const handleDelete = async () => {
@@ -189,9 +197,21 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
                     <span className={`px-2 py-0.5 rounded-full text-xs ${u.is_active !== false ? 'bg-emerald-900/30 text-emerald-400' : 'bg-slate-700 text-slate-500'}`}>
                       {u.is_active !== false ? '활성' : '비활성'}
                     </span>
+                    {u.sign_in_locked_until && (
+                      <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-red-900/30 text-red-400" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
+                        잠김 · {lockUntilLabel(u.sign_in_locked_until)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1.5">
+                      {u.sign_in_locked_until && (
+                        <button
+                          onClick={() => handleUnlock(u.id)}
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-900/20 hover:bg-red-900/40 text-red-300 transition-colors">
+                          잠금 풀기
+                        </button>
+                      )}
                       <button
                         onClick={() => handlePatch(u.id, { isActive: u.is_active === false })}
                         className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${u.is_active !== false ? 'bg-slate-700 hover:bg-amber-900/40 text-slate-300 hover:text-amber-400' : 'bg-emerald-900/30 hover:bg-emerald-900/50 text-emerald-400'}`}>
@@ -292,6 +312,13 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
     else onToast(data.error);
   };
 
+  const handleUnlockSuper = async (id: string) => {
+    const res  = await fetch(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) { load(); onToast('로그인 잠금을 풀었습니다.'); }
+    else onToast(data.error?.message ?? '잠금 풀기 실패');
+  };
+
   const handleChangePw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pwForm.next !== pwForm.confirm) { setPwError('새 비밀번호가 일치하지 않습니다.'); return; }
@@ -342,8 +369,20 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
                     <span className={`px-2 py-0.5 rounded-full text-xs ${sa.is_active !== false ? 'bg-emerald-900/30 text-emerald-400' : 'bg-slate-700 text-slate-500'}`}>
                       {sa.is_active !== false ? '활성' : '비활성'}
                     </span>
+                    {sa.sign_in_locked_until && (
+                      <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-red-900/30 text-red-400" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
+                        잠김 · {lockUntilLabel(sa.sign_in_locked_until)}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5">
+                    {sa.sign_in_locked_until && (
+                      <button
+                        onClick={() => handleUnlockSuper(sa.id)}
+                        className="mr-1.5 px-3 py-1 text-xs rounded-lg bg-red-900/20 hover:bg-red-900/40 text-red-300 transition-colors">
+                        잠금 풀기
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeactivate(sa.id, sa.is_active === false)}
                       className="px-3 py-1 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">

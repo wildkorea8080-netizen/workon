@@ -94,3 +94,70 @@ export function requestIp(headers: Record<string, unknown> | { get(name: string)
   const ip = raw?.trim() ?? '';
   return ip && ip.length <= 64 ? ip : null;
 }
+
+/**
+ * 잠금 풀리는 때(2026-11-16) — 30분 창 안의 실패 시각(아무 순서)을 받아, 잠겼으면 풀리는 때(ISO), 아니면 null.
+ * 잠긴 동안은 실패를 더 세지 않으므로, 창 안 실패가 5번 아래로 떨어지는 순간 = (n−5)번째로 오래된 실패 + 30분.
+ */
+export function lockedUntil(failureTimes: string[], nowMs = Date.now()): string | null {
+  const since = nowMs - LOCK_WINDOW_MS;
+  const times = failureTimes.map((t) => Date.parse(t)).filter((t) => Number.isFinite(t) && t >= since).sort((a, b) => a - b);
+  if (times.length < LOCK_FAILURES) return null;
+  return new Date(times[times.length - LOCK_FAILURES] + LOCK_WINDOW_MS).toISOString();
+}
+
+export interface LockReadDeps {
+  /** 그 해시들의 그때 뒤 실패 — 못 읽으면 null */
+  listFailures(scope: SignInScope, keyHashes: string[], sinceIso: string): Promise<{ key_hash: string; created_at: string }[] | null>;
+}
+
+/** 관리 화면용 — 이메일마다 잠겨 있으면 풀리는 때. 못 읽은 것은 비움(모름 = 잠김 표시 없음) */
+export async function accountLocks(deps: LockReadDeps, scope: SignInScope, emails: unknown[], nowMs = Date.now()): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const byHash = new Map<string, string[]>();
+  for (const e of emails) {
+    if (typeof e !== 'string' || !e.trim()) continue;
+    const h = signInKey(e);
+    byHash.set(h, [...(byHash.get(h) ?? []), e]);
+  }
+  const hashes = Array.from(byHash.keys());
+  const since = new Date(nowMs - LOCK_WINDOW_MS).toISOString();
+  const times = new Map<string, string[]>();
+  for (let i = 0; i < hashes.length; i += LOCK_READ_CHUNK) {
+    const rows = await deps.listFailures(scope, hashes.slice(i, i + LOCK_READ_CHUNK), since).catch(() => null);
+    for (const r of rows ?? []) times.set(r.key_hash, [...(times.get(r.key_hash) ?? []), r.created_at]);
+  }
+  for (const [h, ts] of Array.from(times)) {
+    const until = lockedUntil(ts, nowMs);
+    if (until) for (const e of byHash.get(h) ?? []) out.set(e, until);
+  }
+  return out;
+}
+
+/** 한 번에 맞대는 해시 수 — 주소 길이(64자 × 100)와 응답 행 수(잠기면 더 세지 않아 해시마다 5줄 안팎)를 함께 본다 */
+export const LOCK_READ_CHUNK = 100;
+
+export function lockReadDeps(): LockReadDeps {
+  return {
+    async listFailures(scope, keyHashes, sinceIso) {
+      const { data, error } = await supabaseAdmin
+        .from('sign_in_failures')
+        .select('key_hash, created_at')
+        .eq('scope', scope)
+        .in('key_hash', keyHashes)
+        .gte('created_at', sinceIso)
+        .limit(1000);
+      return error ? null : (data ?? []);
+    },
+  };
+}
+
+/**
+ * 관리자가 계정 잠금을 푼다 — 그 계정(이메일)의 실패 기록을 지운다. IP 잠금(한 IP 30번)은 그대로다
+ * (그 IP로 여러 계정을 맞춰 본 것이라 한 계정을 풀어 준다고 풀 일이 아니다 — 30분 기다림).
+ * 지우지 못하면 던진다(관리자 화면이 실패를 알아야 한다).
+ */
+export async function unlockSignIn(scope: SignInScope, email: unknown): Promise<void> {
+  const { error } = await supabaseAdmin.from('sign_in_failures').delete().eq('scope', scope).eq('key_hash', signInKey(email));
+  if (error) throw new Error(error.message);
+}

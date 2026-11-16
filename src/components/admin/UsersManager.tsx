@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/db';
 import CsvRegisterTab from './CsvRegisterTab';
+import { lockUntilLabel } from '@/lib/sign-in-lock-spec';
 
 interface Invitation {
   id: string;
@@ -130,6 +131,23 @@ export default function UsersManager() {
     }
   };
 
+  /** 로그인 실패 잠금 풀기(0091) — 그 계정의 실패 기록을 지운다 */
+  const handleUnlock = async (userId: string) => {
+    if (!confirm('이 직원의 로그인 잠금을 풀까요? 본인이 비밀번호를 여러 번 틀린 것인지 먼저 확인하세요.')) return;
+    setMovingId(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}/sign-in-lock`, { method: 'DELETE' });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, sign_in_locked_until: null } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '잠금을 풀지 못했습니다.');
+    } finally {
+      setMovingId(null);
+    }
+  };
+
   const handleMoveDepartment = async (userId: string, departmentId: string) => {
     setMovingId(userId);
     setError(null);
@@ -222,6 +240,20 @@ export default function UsersManager() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
+                        {user.sign_in_locked_until && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-red-50 text-red-600" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
+                              로그인 잠김 · {lockUntilLabel(user.sign_in_locked_until)}
+                            </span>
+                            <button
+                              onClick={() => handleUnlock(user.id)}
+                              disabled={movingId === user.id}
+                              className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                            >
+                              잠금 풀기
+                            </button>
+                          </span>
+                        )}
                         <select
                           value={(user as any).department_id ?? ''}
                           onChange={e => handleMoveDepartment(user.id, e.target.value)}
