@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:check": "tsx scripts/db-check.mjs",
+    "db:drift": "tsx scripts/db-drift.mjs",
     "isolation:check": "tsx scripts/isolation-check.mjs",
     "db:migrate": "tsx scripts/db-migrate.mjs",
     "db:test-agents": "tsx scripts/db-test-agents.mjs",
