@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-16 밤 5) 기관 관리자의 계정 사용 중지·다시 사용(`c77acd2`까지 2개 커밋, 마이그레이션 없음)을 `dpl_6MHzJw12fr5g1zyYMusMxTiAGJ9Q`로 배포했다.
 - (2026-11-16 밤 4) 내 로그인 기록(`c9a7f4c`까지 2개 커밋, 마이그레이션 없음)을 `dpl_Faj9374W424prRDUKK44tmWyRbKu`로 배포했다.
 - (2026-11-16 밤 3) 직원 접속 기록(0094 운영 적용, `f40aad7`까지 2개 커밋)을 `dpl_GLbdYZDaKuAn5VhAuzxCfFdLo7vj`로 배포했다.
 - (2026-11-16 밤 2) 임시 비밀번호는 비밀번호부터 바꾸기·슈퍼관리자 재발급(0093 운영 적용, `cdec0d8`까지 2개 커밋)을 `dpl_BiMX4HKJTBX3uLw8Af2rtRvFT8Gc`로 배포했다.

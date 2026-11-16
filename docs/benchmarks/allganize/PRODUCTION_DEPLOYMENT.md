@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-16(밤 5): 기관 관리자의 계정 사용 중지·다시 사용
+
+- 2026-11-16 23:11 KST 배포 `dpl_6MHzJw12fr5g1zyYMusMxTiAGJ9Q`(커밋 `c77acd2`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_Faj9374W424prRDUKK44tmWyRbKu`(c9a7f4c)로 promote한다(기관 관리자의 사용 중지·다시 사용 단추만 빠진다 — 이미 끈 계정은 꺼진 채, 슈퍼관리자가 켤 수 있다).
+- 들어간 커밋: `876298b`(직전 배포 기록), `e51b873` 기관 관리자의 계정 사용 중지·다시 사용(`POST /api/users/[id]/active` — 관리 범위 직원만·본인 안 됨·대리 접근 막음·슈퍼관리자 계정 제외·끌 때 사유·보안 로그 high, 사용자 관리 목록 '사용 중지됨'·단추·거르기(사용 중지·90일 넘게 로그인 안 함·기록 없음)), `c77acd2` 문서.
+- **배포 전**: 가지 Preview(`c77acd2`, `workon-hgf4oj41f`) Ready를 확인한 뒤 `main`에 올렸다. 시험 DB(0001~0094)를 띄운 전체 시험 267파일 3,673개 통과·tsc 0.
+- 배포 뒤 확인(로그인 없이, 운영 주소): `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `GET /api/users` 403, `POST /api/users/{id}/active` 403. pg_cron 호출 200(23:12·23:13 KST, 실행기 하트비트 23:10).
+- **확인하지 못한 것**(사용자 몫): 관리자로 로그인해 시험 계정을 '사용 중지'하면 그 계정의 열린 로그인이 30초 안에 끝나고 다시 로그인이 막히는지, '다시 사용'으로 되돌아오는지, 목록 거르기를 브라우저로 보지 않았다.
+
 ## 2026-11-16(밤 4): 내 로그인 기록
 
 - 2026-11-16 23:00 KST 배포 `dpl_Faj9374W424prRDUKK44tmWyRbKu`(커밋 `c9a7f4c`, `main` fast-forward — GitHub 연동). 사용자 선택("운영반영"). 마이그레이션 없음. 되돌릴 때는 직전 `dpl_GLbdYZDaKuAn5VhAuzxCfFdLo7vj`(f40aad7)로 promote한다(내 로그인 기록 화면만 빠진다).
