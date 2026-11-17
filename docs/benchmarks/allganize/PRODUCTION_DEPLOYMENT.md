@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(밤 2): 계약·API 키·공지·초대 링크 조작 기록 — 마이그레이션 없음
+
+- 코드 배포 `dpl_2n69VVcVvepfqhXPcqkq3GZo8H21`(커밋 `af8bc96`, 2026-11-17 21:49 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `022eb26`(밤 배포 기록), `2f5b0e4` 기능 — 계약 등록·변경·해지(달라진 칸만), 시스템·기관 API 키 교체(키 값 없음), 공지 작성·수정·삭제(본문 없음), 관리자 초대 링크 만들기(초대 열쇠 없음), 기관 종료(`org_terminated`)를 `super_admin_logs`에, 초대 링크 역할 ADMIN·USER만·최상위 부서·부서 없으면 400·주소 config 경유, 기관 상태 넷만, '기관 삭제' 단추 응답 확인, `af8bc96` 문서. 가지 Preview(`workon-fqkawkph7`) Ready 뒤 `main`. 배포 전 전체 시험 292파일 3,873개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_ArbBFS648gWr3oZDNwFjrsCG8o1j`(ae708b6)로 promote.
+- 배포 뒤 확인(읽기 전용): 운영 슈퍼관리자 창에서 조작 기록 API·계약 목록·기관 초대 링크 목록 200(초대 주소 호스트 `workon-ai.vercel.app`). `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, 슈퍼관리자 API 무인증 401. 실행기 호출 21:50 KST 200, 최근 24시간 critical 0건.
+- 관찰: 배포 전 21:36 KST 운영 기록에 `시스템 API 키 변경: anthropic`(warning) — 슈퍼관리자 화면에서 시스템 키를 바꾼 것으로 보인다. 옛 코드라 조작 기록에는 없다. 이 화면에 저장한 키는 모델 호출에 쓰이지 않는다(호출은 서버 환경 변수 `ANTHROPIC_API_KEY`), 운영 `ENCRYPTION_KEY`가 비어 있어 소스의 고정 키로 암호화돼 있다.
+
 ## 2026-11-17(밤): 슈퍼관리자 조작 기록 보이기 — 마이그레이션 없음
 
 - 코드 배포 `dpl_ArbBFS648gWr3oZDNwFjrsCG8o1j`(커밋 `ae708b6`, 2026-11-17 21:33 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `5df4a0b`(오후 7 기록), `c38cd1d` 기능 — `GET /api/super/logs/admin`(`super_admin_logs`를 처음으로 읽음 — 종류 거르기·쪽 나누기·대상 기관·계정 이름·짧은 요약, 못 읽으면 503)·로그 관리 '관리자 조작' 탭·설정 보안 탭 최근 10건(예전엔 없는 `/api/super/logs`를 불러 늘 비어 있었다)·계정 사용 중지·권한 변경·슈퍼관리자 추가·사용 중지 기록·세 로그 API는 못 읽으면 503, `ae708b6` 문서. 가지 Preview(`workon-34opn69sz`) Ready 뒤 `main`. 배포 전 전체 시험 291파일 3,857개 통과·tsc 0.
