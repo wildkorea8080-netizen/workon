@@ -1143,6 +1143,8 @@ HWPX 표의 `caption`은 **앞 문단 + 표 자신의 `hp:caption`을 잇습니�
 잘게 쪼개져 오므로 블록 인덱스별로 모았다가 `content_block_stop`에서 파싱합니다
 (`src/lib/llm/anthropic.ts`). 토큰 사용량은 라운드별로, **실제 쓴 모델별로** 누적합니다.
 
+**메시지를 시각으로 줄 세울 때는 역할로도 가르세요**(2026-11-18) — 한 턴의 질문·답 두 행은 한 번에 들어가 `created_at`(now())이 같습니다. 시각만으로는 같은 시각 안의 순서가 정해지지 않아, 이력(`loadHistory`)이 질문1 → 답2처럼 한 칸씩 밀린 채 모델에 갔습니다(첫 답은 빠짐, 오류 없음). 최신순은 `.order('created_at', {ascending:false}).order('role', {ascending:true})`(답 먼저), 시간순은 `role` 내림(질문 먼저). 한 역할만 읽는 조회는 해당 없음. `tests/batch-0150.test.ts`
+
 **Supabase 배치 삽입 주의**: PostgREST는 여러 행을 한 번에 넣을 때 모든 행의
 컬럼을 **합집합**으로 맞추고, 그 컬럼이 없는 행에는 **명시적 NULL**을 넣습니다.
 컬럼에 기본값이 있어도 우회되므로 NOT NULL이면 배치 전체가 23502로 실패합니다.
