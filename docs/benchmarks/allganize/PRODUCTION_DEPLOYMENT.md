@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(오후 3): 인원 상한을 화면에 — 마이그레이션 없음
+
+- 코드 배포 `dpl_GpFMCBkM1e6Ug3M7e5nM74pncVjp`(커밋 `a42e8fe`, 2026-11-17 15:18 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `c0bed11`(오후 2 배포 기록), `b3859b0` 기능 — 사용자 목록 API에 `seats`(`seatUsage` — 기관 전체 활성 계정·상한, 못 읽으면 null)·'사용자 관리' 머리에 N / M명·남은 자리, 슈퍼관리자 기관 상세 `user_count`(활성 계정)·`agent_count`(지우지 않은 비서 — 예전 막대는 부서 수)·`tokens_this_month`(`organization_chat_tokens`), 못 읽으면 '—'. `a42e8fe` 문서. 가지 Preview(`workon-i7qvtixkt`) Ready 뒤 `main`. 배포 전 전체 시험 288파일 3,830개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_kzNfFha36aZruJP67ZubjPmZGPbe`(b9e7670)로 promote.
+- 배포 전·뒤 확인(읽기 전용): 새 PostgREST 읽기(비서 수 head count·토큰 RPC)를 운영에 그대로 돌려 SQL 수와 같음(비서 23·19). `/login`·`/forgot-password`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/api/users` 무인증 403·슈퍼관리자 기관 상세 401. 실행기 하트비트 15:20 KST·pg_cron 호출 200. 최근 24시간 critical 0건·최근 20분 warning 이상 0건.
+- **확인하지 못한 것**: 로그인한 두 화면('사용자 관리' 머리·슈퍼관리자 기관 상세 한도 막대).
+
 ## 2026-11-17(오후 2): 기관의 사용자 수 상한 — 마이그레이션 없음
 
 - 코드 배포 `dpl_kzNfFha36aZruJP67ZubjPmZGPbe`(커밋 `b9e7670`, 2026-11-17 13:56 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `e6f4d6d`(오후 배포 기록), `8b04f6f` 기능 — `src/lib/user-seats.ts` `checkUserSeats`가 그 기관 부서의 활성·탈퇴 안 한 계정을 세어 `organizations.max_users`를 넘으면 403 `SEAT_LIMIT`·못 세면 503 `SEAT_UNKNOWN`. 관리자 등록(역할 USER·ADMIN만·오류 원문 `details` 뺌)·CSV 일괄 등록(남은 자리만큼·500명 상한)·초대 가입 두 곳(초대 차지 전에, 도메인 가입은 users 행 전에)·기관 관리자의 다시 사용(꺼진 계정을 켤 때). `b9e7670` 문서. 가지 Preview(`workon-n6km8vhvv`) Ready 뒤 `main`. 배포 전 전체 시험 287파일 3,826개 통과·tsc 0.
