@@ -9,6 +9,8 @@ import { reportContractSync } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
 import { APP_URL } from '@/lib/config';
 import { normalizeOrgSlug } from '@/lib/org-slug';
+import { orgChatTokens } from '@/lib/org-chat-tokens';
+import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +41,9 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
+    // 이번 달 토큰은 한도 판정과 같은 셈(chat_message·한국 시간 이번 달 — `org-chat-tokens.ts`). 뷰의 값은 모든 활동·UTC 달이라 기관 상세와 달랐다(2026-11-17)
+    const tokens = await orgChatTokens((data ?? []).map((o: { id: string }) => o.id), kstMonthStart().toISOString());
+
     // 만료까지 남은 일수 계산
     const now = Date.now();
     const orgs = (data ?? []).map((o: any) => {
@@ -46,7 +51,7 @@ export async function GET(request: NextRequest) {
       if (o.contract_expires_at) {
         daysLeft = Math.ceil((new Date(o.contract_expires_at).getTime() - now) / 86400000);
       }
-      return { ...o, days_until_expiry: daysLeft };
+      return { ...o, tokens_this_month: tokens.has(o.id) ? tokens.get(o.id) : null, days_until_expiry: daysLeft };
     });
 
     return NextResponse.json({

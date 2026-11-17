@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { pagedRows } from '@/lib/paged-select';
+import { loadChatTokensByOrg } from '@/lib/org-chat-tokens';
 import { kstMonthStart } from '@/lib/kst-time';
 
 export const dynamic = 'force-dynamic';
@@ -12,23 +12,15 @@ export async function GET(request: NextRequest) {
 
   const monthStart = kstMonthStart().toISOString();
 
-  const [{ data: orgs }, { data: logs }] = await Promise.all([
+  const [{ data: orgs, error: orgErr }, usage] = await Promise.all([
     supabaseAdmin.from('organizations')
       .select('id, name, monthly_token_limit').eq('status', 'active'),
-    pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs')
-      .select('organization_id, details', w ? { count: 'exact' } : undefined)
-      .eq('action', 'chat_message')
-      .gte('created_at', monthStart)
-      .order('id').range(a, b)),
+    // 한도 판정과 같은 셈(2026-11-17, `org-chat-tokens.ts`)
+    loadChatTokensByOrg(monthStart),
   ]);
-
-  const usageMap = new Map<string, number>();
-  for (const l of logs ?? []) {
-    const oid = l.organization_id;
-    if (!oid) continue;
-    const t = (l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0);
-    usageMap.set(oid, (usageMap.get(oid) ?? 0) + t);
-  }
+  // 못 읽었으면 '경보 없음'으로 꾸미지 않는다
+  if (orgErr || !usage) return NextResponse.json({ ok: false, error: '사용량을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+  const usageMap = usage;
 
   const warning: any[] = [];
   const exceeded: any[] = [];

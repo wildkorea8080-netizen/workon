@@ -8,6 +8,7 @@ import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
 import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-throttle';
 import { seatAlerts } from '@/lib/user-seats';
 import { dbErrorText } from '@/lib/db-error-text';
+import { loadChatTokensByOrg } from '@/lib/org-chat-tokens';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,8 @@ export async function GET(request: NextRequest) {
 
   try {
     // ── 병렬 쿼리 ──────────────────────────────────────────
+    // 기관별 이번 달 토큰(한도 판정과 같은 셈) — 경고·초과·Top 5가 함께 쓴다
+    const monthTokensP = loadChatTokensByOrg(monthStart);
     const [
       orgAll, orgActive, orgSuspended, orgExpiring,
       userAll, userNew, userToday,
@@ -44,16 +47,10 @@ export async function GET(request: NextRequest) {
       pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b)),
       supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', monthStart),
       supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', lastMonthStart).lt('started_at', monthStart),
-      // 80~100% 경고 기관
+      // 80~100% 경고 기관 — 기관별 이번 달 토큰은 한 번만 읽는다(예전엔 경고·초과·Top 5가 같은 기록을 세 번 읽었다, 2026-11-17)
       (async () => {
         const { data: orgs } = await supabaseAdmin.from('organizations').select('id, monthly_token_limit').eq('status', 'active');
-        const { data: logs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
-        const usageMap = new Map<string, number>();
-        for (const l of logs ?? []) {
-          const oid = l.organization_id;
-          if (!oid) continue;
-          usageMap.set(oid, (usageMap.get(oid) ?? 0) + ((l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0)));
-        }
+        const usageMap = (await monthTokensP) ?? new Map<string, number>();
         let warn = 0;
         for (const o of orgs ?? []) {
           if (!o.monthly_token_limit) continue;
@@ -64,12 +61,7 @@ export async function GET(request: NextRequest) {
       })(),
       (async () => {
         const { data: orgs } = await supabaseAdmin.from('organizations').select('id, monthly_token_limit').eq('status', 'active');
-        const { data: logs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
-        const usageMap = new Map<string, number>();
-        for (const l of logs ?? []) {
-          const oid = l.organization_id; if (!oid) continue;
-          usageMap.set(oid, (usageMap.get(oid) ?? 0) + ((l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0)));
-        }
+        const usageMap = (await monthTokensP) ?? new Map<string, number>();
         return (orgs ?? []).filter((o: { id: string; monthly_token_limit?: number }) => o.monthly_token_limit && (usageMap.get(o.id) ?? 0) >= o.monthly_token_limit).length;
       })(),
       supabaseAdmin.from('organizations').select('id, name, plan, status, created_at').order('created_at', { ascending: false }).limit(5),
@@ -135,14 +127,7 @@ export async function GET(request: NextRequest) {
     const planChart = [...planMap.entries()].map(([name, value]) => ({ name, value }));
 
     // ── 이번달 사용량 Top 5 기관 ──────────────────────
-    const { data: topLogs } = await pagedRows<{ organization_id: string | null; details: any }>((a, b, w) => supabaseAdmin
-      .from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined)
-      .eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b));
-    const topMap = new Map<string, number>();
-    for (const l of topLogs ?? []) {
-      const oid = l.organization_id; if (!oid) continue;
-      topMap.set(oid, (topMap.get(oid) ?? 0) + ((l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0)));
-    }
+    const topMap = (await monthTokensP) ?? new Map<string, number>();
     const top5Ids = [...topMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
     let topUsageOrgs: any[] = [];
     if (top5Ids.length > 0) {

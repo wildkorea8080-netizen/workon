@@ -30,7 +30,7 @@ const STATUS_BADGE: Record<string, string> = {
 interface Org {
   id: string; name: string; slug: string; type: string;
   status: string; plan: string; domain?: string;
-  current_users?: number; tokens_this_month?: number;
+  current_users?: number; tokens_this_month?: number | null;
   contract_expires_at?: string; days_until_expiry?: number | null;
 }
 
@@ -198,7 +198,7 @@ export default function OrganizationsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-slate-300">{org.current_users ?? 0}명</td>
-                    <td className="px-5 py-4 text-slate-300">{formatTokens(org.tokens_this_month ?? 0)}</td>
+                    <td className="px-5 py-4 text-slate-300">{typeof org.tokens_this_month === 'number' ? formatTokens(org.tokens_this_month) : '—'}</td>
                     <td className="px-5 py-4 text-slate-400 text-xs">
                       {org.contract_expires_at
                         ? new Date(org.contract_expires_at).toLocaleDateString('ko-KR')
