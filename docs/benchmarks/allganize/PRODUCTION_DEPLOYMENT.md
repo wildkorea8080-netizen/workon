@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(밤): 슈퍼관리자 조작 기록 보이기 — 마이그레이션 없음
+
+- 코드 배포 `dpl_ArbBFS648gWr3oZDNwFjrsCG8o1j`(커밋 `ae708b6`, 2026-11-17 21:33 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `5df4a0b`(오후 7 기록), `c38cd1d` 기능 — `GET /api/super/logs/admin`(`super_admin_logs`를 처음으로 읽음 — 종류 거르기·쪽 나누기·대상 기관·계정 이름·짧은 요약, 못 읽으면 503)·로그 관리 '관리자 조작' 탭·설정 보안 탭 최근 10건(예전엔 없는 `/api/super/logs`를 불러 늘 비어 있었다)·계정 사용 중지·권한 변경·슈퍼관리자 추가·사용 중지 기록·세 로그 API는 못 읽으면 503, `ae708b6` 문서. 가지 Preview(`workon-34opn69sz`) Ready 뒤 `main`. 배포 전 전체 시험 291파일 3,857개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_HNEfiab9vYKWmVt8ULBhTL1giz6B`(2f23775)로 promote.
+- 배포 전·뒤 확인(읽기 전용): 운영 `super_admin_logs` 칸·외래 키 이름(`super_admin_logs_admin_user_id_fkey`)이 새 조회와 같음, 기록 11건(업무 화면 전환 10·기관 등록 1). 운영 브라우저(슈퍼관리자 로그인)에서 '관리자 조작' 탭 11건 — '업무 화면 전환 · 기관 · 기본 기관 · 업무 홈 끔 · 새 작업 켬', '기관 등록 · 해외농업자원개발협회 · 요금제 enterprise' — 과 설정 보안 탭 최근 10건을 봄. `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, 새 API 무인증 401. 실행기 하트비트 21:35 KST·pg_cron 호출 200, 최근 24시간 critical 0건·20분 warning 이상 0건.
+- 좁은 창에서는 표 칸이 좁아 대상 글이 글자마다 줄바뀜(다른 로그 탭과 같은 꼴 — 가로 넘김 없음).
+
 ## 2026-11-17(오후 7): 운영 SUPER_JWT_SECRET 넣기 — 코드·마이그레이션 없음
 
 - **발견**: 운영 슈퍼관리자 로그인이 "서버 오류가 발생했습니다"(500). Vercel 함수 로그 `[super/auth/login] Error: SUPER_JWT_SECRET이 설정되지 않았습니다.` — `vercel env ls`에는 이름이 있었지만(206일 전) `vercel env pull`로 길이만 재 보니 0. 2026-11-13 `super-secret.ts`가 운영의 빈 값을 거절하게 바꾼 뒤(`dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`)부터 슈퍼관리자 로그인이 막혀 있었다. 그 전에는 소스의 고정 값으로 서명했다(토큰을 누구나 만들 수 있는 상태였음). 기관 관리자 로그인(NextAuth — `NEXTAUTH_SECRET` 44자)은 그대로였다.
