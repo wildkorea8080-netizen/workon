@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(아침 3): 여러 턴 대화 이력 순서 — 마이그레이션 없음
+
+- 코드 배포 `dpl_G5DN9XFYxVgHuimNaDQKptXsFu69`(커밋 `28eb99d`, 2026-11-18 08:54 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `0b01488`(아침 2 기록), 고침 — 한 턴의 질문·답은 `created_at`이 같아(운영 10턴 모두) 시각만으로 줄 세우면 이력(`loadHistory`)이 질문1 → 답2처럼 한 칸씩 밀린 채 모델에 가던 것(첫 답은 빠짐, 오류 없음)을 같은 시각이면 역할로 가르게(이력은 `created_at desc, role asc`, 대화 열기·공유 화면은 `created_at asc, role desc`), `28eb99d` 문서. 가지 Preview(`workon-duw73khce`) Ready 뒤 `main`. 배포 전 전체 시험 304파일 3,962개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_J2XTcvJ7F4QPhGx7R1VQSRZX4gTy`(f0e4b22)로 promote.
+- 배포 전 확인(운영, 읽기 전용): 옛 순서로 3턴 대화 최신순이 `uauaua`(= 뒤집으면 밀림), 새 순서로 이력·화면 모두 `uauaua` 시간순(질문 → 그 답). 배포 뒤: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 없는 공유 토큰 404. 실행기 호출 08:54 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 운영에 공유된 대화가 없어 공유 화면은, 직원 로그인이 아니라 대화 열기는 실제로 보지 못함(배포 전 같은 조회로 확인).
+
 ## 2026-11-18(아침 2): 읽기 실패를 판정에 쓰지 않기 — 마이그레이션 없음
 
 - 코드 배포 `dpl_J2XTcvJ7F4QPhGx7R1VQSRZX4gTy`(커밋 `f0e4b22`, 2026-11-18 08:40 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b655395`·`87a2e74`(아침 기록·화면 확인), 고침 — 부서 이동 순환 검사가 하위 부서를 `departmentDescendantsStrict`로 읽어 못 읽으면 503(예전엔 실패가 '하위 없음'이 되어 자기 하위 밑으로 옮기는 이동을 통과), 관리자 부서 읽기 실패 503, 비서 설정 저장은 지금 값을 못 읽으면 503(예전엔 빈 값으로 보고 판정), 슈퍼관리자 공지 목록 못 읽으면 503, `f0e4b22` 문서. 가지 Preview(`workon-b24umiz5y`) Ready 뒤 `main`. 배포 전 전체 시험 303파일 3,958개 통과·tsc 0(시험 DB가 꺼져 있어 다시 켜고 돌림).
