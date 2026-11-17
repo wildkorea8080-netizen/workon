@@ -5,6 +5,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
+import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-throttle';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       todayUsage, monthUsage,
       revenueThis, revenueLast,
       tokenAlerts, tokenExceeded,
-      recentOrgs, recentLogs, criticalRecent,
+      recentOrgs, recentLogs, criticalRecent, ipFailures, ipLockLogs,
     ] = await Promise.all([
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -74,6 +75,13 @@ export async function GET(request: NextRequest) {
       // 최근 24시간 critical — 문구별로 세어 알림 띠에(2026-11-17). 수는 정확히, 문구 묶기는 500줄까지
       supabaseAdmin.from('system_logs').select('message', { count: 'exact' }).eq('level', 'critical')
         .gte('created_at', new Date(Date.now() - CRITICAL_WINDOW_MS).toISOString()).order('created_at', { ascending: false }).limit(500),
+      // 지금 로그인이 막힌 IP(2026-11-17) — 30분 창 안 실패의 IP 해시에서 30번 넘은 것. 기관 전체가 바깥 IP 하나를 쓰면 기관 전체가 막힌다
+      // API는 한 번에 1,000행까지라 쪽마다 끝까지(pagedRows) — 무작위 대입이 몰리면 30분에 수천 줄이 된다
+      pagedRows<{ ip_hash: string | null }>((a, b, w) => supabaseAdmin.from('sign_in_failures').select('ip_hash', w ? { count: 'exact' } : undefined).not('ip_hash', 'is', null)
+        .gte('created_at', new Date(Date.now() - LOCK_WINDOW_MS).toISOString()).order('id').range(a, b)),
+      // 그 사이 '막 잠김' 기록의 가린 IP(운영자가 기관 담당자에게 물을 단서)
+      supabaseAdmin.from('system_logs').select('details, created_at').eq('message', IP_LOCK_STARTED)
+        .gte('created_at', new Date(Date.now() - LOCK_WINDOW_MS).toISOString()).order('created_at', { ascending: false }).limit(20),
     ]);
 
     // ── 사용량 집계 ──────────────────────────────────────
@@ -163,6 +171,11 @@ export async function GET(request: NextRequest) {
           expiringContracts: orgExpiring.count ?? 0,
           // 못 읽으면 null(0으로 보이면 '문제 없음'으로 읽힌다)
           critical24h: criticalRecent.error ? null : { count: criticalRecent.count ?? 0, top: criticalSummary((criticalRecent.data ?? []) as Array<{ message: string | null }>) },
+          // 못 읽으면 null(0으로 보이면 '막힌 곳 없음'으로 읽힌다)
+          lockedIps: ipFailures.error ? null : {
+            count: lockedIpCount(((ipFailures.data ?? []) as Array<{ ip_hash: string | null }>).map((r) => r.ip_hash)),
+            masked: Array.from(new Set(((ipLockLogs.data ?? []) as Array<{ details: { ip?: unknown } | null }>).map((r) => r.details?.ip).filter((v): v is string => typeof v === 'string'))).slice(0, 5),
+          },
         },
         recentOrgs:     recentOrgs.data ?? [],
         topUsageOrgs,

@@ -102,6 +102,21 @@ export default function SuperDashboard() {
         </div>
       )}
 
+      {/* 지금 로그인이 막힌 IP(2026-11-17) — 기관 전체가 바깥 IP 하나를 쓰면 기관 전체가 못 들어온다. 계정 관리에서 IP를 넣어 푼다 */}
+      {al.lockedIps?.count > 0 && (
+        <div className="flex items-start gap-4 p-4 bg-amber-950/30 border border-amber-700/40 rounded-2xl">
+          <span className="text-xl">🔒</span>
+          <div className="flex-1 text-sm text-amber-300">
+            <p className="font-semibold">지금 로그인이 막힌 인터넷 주소(IP) {al.lockedIps.count}곳</p>
+            <p className="mt-1 text-xs text-amber-200/80">
+              한 주소에서 30분에 30번 틀리면 그 주소의 로그인을 30분 막습니다. 기관 전체가 한 주소를 쓰면 기관 전체가 못 들어옵니다.
+              {(al.lockedIps.masked ?? []).length > 0 && <> 최근 잠긴 주소: {(al.lockedIps.masked as string[]).join(', ')}</>}
+            </p>
+          </div>
+          <Link href="/super/accounts" className="flex-shrink-0 px-3 py-1.5 bg-amber-700/40 hover:bg-amber-700/60 text-amber-200 text-xs font-semibold rounded-lg transition-colors">IP 확인·풀기</Link>
+        </div>
+      )}
+
       {/* 알림 배너 */}
       {(al.tokenExceeded > 0 || al.expiringContracts > 0) && (
         <div className="flex items-center gap-4 p-4 bg-red-950/30 border border-red-700/40 rounded-2xl">

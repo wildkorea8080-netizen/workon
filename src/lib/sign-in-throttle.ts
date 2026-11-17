@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
+import { maskIp } from '@/lib/sign-in-lock-spec';
 
 /**
  * 로그인 실패 잠금(2026-11-13, 0091).
@@ -70,9 +71,26 @@ function errorCode(error: unknown): string {
   return typeof code === 'string' && code ? code.slice(0, 40) : 'error';
 }
 
-export async function noteSignInFailure(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null): Promise<void> {
-  await deps.recordFailure(scope, signInKey(email), ipKey(ip)).catch((error) =>
-    logSystem({ level: 'error', category: 'security', message: FAILURE_NOT_RECORDED, details: { scope, code: errorCode(error) } }));
+/** IP 잠금이 막 걸렸을 때(2026-11-17) — 운영자가 알게. 가린 IP·범위만 */
+export const IP_LOCK_STARTED = '한 인터넷 주소(IP)에서 로그인 실패가 많아 그 주소의 로그인을 30분 막았습니다';
+
+export async function noteSignInFailure(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null, nowMs = Date.now()): Promise<void> {
+  const recorded = await deps.recordFailure(scope, signInKey(email), ipKey(ip)).then(() => true, (error) =>
+    logSystem({ level: 'error', category: 'security', message: FAILURE_NOT_RECORDED, details: { scope, code: errorCode(error) } }).then(() => false));
+  // 이 실패로 IP가 막 잠겼으면 한 번 남긴다 — 잠긴 동안은 실패를 더 세지 않으므로(비밀번호를 보기 전에 막음) 꼭 30번째에서 한 번이다
+  const hash = ipKey(ip);
+  if (!recorded || !hash || !ip) return;
+  const count = await deps.countFailures(scope, 'ip_hash', hash, new Date(nowMs - LOCK_WINDOW_MS).toISOString()).catch(() => null);
+  if (count === IP_FAILURES) {
+    await logSystem({ level: 'warning', category: 'security', message: IP_LOCK_STARTED, details: { scope, ip: maskIp(ip) } }).catch(() => {});
+  }
+}
+
+/** 지금 잠긴 IP 수(2026-11-17) — 창 안 실패의 IP 해시 목록에서 30번 넘은 해시 수. 대시보드가 쓴다 */
+export function lockedIpCount(ipHashes: Array<string | null>): number {
+  const n = new Map<string, number>();
+  for (const h of ipHashes) if (h) n.set(h, (n.get(h) ?? 0) + 1);
+  return Array.from(n.values()).filter((c) => c >= IP_FAILURES).length;
 }
 
 export async function noteSignInSuccess(deps: ThrottleDeps, scope: SignInScope, email: unknown): Promise<void> {
