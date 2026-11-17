@@ -6,6 +6,7 @@ import { kstMonthStart } from '@/lib/kst-time';
 import { writeAuditRow } from '@/lib/audit-write';
 import { contractToRestore, reportContractSync, type ContractLite } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
+import { PLANS } from '@/lib/plans';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,15 +18,22 @@ export async function PATCH(
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const { status, plan, notes } = await request.json();
+    const { status, plan, notes, monthly_token_limit } = await request.json();
     const { id } = params;
     // 상태는 정해 둔 넷만(2026-11-17 — 예전엔 아무 글이나 받았다)
     if (status !== undefined && !['trial', 'active', 'suspended', 'terminated'].includes(status))
       return NextResponse.json({ ok: false, error: '기관 상태 값이 올바르지 않습니다.' }, { status: 400 });
+    // 요금제는 정해 둔 것만(2026-11-18)
+    if (plan !== undefined && !(typeof plan === 'string' && Object.prototype.hasOwnProperty.call(PLANS, plan)))
+      return NextResponse.json({ ok: false, error: '요금제 값이 올바르지 않습니다.' }, { status: 400 });
+    // 월 토큰 한도(2026-11-18) — 사용량 화면의 '한도 증량'이 이 값을 보내는데 예전엔 받지 않아 저장된 척만 했다. 0이면 무제한(`checkTokenLimit`)
+    const tokenLimit = parseTokenLimit(monthly_token_limit);
+    if (tokenLimit === 'invalid')
+      return NextResponse.json({ ok: false, error: '월 토큰 한도는 0(무제한) 이상의 정수여야 합니다.' }, { status: 400 });
 
     const { data: before } = await supabaseAdmin
       .from('organizations')
-      .select('id, name, status, plan')
+      .select('id, name, status, plan, monthly_token_limit')
       .eq('id', id)
       .single();
 
@@ -37,6 +45,7 @@ export async function PATCH(
     if (status !== undefined) updateData.status = status;
     if (plan    !== undefined) updateData.plan   = plan;
     if (notes   !== undefined) updateData.notes  = notes;
+    if (tokenLimit !== undefined) updateData.monthly_token_limit = tokenLimit;
 
     const { data: updated, error } = await supabaseAdmin
       .from('organizations')
@@ -86,6 +95,12 @@ export async function PATCH(
     console.error('[super/organizations PATCH]', err);
     return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
+}
+
+/** 월 토큰 한도 — 없으면 undefined(안 바꿈), 0~1조 정수만 */
+function parseTokenLimit(v: unknown): number | undefined | 'invalid' {
+  if (v === undefined) return undefined;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1_000_000_000_000 ? v : 'invalid';
 }
 
 export async function GET(

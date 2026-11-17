@@ -70,21 +70,32 @@ export default function UsagePage() {
     return () => clearInterval(realtimeRef.current);
   }, [period, fetchRealtime]);
 
-  const handleLimitSave = async (orgId: string, newLimit: number) => {
-    await fetch(`/api/super/organizations/${orgId}`, {
+  // 2026-11-18 — 예전엔 응답을 보지 않고 닫았다(서버가 이 값을 받지 않아 한도가 바뀌지 않았는데도). 실패하면 창에 이유를 보인다
+  const handleLimitSave = async (orgId: string, newLimit: number): Promise<string | null> => {
+    if (!Number.isInteger(newLimit) || newLimit < 0) return '0(무제한) 이상의 정수를 입력하세요.';
+    const res = await fetch(`/api/super/organizations/${orgId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ monthly_token_limit: newLimit }),
-    });
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (!data?.ok) return (typeof data?.error === 'string' ? data.error : data?.error?.message) ?? '한도를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
     setLimitModal(null);
     fetchMain();
+    return null;
   };
 
   const exportCsv = () => {
     if (!data?.orgStats) return;
+    // 칸 감싸기·수식 주입 막기(2026-11-18 — 예전엔 쉼표가 든 기관명이 칸을 밀고 '='로 시작하면 엑셀이 수식으로 읽었다)
+    const q = (v: unknown) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
     const rows = [
       '기관명,플랜,대화수,입력토큰,출력토큰,비용(USD),활성사용자,한도사용률(%)',
       ...data.orgStats.map((s: any) =>
-        `${s.orgName},${s.plan},${s.conversations},${s.inputTokens},${s.outputTokens},${s.estimatedCost},${s.activeUsers},${s.usagePercent}`
+        [s.orgName, s.plan, s.conversations, s.inputTokens, s.outputTokens, s.estimatedCost, s.activeUsers, s.usagePercent].map(q).join(',')
       ),
     ].join('\n');
     const blob = new Blob(['﻿' + rows], { type: 'text/csv;charset=utf-8' });
@@ -400,8 +411,10 @@ export default function UsagePage() {
 }
 
 // ─── 한도 증량 모달 ───────────────────────────────────────────
-function LimitModal({ org, onClose, onSave }: { org: any; onClose: () => void; onSave: (id: string, v: number) => void }) {
+function LimitModal({ org, onClose, onSave }: { org: any; onClose: () => void; onSave: (id: string, v: number) => Promise<string | null> }) {
   const [val, setVal] = useState(String(Math.ceil((org.limit ?? 2000000) * 1.5 / 1000000) * 1000000));
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
       <div className="bg-[#1E293B] border border-slate-700 rounded-2xl p-6 w-full max-w-sm space-y-4">
@@ -409,13 +422,15 @@ function LimitModal({ org, onClose, onSave }: { org: any; onClose: () => void; o
         <div>
           <p className="text-xs text-slate-400 mb-1">현재 한도: {(org.limit ?? 0).toLocaleString()} 토큰</p>
           <label className="block text-xs font-semibold text-slate-400 mb-1.5">새 한도 (토큰)</label>
-          <input type="number" value={val} onChange={e => setVal(e.target.value)} min={1000000} step={1000000}
+          <input type="number" value={val} onChange={e => setVal(e.target.value)} min={0} step={1000000}
             className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]" />
         </div>
+        <p className="text-xs text-slate-500">0이면 무제한입니다. 종량제 계약의 한도이며, 다음에 계약을 바꾸면 요금제 기본값으로 다시 맞춰집니다.</p>
+        {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-sm text-slate-400 hover:text-white">취소</button>
-          <button onClick={() => onSave(org.orgId, Number(val))}
-            className="flex-1 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white font-semibold rounded-xl text-sm">저장</button>
+          <button disabled={saving} onClick={async () => { setSaving(true); setError(await onSave(org.orgId, Number(val))); setSaving(false); }}
+            className="flex-1 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:opacity-50 text-white font-semibold rounded-xl text-sm">{saving ? '저장 중…' : '저장'}</button>
         </div>
       </div>
     </div>

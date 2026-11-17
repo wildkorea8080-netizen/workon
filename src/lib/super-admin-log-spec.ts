@@ -112,6 +112,7 @@ export function adminLogSummary(action: string, beforeData: unknown, afterData: 
     if (has(a, 'is_active')) parts.push(`${has(b, 'is_active') ? `${activeText(b!.is_active)} → ` : ''}${activeText(a!.is_active)}`);
     if (has(a, 'role')) parts.push(`권한 ${has(b, 'role') ? `${clip(b!.role, 10)} → ` : ''}${clip(a!.role, 10)}`);
     if (has(a, 'status')) parts.push(`상태 ${has(b, 'status') ? `${clip(b!.status, 12)} → ` : ''}${clip(a!.status, 12)}`);
+    if (has(a, 'monthly_token_limit')) parts.push(`월 토큰 한도 ${has(b, 'monthly_token_limit') ? `${fmtLimit(b!.monthly_token_limit)} → ` : ''}${fmtLimit(a!.monthly_token_limit)}`);
     if (has(a, 'homeEnabled')) parts.push(`업무 홈 ${a!.homeEnabled ? '켬' : '끔'}`);
     if (has(a, 'newTasksEnabled')) parts.push(`새 작업 ${a!.newTasksEnabled ? '켬' : '끔'}`);
   }
@@ -167,6 +168,10 @@ export function changedFields(before: Record<string, unknown>, after: Record<str
     if (JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null)) { b[k] = before[k] ?? null; a[k] = after[k] ?? null; }
   }
   return { before: b, after: a };
+}
+
+function fmtLimit(v: unknown): string {
+  return typeof v === 'number' ? (v === 0 ? '무제한' : v.toLocaleString('ko-KR')) : clip(v, 20);
 }
 
 function fmtField(k: string, v: unknown): string {
