@@ -19,7 +19,7 @@ export const LOCK_FAILURES = 5;
 export const IP_FAILURES = 30;
 export const LOCK_WINDOW_MS = 30 * 60_000;
 // 화면도 읽는 값은 잎 파일에(로그인 화면이 이 서버 모듈을 불러오지 않게)
-export { ACCOUNT_LOCKED, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
+export { ACCOUNT_LOCKED, IP_LOCKED, IP_LOCKED_MESSAGE, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
 
 export type SignInScope = 'user' | 'super';
 
@@ -39,16 +39,26 @@ export interface ThrottleDeps {
   clearFailures(scope: SignInScope, keyHash: string): Promise<void>;
 }
 
-/** 지금 로그인을 받아도 되는가 — 잠겼으면 false. 못 읽으면 true(열림) */
-export async function signInAllowed(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null, nowMs = Date.now()): Promise<boolean> {
+/**
+ * 무엇이 잠겼는가 — 'ip'(그 IP 30번)·'account'(그 계정 5번)·null(받음). 못 읽으면 null(열림).
+ * 둘 다면 'ip' — 계정 잠금을 풀어 줘도 IP 잠금이 남아 못 들어오므로, 안내는 풀 수 있는 쪽(서비스 운영자)을 가리켜야 한다(2026-11-17)
+ */
+export type SignInLock = 'ip' | 'account';
+
+export async function signInLock(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null, nowMs = Date.now()): Promise<SignInLock | null> {
   const since = new Date(nowMs - LOCK_WINDOW_MS).toISOString();
   const [byKey, byIp] = await Promise.all([
     deps.countFailures(scope, 'key_hash', signInKey(email), since).catch(() => null),
     ipKey(ip) ? deps.countFailures(scope, 'ip_hash', ipKey(ip)!, since).catch(() => null) : Promise.resolve(null),
   ]);
-  if (byKey !== null && byKey >= LOCK_FAILURES) return false;
-  if (byIp !== null && byIp >= IP_FAILURES) return false;
-  return true;
+  if (byIp !== null && byIp >= IP_FAILURES) return 'ip';
+  if (byKey !== null && byKey >= LOCK_FAILURES) return 'account';
+  return null;
+}
+
+/** 지금 로그인을 받아도 되는가 — 잠겼으면 false. 못 읽으면 true(열림) */
+export async function signInAllowed(deps: ThrottleDeps, scope: SignInScope, email: unknown, ip: string | null, nowMs = Date.now()): Promise<boolean> {
+  return (await signInLock(deps, scope, email, ip, nowMs)) === null;
 }
 
 /** 실패 기록을 남기지 못했을 때 — 로그인은 막지 않고 운영 기록에(2026-11-17). 못 남기면 잠금이 걸리지 않는다 */

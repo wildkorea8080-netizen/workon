@@ -6,7 +6,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NEXTAUTH_SECRET } from '@/lib/config';
 import { canSignIn } from '@/lib/user-withdrawal';
 import { decideSignIn } from '@/lib/sign-in-user';
-import { ACCOUNT_LOCKED, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
+import { ACCOUNT_LOCKED, IP_LOCKED, noteSignInFailure, noteSignInSuccess, requestIp, signInLock, throttleDeps } from '@/lib/sign-in-throttle';
 import { recordSignIn, signInRecordDeps, type SignInOutcome } from '@/lib/sign-in-record';
 import { dormantDeps, lockIfDormant } from '@/lib/dormant-lock';
 import { ACCOUNT_DORMANT } from '@/lib/sign-in-lock-spec';
@@ -31,9 +31,11 @@ export const authOptions: AuthOptions = {
         const uaRaw = (req?.headers as Record<string, unknown> | undefined)?.['user-agent'];
         const record = (outcome: SignInOutcome, user?: { id: string; departmentId: string | null } | null) =>
           recordSignIn(signInRecordDeps(), { outcome, email: credentials.email, ip, userAgent: typeof uaRaw === 'string' ? uaRaw : null, user });
-        if (!(await signInAllowed(throttle, 'user', credentials.email, ip))) {
+        // IP 잠금이면 다른 안내(2026-11-17) — 기관 관리자도 같은 주소라 풀 수 없고, 서비스 운영자만 푼다
+        const lock = await signInLock(throttle, 'user', credentials.email, ip);
+        if (lock) {
           await record('login_locked');
-          throw new Error(ACCOUNT_LOCKED);
+          throw new Error(lock === 'ip' ? IP_LOCKED : ACCOUNT_LOCKED);
         }
 
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({

@@ -5,6 +5,13 @@
 export const ACCOUNT_LOCKED = 'ACCOUNT_LOCKED';
 export const LOCKED_MESSAGE = '로그인을 여러 번 실패해 30분 동안 잠겼습니다. 잠시 뒤 다시 시도하거나 관리자에게 문의하세요.';
 
+/**
+ * IP 잠금(2026-11-17) — 같은 인터넷 주소에서 30분에 30번 틀려 그 주소의 로그인을 막았을 때. 기관 관리자도 같은 주소라 들어와 풀 수 없고,
+ * 계정 잠금 풀기로도 풀리지 않는다 — 서비스 운영자(슈퍼관리자 '계정 관리'의 IP 로그인 잠금)만 푼다. 계정 이야기는 하지 않는다
+ */
+export const IP_LOCKED = 'IP_LOCKED';
+export const IP_LOCKED_MESSAGE = '이 인터넷 주소(사무실 네트워크)에서 로그인 실패가 많아 30분 동안 로그인이 막혔습니다. 잠시 뒤 다시 시도하거나, 기관 담당자가 서비스 운영자에게 잠금 풀기를 요청해 주세요.';
+
 /** 장기 미접속 잠금(0095) — 기관이 켰을 때 */
 export const ACCOUNT_DORMANT = 'ACCOUNT_DORMANT';
 export const DORMANT_MESSAGE = '오래 로그인하지 않아 계정이 사용 중지되었습니다. 기관 관리자에게 다시 사용을 요청해 주세요.';

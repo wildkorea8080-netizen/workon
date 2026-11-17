@@ -66,7 +66,7 @@ describe('접속 기록', () => {
 describe('연결(원본)', () => {
   const auth = readFileSync('src/lib/nextAuthOptions.ts', 'utf8');
   it('직원 로그인 — 잠김·실패·성공(두 길)·거절을 남긴다', () => {
-    expect(auth.indexOf("await record('login_locked');")).toBeLessThan(auth.indexOf('throw new Error(ACCOUNT_LOCKED);'));
+    expect(auth.indexOf("await record('login_locked');")).toBeLessThan(auth.indexOf("throw new Error(lock === 'ip' ? IP_LOCKED : ACCOUNT_LOCKED);"));
     expect(auth).toContain("await record('login_failed');");
     expect(auth).toContain("await record('login', { id: local.id, departmentId: local.departmentId ?? null });");
     expect(auth).toContain("await record('login', { id: authUser.id, departmentId: decision.departmentId });");

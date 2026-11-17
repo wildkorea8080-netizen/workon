@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
 import { logAccess } from '@/lib/logger';
 import { canSignIn } from '@/lib/user-withdrawal';
-import { LOCKED_MESSAGE, noteSignInFailure, noteSignInSuccess, requestIp, signInAllowed, throttleDeps } from '@/lib/sign-in-throttle';
+import { IP_LOCKED_MESSAGE, LOCKED_MESSAGE, noteSignInFailure, noteSignInSuccess, requestIp, signInLock, throttleDeps } from '@/lib/sign-in-throttle';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,9 +24,10 @@ export async function POST(request: NextRequest) {
     // 로그인 실패 잠금(2026-11-13, `sign-in-throttle.ts`) — 30분 안에 5번 틀린 계정·30번 틀린 IP는 맞는 비밀번호도 받지 않는다
     const throttle = throttleDeps();
     const ip = requestIp(request.headers);
-    if (!(await signInAllowed(throttle, 'super', normalizedEmail, ip))) {
-      logAccess({ action: 'login_locked', path: '/super/login', ipAddress: ip, userAgent: request.headers.get('user-agent'), statusCode: 429 });
-      return NextResponse.json({ ok: false, error: LOCKED_MESSAGE }, { status: 429 });
+    const lock = await signInLock(throttle, 'super', normalizedEmail, ip);
+    if (lock) {
+      logAccess({ action: 'login_locked', path: '/super/login', ipAddress: ip, userAgent: request.headers.get('user-agent'), statusCode: 429, details: { lock } });
+      return NextResponse.json({ ok: false, error: lock === 'ip' ? IP_LOCKED_MESSAGE : LOCKED_MESSAGE }, { status: 429 });
     }
 
     // 1) anon key 클라이언트로 비밀번호 검증

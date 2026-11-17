@@ -68,17 +68,18 @@ describe('잠금 판정', () => {
 describe('연결(원본)', () => {
   it('직원 로그인 — 잠겼으면 비밀번호를 보기 전에 던지고, 틀리면 세고, 맞으면 지운다', () => {
     const src = readFileSync('src/lib/nextAuthOptions.ts', 'utf8');
-    const gate = src.indexOf("if (!(await signInAllowed(throttle, 'user', credentials.email, ip)))");
+    // 2026-11-17: 무엇이 잠겼는지(계정·IP)에 따라 안내가 갈린다(batch-0128)
+    const gate = src.indexOf("const lock = await signInLock(throttle, 'user', credentials.email, ip);");
     expect(gate).toBeGreaterThan(0);
     expect(gate).toBeLessThan(src.indexOf('supabase.auth.signInWithPassword('));
-    expect(src).toContain('throw new Error(ACCOUNT_LOCKED);');
+    expect(src).toContain("throw new Error(lock === 'ip' ? IP_LOCKED : ACCOUNT_LOCKED);");
     expect(src).toMatch(/\} else \{\s*await noteSignInFailure\(throttle, 'user', credentials\.email, ip\);/);
     expect(src.match(/noteSignInSuccess\(throttle, 'user', credentials\.email\)/g)).toHaveLength(2);
   });
   it('슈퍼관리자 로그인 — 잠기면 429, 틀리면 세고, 다 통과하면 지운다', () => {
     const src = readFileSync('src/app/api/super/auth/login/route.ts', 'utf8');
-    expect(src.indexOf("signInAllowed(throttle, 'super', normalizedEmail, ip)")).toBeLessThan(src.indexOf('signInWithPassword('));
-    expect(src).toContain('{ ok: false, error: LOCKED_MESSAGE }, { status: 429 }');
+    expect(src.indexOf("signInLock(throttle, 'super', normalizedEmail, ip)")).toBeLessThan(src.indexOf('signInWithPassword('));
+    expect(src).toContain("{ ok: false, error: lock === 'ip' ? IP_LOCKED_MESSAGE : LOCKED_MESSAGE }, { status: 429 }");
     expect(src).toContain("await noteSignInFailure(throttle, 'super', normalizedEmail, ip);");
     expect(src.indexOf("await noteSignInSuccess(throttle, 'super', normalizedEmail);")).toBeLessThan(src.indexOf('signSuperJWT('));
   });
