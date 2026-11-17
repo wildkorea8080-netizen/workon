@@ -1716,6 +1716,8 @@ details: {
 `model` 없이 토큰만 남기면 **모델을 추가하는 순간 과거 사용량을 어느 모델에
 귀속시킬지 영원히 알 수 없게 됩니다.** 소급이 불가능하므로 지금부터 지킵니다.
 
+**기관의 '이번 달 토큰'을 화면에 보일 때는 `src/lib/org-chat-tokens.ts`를 씁니다**(2026-11-17) — 한도 판정(`organization_chat_tokens`, 0057)과 같은 셈(chat_message·한국 시간 이번 달·숫자만). DB 뷰 `v_organization_summary.tokens_this_month`는 모든 활동·UTC 달이라 쓰지 않는다(슈퍼관리자 기관 목록이 그 값이라 기관 상세와 달랐다). `tests/batch-0143.test.ts`
+
 **사용 기록은 `writeUsageLog`(`src/lib/assistant/persist.ts`)로만 씁니다**(업무 실행은 store의 `writeUsage`, 2026-11-17). 쓰기가 실패하면 `system_logs`에 critical·payment(`사용 기록을 남기지 못했습니다(청구·한도에서 빠짐)` — 부서·활동·오류 코드·모델·토큰·원가만, `src/lib/usage-log-failure.ts`)로 남아 슈퍼관리자 로그에서 보입니다. 예전에는 `console.error` 한 줄뿐이라 쓴 토큰이 청구·한도에서 조용히 빠져도 몰랐습니다(보안 로그가 표 없이 사라졌던 0097과 같은 꼴). 직접 insert는 `tests/batch-0118.test.ts`가 막습니다.
 
 `cost_usd`를 기록 시점에 확정해 두는 이유는 나중에 단가가 바뀌어도 과거 정산이
