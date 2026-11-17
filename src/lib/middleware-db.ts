@@ -76,25 +76,34 @@ export async function readIpPolicy(cfg: RestConfig | null, f: FetchLike): Promis
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 슈퍼관리자 계정이 지금도 활성인가 — 'active' | 'inactive' | 'error'(못 읽음) */
-export async function readSuperAdminStatus(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<'active' | 'inactive' | 'error'> {
-  if (typeof sub !== 'string' || !UUID.test(sub)) return 'inactive';
-  if (!cfg) return 'error';
+export interface SuperAdminState { status: 'active' | 'inactive' | 'error'; changedAtMs: number | null }
+
+/** 슈퍼관리자 계정 상태 + 비밀번호를 바꾼 때(0092, 2026-11-17 — 그 전에 받은 슈퍼관리자 토큰을 끝내려고) */
+export async function readSuperAdminState(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<SuperAdminState> {
+  if (typeof sub !== 'string' || !UUID.test(sub)) return { status: 'inactive', changedAtMs: null };
+  if (!cfg) return { status: 'error', changedAtMs: null };
   try {
-    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=is_super_admin,is_active,deleted_at`, { headers: headers(cfg) });
-    if (!res.ok) return 'error';
-    const rows = (await res.json()) as { is_super_admin?: boolean; is_active?: boolean | null; deleted_at?: string | null }[];
-    if (!Array.isArray(rows)) return 'error';
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=is_super_admin,is_active,deleted_at,password_changed_at`, { headers: headers(cfg) });
+    if (!res.ok) return { status: 'error', changedAtMs: null };
+    const rows = (await res.json()) as { is_super_admin?: boolean; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null }[];
+    if (!Array.isArray(rows)) return { status: 'error', changedAtMs: null };
     const row = rows[0];
-    return row && row.is_super_admin === true && row.is_active !== false && !row.deleted_at ? 'active' : 'inactive';
+    const ok = row && row.is_super_admin === true && row.is_active !== false && !row.deleted_at;
+    const changed = row?.password_changed_at ? Date.parse(row.password_changed_at) : NaN;
+    return { status: ok ? 'active' : 'inactive', changedAtMs: Number.isFinite(changed) ? changed : null };
   } catch {
-    return 'error';
+    return { status: 'error', changedAtMs: null };
   }
+}
+
+export async function readSuperAdminStatus(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<'active' | 'inactive' | 'error'> {
+  return (await readSuperAdminState(cfg, sub, f)).status;
 }
 
 export const SUPER_STATUS_TTL_MS = 30_000;
 export const SUPER_STATUS_STALE_MS = 10 * 60_000;
 
-type CacheEntry = { active: boolean; at: number };
+type CacheEntry = { active: boolean; at: number; changedAtMs?: number | null };
 
 /**
  * 슈퍼관리자 활성 여부 — 30초 안의 기억은 그대로, 지나면 다시 읽는다. 읽지 못하면 10분 안의 마지막 값을 쓰고, 그것도 없으면 막는다
@@ -103,20 +112,37 @@ type CacheEntry = { active: boolean; at: number };
 export async function superAdminActive(
   cache: Map<string, CacheEntry>,
   sub: unknown,
-  read: (sub: unknown) => Promise<'active' | 'inactive' | 'error'>,
+  read: (sub: unknown) => Promise<'active' | 'inactive' | 'error' | SuperAdminState>,
   now = Date.now(),
+  /** 토큰을 받은 때(초) — 주면 비밀번호를 바꾼 때보다 앞선 토큰을 끝낸다 */
+  iat?: number,
 ): Promise<boolean> {
   const key = typeof sub === 'string' ? sub : '';
+  const fresh = (e: CacheEntry) => e.active && !(typeof iat === 'number' && e.changedAtMs != null && Math.floor(e.changedAtMs / 1000) > iat);
   const hit = cache.get(key);
-  if (hit && now - hit.at < SUPER_STATUS_TTL_MS) return hit.active;
-  const status = await read(sub);
-  if (status === 'error') return Boolean(hit && now - hit.at < SUPER_STATUS_STALE_MS && hit.active);
-  const active = status === 'active';
+  if (hit && now - hit.at < SUPER_STATUS_TTL_MS) return fresh(hit);
+  const got = await read(sub);
+  const state: SuperAdminState = typeof got === 'string' ? { status: got, changedAtMs: null } : got;
+  if (state.status === 'error') return Boolean(hit && now - hit.at < SUPER_STATUS_STALE_MS && fresh(hit));
+  const entry: CacheEntry = { active: state.status === 'active', at: now, changedAtMs: state.changedAtMs };
   if (key) {
     if (cache.size > 200) cache.clear();
-    cache.set(key, { active, at: now });
+    cache.set(key, entry);
   }
-  return active;
+  return fresh(entry);
+}
+
+/** 서명을 이미 확인한 토큰에서 받은 때(초) */
+export function superTokenIat(token: string): number | undefined {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return undefined;
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))) as { iat?: unknown };
+    return typeof decoded.iat === 'number' && Number.isFinite(decoded.iat) ? decoded.iat : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** 서명을 이미 확인한 토큰에서 sub만 꺼낸다 */

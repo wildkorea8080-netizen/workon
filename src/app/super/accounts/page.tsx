@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
 import { lockUntilLabel, normalizeIp } from '@/lib/sign-in-lock-spec';
+import { passwordPolicyError } from '@/lib/password-policy';
 
 type Tab = 'users' | 'superadmins';
 
@@ -414,15 +415,22 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
   const handleChangePw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pwForm.next !== pwForm.confirm) { setPwError('새 비밀번호가 일치하지 않습니다.'); return; }
-    if (pwForm.next.length < 8) { setPwError('8자 이상 입력하세요.'); return; }
+    // 규칙은 직원과 같다(서버가 다시 본다) — 영문 대·소문자·숫자·특수문자 중 세 종류 8자 또는 두 종류 10자 이상
+    const policy = passwordPolicyError(pwForm.next);
+    if (policy) { setPwError(policy); return; }
     setPwSaving(true); setPwError(null);
     const res  = await fetch('/api/super/accounts/me/password', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }),
     });
     const data = await res.json();
-    if (data.ok) { onToast('비밀번호가 변경됐습니다.'); setPwForm({ current: '', next: '', confirm: '' }); }
-    else setPwError(data.error);
+    if (data.ok) {
+      setPwForm({ current: '', next: '', confirm: '' });
+      // 모든 슈퍼관리자 로그인이 끝났다 — 새 비밀번호로 다시 로그인
+      if (data.data?.signedOut) { window.location.href = '/super/login'; return; }
+      onToast('비밀번호가 변경됐습니다.');
+    }
+    else setPwError(typeof data.error === 'string' ? data.error : data.error?.message ?? '비밀번호를 바꾸지 못했습니다.');
     setPwSaving(false);
   };
 

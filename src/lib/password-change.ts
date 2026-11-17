@@ -38,9 +38,11 @@ export interface PasswordChangeDeps {
 
 export async function changeOwnPassword(
   deps: PasswordChangeDeps,
-  input: { userId: string; current: unknown; next: unknown; ip: string | null },
+  input: { userId: string; current: unknown; next: unknown; ip: string | null; scope?: 'user' | 'super' },
 ): Promise<PasswordChangeResult> {
   const { userId, ip } = input;
+  // 로그인 실패 잠금의 범위 — 슈퍼관리자 포털에서 바꾸면 슈퍼관리자 로그인과 같은 셈(2026-11-17)
+  const scope = input.scope ?? 'user';
   if (typeof input.current !== 'string' || !input.current) return { ok: false, code: 'wrong', message: '지금 비밀번호를 입력해 주세요.' };
   const current = input.current;
   const row = await deps.readUser(userId);
@@ -48,7 +50,7 @@ export async function changeOwnPassword(
   if (!row || !row.email || !canSignIn(row)) return { ok: false, code: 'not_found' };
   const email = row.email;
 
-  if (!(await signInAllowed(deps.throttle, 'user', email, ip))) return { ok: false, code: 'locked' };
+  if (!(await signInAllowed(deps.throttle, scope, email, ip))) return { ok: false, code: 'locked' };
 
   const policy = passwordPolicyError(input.next, { email });
   if (policy) return { ok: false, code: 'policy', message: policy };
@@ -60,10 +62,10 @@ export async function changeOwnPassword(
   const viaAuth = authId === userId;
   const viaHash = !viaAuth && Boolean(row.password_hash) && (await deps.compareHash(current, row.password_hash!).catch(() => false));
   if (!viaAuth && !viaHash) {
-    await noteSignInFailure(deps.throttle, 'user', email, ip);
+    await noteSignInFailure(deps.throttle, scope, email, ip);
     return { ok: false, code: 'wrong', message: '지금 비밀번호가 맞지 않습니다.' };
   }
-  await noteSignInSuccess(deps.throttle, 'user', email);
+  await noteSignInSuccess(deps.throttle, scope, email);
 
   const auth = await deps.updateAuthPassword(userId, next);
   if (auth === 'error') return { ok: false, code: 'error' };

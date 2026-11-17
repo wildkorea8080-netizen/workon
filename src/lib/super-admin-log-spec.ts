@@ -19,6 +19,7 @@ export const ADMIN_LOG_ACTIONS: Record<string, string> = {
   sign_in_ip_unlocked: 'IP 로그인 잠금 풀기',
   super_admin_created: '슈퍼관리자 추가',
   super_admin_updated: '슈퍼관리자 사용 변경',
+  super_admin_password_changed: '슈퍼관리자 본인 비밀번호 변경',
   system_setting_changed: '시스템 설정 변경',
   work_settings_changed: '업무 화면 전환',
   common_document_uploaded: '공통 문서 올림',

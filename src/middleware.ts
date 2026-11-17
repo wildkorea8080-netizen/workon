@@ -4,7 +4,7 @@ import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
 import {
-  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenSub, userSessionVerdict,
+  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenIat, superTokenSub, userSessionVerdict,
   type SessionVerdict,
 } from '@/lib/middleware-db';
 
@@ -81,7 +81,8 @@ function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerd
 }
 async function superTokenActive(token: string): Promise<boolean> {
   if (!(await verifySuperTokenEdge(token))) return false;
-  return superAdminActive(superStatusCache, superTokenSub(token), (sub) => readSuperAdminStatus(restConfig(), sub, fetch));
+  // 비밀번호를 바꾼 때보다 앞서 받은 토큰은 끝(2026-11-17 — 다른 기기의 슈퍼관리자 로그인도)
+  return superAdminActive(superStatusCache, superTokenSub(token), (sub) => readSuperAdminState(restConfig(), sub, fetch), Date.now(), superTokenIat(token));
 }
 
 /**
