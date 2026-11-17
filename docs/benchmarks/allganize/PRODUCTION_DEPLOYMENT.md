@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(아침 5): 슈퍼관리자 IP 로그인 잠금 확인·풀기 — 마이그레이션 없음
+
+- 코드 배포 `dpl_GWdyh7rShbk74VtYfQcfhVmBBef4`(커밋 `cd377ec`, 2026-11-17 09:45 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `7b74b83`(아침 4 배포 기록), 기능 커밋 — `GET`·`DELETE /api/super/sign-in-ip-lock`(슈퍼관리자만, IP를 넣어 30분 안 실패 수·풀리는 때를 보고 그 IP 해시의 실패 기록을 지움, `super_admin_logs` `sign_in_ip_unlocked`에 가린 IP·지운 수만), 계정 관리 화면 위 'IP 로그인 잠금' 칸, `normalizeIp`·`maskIp`(잎 파일), `cd377ec` 문서. 가지 Preview(`workon-ag8y9nvq1`) Ready 뒤 `main`. 배포 전 전체 시험 283파일 3,796개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_43gfqdms1idttRnmDfb9ndj1GYJe`(01ef727)로 promote.
+- 배포 뒤 확인(로그인 없이 + 읽기 전용): `/login`·`/forgot-password`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, IP 잠금 GET·DELETE 무인증 401, `/super/accounts` 무인증 307. 실행기 하트비트 09:50 KST(배포 뒤 첫 차례)·pg_cron 호출 200. 최근 24시간 critical 0건·최근 20분 warning 이상 0건.
+- **확인하지 못한 것**(사용자 몫): 슈퍼관리자 계정 관리 화면의 'IP 로그인 잠금' 칸(로그인한 화면) — 아무 IP나 넣고 '확인'(읽기만).
+
 ## 2026-11-17(아침 4): 대리 접근 기록 없이는 들어가지 않음 — 마이그레이션 없음
 
 - 코드 배포 `dpl_43gfqdms1idttRnmDfb9ndj1GYJe`(커밋 `01ef727`, 2026-11-17 09:21 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `12d1fa6`(아침 3 배포 기록), 기능 커밋 — 대리 접근은 `impersonation_logs`를 못 남기면 503(쿠키·세션 토큰 전에 끝냄, security·error 기록), 기관 만들기에서 기본 부서를 못 만들면 소속 없는 초대를 만들지 않고 경고(`org_default_department`, payment·critical), 일괄 실행 묶음 멈춤·마침 쓰기 오류를 던짐(멈춤을 못 쓰면 줄을 건너뛰지 않음), 결과를 받되 `error`를 받지 않는 쓰기(`const { data } = await …`)도 찾개가 잡음(`tests/batch-0126.test.ts`), `01ef727` 문서. 가지 Preview(`workon-gusp1akyy`) Ready 뒤 `main`. 배포 전 전체 시험 282파일 3,787개 통과·tsc 0.
