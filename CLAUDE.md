@@ -1881,7 +1881,7 @@ details: {
 |---|---|---|
 | 기관명 | `organizations.name` | 헤더, 로그인 |
 | 로고 | `organizations.logo_url` = **스토리지 경로** | `/api/branding/logo?org=` |
-| 로그인 경로 | `organizations.slug` | `/signin/{slug}` |
+| 로그인 경로 | `organizations.slug` | `/signin/{slug}` — 규칙·경로는 `src/lib/org-slug.ts` 한 곳(2026-11-17 — 슈퍼관리자 기관 등록이 입력 Slug를 기관에 저장하지 않고, 기관 상세가 없는 `/org/{slug}`를 복사하던 것을 고침, `tests/batch-0142.test.ts`) |
 | AI 고지 | `organizations.ai_notice` (NULL이면 기본) | 대화 화면 하단 |
 | 테마 색 | `organizations.theme_color` (0067, NULL이면 기본 청록) | 업무 틀 안 화면의 단추·선택된 메뉴·테두리 (`src/lib/theme-color.ts`), 기관 전용 로그인 `/signin/{slug}`의 바탕·단추(서버가 `org-theme.ts`로 먼저 읽어 첫 그림부터, 정하지 않은 기관·공용 `/login`은 남색 그대로) |
 
