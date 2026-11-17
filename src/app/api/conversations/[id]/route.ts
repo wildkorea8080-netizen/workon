@@ -40,6 +40,8 @@ export async function GET(
         )
       `)
       .order('created_at', { referencedTable: 'messages', ascending: true })
+      // 한 턴의 질문·답은 시각이 같다 — 같으면 질문(user)이 먼저(2026-11-18, history.ts 참고)
+      .order('role', { referencedTable: 'messages', ascending: false })
       .eq('id', conversationId)
       .eq('user_id', session.user.id)
       .single();

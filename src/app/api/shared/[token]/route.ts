@@ -23,6 +23,9 @@ export async function GET(
       `)
       .eq('share_token', params.token)
       .eq('is_shared', true)
+      // 시간순, 같은 시각(한 턴의 질문·답)이면 질문이 먼저(2026-11-18 — 예전엔 순서를 정하지 않았다)
+      .order('created_at', { referencedTable: 'messages', ascending: true })
+      .order('role', { referencedTable: 'messages', ascending: false })
       .single();
 
     if (error || !conversation) {
