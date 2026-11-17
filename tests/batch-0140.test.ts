@@ -73,10 +73,10 @@ describe('미들웨어 — 비밀번호를 바꾼 때보다 앞서 받은 슈퍼
 
   it('상태와 바꾼 때를 함께 읽고, 옛 함수는 상태만', async () => {
     const f = (async () => ok([{ is_super_admin: true, is_active: true, deleted_at: null, password_changed_at: changedAt }])) as unknown as FetchLike;
-    expect(await readSuperAdminState(cfg, ID, f)).toEqual({ status: 'active', changedAtMs: Date.parse(changedAt) });
+    expect(await readSuperAdminState(cfg, ID, f)).toEqual({ status: 'active', changedAtMs: Date.parse(changedAt), mustChange: false });
     expect(await readSuperAdminStatus(cfg, ID, f)).toBe('active');
     const g = (async () => ok([{ is_super_admin: true, is_active: true, deleted_at: null, password_changed_at: null }])) as unknown as FetchLike;
-    expect(await readSuperAdminState(cfg, ID, g)).toEqual({ status: 'active', changedAtMs: null });
+    expect(await readSuperAdminState(cfg, ID, g)).toEqual({ status: 'active', changedAtMs: null, mustChange: false });
   });
   it('바꾼 뒤에 받은 토큰은 그대로, 앞선 토큰은 끝(같은 초는 그대로)', async () => {
     const read = async () => ({ status: 'active' as const, changedAtMs: Date.parse(changedAt) });
@@ -89,12 +89,14 @@ describe('미들웨어 — 비밀번호를 바꾼 때보다 앞서 받은 슈퍼
   it('기억한 값으로도 같은 판정, DB를 못 읽을 때도', async () => {
     const cache = new Map();
     const read = vi.fn(async () => ({ status: 'active' as const, changedAtMs: Date.parse(changedAt) }));
-    expect(await superAdminActive(cache, ID, read, 1_000, changedSec + 1)).toBe(true);
-    expect(await superAdminActive(cache, ID, read, 2_000, changedSec - 1)).toBe(false); // 30초 안 — 기억으로
+    // 실제 시각처럼 — 기억은 토큰보다 뒤에 만든다
+    const t0 = (changedSec + 10) * 1000;
+    expect(await superAdminActive(cache, ID, read, t0, changedSec + 1)).toBe(true);
+    expect(await superAdminActive(cache, ID, read, t0 + 1_000, changedSec - 1)).toBe(false); // 30초 안 — 기억으로
     expect(read).toHaveBeenCalledTimes(1);
     const err = async () => 'error' as const;
-    expect(await superAdminActive(cache, ID, err, 60_000, changedSec - 1)).toBe(false);
-    expect(await superAdminActive(cache, ID, err, 60_000, changedSec + 1)).toBe(true);
+    expect(await superAdminActive(cache, ID, err, t0 + 60_000, changedSec - 1)).toBe(false);
+    expect(await superAdminActive(cache, ID, err, t0 + 60_000, changedSec + 1)).toBe(true);
   });
   it('토큰의 iat 꺼내기', () => {
     const tok = (p: object) => `h.${Buffer.from(JSON.stringify(p)).toString('base64url')}.s`;

@@ -565,6 +565,7 @@ function AddSuperAdminModal({
                 <CopyBtn value={result.tempPassword} />
               </div>
               <p className="text-xs text-amber-400 mt-3">⚠️ 지금 복사하세요. 다시 확인할 수 없습니다.</p>
+              <p className="text-xs text-slate-400 mt-1">첫 로그인에서 이 임시 비밀번호를 본인 비밀번호로 바꿔야 다른 화면을 쓸 수 있습니다.</p>
             </div>
             <button onClick={onClose} className="w-full py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white font-semibold rounded-xl text-sm">닫기</button>
           </div>

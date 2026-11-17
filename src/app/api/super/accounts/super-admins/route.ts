@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import crypto from 'crypto';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 import { dbErrorText } from '@/lib/db-error-text';
 import { writeAuditRow } from '@/lib/audit-write';
+import { generateTempPassword } from '@/lib/password-reset';
 
 export const dynamic = 'force-dynamic';
 
-function genTempPassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
-  return Array.from(crypto.randomBytes(12))
-    .map(b => chars[b % chars.length]).join('');
-}
 
 // GET: 슈퍼관리자 목록
 export async function GET(request: NextRequest) {
@@ -47,7 +42,8 @@ export async function POST(request: NextRequest) {
       .from('users').select('id').eq('email', normalizedEmail).maybeSingle();
     if (existing) return NextResponse.json({ ok: false, error: '이미 등록된 이메일입니다.' }, { status: 409 });
 
-    const tempPassword = genTempPassword();
+    // 직원 재발급과 같은 임시 비밀번호(대·소문자·숫자, 나머지 편향 없음) — 첫 로그인에 바꾸게 한다(2026-11-17)
+    const tempPassword = generateTempPassword();
 
     // Supabase Auth 사용자 생성
     const { data: authList } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
@@ -69,7 +65,7 @@ export async function POST(request: NextRequest) {
     // users 테이블 등록
     const { data: newUser, error: insertErr } = await supabaseAdmin
       .from('users')
-      .upsert({ id: authUserId, email: normalizedEmail, full_name: name, role: 'ADMIN', is_super_admin: true }, { onConflict: 'id' })
+      .upsert({ id: authUserId, email: normalizedEmail, full_name: name, role: 'ADMIN', is_super_admin: true, password_must_change: true, password_changed_at: new Date().toISOString() }, { onConflict: 'id' })
       .select('id, email, full_name').single();
 
     if (insertErr) throw insertErr;

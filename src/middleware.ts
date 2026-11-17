@@ -4,7 +4,7 @@ import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
 import {
-  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superTokenIat, superTokenSub, userSessionVerdict,
+  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
   type SessionVerdict,
 } from '@/lib/middleware-db';
 
@@ -179,6 +179,10 @@ export async function middleware(req: NextRequest) {
       res.cookies.set({ name: SUPER_COOKIE, value: '', maxAge: 0, path: '/' });
       return res;
     }
+    // 임시 비밀번호인 슈퍼관리자는 비밀번호 바꾸기만(2026-11-17)
+    if (superToken && superMustChange(superStatusCache, superTokenSub(superToken)) && !superAllowedWhileMustChange(pathname)) {
+      return NextResponse.json({ ok: false, error: '비밀번호를 먼저 바꿔 주세요.', code: 'password_change_required' }, { status: 403 });
+    }
     return NextResponse.next();
   }
 
@@ -278,6 +282,14 @@ export async function middleware(req: NextRequest) {
       // 만료된 쿠키 제거
       res.cookies.set({ name: SUPER_COOKIE, value: '', maxAge: 0, path: '/' });
       return res;
+    }
+
+    // 임시 비밀번호인 슈퍼관리자는 비밀번호 바꾸기 화면으로(2026-11-17)
+    if (superMustChange(superStatusCache, superTokenSub(superToken)) && !superAllowedWhileMustChange(pathname)) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/super/password';
+      url.search = '';
+      return NextResponse.redirect(url);
     }
 
     // pathname을 헤더로 전달 (layout에서 /super/login 제외 처리용)

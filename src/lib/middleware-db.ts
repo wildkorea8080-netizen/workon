@@ -76,21 +76,21 @@ export async function readIpPolicy(cfg: RestConfig | null, f: FetchLike): Promis
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 슈퍼관리자 계정이 지금도 활성인가 — 'active' | 'inactive' | 'error'(못 읽음) */
-export interface SuperAdminState { status: 'active' | 'inactive' | 'error'; changedAtMs: number | null }
+export interface SuperAdminState { status: 'active' | 'inactive' | 'error'; changedAtMs: number | null; mustChange?: boolean }
 
 /** 슈퍼관리자 계정 상태 + 비밀번호를 바꾼 때(0092, 2026-11-17 — 그 전에 받은 슈퍼관리자 토큰을 끝내려고) */
 export async function readSuperAdminState(cfg: RestConfig | null, sub: unknown, f: FetchLike): Promise<SuperAdminState> {
   if (typeof sub !== 'string' || !UUID.test(sub)) return { status: 'inactive', changedAtMs: null };
   if (!cfg) return { status: 'error', changedAtMs: null };
   try {
-    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=is_super_admin,is_active,deleted_at,password_changed_at`, { headers: headers(cfg) });
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=is_super_admin,is_active,deleted_at,password_changed_at,password_must_change`, { headers: headers(cfg) });
     if (!res.ok) return { status: 'error', changedAtMs: null };
-    const rows = (await res.json()) as { is_super_admin?: boolean; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null }[];
+    const rows = (await res.json()) as { is_super_admin?: boolean; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null; password_must_change?: boolean | null }[];
     if (!Array.isArray(rows)) return { status: 'error', changedAtMs: null };
     const row = rows[0];
     const ok = row && row.is_super_admin === true && row.is_active !== false && !row.deleted_at;
     const changed = row?.password_changed_at ? Date.parse(row.password_changed_at) : NaN;
-    return { status: ok ? 'active' : 'inactive', changedAtMs: Number.isFinite(changed) ? changed : null };
+    return { status: ok ? 'active' : 'inactive', changedAtMs: Number.isFinite(changed) ? changed : null, mustChange: row?.password_must_change === true };
   } catch {
     return { status: 'error', changedAtMs: null };
   }
@@ -103,7 +103,7 @@ export async function readSuperAdminStatus(cfg: RestConfig | null, sub: unknown,
 export const SUPER_STATUS_TTL_MS = 30_000;
 export const SUPER_STATUS_STALE_MS = 10 * 60_000;
 
-type CacheEntry = { active: boolean; at: number; changedAtMs?: number | null };
+type CacheEntry = { active: boolean; at: number; changedAtMs?: number | null; mustChange?: boolean };
 
 /**
  * 슈퍼관리자 활성 여부 — 30초 안의 기억은 그대로, 지나면 다시 읽는다. 읽지 못하면 10분 안의 마지막 값을 쓰고, 그것도 없으면 막는다
@@ -120,16 +120,31 @@ export async function superAdminActive(
   const key = typeof sub === 'string' ? sub : '';
   const fresh = (e: CacheEntry) => e.active && !(typeof iat === 'number' && e.changedAtMs != null && Math.floor(e.changedAtMs / 1000) > iat);
   const hit = cache.get(key);
-  if (hit && now - hit.at < SUPER_STATUS_TTL_MS) return fresh(hit);
+  // 기억한 값보다 새로 받은 토큰이면 다시 읽는다 — 비밀번호를 바꾸고 다시 로그인한 직후 옛 값(바꾸기 전)을 쓰지 않게
+  const newerToken = typeof iat === 'number' && hit && hit.at < iat * 1000;
+  if (hit && !newerToken && now - hit.at < SUPER_STATUS_TTL_MS) return fresh(hit);
   const got = await read(sub);
   const state: SuperAdminState = typeof got === 'string' ? { status: got, changedAtMs: null } : got;
   if (state.status === 'error') return Boolean(hit && now - hit.at < SUPER_STATUS_STALE_MS && fresh(hit));
-  const entry: CacheEntry = { active: state.status === 'active', at: now, changedAtMs: state.changedAtMs };
+  const entry: CacheEntry = { active: state.status === 'active', at: now, changedAtMs: state.changedAtMs, mustChange: state.mustChange === true };
   if (key) {
     if (cache.size > 200) cache.clear();
     cache.set(key, entry);
   }
   return fresh(entry);
+}
+
+/**
+ * 임시 비밀번호로 만든 슈퍼관리자인가(0093, 2026-11-17) — `superAdminActive`가 방금 읽어 기억한 값으로 본다(DB를 다시 부르지 않음).
+ * 참이면 미들웨어가 비밀번호 바꾸기 화면·API만 열어 둔다
+ */
+export function superMustChange(cache: Map<string, CacheEntry>, sub: unknown): boolean {
+  return typeof sub === 'string' && cache.get(sub)?.mustChange === true;
+}
+
+/** 임시 비밀번호인 슈퍼관리자에게 열어 두는 경로 */
+export function superAllowedWhileMustChange(pathname: string): boolean {
+  return /^\/(super\/password|super\/login|api\/super\/accounts\/me\/password|api\/super\/auth)(\/|$)/.test(pathname);
 }
 
 /** 서명을 이미 확인한 토큰에서 받은 때(초) */
