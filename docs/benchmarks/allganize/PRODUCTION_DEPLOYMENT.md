@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(새벽 2): 슈퍼관리자 대시보드·사용량 숫자 — 마이그레이션 없음
+
+- 코드 배포 `dpl_DwrauwuDzH3dQfgFeheSbTYc1Jn5`(커밋 `c3934c1`, 2026-11-18 00:31 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b9aadd5`(새벽 기록), `0531f21` 고침 — 대시보드 '오늘 활성'은 서로 다른 사람 수(예전엔 오늘 대화 기록 수)·'전체 사용자'·'이번달 신규'에서 탈퇴 처리한 계정 빼기·예상 비용은 기록한 원가(`sumCostUsd`, 대시보드·사용량 모니터링 전체·기관별)·토큰은 숫자만, `c3934c1` 문서. 가지 Preview(`workon-hkb93udq8`) Ready 뒤 `main`. 배포 전 전체 시험 299파일 3,934개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_2ub3GC9uiwqUkM5Wa5dvi3vbmkEq`(4f35c77)로 promote.
+- 배포 뒤 확인(운영 브라우저, 읽기 전용): 대시보드 전체 사용자 3·오늘 활성 0·이번 달 토큰 10,697·예상 비용 $0.0381, 사용량 모니터링 요약·기관별(기본 기관 10,697 토큰·$0.0381)과 같음. `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, 대시보드 무인증 401. 실행기 호출 00:31 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건.
+
 ## 2026-11-18(새벽): 계약 매출 한 규칙 — 마이그레이션 없음
 
 - 코드 배포 `dpl_2ub3GC9uiwqUkM5Wa5dvi3vbmkEq`(커밋 `4f35c77`, 2026-11-18 00:13 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `ea79c0a`(밤 7 기록), `272f891` 고침 — `src/lib/contract-revenue.ts`(그달(한국 시간)에 하루라도 유효했던 계약, 해지는 해지한 때까지)를 대시보드 '이번달 매출'·계약 '매출 현황'(그해 전 시작한 계약도·앞날의 달 제외)이 씀, `4f35c77` 문서. 가지 Preview(`workon-gbiewb644`) Ready 뒤 `main`. 배포 전 전체 시험 298파일 3,929개 통과·tsc 0.
