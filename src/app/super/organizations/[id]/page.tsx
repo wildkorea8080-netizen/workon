@@ -205,11 +205,14 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
 
   const handleDelete = async () => {
     if (deleteInput !== org.name) { onToast('기관명이 일치하지 않습니다.'); return; }
-    await fetch(`/api/super/organizations/${org.id}`, {
+    // 2026-11-17 — 예전엔 응답을 보지 않고 늘 '삭제됐습니다'라고 알렸다
+    const res = await fetch(`/api/super/organizations/${org.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'terminated' }),
-    });
-    onToast('기관이 삭제(종료)됐습니다.');
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (!data?.ok) { onToast((typeof data?.error === 'string' ? data.error : data?.error?.message) ?? '기관을 종료하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'); return; }
+    onToast('기관이 종료됐습니다(행은 남김).');
     setShowDeleteModal(false);
   };
 

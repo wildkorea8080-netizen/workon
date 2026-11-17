@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { dbErrorText } from '@/lib/db-error-text';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,13 @@ export async function POST(request: NextRequest) {
     }).select().single();
 
     if (error) throw error;
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'notice_created',
+      target_type: 'notice',
+      target_id: data.id,
+      after_data: { title: data.title, is_published: data.is_published, target_type: data.target_type },
+    }, 'notice_created');
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     console.error('[super/notices POST]', err);

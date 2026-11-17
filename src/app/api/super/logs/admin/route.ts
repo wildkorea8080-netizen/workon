@@ -51,8 +51,14 @@ export async function GET(request: NextRequest) {
 
   // 대상 이름 — 기관·계정만, 못 읽으면 id 앞부분
   const idsOf = (type: string) => Array.from(new Set(rows.filter((r) => r.target_type === type && r.target_id && UUID.test(r.target_id)).map((r) => r.target_id as string)));
-  const orgIds = idsOf('organization');
   const userIds = idsOf('user');
+  const contractIds = idsOf('contract');
+  // 계약은 그 계약의 기관 이름으로
+  const contracts = contractIds.length
+    ? await supabaseAdmin.from('contracts').select('id, organization_id').in('id', contractIds)
+    : { data: [] as Array<{ id: string; organization_id: string | null }> };
+  const contractOrg = new Map(((contracts.data ?? []) as Array<{ id: string; organization_id: string | null }>).map((c) => [c.id, c.organization_id]));
+  const orgIds = Array.from(new Set([...idsOf('organization'), ...Array.from(contractOrg.values()).filter((v): v is string => !!v)]));
   const [orgs, users] = await Promise.all([
     orgIds.length ? supabaseAdmin.from('organizations').select('id, name').in('id', orgIds) : Promise.resolve({ data: [] as Array<{ id: string; name: string | null }> }),
     userIds.length ? supabaseAdmin.from('users').select('id, email, full_name').in('id', userIds) : Promise.resolve({ data: [] as Array<{ id: string; email: string | null; full_name: string | null }> }),
@@ -62,7 +68,13 @@ export async function GET(request: NextRequest) {
 
   const out = rows.map((r) => {
     const admin = Array.isArray(r.users) ? r.users[0] : r.users;
-    const name = r.target_id ? (r.target_type === 'organization' ? orgName.get(r.target_id) : r.target_type === 'user' ? userName.get(r.target_id) : undefined) : undefined;
+    const contractOrgId = r.target_type === 'contract' && r.target_id ? contractOrg.get(r.target_id) : undefined;
+    const name = r.target_id
+      ? r.target_type === 'organization' ? orgName.get(r.target_id)
+        : r.target_type === 'user' ? userName.get(r.target_id)
+          : contractOrgId ? orgName.get(contractOrgId)
+            : undefined
+      : undefined;
     return {
       id: r.id,
       createdAt: r.created_at,
@@ -71,7 +83,8 @@ export async function GET(request: NextRequest) {
       targetType: r.target_type,
       targetLabel: adminLogTargetLabel(r.target_type),
       targetId: r.target_id,
-      targetName: name || (r.target_id ? `${r.target_id.slice(0, 8)}…` : null),
+      // 공지는 요약에 제목이 있어 id를 보이지 않는다
+      targetName: name || (r.target_id && r.target_type !== 'notice' ? `${r.target_id.slice(0, 8)}…` : null),
       summary: adminLogSummary(r.action, r.before_data, r.after_data),
       adminEmail: admin?.email ?? '—',
       adminName: admin?.full_name ?? '—',

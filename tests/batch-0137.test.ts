@@ -85,7 +85,9 @@ describe('기록 글로 옮기기', () => {
       const s = readFileSync(f, 'utf8');
       if (!s.includes("'super_admin_logs'")) continue;
       for (const m of s.matchAll(/writeAuditRow\('super_admin_logs',\s*\{[\s\S]*?\n\s*\}(?:,\s*[^)]*)?\)/g)) {
-        for (const a of m[0].matchAll(/'([a-z_]+)'/g)) if (/_/.test(a[1]) && !['super_admin_logs', 'admin_user_id', 'target_type', 'target_id', 'before_data', 'after_data', 'common_document', 'system_setting', 'email_sent', 'sessions_kept', 'edition_year', 'org_type', 'usage_terms', 'replaces_id', 'is_active'].includes(a[1])) seen.add(a[1]);
+        // action: 칸의 값(삼항이면 갈래 모두)만
+        const act = m[0].match(/action:\s*([^\n]+)/);
+        for (const a of (act?.[1] ?? '').matchAll(/'([a-z_]+)'/g)) if (!['suspended', 'terminated', 'cancelled'].includes(a[1])) seen.add(a[1]);
       }
     }
     expect(seen.size).toBeGreaterThanOrEqual(14);

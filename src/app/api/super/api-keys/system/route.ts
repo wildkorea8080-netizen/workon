@@ -7,6 +7,7 @@ import { logSystem } from '@/lib/logger';
 import { estimateCostUsd } from '@/lib/models';
 import { kstMonthStart } from '@/lib/kst-time';
 import { API_KEY_PROVIDERS, UNSUPPORTED_PROVIDER_MESSAGE, isApiKeyProvider } from '@/lib/api-key-providers';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,8 @@ export async function GET(request: NextRequest) {
 
 // PATCH: 시스템 키 저장
 export async function PATCH(request: NextRequest) {
-  if (!getSuperAdminFromRequest(request))
+  const admin = getSuperAdminFromRequest(request);
+  if (!admin)
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   const { provider, keyValue } = await request.json();
@@ -98,5 +100,13 @@ export async function PATCH(request: NextRequest) {
   logSystem({ level: 'warning', category: 'security',
     message: `시스템 API 키 변경: ${provider}`,
     details: { provider, prefix } });
+  // 조작 기록(2026-11-17) — 키 값·앞부분은 남기지 않는다
+  await writeAuditRow('super_admin_logs', {
+    admin_user_id: admin.sub,
+    action: 'api_key_changed',
+    target_type: 'api_key',
+    target_id: null,
+    after_data: { scope: 'system', provider },
+  }, 'api_key_changed');
   return NextResponse.json({ ok: true });
 }

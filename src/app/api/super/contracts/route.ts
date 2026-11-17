@@ -4,6 +4,8 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
 import { dbErrorText } from '@/lib/db-error-text';
+import { writeAuditRow } from '@/lib/audit-write';
+import { contractAudit } from '@/lib/super-admin-log-spec';
 
 export const dynamic = 'force-dynamic';
 
@@ -134,6 +136,15 @@ export async function POST(request: NextRequest) {
       status: 'active',
     }).eq('id', orgId);
     const warning = orgErr ? await reportContractSync('org_limits_after_contract', orgId, orgErr.code ?? 'error') : undefined;
+
+    // 조작 기록(2026-11-17) — 계약은 돈과 한도를 정하므로 누가 언제 무엇으로 바꿨는지 남긴다
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'contract_created',
+      target_type: 'contract',
+      target_id: contract.id,
+      after_data: contractAudit(contract),
+    }, 'contract_created');
 
     return NextResponse.json({ ok: true, data: contract, ...(warning ? { warning } : {}) });
   } catch (err: any) {

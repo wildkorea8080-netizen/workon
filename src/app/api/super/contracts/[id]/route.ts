@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
 import { reportContractSync } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
+import { writeAuditRow } from '@/lib/audit-write';
+import { contractAudit, changedFields } from '@/lib/super-admin-log-spec';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +48,9 @@ export async function PATCH(
       if (pct > 0 && pct <= 100) update.budget_alert_percent = pct;
     }
 
+    // 바꾸기 전 값 — 조작 기록(2026-11-17)
+    const { data: before } = await supabaseAdmin.from('contracts').select('*').eq('id', params.id).maybeSingle();
+
     const { data: contract, error } = await supabaseAdmin
       .from('contracts').update(update).eq('id', params.id).select('*, organization_id').single();
 
@@ -72,6 +77,16 @@ export async function PATCH(
       }).eq('id', contract.organization_id);
       if (planErr) warnings.push(await reportContractSync('org_plan_after_contract_change', contract.organization_id, planErr.code ?? 'error'));
     }
+
+    const diff = changedFields(contractAudit(before), contractAudit(contract));
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: status === 'cancelled' ? 'contract_cancelled' : 'contract_updated',
+      target_type: 'contract',
+      target_id: params.id,
+      before_data: diff.before,
+      after_data: diff.after,
+    }, status === 'cancelled' ? 'contract_cancelled' : 'contract_updated');
 
     return NextResponse.json({ ok: true, data: contract, ...(warnings.length ? { warning: warnings.join(' ') } : {}) });
   } catch (err: any) {

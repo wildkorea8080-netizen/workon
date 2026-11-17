@@ -19,6 +19,9 @@ export async function PATCH(
   try {
     const { status, plan, notes } = await request.json();
     const { id } = params;
+    // 상태는 정해 둔 넷만(2026-11-17 — 예전엔 아무 글이나 받았다)
+    if (status !== undefined && !['trial', 'active', 'suspended', 'terminated'].includes(status))
+      return NextResponse.json({ ok: false, error: '기관 상태 값이 올바르지 않습니다.' }, { status: 400 });
 
     const { data: before } = await supabaseAdmin
       .from('organizations')
@@ -71,12 +74,12 @@ export async function PATCH(
     // 감사 로그
     await writeAuditRow('super_admin_logs', {
       admin_user_id: admin.sub,
-      action: status === 'suspended' ? 'org_suspended' : 'org_updated',
+      action: status === 'suspended' ? 'org_suspended' : status === 'terminated' ? 'org_terminated' : 'org_updated',
       target_type: 'organization',
       target_id: id,
       before_data: before,
       after_data: updateData,
-    }, status === 'suspended' ? 'org_suspended' : 'org_updated');
+    }, status === 'suspended' ? 'org_suspended' : status === 'terminated' ? 'org_terminated' : 'org_updated');
 
     return NextResponse.json({ ok: true, data: updated, ...(warning ? { warning } : {}) });
   } catch (err: any) {

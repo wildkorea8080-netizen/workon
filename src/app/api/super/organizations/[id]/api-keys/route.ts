@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encryptApiKey, decryptApiKey, maskKey } from '@/lib/crypto';
 import { UNSUPPORTED_PROVIDER_MESSAGE, isApiKeyProvider } from '@/lib/api-key-providers';
+import { writeAuditRow } from '@/lib/audit-write';
 
 const KEY_SAVE_FAILED = 'API 키를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -48,6 +49,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       .eq('organization_id', params.id);
     // Supabase는 실패를 던지지 않고 돌려준다 — 예전엔 실패해도 성공으로 답했다(2026-11-17)
     if (error) return NextResponse.json({ ok: false, error: KEY_SAVE_FAILED }, { status: 500 });
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'api_key_changed',
+      target_type: 'organization',
+      target_id: params.id,
+      after_data: { scope: 'organization', use_system_default: true },
+    }, 'api_key_changed');
     return NextResponse.json({ ok: true });
   }
 
@@ -80,5 +88,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   });
   if (added.error) return NextResponse.json({ ok: false, error: KEY_SAVE_FAILED }, { status: 500 });
 
+  // 조작 기록(2026-11-17) — 키 값·앞부분은 남기지 않는다
+  await writeAuditRow('super_admin_logs', {
+    admin_user_id: admin.sub,
+    action: 'api_key_changed',
+    target_type: 'organization',
+    target_id: params.id,
+    after_data: { scope: 'organization', provider },
+  }, 'api_key_changed');
   return NextResponse.json({ ok: true });
 }

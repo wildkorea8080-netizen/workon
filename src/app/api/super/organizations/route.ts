@@ -7,6 +7,7 @@ import { logSystem } from '@/lib/logger';
 import { writeAuditRow } from '@/lib/audit-write';
 import { reportContractSync } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
+import { APP_URL } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -186,7 +187,7 @@ export async function POST(request: NextRequest) {
     }
 
     const inviteToken = crypto.randomBytes(32).toString('hex');
-    const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
+    const baseUrl = APP_URL;
 
     // 초대를 저장하지 못하면 링크가 동작하지 않는다 — 예전에는 그래도 링크를 돌려줘 기관 관리자가 가입할 수 없었다(2026-11-17)
     let inviteWarning: string | undefined;

@@ -73,7 +73,7 @@ describe('감사 기록은 이 길로만', () => {
       'src/app/api/super/work-settings/route.ts',
     ];
     for (const f of files) expect(readFileSync(f, 'utf8'), f).toContain("await writeAuditRow('super_admin_logs', {");
-    expect(readFileSync('src/app/api/super/organizations/[id]/route.ts', 'utf8')).toContain("}, status === 'suspended' ? 'org_suspended' : 'org_updated');");
+    expect(readFileSync('src/app/api/super/organizations/[id]/route.ts', 'utf8')).toContain("}, status === 'suspended' ? 'org_suspended' : status === 'terminated' ? 'org_terminated' : 'org_updated');");
     expect(readFileSync('src/app/api/admin/organization/route.ts', 'utf8')).toContain("}, 'allowed_models_changed');");
   });
 });
