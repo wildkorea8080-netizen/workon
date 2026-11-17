@@ -74,8 +74,11 @@ export async function createOutboundEndpoint(actor: ActorScope, raw: unknown, ch
   if (countError) return { ok: false, status: 503, message: '보낼 곳을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if ((count ?? 0) >= OUTBOUND_MAX_ENDPOINTS) return { ok: false, status: 409, message: `쓸 수 있는 보낼 곳은 기관에 ${OUTBOUND_MAX_ENDPOINTS}개까지입니다. 쓰지 않는 곳을 먼저 회수해 주세요.` };
   const { secret, prefix } = generateOutboundSecret();
+  // 운영에서 암호화 키가 없으면 거절한다(고정 값으로 저장하지 않음, 2026-11-17)
+  let secretEncrypted: string;
+  try { secretEncrypted = encryptApiKey(secret); } catch { return { ok: false, status: 503, message: '암호화 키가 설정되지 않아 저장할 수 없습니다 — 운영자에게 알려 주세요.' }; }
   const { data, error } = await supabaseAdmin.from('app_outbound_endpoints').insert({
-    organization_id: actor.organizationId, name: parsed.value.name, url: parsed.value.url, secret_encrypted: encryptApiKey(secret), secret_prefix: prefix, created_by: actor.userId,
+    organization_id: actor.organizationId, name: parsed.value.name, url: parsed.value.url, secret_encrypted: secretEncrypted, secret_prefix: prefix, created_by: actor.userId,
     require_approval: parsed.value.requireApproval, actions: parsed.value.actions,
   }).select(ENDPOINT_COLUMNS).single();
   if (error || !data) return { ok: false, status: 503, message: '보낼 곳을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };

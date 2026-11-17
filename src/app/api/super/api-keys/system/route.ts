@@ -74,7 +74,9 @@ export async function PATCH(request: NextRequest) {
   if (!isApiKeyProvider(provider))
     return NextResponse.json({ ok: false, error: UNSUPPORTED_PROVIDER_MESSAGE }, { status: 400 });
 
-  const encrypted = encryptApiKey(keyValue);
+  // 운영에서 암호화 키가 없으면 거절한다(고정 값으로 저장하지 않음, 2026-11-17)
+  let encrypted: string;
+  try { encrypted = encryptApiKey(keyValue); } catch { return NextResponse.json({ ok: false, error: '암호화 키가 설정되지 않아 저장할 수 없습니다 — 운영자에게 알려 주세요.' }, { status: 503 }); }
   const prefix    = keyValue.slice(0, 10);
 
   // 기존 시스템 키 비활성화
