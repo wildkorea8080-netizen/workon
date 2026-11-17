@@ -114,11 +114,11 @@ export function requestIp(headers: Record<string, unknown> | { get(name: string)
  * 잠금 풀리는 때(2026-11-16) — 30분 창 안의 실패 시각(아무 순서)을 받아, 잠겼으면 풀리는 때(ISO), 아니면 null.
  * 잠긴 동안은 실패를 더 세지 않으므로, 창 안 실패가 5번 아래로 떨어지는 순간 = (n−5)번째로 오래된 실패 + 30분.
  */
-export function lockedUntil(failureTimes: string[], nowMs = Date.now()): string | null {
+export function lockedUntil(failureTimes: string[], nowMs = Date.now(), threshold = LOCK_FAILURES): string | null {
   const since = nowMs - LOCK_WINDOW_MS;
   const times = failureTimes.map((t) => Date.parse(t)).filter((t) => Number.isFinite(t) && t >= since).sort((a, b) => a - b);
-  if (times.length < LOCK_FAILURES) return null;
-  return new Date(times[times.length - LOCK_FAILURES] + LOCK_WINDOW_MS).toISOString();
+  if (times.length < threshold) return null;
+  return new Date(times[times.length - threshold] + LOCK_WINDOW_MS).toISOString();
 }
 
 export interface LockReadDeps {
@@ -163,6 +163,44 @@ export function lockReadDeps(): LockReadDeps {
         .gte('created_at', sinceIso)
         .limit(1000);
       return error ? null : (data ?? []);
+    },
+  };
+}
+
+/**
+ * IP 잠금(2026-11-17) — 공공기관은 기관 전체가 바깥 IP 하나를 함께 쓰는 일이 많아, 여러 직원의 실수가 모이면(30분 30번)
+ * 기관 전체가 30분 동안 못 들어온다. 슈퍼관리자가 IP를 넣어 잠김을 보고 푼다. IP는 해시로만 남아 있어 목록은 못 보인다.
+ */
+export interface IpLockStatus { failures: number; lockedUntil: string | null }
+
+export interface IpLockDeps {
+  /** 그 IP 해시의 창 안 실패 시각(두 범위) — 못 읽으면 던짐 */
+  ipFailures(ipHash: string, sinceIso: string): Promise<string[]>;
+  /** 그 IP 해시의 실패 기록을 지운다(두 범위) — 지운 수, 못 지우면 던짐 */
+  clearIp(ipHash: string): Promise<number>;
+}
+
+export async function ipLockStatus(deps: IpLockDeps, ip: string, nowMs = Date.now()): Promise<IpLockStatus> {
+  const hash = ipKey(ip)!;
+  const times = await deps.ipFailures(hash, new Date(nowMs - LOCK_WINDOW_MS).toISOString());
+  return { failures: times.length, lockedUntil: lockedUntil(times, nowMs, IP_FAILURES) };
+}
+
+export async function unlockIp(deps: IpLockDeps, ip: string): Promise<number> {
+  return deps.clearIp(ipKey(ip)!);
+}
+
+export function ipLockDeps(): IpLockDeps {
+  return {
+    async ipFailures(ipHash, sinceIso) {
+      const { data, error } = await supabaseAdmin.from('sign_in_failures').select('created_at').eq('ip_hash', ipHash).gte('created_at', sinceIso).limit(1000);
+      if (error) throw error;
+      return ((data ?? []) as { created_at: string }[]).map((r) => r.created_at);
+    },
+    async clearIp(ipHash) {
+      const { data, error } = await supabaseAdmin.from('sign_in_failures').delete().eq('ip_hash', ipHash).select('id');
+      if (error) throw error;
+      return data?.length ?? 0;
     },
   };
 }

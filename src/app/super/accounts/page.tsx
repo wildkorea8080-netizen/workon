@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
-import { lockUntilLabel } from '@/lib/sign-in-lock-spec';
+import { lockUntilLabel, normalizeIp } from '@/lib/sign-in-lock-spec';
 
 type Tab = 'users' | 'superadmins';
 
@@ -40,12 +40,73 @@ export default function AccountsPage() {
         ))}
       </div>
 
+      <IpLockPanel onToast={showToast} />
+
       {tab === 'users'      && <UsersTab onToast={showToast} />}
       {tab === 'superadmins' && <SuperAdminsTab onToast={showToast} />}
 
       {toast && (
         <div className="fixed bottom-6 right-6 px-5 py-3 bg-[#7C3AED] text-white text-sm font-semibold rounded-xl shadow-lg z-50">{toast}</div>
       )}
+    </div>
+  );
+}
+
+// ─── IP 로그인 잠금(2026-11-17) ──────────────────────────────
+// 한 IP가 30분에 30번 틀리면 그 IP를 막는다. 기관 전체가 바깥 IP 하나를 함께 쓰면 기관 전체가 못 들어오므로, IP를 넣어 확인하고 푼다.
+// IP는 해시로만 남아 목록은 없다 — 기관 담당자에게 그 기관의 바깥 IP를 받아 넣는다.
+function IpLockPanel({ onToast }: { onToast: (m: string) => void }) {
+  const [ip, setIp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ ip: string; failures: number; lockedUntil: string | null } | null>(null);
+  const valid = normalizeIp(ip) !== null;
+
+  const check = async () => {
+    if (!valid) { onToast('IP 주소 꼴이 아닙니다(예: 203.0.113.5).'); return; }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/super/sign-in-ip-lock?ip=${encodeURIComponent(ip.trim())}`);
+      const data = await res.json();
+      if (data.ok) setStatus(data.data); else onToast(data.error?.message ?? '확인 실패');
+    } finally { setBusy(false); }
+  };
+  const unlock = async () => {
+    if (!confirm(`${ip.trim()}의 로그인 실패 기록을 지워 잠금을 풀까요?
+그 IP로 들어오는 모든 계정의 실패 수도 함께 지워집니다.`)) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/super/sign-in-ip-lock', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip.trim() }) });
+      const data = await res.json();
+      if (data.ok) { onToast(`IP 잠금을 풀었습니다(실패 기록 ${data.data.cleared}건 지움).`); setStatus(null); }
+      else onToast(data.error?.message ?? '잠금 풀기 실패');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-slate-200">IP 로그인 잠금</span>
+        <span className="text-xs text-slate-500">한 IP가 30분에 30번 틀리면 그 IP의 로그인을 30분 막습니다.</span>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input value={ip} onChange={(e) => { setIp(e.target.value); setStatus(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !isImeComposing(e)) check(); }}
+          placeholder="기관의 바깥 IP (예: 203.0.113.5)"
+          className="w-64 px-3 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-600" />
+        <button onClick={check} disabled={busy || !valid}
+          className="px-3 py-1.5 text-sm rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-40">확인</button>
+        {status && (
+          status.lockedUntil ? (
+            <>
+              <span className="text-sm text-amber-300">{status.ip} 잠김 · {lockUntilLabel(status.lockedUntil)} (30분 안 실패 {status.failures}번)</span>
+              <button onClick={unlock} disabled={busy}
+                className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40">잠금 풀기</button>
+            </>
+          ) : (
+            <span className="text-sm text-slate-400">{status.ip} 잠기지 않음 (30분 안 실패 {status.failures}번)</span>
+          )
+        )}
+      </div>
     </div>
   );
 }

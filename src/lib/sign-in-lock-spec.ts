@@ -9,6 +9,26 @@ export const LOCKED_MESSAGE = '로그인을 여러 번 실패해 30분 동안 �
 export const ACCOUNT_DORMANT = 'ACCOUNT_DORMANT';
 export const DORMANT_MESSAGE = '오래 로그인하지 않아 계정이 사용 중지되었습니다. 기관 관리자에게 다시 사용을 요청해 주세요.';
 
+/**
+ * IP 잠금 확인·풀기(2026-11-17) — 관리자가 넣은 IP를 다듬는다. 로그인 기록은 받은 머리글 값 그대로를 해시하므로(`requestIp`)
+ * 여기서도 같은 꼴(앞뒤 공백 없는 IPv4 점 네 칸 / IPv6 소문자)로만 맞춘다. 꼴이 아니면 null
+ */
+export function normalizeIp(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const ip = raw.trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    return ip.split('.').every((p) => Number(p) <= 255 && String(Number(p)) === p) ? ip : null;
+  }
+  if (ip.length <= 45 && ip.includes(':') && /^[0-9a-fA-F:.]+$/.test(ip)) return ip.toLowerCase();
+  return null;
+}
+
+/** 기록·화면에 남길 꼴 — IPv4는 끝 칸, IPv6는 앞 세 칸 뒤를 가린다 */
+export function maskIp(ip: string): string {
+  if (ip.includes('.') && !ip.includes(':')) return ip.split('.').slice(0, 3).join('.') + '.x';
+  return ip.split(':').slice(0, 3).join(':') + ':…';
+}
+
 /** 관리 화면의 '… 풀림' 글 — 한국 시간 시:분(오늘이 아니면 월/일도) */
 export function lockUntilLabel(iso: string, nowMs = Date.now()): string {
   const t = Date.parse(iso);
