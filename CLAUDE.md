@@ -1327,6 +1327,8 @@ MAIL_FROM=
 
 **환경변수는 반드시 `src/lib/config.ts`를 경유**해서 읽습니다. `process.env` 직접 접근 금지.
 
+**비밀값 암호화(`src/lib/crypto.ts`, 2026-11-17)**: API 키·앱 결과 보낼 곳 서명 비밀값. 새 암호문은 `v2:`(AES-256-GCM, `ENCRYPTION_KEY` 64자 16진수), 옛 꼴(`iv:암호문`, CBC)은 `ENCRYPTION_KEY` → 옛 비밀값(`API_KEY_ENCRYPTION_SECRET`·고정 값) 순으로 그대로 읽는다. **운영에서 키가 없으면 고정 값으로 저장하지 않고 거절**(`EncryptionKeyMissingError` → 저장 세 곳이 503 안내). 이 모듈만 환경 값을 직접 읽는다(config는 가져오는 순간 필수 값을 요구). `tests/batch-0139.test.ts`
+
 ---
 
 ## 현재 알려진 제약 (작업 전 반드시 확인)
@@ -2014,7 +2016,7 @@ details: {
 - **JWT**: HMAC-SHA256, `SUPER_JWT_SECRET` 서명
 - **미들웨어**: Edge Runtime에서 Web Crypto API로 검증 (30초 캐시)
 - **(2026-11-13 고침)** ① 서명 비밀값은 `src/lib/super-secret.ts` `superJwtSecret` 한 곳 — 운영(`NODE_ENV=production`)에서 `SUPER_JWT_SECRET`이 비면 서명은 던지고 검증은 거절한다
-  (예전에는 소스에 적힌 고정 값으로 서명·검증해, 값이 빠지면 누구나 슈퍼관리자 토큰을 만들 수 있었다 — **운영에는 이름만 있고 값이 비어 있었다**: 그래서 이 배포부터 슈퍼관리자 로그인이 500이었고, 2026-11-17에 64자 무작위 값을 넣어 다시 배포했다. 그 전 슈퍼관리자 토큰은 소스의 고정 값으로 서명됐었다. 환경 변수는 `vercel env ls`의 이름만 믿지 말고 값 길이를 본다 — `SUPER_ADMIN_SETUP_KEY`·`ENCRYPTION_KEY`도 운영 값이 비어 있다(설정 키는 비면 설정이 막혀 안전, 암호화 키는 `crypto.ts`가 소스의 고정 키로 대신 — 기존 암호문을 다시 암호화해야 바꿀 수 있다). 서명 비교는 같은 시간 비교(`constantTimeEqual`)
+  (예전에는 소스에 적힌 고정 값으로 서명·검증해, 값이 빠지면 누구나 슈퍼관리자 토큰을 만들 수 있었다 — **운영에는 이름만 있고 값이 비어 있었다**: 그래서 이 배포부터 슈퍼관리자 로그인이 500이었고, 2026-11-17에 64자 무작위 값을 넣어 다시 배포했다. 그 전 슈퍼관리자 토큰은 소스의 고정 값으로 서명됐었다. 환경 변수는 `vercel env ls`의 이름만 믿지 말고 값을 확인한다 — 단 **Sensitive 변수는 `vercel env pull --environment=production`이 빈 값으로 내려준다**(`ENCRYPTION_KEY`·`SUPER_ADMIN_SETUP_KEY`가 그렇다 — 처음에 '비어 있다'고 적었다가 2026-11-17 밤 정정: 운영 런타임이 저장한 API 키를 풀고, 그 암호문은 고정 키·로컬 키로 안 풀린다 = 운영에 진짜 키가 있다). 런타임에 실제로 비었는지는 함수 로그·동작으로 본다. 서명 비교는 같은 시간 비교(`constantTimeEqual`)
   ② 설정(`/api/super/auth/setup`)의 '슈퍼관리자가 이미 있으면 막기'를 수로 센다 — 예전 `maybeSingle()`은 슈퍼관리자가 **둘 이상이면 오류로 비어 막이가 열렸고**(운영은 둘),
   설정 키만 있으면 아무 계정의 비밀번호를 바꾸고 슈퍼관리자로 올릴 수 있었다. 세지 못하면 503(닫힘), 설정 키도 같은 시간 비교
   ③ 슈퍼관리자 로그인이 `canSignIn`(비활성·삭제)을 본다 — 예전 '비활성화'는 `is_active`만 바꾸고 로그인은 보지 않았다.

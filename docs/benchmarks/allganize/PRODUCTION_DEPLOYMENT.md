@@ -10,7 +10,7 @@
 - 코드 배포 `dpl_2n69VVcVvepfqhXPcqkq3GZo8H21`(커밋 `af8bc96`, 2026-11-17 21:49 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `022eb26`(밤 배포 기록), `2f5b0e4` 기능 — 계약 등록·변경·해지(달라진 칸만), 시스템·기관 API 키 교체(키 값 없음), 공지 작성·수정·삭제(본문 없음), 관리자 초대 링크 만들기(초대 열쇠 없음), 기관 종료(`org_terminated`)를 `super_admin_logs`에, 초대 링크 역할 ADMIN·USER만·최상위 부서·부서 없으면 400·주소 config 경유, 기관 상태 넷만, '기관 삭제' 단추 응답 확인, `af8bc96` 문서. 가지 Preview(`workon-fqkawkph7`) Ready 뒤 `main`. 배포 전 전체 시험 292파일 3,873개 통과·tsc 0.
 - 되돌릴 때는 직전 `dpl_ArbBFS648gWr3oZDNwFjrsCG8o1j`(ae708b6)로 promote.
 - 배포 뒤 확인(읽기 전용): 운영 슈퍼관리자 창에서 조작 기록 API·계약 목록·기관 초대 링크 목록 200(초대 주소 호스트 `workon-ai.vercel.app`). `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, 슈퍼관리자 API 무인증 401. 실행기 호출 21:50 KST 200, 최근 24시간 critical 0건.
-- 관찰: 배포 전 21:36 KST 운영 기록에 `시스템 API 키 변경: anthropic`(warning) — 슈퍼관리자 화면에서 시스템 키를 바꾼 것으로 보인다. 옛 코드라 조작 기록에는 없다. 이 화면에 저장한 키는 모델 호출에 쓰이지 않는다(호출은 서버 환경 변수 `ANTHROPIC_API_KEY`), 운영 `ENCRYPTION_KEY`가 비어 있어 소스의 고정 키로 암호화돼 있다.
+- 관찰: 배포 전 21:36 KST 운영 기록에 `시스템 API 키 변경: anthropic`(warning) — 슈퍼관리자 화면에서 시스템 키를 바꾼 것으로 보인다. 옛 코드라 조작 기록에는 없다. 이 화면에 저장한 키는 모델 호출에 쓰이지 않는다(호출은 서버 환경 변수 `ANTHROPIC_API_KEY`), (운영 `ENCRYPTION_KEY`가 비어 있다고 적었던 것은 틀렸다 — 아래 '오후 7' 항목의 정정.)
 
 ## 2026-11-17(밤): 슈퍼관리자 조작 기록 보이기 — 마이그레이션 없음
 
@@ -24,7 +24,7 @@
 - **발견**: 운영 슈퍼관리자 로그인이 "서버 오류가 발생했습니다"(500). Vercel 함수 로그 `[super/auth/login] Error: SUPER_JWT_SECRET이 설정되지 않았습니다.` — `vercel env ls`에는 이름이 있었지만(206일 전) `vercel env pull`로 길이만 재 보니 0. 2026-11-13 `super-secret.ts`가 운영의 빈 값을 거절하게 바꾼 뒤(`dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`)부터 슈퍼관리자 로그인이 막혀 있었다. 그 전에는 소스의 고정 값으로 서명했다(토큰을 누구나 만들 수 있는 상태였음). 기관 관리자 로그인(NextAuth — `NEXTAUTH_SECRET` 44자)은 그대로였다.
 - **조치**(사용자 "넣고 다시 배포"): Production `SUPER_JWT_SECRET`을 지우고 64자 무작위 16진수(화면·기록에 찍지 않음)로 다시 넣음, 길이 64 확인. `2f23775`(오후 6 배포 기록)를 가지 Preview(`workon-9tqigpwy2`) Ready 뒤 `main`으로 올려 `dpl_HNEfiab9vYKWmVt8ULBhTL1giz6B`(2026-11-17 17:05 KST)로 다시 배포. 살아 있던 슈퍼관리자 토큰이 없어 끊긴 사람은 없다.
 - 되돌릴 때 이 값을 비우면 다시 로그인이 막힌다(코드가 빈 값을 거절) — 되돌리지 않는다.
-- **같이 비어 있는 값**: `SUPER_ADMIN_SETUP_KEY`(비면 최초 설정이 막힘 — 안전), `ENCRYPTION_KEY`(비면 `crypto.ts`가 소스의 고정 키로 API 키·보낼 곳 서명 비밀값을 암호화 — 넣으려면 기존 암호문을 다시 암호화해야 한다, 다음 묶음). Preview 환경의 `SUPER_JWT_SECRET`은 넣지 않았다.
+- **같이 비어 있는 값**: `SUPER_ADMIN_SETUP_KEY`(비면 최초 설정이 막힘 — 안전), `ENCRYPTION_KEY`(비면 `crypto.ts`가 소스의 고정 키로 API 키·보낼 곳 서명 비밀값을 암호화 — 넣으려면 기존 암호문을 다시 암호화해야 한다, 다음 묶음). Preview 환경의 `SUPER_JWT_SECRET`은 넣지 않았다. — **정정(2026-11-17 밤)**: 두 값은 Sensitive 변수라 `vercel env pull`이 빈 값으로 내려준 것이다. 운영 런타임이 저장한 API 키를 풀고(슈퍼관리자 API 키 화면의 가린 값이 `sk-`로 시작) 그 암호문은 고정 키로 안 풀리므로 운영 `ENCRYPTION_KEY`에는 진짜 키가 있다. 다시 암호화할 일은 없다.
 
 ## 2026-11-17(오후 6): 대시보드 사용자 수 상한 띠 — 마이그레이션 없음
 
