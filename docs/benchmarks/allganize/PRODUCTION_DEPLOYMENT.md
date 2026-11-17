@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(밤 5): 슈퍼관리자 임시 비밀번호는 바꾸기부터 — 마이그레이션 없음
+
+- 코드 배포 `dpl_EY692sfSYSj5TwDU87L5PFeQwYsg`(커밋 `998ad99`, 2026-11-17 23:00 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `f1db76d`(밤 4 기록), `6363bb2` 기능 — '슈퍼관리자 추가'가 `generateTempPassword`·`password_must_change: true`로 만들고, 미들웨어가 `superMustChange`면 `/super/password`·비밀번호 바꾸기 API·로그인·로그아웃만 열고(화면은 그리로, API는 403 `password_change_required`), 기억보다 새 토큰이면 다시 읽음, `998ad99` 문서. 가지 Preview(`workon-52h2a4wo1`) Ready 뒤 `main`. 배포 전 전체 시험 295파일 3,904개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_H28ezMrbGx8At6ZZMs518gxnFnV4`(7bea09f)로 promote.
+- 배포 전 확인(읽기 전용): 운영 슈퍼관리자 둘 다 `password_must_change` 거짓 — 배포로 막히는 사람 없음. 배포 뒤: 운영 브라우저에서 `/super/password` 화면(지금 비밀번호·새 비밀번호·확인·규칙 글) 보임, 기존 로그인은 `/super`에 그대로·대시보드 API 200(다른 곳으로 보내지 않음). `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/super/password` 무인증 307(로그인으로). 실행기 호출 23:00 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 실제 슈퍼관리자 추가는 돌려 보지 않음(운영 계정이 생기므로).
+
 ## 2026-11-17(밤 4): 슈퍼관리자 본인 비밀번호 바꾸기 — 마이그레이션 없음
 
 - 코드 배포 `dpl_H28ezMrbGx8At6ZZMs518gxnFnV4`(커밋 `7bea09f`, 2026-11-17 22:33 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `9ae2667`(밤 3 기록), `0a5daab` 기능 — `/api/super/accounts/me/password`가 직원과 같은 `changeOwnPassword`(`scope: 'super'` — 규칙·틀리면 슈퍼관리자 로그인 실패로 셈·Auth와 `password_hash` 둘 다·바꾼 때 0092), 미들웨어가 그보다 앞서 받은 슈퍼관리자 토큰(`iat`)을 끝냄(`readSuperAdminState`·`superTokenIat`), 이 브라우저 쿠키 지우고 로그인으로, 조작 기록 `super_admin_password_changed`, `7bea09f` 문서. 가지 Preview(`workon-l2zz85q8i`) Ready 뒤 `main`. 배포 전 전체 시험 294파일 3,897개 통과·tsc 0.
