@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ORG_TYPES } from '@/lib/org-types';
 import { kstDay } from '@/lib/kst-time';
 import { isImeComposing } from '@/lib/ime';
+import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
 
 const PLAN_PRESETS: Record<string, { maxUsers: number; maxAgents: number; maxTokens: number; price: number }> = {
   trial:      { maxUsers: 5,   maxAgents: 3,   maxTokens: 500000,   price: 0       },
@@ -389,7 +390,7 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
                     onChange={e => set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                     required placeholder="oasan-digital"
                     className="w-full px-4 py-3 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-[#7C3AED] font-mono" />
-                  {form.slug && <p className="text-xs text-slate-500 mt-1">접속 URL: /org/{form.slug}</p>}
+                  {form.slug && <p className="text-xs text-slate-500 mt-1">기관 로그인 주소: /signin/{form.slug}{!ORG_SLUG_PATTERN.test(form.slug) && <span className="text-amber-400"> — 3~40자, 하이픈으로 시작·끝 안 됨</span>}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-2">기관 유형</label>

@@ -8,6 +8,7 @@ import { writeAuditRow } from '@/lib/audit-write';
 import { reportContractSync } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
 import { APP_URL } from '@/lib/config';
+import { normalizeOrgSlug } from '@/lib/org-slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,33 +103,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // slug 형식 검증
-    if (!/^[a-z0-9-]+$/.test(slug)) {
-      return NextResponse.json(
-        { ok: false, error: 'Slug는 영문 소문자, 숫자, 하이픈만 사용 가능합니다.' },
-        { status: 400 }
-      );
+    // slug 형식 — 기관 관리자 '기관 정보'와 같은 규칙(2026-11-17, `org-slug.ts`)
+    const slugCheck = normalizeOrgSlug(slug);
+    if (!slugCheck.ok) {
+      return NextResponse.json({ ok: false, error: slugCheck.message }, { status: 400 });
+    }
+    const orgSlug = slugCheck.slug;
+
+    // slug 중복 — 기관 로그인 경로(organizations.slug, 0020 유일)와 기본 부서 slug 둘 다
+    const [{ data: existingOrg, error: orgSlugErr }, { data: existingDept, error: deptSlugErr }] = await Promise.all([
+      supabaseAdmin.from('organizations').select('id').eq('slug', orgSlug).maybeSingle(),
+      supabaseAdmin.from('departments').select('id').eq('slug', `${orgSlug}-main`).maybeSingle(),
+    ]);
+    if (orgSlugErr || deptSlugErr) {
+      return NextResponse.json({ ok: false, error: dbErrorText(orgSlugErr ?? deptSlugErr) }, { status: 500 });
     }
 
-    // slug 중복 확인 (departments 테이블에서 확인)
-    const { data: existingDept } = await supabaseAdmin
-      .from('departments')
-      .select('id')
-      .eq('slug', `${slug}-main`)
-      .maybeSingle();
-
-    if (existingDept) {
+    if (existingOrg || existingDept) {
       return NextResponse.json(
         { ok: false, error: '이미 사용 중인 Slug입니다.' },
         { status: 409 }
       );
     }
 
-    // 1) organizations INSERT (slug 컬럼은 organizations 테이블에 없음 → departments에서 사용)
+    // 1) organizations INSERT — slug는 기관 전용 로그인 경로(/signin/{slug}, 0020). 예전엔 기관에 저장하지 않아 새 기관은 로그인 경로가 없었다
     const { data: org, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
         name: name.trim(),
+        slug: orgSlug,
         type: type ?? '공공기관',
         status: 'active',
         plan: plan ?? 'basic',
@@ -167,7 +170,7 @@ export async function POST(request: NextRequest) {
       .from('departments')
       .insert({
         name: `${name.trim()} 본청`,
-        slug: `${slug}-main`,
+        slug: `${orgSlug}-main`,
         description: `${name.trim()} 기본 부서`,
         organization_id: org.id,
       })

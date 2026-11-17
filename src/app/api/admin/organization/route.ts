@@ -8,6 +8,7 @@ import { getAllowedModelIds } from '@/lib/model-policy';
 import { DEFAULT_THEME_COLOR, normalizeHex, themeColorProblem } from '@/lib/theme-color';
 import { getActorScope } from '@/lib/actor-scope';
 import { writeAuditRow } from '@/lib/audit-write';
+import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,8 +24,8 @@ export const dynamic = 'force-dynamic';
 const MAX_LOGO_BYTES = 500 * 1024;
 const ALLOWED_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
 
-/** 영문 소문자·숫자·하이픈만. URL 경로에 그대로 들어간다. */
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+/** 영문 소문자·숫자·하이픈만. URL 경로에 그대로 들어간다 — 규칙은 슈퍼관리자 기관 등록과 한 곳(`org-slug.ts`) */
+const SLUG_PATTERN = ORG_SLUG_PATTERN;
 
 async function requireAdminOrg() {
   const session = await getServerAuthSession();

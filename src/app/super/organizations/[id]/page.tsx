@@ -9,6 +9,7 @@ import {
 import { kstDay } from '@/lib/kst-time';
 import { isImeComposing } from '@/lib/ime';
 import { STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
+import { orgSignInPath } from '@/lib/org-slug';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -216,9 +217,11 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
     setShowDeleteModal(false);
   };
 
+  // 기관 전용 로그인 화면(2026-11-17 — 예전엔 없는 주소 /org/{slug}를 복사했다)
+  const signInPath = orgSignInPath(org.slug);
   const copyUrl = async () => {
-    const base = window.location.origin;
-    await navigator.clipboard.writeText(`${base}/org/${org.slug}`);
+    if (!signInPath) return;
+    await navigator.clipboard.writeText(`${window.location.origin}${signInPath}`);
     onToast('링크가 복사됐습니다.');
   };
 
@@ -232,9 +235,9 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
           <InfoRow label="유형"    value={org.type} />
           <InfoRow label="등록일"  value={fmtDate(org.created_at)} />
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-slate-500 w-20 flex-shrink-0">접속 URL</span>
-            <span className="text-xs text-slate-300 font-mono truncate flex-1">/{org.slug}</span>
-            <button onClick={copyUrl} className="text-xs text-[#A78BFA] hover:text-violet-300 flex-shrink-0">복사</button>
+            <span className="text-xs text-slate-500 w-20 flex-shrink-0">로그인 주소</span>
+            <span className="text-xs text-slate-300 font-mono truncate flex-1">{signInPath ?? '없음 — 기관 관리자 \'기관 정보\'에서 정함'}</span>
+            {signInPath && <button onClick={copyUrl} className="text-xs text-[#A78BFA] hover:text-violet-300 flex-shrink-0">복사</button>}
           </div>
         </InfoCard>
 
