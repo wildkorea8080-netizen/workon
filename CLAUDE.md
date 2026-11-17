@@ -2021,6 +2021,7 @@ details: {
   ② 설정(`/api/super/auth/setup`)의 '슈퍼관리자가 이미 있으면 막기'를 수로 센다 — 예전 `maybeSingle()`은 슈퍼관리자가 **둘 이상이면 오류로 비어 막이가 열렸고**(운영은 둘),
   설정 키만 있으면 아무 계정의 비밀번호를 바꾸고 슈퍼관리자로 올릴 수 있었다. 세지 못하면 503(닫힘), 설정 키도 같은 시간 비교
   ③ 슈퍼관리자 로그인이 `canSignIn`(비활성·삭제)을 본다 — 예전 '비활성화'는 `is_active`만 바꾸고 로그인은 보지 않았다.
+  ⑤ (2026-11-17) 슈퍼관리자 본인 비밀번호 바꾸기(`/api/super/accounts/me/password`)는 직원과 같은 `changeOwnPassword`(`scope: 'super'` — 틀리면 슈퍼관리자 로그인 실패로 셈, 규칙 `passwordPolicyError`, Auth와 `password_hash` 둘 다)를 쓰고 바꾼 때(0092)를 적는다. 미들웨어가 슈퍼관리자 토큰의 `iat`가 그보다 앞서면 끝낸다(`readSuperAdminState`·`superTokenIat`, 같은 초는 그대로) — 다른 기기의 슈퍼관리자 로그인도 끝나고 이 브라우저는 쿠키를 지워 로그인으로. `tests/batch-0140.test.ts`
   ④ (2026-11-13) 미들웨어가 `/super` 화면·`/api/super` API·점검 모드 통과 때 계정이 지금도 활성 슈퍼관리자인지 DB로 다시 본다(`middleware-db.ts` `superAdminActive` — 30초 기억,
   못 읽으면 10분 안의 마지막 값, 그것도 없으면 막음) — 비활성화하면 30초 안에 막히고 쿠키를 지운다(라우트의 `getSuperAdminFromRequest`는 서명만 본다). `tests/batch-0101.test.ts`·`batch-0102.test.ts`
 
