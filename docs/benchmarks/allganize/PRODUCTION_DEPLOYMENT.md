@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(밤 3): 비밀값 암호화 v2(GCM) — 마이그레이션 없음
+
+- 코드 배포 `dpl_G7i219ExoNDhz8P5PCxvVh3QxNFu`(커밋 `e7d808d`, 2026-11-17 22:18 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b684db9`(밤 2 기록), `0c0b133` 기능 — `src/lib/crypto.ts` 새 암호문 `v2:`(AES-256-GCM), 옛 CBC 꼴은 `ENCRYPTION_KEY` → 옛 비밀값 순으로 그대로 읽음, 운영에서 키가 없으면 고정 값으로 저장하지 않고 저장 세 곳 503, `@ts-nocheck` 뺌, `e7d808d` 문서(운영 `ENCRYPTION_KEY`가 비었다던 기록 정정). 가지 Preview(`workon-lcskbi2y0`) Ready 뒤 `main`. 배포 전 전체 시험 293파일 3,885개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_2n69VVcVvepfqhXPcqkq3GZo8H21`(af8bc96)로 promote — 단 이 배포 뒤에 저장한 키(v2)는 옛 코드가 못 푼다(그때는 다시 저장).
+- 배포 전 확인(읽기 전용): 운영 암호문은 시스템 Anthropic 키 1건(옛 CBC 꼴)·보낼 곳 비밀값 0건. 그 1건은 고정 키·로컬 키로 안 풀리고 운영 런타임은 푼다 → 운영 `ENCRYPTION_KEY`는 Sensitive 변수로 실제 값이 있다(`vercel env pull --environment=production`이 빈 값을 줌).
+- 배포 뒤 확인: 새 코드가 그 옛 꼴 키를 푼다(슈퍼관리자 API 키 화면 가린 값이 `sk-`로 시작 — 운영 브라우저). `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200. 실행기 호출 22:20 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건.
+
 ## 2026-11-17(밤 2): 계약·API 키·공지·초대 링크 조작 기록 — 마이그레이션 없음
 
 - 코드 배포 `dpl_2n69VVcVvepfqhXPcqkq3GZo8H21`(커밋 `af8bc96`, 2026-11-17 21:49 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `022eb26`(밤 배포 기록), `2f5b0e4` 기능 — 계약 등록·변경·해지(달라진 칸만), 시스템·기관 API 키 교체(키 값 없음), 공지 작성·수정·삭제(본문 없음), 관리자 초대 링크 만들기(초대 열쇠 없음), 기관 종료(`org_terminated`)를 `super_admin_logs`에, 초대 링크 역할 ADMIN·USER만·최상위 부서·부서 없으면 400·주소 config 경유, 기관 상태 넷만, '기관 삭제' 단추 응답 확인, `af8bc96` 문서. 가지 Preview(`workon-fqkawkph7`) Ready 뒤 `main`. 배포 전 전체 시험 292파일 3,873개 통과·tsc 0.
