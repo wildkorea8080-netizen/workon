@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { SIGN_IN_RULES, STORED_SETTINGS_NOTICE } from '@/lib/system-settings-spec';
 
 type Tab = 'basic' | 'maintenance' | 'security';
 
@@ -10,31 +12,43 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading]   = useState(true);
   const [toast, setToast]       = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000); };
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/super/settings');
-    const d   = await res.json();
-    if (d.ok) {
-      const map: Record<string, string> = {};
-      for (const item of d.data) map[item.key] = item.value;
-      setSettings(map);
+    // 못 읽었으면 기본값을 실제 값처럼 보이지 않는다(2026-11-17)
+    try {
+      const res = await fetch('/api/super/settings');
+      const d   = await res.json();
+      if (d.ok) {
+        const map: Record<string, string> = {};
+        for (const item of d.data) map[item.key] = item.value;
+        setSettings(map);
+        setLoadError(null);
+      } else setLoadError(d.error?.message ?? '설정을 읽지 못했습니다.');
+    } catch {
+      setLoadError('설정을 읽지 못했습니다. 잠시 뒤 다시 열어 주세요.');
     }
     setLoading(false);
   }, []);
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
-  const saveSetting = async (key: string, value: string) => {
-    const res = await fetch('/api/super/settings', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    });
-    const d = await res.json();
-    if (d.ok) { setSettings(s => ({ ...s, [key]: value })); showToast('✅ 저장됐습니다.'); }
-    else showToast('❌ ' + d.error);
+  const saveSetting = async (key: string, value: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/super/settings', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+      const d = await res.json();
+      if (d.ok) { setSettings(s => ({ ...s, [key]: d.data?.value ?? value })); showToast('✅ 저장됐습니다.'); return true; }
+      showToast('❌ ' + (d.error?.message ?? d.error ?? '저장하지 못했습니다.'));
+    } catch {
+      showToast('❌ 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+    }
+    return false;
   };
 
   return (
@@ -59,11 +73,16 @@ export default function SettingsPage() {
         <div className="flex justify-center py-12">
           <div className="w-6 h-6 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin"/>
         </div>
+      ) : loadError ? (
+        <div className="p-5 rounded-2xl border border-red-700/40 bg-red-950/30 text-sm text-red-200 flex items-center gap-4">
+          <span className="flex-1">{loadError}</span>
+          <button onClick={loadSettings} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl">다시 읽기</button>
+        </div>
       ) : (
         <>
           {tab === 'basic'       && <BasicTab settings={settings} onSave={saveSetting} />}
-          {tab === 'maintenance' && <MaintenanceTab settings={settings} onSave={saveSetting} onToast={showToast} />}
-          {tab === 'security'    && <SecurityTab settings={settings} onSave={saveSetting} />}
+          {tab === 'maintenance' && <MaintenanceTab settings={settings} onSave={saveSetting} />}
+          {tab === 'security'    && <SecurityTab />}
         </>
       )}
 
@@ -79,7 +98,7 @@ function SettingRow({ label, settingKey, value, type = 'text', options, onSave }
   label: string; settingKey: string; value: string;
   type?: 'text' | 'number' | 'select' | 'textarea';
   options?: { value: string; label: string }[];
-  onSave: (key: string, value: string) => void;
+  onSave: (key: string, value: string) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal]         = useState(value);
@@ -106,7 +125,7 @@ function SettingRow({ label, settingKey, value, type = 'text', options, onSave }
               <input type={type} value={val} onChange={e => setVal(e.target.value)}
                 className="flex-1 px-4 py-2.5 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
             )}
-            <button onClick={() => { onSave(settingKey, val); setEditing(false); }}
+            <button onClick={async () => { if (await onSave(settingKey, val)) setEditing(false); }}
               className="px-4 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-semibold rounded-xl transition-colors">저장</button>
             <button onClick={() => { setVal(value); setEditing(false); }}
               className="px-4 py-2.5 border border-slate-700 text-slate-400 text-xs rounded-xl hover:text-white transition-colors">취소</button>
@@ -124,25 +143,24 @@ function SettingRow({ label, settingKey, value, type = 'text', options, onSave }
 }
 
 // ─── 기본 설정 탭 ────────────────────────────────────────
-function BasicTab({ settings, onSave }: { settings: Record<string, string>; onSave: (k: string, v: string) => void }) {
+// 2026-11-17 — 서비스가 읽지 않는 값만 남았다. '세션 유지 시간'·'최대 파일 크기'·'신규 기관 기본 플랜'은 바꿔도 아무 일도 없어 뺐다
+function BasicTab({ settings, onSave }: { settings: Record<string, string>; onSave: (k: string, v: string) => Promise<boolean> }) {
   return (
-    <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl px-6 py-4 space-y-0 divide-y divide-slate-700/30">
-      <SettingRow label="서비스명" settingKey="service_name" value={settings.service_name ?? ''} onSave={onSave} />
-      <SettingRow label="서비스 URL" settingKey="service_url" value={settings.service_url ?? ''} onSave={onSave} />
-      <SettingRow label="신규 기관 기본 플랜" settingKey="new_org_default_plan" value={settings.new_org_default_plan ?? 'trial'}
-        type="select" options={['trial','basic','pro','enterprise'].map(k => ({ value: k, label: k.charAt(0).toUpperCase()+k.slice(1) }))} onSave={onSave} />
-      <SettingRow label="세션 유지 시간 (시간)" settingKey="session_timeout_hours" value={settings.session_timeout_hours ?? '24'} type="number" onSave={onSave} />
-      <SettingRow label="최대 파일 크기 (MB)" settingKey="max_file_size_mb" value={settings.max_file_size_mb ?? '50'} type="number" onSave={onSave} />
-      <SettingRow label="고객지원 이메일" settingKey="support_email" value={settings.support_email ?? ''} onSave={onSave} />
+    <div className="space-y-3">
+      <p className="text-xs text-amber-200 bg-amber-950/30 border border-amber-700/40 rounded-xl px-4 py-3">{STORED_SETTINGS_NOTICE}</p>
+      <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl px-6 py-4 space-y-0 divide-y divide-slate-700/30">
+        <SettingRow label="서비스명" settingKey="service_name" value={settings.service_name ?? ''} onSave={onSave} />
+        <SettingRow label="서비스 URL" settingKey="service_url" value={settings.service_url ?? ''} onSave={onSave} />
+        <SettingRow label="고객지원 이메일" settingKey="support_email" value={settings.support_email ?? ''} onSave={onSave} />
+      </div>
     </div>
   );
 }
 
 // ─── 점검 모드 탭 ────────────────────────────────────────
-function MaintenanceTab({ settings, onSave, onToast }: {
+function MaintenanceTab({ settings, onSave }: {
   settings: Record<string, string>;
-  onSave: (k: string, v: string) => void;
-  onToast: (m: string) => void;
+  onSave: (k: string, v: string) => Promise<boolean>;
 }) {
   const isOn = settings.maintenance_mode === 'true';
   const [showConfirm, setShowConfirm] = useState(false);
@@ -152,7 +170,7 @@ function MaintenanceTab({ settings, onSave, onToast }: {
 
   const handleToggle = () => {
     if (!isOn) setShowConfirm(true);
-    else { onSave('maintenance_mode', 'false'); onToast('점검 모드가 해제됐습니다.'); }
+    else onSave('maintenance_mode', 'false');
   };
 
   return (
@@ -194,7 +212,7 @@ function MaintenanceTab({ settings, onSave, onToast }: {
             <div className="flex gap-3">
               <button onClick={() => setShowConfirm(false)}
                 className="flex-1 py-2.5 border border-slate-700 rounded-xl text-sm text-slate-400 hover:text-white">취소</button>
-              <button onClick={() => { onSave('maintenance_mode', 'true'); setShowConfirm(false); onToast('점검 모드가 활성화됐습니다.'); }}
+              <button onClick={() => { onSave('maintenance_mode', 'true'); setShowConfirm(false); }}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl text-sm">확인</button>
             </div>
           </div>
@@ -205,27 +223,24 @@ function MaintenanceTab({ settings, onSave, onToast }: {
 }
 
 // ─── 보안 설정 탭 ────────────────────────────────────────
-function SecurityTab({ settings, onSave }: { settings: Record<string, string>; onSave: (k: string, v: string) => void }) {
+// 2026-11-17 — 예전 '로그인 실패 허용 횟수'·'허용 IP 목록'은 저장만 되고 아무것도 막지 않았다. 실제 규칙을 읽기 전용으로 보인다.
+// 내 IP를 바깥 IP 조회 서비스에 묻던 것도 뺐다 — 슈퍼관리자 접속 IP를 남의 서버에 보낼 까닭이 없다
+function SecurityTab() {
   const [logs, setLogs] = useState<any[]>([]);
-  const [myIp, setMyIp] = useState('—');
 
   useEffect(() => {
     // 슈퍼관리자 최근 활동 로그
     fetch('/api/super/logs?limit=20').then(r => r.json()).then(d => { if (d.ok) setLogs(d.data); }).catch(() => {});
-    // 내 IP (공개 API)
-    fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => setMyIp(d.ip ?? '—')).catch(() => {});
   }, []);
 
   return (
     <div className="space-y-5">
-      <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl px-6 py-4 divide-y divide-slate-700/30">
-        <SettingRow label="로그인 실패 허용 횟수" settingKey="max_login_attempts"
-          value={settings.max_login_attempts ?? '5'} type="number" onSave={onSave} />
-        <div className="py-4">
-          <p className="text-xs text-slate-500 mb-1">현재 내 IP: <span className="text-white font-mono">{myIp}</span></p>
-          <SettingRow label="허용 IP 목록" settingKey="allowed_ips"
-            value={settings.allowed_ips ?? '0.0.0.0/0'} type="textarea" onSave={onSave} />
-        </div>
+      <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl px-6 py-5 space-y-3">
+        <h3 className="text-sm font-bold text-white">로그인 보호 규칙 <span className="text-xs font-normal text-slate-500">(코드에 정한 값 — 여기서 바꾸지 않습니다)</span></h3>
+        <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-300">
+          {SIGN_IN_RULES.map((r) => <li key={r}>{r}</li>)}
+        </ul>
+        <Link href="/super/accounts" className="inline-block px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl">계정 관리에서 잠금 확인·풀기</Link>
       </div>
 
       {/* 최근 로그인 이력 */}
