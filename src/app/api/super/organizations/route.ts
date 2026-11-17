@@ -160,7 +160,8 @@ export async function POST(request: NextRequest) {
 
     // 3) 관리자 초대 토큰 생성 (invitations INSERT)
     //    먼저 기관에 기본 부서 생성
-    const { data: dept } = await supabaseAdmin
+    // 못 만들면 기본 비서·관리자 초대가 빠진다 — 예전엔 소속 없는 초대를 만들어(가입에서 거절됨) 동작하지 않는 링크를 돌려줬다(2026-11-17)
+    const { data: dept, error: deptError } = await supabaseAdmin
       .from('departments')
       .insert({
         name: `${name.trim()} 본청`,
@@ -187,17 +188,22 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
 
     // 초대를 저장하지 못하면 링크가 동작하지 않는다 — 예전에는 그래도 링크를 돌려줘 기관 관리자가 가입할 수 없었다(2026-11-17)
-    const { error: inviteErr } = await supabaseAdmin.from('invitations').insert({
-      email: adminEmail.trim().toLowerCase(),
-      department_id: dept?.id ?? null,
-      role: 'ADMIN',
-      token: inviteToken,
-      invited_by: admin.sub,
-      expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-    });
-    const inviteWarning = inviteErr ? await reportContractSync('org_admin_invitation', org.id, inviteErr.code ?? 'error') : undefined;
-
-    const inviteUrl = inviteErr ? null : `${baseUrl}/signup?invite=${inviteToken}`;
+    let inviteWarning: string | undefined;
+    let inviteUrl: string | null = null;
+    if (!dept?.id) {
+      inviteWarning = await reportContractSync('org_default_department', org.id, deptError?.code ?? 'no_row');
+    } else {
+      const { error: inviteErr } = await supabaseAdmin.from('invitations').insert({
+        email: adminEmail.trim().toLowerCase(),
+        department_id: dept.id,
+        role: 'ADMIN',
+        token: inviteToken,
+        invited_by: admin.sub,
+        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+      });
+      if (inviteErr) inviteWarning = await reportContractSync('org_admin_invitation', org.id, inviteErr.code ?? 'error');
+      else inviteUrl = `${baseUrl}/signup?invite=${inviteToken}`;
+    }
 
     // 슈퍼관리자 로그 기록
     await writeAuditRow('super_admin_logs', {

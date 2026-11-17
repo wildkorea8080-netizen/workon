@@ -5,6 +5,8 @@ import { encode } from 'next-auth/jwt';
 import { logSystem } from '@/lib/logger';
 import { NEXTAUTH_SECRET } from '@/lib/config';
 
+const IMPERSONATION_NOT_LOGGED = '대리 접근 기록을 남기지 못해 대리 접근을 내주지 않았습니다';
+
 export const dynamic = 'force-dynamic';
 
 function nextAuthCookieName() {
@@ -76,7 +78,7 @@ export async function POST(
   }
 
   // 4) impersonation_logs 기록
-  const { data: logRow } = await supabaseAdmin
+  const { data: logRow, error: logError } = await supabaseAdmin
     .from('impersonation_logs')
     .insert({
       super_admin_id: admin.sub,
@@ -86,6 +88,11 @@ export async function POST(
     })
     .select('id')
     .maybeSingle();
+  // 기록 없는 대리 접근은 내주지 않는다(2026-11-17) — 예전엔 기록이 실패해도 들어가, 감사 '대리 접근 이력'에 없는 접근이 생겼다
+  if (logError || !logRow?.id) {
+    await logSystem({ level: 'error', category: 'security', message: IMPERSONATION_NOT_LOGGED, details: { superAdminId: admin.sub, code: logError?.code ?? 'no_row' }, orgId });
+    return NextResponse.json({ ok: false, error: '대리 접근 기록을 남기지 못해 들어가지 않았습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+  }
 
   // 5) NextAuth 호환 임시 세션 토큰 생성 (2시간)
   // 예전엔 환경 변수가 비면 소스에 적힌 고정 값으로 서명했다(2026-11-16 — config.ts가 값이 없으면 시작에서 멈춘다)
@@ -102,7 +109,7 @@ export async function POST(
       impersonatedBy: admin.sub,
       impersonateOrgId: orgId,
       impersonateOrgName: org.name,
-      impersonateLogId: logRow?.id ?? '',
+      impersonateLogId: logRow.id,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 7200,
     },

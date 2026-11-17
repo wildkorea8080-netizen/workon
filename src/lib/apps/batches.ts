@@ -392,14 +392,17 @@ export function batchDeps(): BatchDeps {
       if (error) throw new Error(`app_batch_items finish: ${error.message}`);
     },
     async stop(batchId, reason, nowIso) {
-      const { data } = await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
+      const { data, error } = await supabaseAdmin.from('app_batches').update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
+      // 묶음을 못 멈춘 채 줄만 건너뛰면 묶음이 곧 '마침'으로 바뀌어 멈춘 까닭이 사라진다 — 던져서 줄을 남기면 다음 차례에 그 줄이 같은 까닭으로 다시 멈추기를 해 본다(2026-11-17)
+      if (error) throw new Error(`app_batches stop: ${error.message}`);
       await skipPendingItems(batchId, nowIso, reason);
       return Boolean(data?.length);
     },
     async settle(batchId, nowIso) {
       const { count, error } = await supabaseAdmin.from('app_batch_items').select('id', { count: 'exact', head: true }).eq('batch_id', batchId).in('status', ['pending', 'running']);
       if (error || (count ?? 0) > 0) return false;
-      const { data } = await supabaseAdmin.from('app_batches').update({ status: 'done', finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
+      const { data, error: doneError } = await supabaseAdmin.from('app_batches').update({ status: 'done', finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id');
+      if (doneError) throw new Error(`app_batches settle: ${doneError.message}`);
       return Boolean(data?.length);
     },
     notifyFinished: (batchId) => notifyBatchFinished(batchId),
