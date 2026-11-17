@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { estimateCostUsd } from '@/lib/models';
+import { sumCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
 import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-throttle';
 import { seatAlerts } from '@/lib/user-seats';
 import { dbErrorText } from '@/lib/db-error-text';
-import { loadChatTokensByOrg } from '@/lib/org-chat-tokens';
+import { chatTokensOf, loadChatTokensByOrg } from '@/lib/org-chat-tokens';
 import { revenueIn, type RevenueContract } from '@/lib/contract-revenue';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     const monthTokensP = loadChatTokensByOrg(monthStart);
     const [
       orgAll, orgActive, orgSuspended, orgExpiring,
-      userAll, userNew, userToday,
+      userAll, userNew,
       todayUsage, monthUsage,
       revenueContracts,
       tokenAlerts, tokenExceeded,
@@ -42,10 +42,11 @@ export async function GET(request: NextRequest) {
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'suspended'),
       supabaseAdmin.from('contracts').select('id', { count: 'exact', head: true })
         .eq('status', 'active').not('expires_at', 'is', null).lte('expires_at', in30).gte('expires_at', now.toISOString()),
-      supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false),
-      supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).gte('created_at', monthStart),
-      supabaseAdmin.from('usage_logs').select('user_id', { count: 'exact', head: true }).eq('action', 'chat_message').gte('created_at', todayStart),
-      pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', todayStart).order('id').range(a, b)),
+      // 사용자 수 — 탈퇴 처리한 계정은 빼고(2026-11-17, 0047)
+      supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).is('deleted_at', null),
+      supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).is('deleted_at', null).gte('created_at', monthStart),
+      // 오늘 대화 기록 — 대화 수와 '오늘 활성 사용자'(서로 다른 사람 수)를 함께 낸다
+      pagedRows<{ user_id: string | null }>((a, b, w) => supabaseAdmin.from('usage_logs').select('user_id', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', todayStart).order('id').range(a, b)),
       pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b)),
       // 매출 — 그달에 유효했던 계약(2026-11-17, `contract-revenue.ts`). 예전엔 이번 달에 '시작한' 계약만 더해 이어지는 계약이 0원이었다
       supabaseAdmin.from('contracts').select('status, price_per_month, started_at, expires_at, updated_at').in('status', ['active', 'cancelled']).lt('started_at', nextMonthStart),
@@ -86,15 +87,14 @@ export async function GET(request: NextRequest) {
     ]);
 
     // ── 사용량 집계 ──────────────────────────────────────
-    const todayConversations = todayUsage.count ?? 0;
+    // 2026-11-17 — '오늘 활성'은 대화 기록 수가 아니라 서로 다른 사람 수(예전엔 한 사람이 열 번 물으면 열 명), 토큰은 한도 판정과 같은 셈,
+    // 비용은 기록할 때 확정한 값(`sumCostUsd` — 옛 기록만 기본 단가로 추정, 예전엔 모든 기록을 기본 모델 단가로)
+    const todayRows = todayUsage.data ?? [];
+    const todayConversations = todayRows.length;
+    const activeToday = new Set(todayRows.map((r: { user_id: string | null }) => r.user_id).filter(Boolean)).size;
     const monthConversations = (monthUsage.data ?? []).length;
-    let monthInput = 0, monthOutput = 0;
-    for (const l of monthUsage.data ?? []) {
-      monthInput  += (l.details?.input_tokens  ?? 0);
-      monthOutput += (l.details?.output_tokens ?? 0);
-    }
-    const monthTokens     = monthInput + monthOutput;
-    const estimatedCostUsd = estimateCostUsd({ input_tokens: monthInput, output_tokens: monthOutput });
+    const monthTokens = (monthUsage.data ?? []).reduce((s: number, l: { details: unknown }) => s + chatTokensOf(l.details), 0);
+    const estimatedCostUsd = sumCostUsd(monthUsage.data ?? []);
 
     // ── 매출 집계 ──────────────────────────────────────
     const revenueRows = (revenueContracts.data ?? []) as RevenueContract[];
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
         users: {
           total: userAll.count ?? 0,
           newThisMonth: userNew.count ?? 0,
-          activeToday: userToday.count ?? 0,
+          activeToday,
         },
         usage: { todayConversations, monthConversations, monthTokens, estimatedCostUsd },
         revenue: { thisMonth: thisMonthRevenue, lastMonth: lastMonthRevenue, growthPercent },

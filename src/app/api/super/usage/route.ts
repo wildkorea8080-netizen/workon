@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { estimateCostUsd } from '@/lib/models';
+import { sumCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstHour, kstMonthStart } from '@/lib/kst-time';
 import { dbErrorText } from '@/lib/db-error-text';
 
@@ -79,7 +79,9 @@ export async function GET(request: NextRequest) {
     let totalConversations = 0;
     let totalInput = 0;
     let totalOutput = 0;
+    let totalCostUsd = 0;
     const activeUsers = new Set<string>();
+    const orgCost = new Map<string, number>();
 
     // 일별/시간별 맵
     const timeMap = new Map<string, { conversations: number; inputTokens: number; outputTokens: number; users: Set<string> }>();
@@ -87,11 +89,17 @@ export async function GET(request: NextRequest) {
     const orgUsageMap = new Map<string, { conversations: number; inputTokens: number; outputTokens: number; users: Set<string> }>();
 
     for (const row of rows) {
-      const inp = (row.details?.input_tokens  as number) ?? 0;
-      const out = (row.details?.output_tokens as number) ?? 0;
+      // 숫자만(한도 판정과 같은 셈), 비용은 기록할 때 확정한 값 — 옛 기록만 기본 단가로 추정(2026-11-17, 예전엔 모두 기본 모델 단가)
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      const inp = num(row.details?.input_tokens);
+      const out = num(row.details?.output_tokens);
+      const cost = sumCostUsd([row]);
       totalConversations++;
       totalInput  += inp;
       totalOutput += out;
+      totalCostUsd += cost;
+      const costKey = row.organization_id ?? '__unknown';
+      orgCost.set(costKey, (orgCost.get(costKey) ?? 0) + cost);
       if (row.user_id) activeUsers.add(row.user_id);
 
       // 시간 키
@@ -139,16 +147,14 @@ export async function GET(request: NextRequest) {
           conversations: u.conversations, totalTokens: total,
           inputTokens: u.inputTokens, outputTokens: u.outputTokens,
           activeUsers: u.users.size,
-          estimatedCost: estimateCostUsd({ input_tokens: u.inputTokens, output_tokens: u.outputTokens }),
+          estimatedCost: orgCost.get(oid) ?? 0,
           tokenLimit: limit,
           usagePercent: limit > 0 ? Math.round((total / limit) * 100) : 0,
         };
       })
       .sort((a, b) => b.totalTokens - a.totalTokens);
 
-    const estimatedCostUsd = parseFloat(
-      estimateCostUsd({ input_tokens: totalInput, output_tokens: totalOutput }).toFixed(4)
-    );
+    const estimatedCostUsd = parseFloat(totalCostUsd.toFixed(4));
 
     return NextResponse.json({
       ok: true,
