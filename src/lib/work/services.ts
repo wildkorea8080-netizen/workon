@@ -181,15 +181,21 @@ export async function listTasks(ctx: WorkContext, actor: WorkActor, q: { status?
   let before: { updatedAt: string; id: string } | null = null;
   if (q.cursor) {
     const [updatedAt, id] = Buffer.from(q.cursor, 'base64url').toString('utf8').split('|');
-    if (updatedAt && /^[0-9a-f-]{36}$/i.test(id ?? '') && !Number.isNaN(Date.parse(updatedAt))) before = { updatedAt, id };
+    // 커서 글은 필터 글에 들어간다 — ISO 시각·uuid 꼴만 받는다(2026-11-18 — 예전엔 Date.parse만 봐 다른 글자가 섞일 수 있었다)
+    if (updatedAt && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.test(updatedAt) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id ?? '') && !Number.isNaN(Date.parse(updatedAt))) before = { updatedAt, id };
   }
   const limit = Math.min(Math.max(q.limit ?? 20, 1), 50);
   const rows = await ctx.store.listTasks({ organizationId: actor.organizationId, userId: actor.userId, status: q.status, workflowKey: q.workflowKey, limit, before });
   const last = rows[rows.length - 1];
   return {
     items: rows.map((t) => taskDto(t, taskAccess(t, actor, t.owner_id === actor.userId ? [] : [{ user_id: actor.userId, role: 'viewer' }]))),
-    nextCursor: rows.length === limit && last ? Buffer.from(`${last.updated_at}|${last.id}`).toString('base64url') : null,
+    // 시각은 ISO 꼴로(직결 DB는 Date를 돌려준다 — 받는 쪽이 ISO만 받는다)
+    nextCursor: rows.length === limit && last ? Buffer.from(`${cursorTime(last.updated_at)}|${last.id}`).toString('base64url') : null,
   };
+}
+
+function cursorTime(v: unknown): string {
+  return v instanceof Date ? v.toISOString() : String(v);
 }
 
 export function taskDto(t: WorkTaskRow, access: TaskAccess) {

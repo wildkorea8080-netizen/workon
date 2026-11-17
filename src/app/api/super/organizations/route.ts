@@ -11,6 +11,7 @@ import { APP_URL } from '@/lib/config';
 import { normalizeOrgSlug } from '@/lib/org-slug';
 import { orgChatTokens } from '@/lib/org-chat-tokens';
 import { kstMonthStart } from '@/lib/kst-time';
+import { searchTerm } from '@/lib/postgrest-search';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
       .from('v_organization_summary')
       .select('*', { count: 'exact' });
 
-    if (search)              query = query.ilike('name', `%${search}%`);
+    if (searchTerm(search))  query = query.ilike('name', `%${searchTerm(search)}%`);
     if (status !== 'all')    query = query.eq('status', status);
     if (plan   !== 'all')    query = query.eq('plan', plan);
 
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
         .from('organizations')
         .select('id, name, slug, type, status, plan, domain, contact_name, contact_email, max_users, max_agents, monthly_token_limit, notes, created_at', { count: 'exact' });
 
-      if (search)           q = q.ilike('name', `%${search}%`);
+      if (searchTerm(search)) q = q.ilike('name', `%${searchTerm(search)}%`);
       if (status !== 'all') q = q.eq('status', status);
       if (plan   !== 'all') q = q.eq('plan', plan);
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { estimateCostUsd } from '@/lib/models';
+import { sumCostUsd } from '@/lib/models';
 import { kstDay, kstDayList, kstMonthStart } from '@/lib/kst-time';
 import { dbErrorText } from '@/lib/db-error-text';
 
@@ -48,11 +48,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    // 숫자만(한도 판정과 같은 셈), 비용은 기록할 때 확정한 원가(2026-11-18 — 예전엔 기본 모델 단가로 다시 셌다)
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
     for (const row of rows) {
       const date = kstDay(row.created_at);
-      const inp  = (row.details?.input_tokens  as number) ?? 0;
-      const out  = (row.details?.output_tokens as number) ?? 0;
+      const inp  = num(row.details?.input_tokens);
+      const out  = num(row.details?.output_tokens);
       totalInputTokens  += inp;
       totalOutputTokens += out;
 
@@ -89,10 +91,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       });
     }
 
-    // 예상 비용: input $3/M, output $15/M
-    const costUsd = parseFloat(
-      estimateCostUsd({ input_tokens: totalInputTokens, output_tokens: totalOutputTokens }).toFixed(4)
-    );
+    const costUsd = parseFloat(sumCostUsd(rows).toFixed(4));
 
     return NextResponse.json({
       ok: true,

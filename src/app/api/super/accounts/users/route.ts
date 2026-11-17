@@ -5,6 +5,7 @@ import { kstMonthStart } from '@/lib/kst-time';
 import { pagedRows } from '@/lib/paged-select';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 import { dbErrorText } from '@/lib/db-error-text';
+import { orIlike, searchTerm } from '@/lib/postgrest-search';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,7 +59,9 @@ export async function GET(request: NextRequest) {
       .eq('is_super_admin', false) // 슈퍼관리자는 별도 탭에서 관리
       .is('deleted_at', null);     // 삭제(탈퇴)한 계정은 행만 남아 있다 (0047)
 
-    if (search)      query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
+    // 찾기 글은 필터 문법 글자를 빼고 넣는다(2026-11-18 — 쉼표 하나로 조회가 깨졌다)
+    const term = searchTerm(search);
+    if (term)        query = query.or(orIlike(['email', 'full_name'], term));
     if (role !== 'all') query = query.eq('role', role);
     if (deptFilter)  query = query.in('department_id', deptFilter);
 

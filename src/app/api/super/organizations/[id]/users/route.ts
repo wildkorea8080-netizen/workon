@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { dbErrorText } from '@/lib/db-error-text';
+import { orIlike, searchTerm } from '@/lib/postgrest-search';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         .is('deleted_at', null) // 삭제(탈퇴)한 계정은 행만 남아 있다 (0047)
         .order('created_at', { ascending: false })
         .order('id');
-      if (search) q = q.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
+      // 찾기 글은 필터 문법 글자를 빼고 넣는다(2026-11-18)
+      const term = searchTerm(search);
+      if (term) q = q.or(orIlike(['email', 'full_name'], term));
       return q.range(a, b);
     };
 
