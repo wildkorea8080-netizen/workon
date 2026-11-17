@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(아침): 한도 증량 저장·직원 공지·찾기 글 감싸기 — 마이그레이션 없음
+
+- 코드 배포 `dpl_43V145QjanEUdrj9w9azsA12v2nK`(커밋 `e12fc62`, 2026-11-18 08:09 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `66b6c1f`(새벽 2 기록), `bc2d881` 사용량 화면 '한도 증량' 저장(기관 PATCH `monthly_token_limit` 0~1조 정수·조작 기록 전·후, 요금제 값 검사, 화면 실패 이유, 사용량 CSV 감싸기·수식 주입 막기), `7bf4fc4` 직원 공지가 보이게(`/api/notices`가 대상 칸을 고르지 않은 채 그 칸으로 걸러 모든 공지가 빠지던 것 — 대상·발행·기한을 DB 조회에서, 못 읽으면 503), `5d6bb01` 찾기 글을 PostgREST 필터에 큰따옴표로 감싸 넣기(`src/lib/postgrest-search.ts` — 슈퍼관리자 계정 관리·기관 상세 사용자 찾기가 쉼표 하나로 깨지던 것)·업무 작업 목록 커서 ISO 시각·uuid만·기관 상세 사용량 예상 비용은 기록한 원가, `e12fc62` 문서. 가지 Preview(`workon-pihkcw6ho`) Ready 뒤 `main`. 배포 전 전체 시험 302파일 3,952개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_DwrauwuDzH3dQfgFeheSbTYc1Jn5`(c3934c1)로 promote.
+- 배포 전 확인(운영, 읽기 전용): 발행된 전체 공지 1건('제목 테스트', 2026-04-27)·읽음 0건 — 배포로 모든 직원 화면 띠에 뜬다. 큰따옴표 감싼 `.or()` 필터를 운영 PostgREST에 직접 — 옛 꼴(`email.ilike.%a,b%`) 오류, 새 꼴은 쉼표·점·괄호가 든 값도 정상(점 5건·쉼표 0건·괄호 0건).
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/api/notices` 무인증 200 빈 목록. 실행기 호출 08:10 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 운영 브라우저의 슈퍼관리자 로그인이 끊겨(창을 다시 엶) 로그인이 필요한 화면(사용자 찾기·한도 증량·직원 공지 띠)은 배포 뒤 다시 보지 못했다.
+
 ## 2026-11-18(새벽 2): 슈퍼관리자 대시보드·사용량 숫자 — 마이그레이션 없음
 
 - 코드 배포 `dpl_DwrauwuDzH3dQfgFeheSbTYc1Jn5`(커밋 `c3934c1`, 2026-11-18 00:31 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b9aadd5`(새벽 기록), `0531f21` 고침 — 대시보드 '오늘 활성'은 서로 다른 사람 수(예전엔 오늘 대화 기록 수)·'전체 사용자'·'이번달 신규'에서 탈퇴 처리한 계정 빼기·예상 비용은 기록한 원가(`sumCostUsd`, 대시보드·사용량 모니터링 전체·기관별)·토큰은 숫자만, `c3934c1` 문서. 가지 Preview(`workon-hkb93udq8`) Ready 뒤 `main`. 배포 전 전체 시험 299파일 3,934개 통과·tsc 0.
