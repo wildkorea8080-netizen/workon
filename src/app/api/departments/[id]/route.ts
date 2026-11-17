@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getSharedDepartmentIds, getManagedDepartmentIds } from '@/lib/department-scope';
+import { departmentDescendantsStrict, getManagedDepartmentIds } from '@/lib/department-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +16,14 @@ async function requireAdminOrg() {
     return { error: NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 }) };
   }
 
-  const { data } = await supabaseAdmin
+  const { data, error: readError } = await supabaseAdmin
     .from('departments')
     .select('organization_id, parent_id')
     .eq('id', departmentId)
     .maybeSingle();
+  if (readError) {
+    return { error: NextResponse.json({ ok: false, error: { message: '부서 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 }) };
+  }
 
   const organizationId = data?.organization_id;
   if (!organizationId) {
@@ -118,7 +121,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
       // 순환 방지: 자기 하위 부서를 상위로 지정하면 트리가 끊어진 고리가 된다.
       // 그 부서들은 어떤 최상위에도 닿지 못해 화면에서 사라지고 조회도 무한루프에 빠진다.
-      const descendants = await getSharedDepartmentIds(target.id);
+      // 하위 부서를 못 읽으면 옮기지 않는다(2026-11-18 — 예전엔 실패가 '하위 없음'이 되어 순환을 통과시켰다)
+      const descendants = await departmentDescendantsStrict(target.id);
+      if (!descendants) {
+        return NextResponse.json({ ok: false, error: { message: '하위 부서를 확인하지 못해 옮기지 않았습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
+      }
       if (descendants.includes(parentId)) {
         return NextResponse.json(
           { ok: false, error: { message: '하위 부서를 상위 부서로 지정할 수 없습니다.' } },

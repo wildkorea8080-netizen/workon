@@ -58,12 +58,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     const body = (await request.json()) as Record<string, unknown>;
 
-    const { data: current } = await supabaseAdmin
+    const { data: current, error: currentError } = await supabaseAdmin
       .from('agents')
       .select(`agent_type, ${SNAPSHOT_KEYS.filter((k) => k !== 'template_ids').join(', ')}`)
       .eq('id', params.id)
       .single();
-    const currentRow = (current ?? {}) as unknown as Record<string, unknown>;
+    // 지금 값을 못 읽으면 저장하지 않는다(2026-11-18 — 예전엔 빈 값으로 보고 유형을 'chat'으로·모든 설정을 '바뀜'으로 판정했다)
+    if (currentError || !current) return jsonError('비서 설정을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    const currentRow = current as unknown as Record<string, unknown>;
 
     const split = splitAgentBody(body, {
       currentType: ((currentRow.agent_type as AgentType) ?? 'chat'),

@@ -163,6 +163,23 @@ export async function getManagedDepartmentIds(departmentId: string): Promise<str
  * 이 부서에 자료를 공유하면 실제로 보게 될 부서 id 목록
  * (자기 자신 + 모든 하위 부서). 관리 화면에서 영향 범위를 보여줄 때 씁니다.
  */
+/**
+ * 하위 부서 전체(자기 포함) — 못 읽으면 null(2026-11-18).
+ * `getSharedDepartmentIds`는 실패하면 자기 부서만 돌려준다(보이는 범위를 좁히는 쪽이라 안전). 그런데 부서 이동의 **순환 검사**가 그 값을 쓰면
+ * 실패가 '하위 부서 없음'이 되어 자기 하위 부서 밑으로 옮기는 이동을 통과시킨다(끊어진 고리 — 화면에서 사라지고 재귀 조회가 멈추지 않음).
+ * 판정에 쓰는 곳은 이것을 쓰고 null이면 거절한다
+ */
+export async function departmentDescendantsStrict(
+  departmentId: string,
+  rpc: (fn: 'department_descendants', args: { p_department_id: string }) => PromiseLike<{ data: unknown; error: unknown }> = (fn, args) => supabaseAdmin.rpc(fn, args),
+): Promise<string[] | null> {
+  if (!departmentId) return null;
+  const { data, error } = await rpc('department_descendants', { p_department_id: departmentId });
+  if (error || !Array.isArray(data)) return null;
+  const ids = data.map((row: { id?: unknown }) => row?.id).filter((id): id is string => typeof id === 'string');
+  return ids.includes(departmentId) ? ids : [departmentId, ...ids];
+}
+
 export async function getSharedDepartmentIds(departmentId: string): Promise<string[]> {
   if (!departmentId) return [];
 

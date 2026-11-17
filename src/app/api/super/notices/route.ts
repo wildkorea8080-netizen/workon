@@ -22,9 +22,9 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query;
   if (error) {
-    // notices 테이블 없을 경우 빈 배열 반환
-    console.warn('[super/notices GET]', error.message);
-    return NextResponse.json({ ok: true, data: [] });
+    // 못 읽으면 빈 목록으로 꾸미지 않는다(2026-11-18)
+    console.warn('[super/notices GET]', error.code ?? 'error');
+    return NextResponse.json({ ok: false, error: '공지를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
   }
 
   const notices = (data ?? []).map((n: any) => ({
