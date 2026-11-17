@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(오후 4): 응답에 오류 원문을 싣지 않음 — 마이그레이션 없음
+
+- 코드 배포 `dpl_EvfGkrqnpGtHQDAxY4Bp6U6hLyGg`(커밋 `f308c5a`, 2026-11-17 15:33 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `f4d7411`(오후 3 배포 기록), `d866563` 기능 — 대화·문서 라우트의 `details: error`, 가입의 Auth 영문 원문(`authErrorMessage`), 일괄 등록 줄 원문(`RowError`만 보임), 대화·문서 붙이기·공지 읽음의 원문을 한국어 안내로, 가입 리디렉트 주소는 `config.ts` `APP_URL`, `tests/batch-0133.test.ts`가 슈퍼관리자 밖 라우트 전체를 훑음. `f308c5a` 문서. 가지 Preview(`workon-247vtpoak`) Ready 뒤 `main`. 배포 전 전체 시험 289파일 3,835개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_GpFMCBkM1e6Ug3M7e5nM74pncVjp`(a42e8fe)로 promote.
+- 배포 뒤 확인(로그인 없이 + 읽기 전용): `/login`·`/forgot-password`·`/signup`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/api/conversations`·`/api/documents` 무인증 401, `/api/signup` 빈 몸 400(한국어 안내). 실행기 하트비트 15:35 KST·pg_cron 호출 200. 최근 24시간 critical 0건·최근 20분 warning 이상 0건.
+- **확인하지 못한 것**: 실제 DB·Auth 오류 때의 화면 문구(오류가 나야 보임). 슈퍼관리자 라우트 26곳은 그대로.
+
 ## 2026-11-17(오후 3): 인원 상한을 화면에 — 마이그레이션 없음
 
 - 코드 배포 `dpl_GpFMCBkM1e6Ug3M7e5nM74pncVjp`(커밋 `a42e8fe`, 2026-11-17 15:18 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `c0bed11`(오후 2 배포 기록), `b3859b0` 기능 — 사용자 목록 API에 `seats`(`seatUsage` — 기관 전체 활성 계정·상한, 못 읽으면 null)·'사용자 관리' 머리에 N / M명·남은 자리, 슈퍼관리자 기관 상세 `user_count`(활성 계정)·`agent_count`(지우지 않은 비서 — 예전 막대는 부서 수)·`tokens_this_month`(`organization_chat_tokens`), 못 읽으면 '—'. `a42e8fe` 문서. 가지 Preview(`workon-i7qvtixkt`) Ready 뒤 `main`. 배포 전 전체 시험 288파일 3,830개 통과·tsc 0.
