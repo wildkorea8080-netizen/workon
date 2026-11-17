@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-17 오후 6) 슈퍼관리자 대시보드 사용자 수 상한 띠(`2a61316`까지 2개 커밋, 마이그레이션 없음)를 `dpl_GxDGprJJbhLgkyAwVLFHSbg3qdpK`로 배포했다.
 - (2026-11-17 오후 5) 슈퍼관리자 응답에 DB 원문 대신 Postgres 코드로 가른 한국어(`dbErrorText` — `2133e2b`까지 2개 커밋, 마이그레이션 없음)를 `dpl_5EDGrJuuzjnB5YMcZJKyDeHQgdK8`로 배포했다.
 - (2026-11-17 오후 4) 직원·관리자 응답에 DB·Auth 오류 원문을 싣지 않음(`f308c5a`까지 2개 커밋, 마이그레이션 없음)을 `dpl_EvfGkrqnpGtHQDAxY4Bp6U6hLyGg`로 배포했다.
 - (2026-11-17 오후 3) 인원 상한을 화면에(사용자 관리 머리·슈퍼관리자 기관 상세 한도 막대 — `a42e8fe`까지 2개 커밋, 마이그레이션 없음)를 `dpl_GpFMCBkM1e6Ug3M7e5nM74pncVjp`로 배포했다.

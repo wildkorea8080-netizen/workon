@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(오후 6): 대시보드 사용자 수 상한 띠 — 마이그레이션 없음
+
+- 코드 배포 `dpl_GxDGprJJbhLgkyAwVLFHSbg3qdpK`(커밋 `2a61316`, 2026-11-17 16:41 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `3045cd6`(오후 5 배포 기록), `c60bf59` 기능 — 슈퍼관리자 대시보드 `alerts.seats`(`seatAlerts` — 활성 기관 상한 + 활성·탈퇴 안 한 계정의 기관을 `pagedRows`로, 닿은 기관 먼저·90% 이상 가까움, 못 읽으면 null)와 띠(기관 상세로 잇기), `2a61316` 문서. 가지 Preview(`workon-b2bxc72c5`) Ready 뒤 `main`. 배포 전 전체 시험 290파일 3,841개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_5EDGrJuuzjnB5YMcZJKyDeHQgdK8`(2133e2b)로 promote.
+- 배포 전·뒤 확인(읽기 전용): 새 계정 쿼리(`departments!inner(organization_id)`)를 운영에 그대로 돌려 기관별 4·1명(상한 20·200 — 띠가 뜨지 않는 것이 맞음). `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, 대시보드 API 무인증 401. 실행기 하트비트 16:45 KST·pg_cron 호출 200. 최근 24시간 critical 0건·최근 20분 warning 이상 0건. 같은 날 앞 배포의 기관 관리자 '사용자 관리' 머리 줄('기관 사용자 4 / 20명 · 16명 더 만들 수 있음')을 운영 브라우저에서 확인.
+
 ## 2026-11-17(오후 5): 슈퍼관리자 응답의 DB 원문 — 마이그레이션 없음
 
 - 코드 배포 `dpl_5EDGrJuuzjnB5YMcZJKyDeHQgdK8`(커밋 `2133e2b`, 2026-11-17 16:21 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `31b2c05`(오후 4 배포 기록), `c0ba81b` 기능 — 슈퍼관리자 라우트 26곳의 `error: err.message`를 `dbErrorText`(`src/lib/db-error-text.ts` — Postgres 코드 23505·23503·23514·23502·22P02로 가른 한국어, 그 밖은 기본 문구)로, DB 오류를 `new Error(x.message)`로 감싸던 던지기를 그대로 던지기로(코드가 남게), 최초 설정·대리 접근 기관 조회 실패도 안내로, `tests/batch-0133.test.ts`가 `src/app/api` 전체를 훑음. `2133e2b` 문서. 가지 Preview(`workon-3k84drub0`) Ready 뒤 `main`. 배포 전 전체 시험 289파일 3,837개 통과·tsc 0.
