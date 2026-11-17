@@ -1528,6 +1528,7 @@ MAIL_FROM=
 - 환경변수 직접 접근 금지 → `src/lib/config.ts` 경유
 - 관리자 전용 API: **모든 핸들러마다** `isAdminSession(session)` 확인 필수
 - 외부 API는 SDK 대신 `fetch`로 직접 호출 (기존 관례)
+- **사용자가 친 글을 `.or()` 같은 PostgREST 필터 글에 넣을 때는 `src/lib/postgrest-search.ts`**(`searchTerm`·`orIlike` — 값을 큰따옴표로 감쌈)를 쓴다(2026-11-18 — 그대로 넣어 쉼표 하나로 슈퍼관리자 사용자 찾기가 깨졌다, `tests/batch-0148.test.ts`)
 - **날짜·시각은 한국 시간으로 `src/lib/kst-time.ts`를 쓴다**(`kstDay`·`kstHour`·`kstDayStart`·`kstMonthStart`·`addKstDays`·`kstDayList`, 잎 파일이라 화면도 씀). 서버(Vercel)는 UTC라 `toISOString().slice(0, 10)`·`created_at.slice(0, 10)`·`getHours()`·`new Date(y, m, 1)`은 한국 00:00~09:00의 일을 전날로, '이번 달'을 1일 09:00부터로, 시간별 표를 9시간 밀어 센다 — 2026-11-06에 내 사용현황·슈퍼관리자 대시보드·사용량·기관 사용량·로그·알림, 감사·이용통계 화면의 기본 기간('오늘'이 오전 9시 전엔 어제), DART·나라장터 검색 끝 날, 고른 끝 날을 그날 UTC 0시로 읽던 것(끝 날 하루가 빠짐)을 고쳤다. 고른 끝 날은 그날 한국 23:59:59.999까지. `tests/kst-time.test.ts`가 API 라우트의 로컬 달·날 시작·`getHours()` 재등장을 막는다
 - **Enter로 보내는 키 처리는 `isImeComposing(e)`(`src/lib/ime.ts`)를 먼저 본다** — 한글 조합 중 Enter를 처리하면 마지막 글자가 보낸 뒤 입력창에 남거나 두 번 가거나 덜 조합된 글로 찾는다(2026-11-06에 대화 입력창·첫 화면·업무 홈·대화 이름 바꾸기·분류 추가·슈퍼관리자 찾기 4곳을 고침). `tests/ime-enter.test.ts`가 빠진 곳을 찾는다
 - `next.config.mjs`의 `ignoreBuildErrors`는 제거된 상태입니다.
@@ -1988,6 +1989,7 @@ details: {
 `src/lib/usage-limit.ts`의 `checkTokenLimit(departmentId)`가
 부서 → 기관 → 이번 달 `usage_logs` 합산 순으로 확인합니다.
 
+- 기관 월 토큰 한도는 슈퍼관리자 사용량 화면 '한도 증량'(→ `PATCH /api/super/organizations/[id]` `monthly_token_limit`, 0 = 무제한, 조작 기록)이나 계약 변경(요금제 기본값)으로 바뀐다 — 2026-11-18 전에는 이 PATCH가 그 칸을 받지 않아 '한도 증량'이 저장된 척만 했다(`tests/batch-0146.test.ts`)
 - 기관 `status='suspended'` → 차단 (429)
 - 이번 달 토큰 합산 ≥ `monthly_token_limit` → 차단 (429)
 - 기관 미연결 부서, `monthly_token_limit=0`(무제한), 집계 실패 → **허용**
@@ -2014,7 +2016,7 @@ details: {
 /super/api-keys       API 키 관리 (시스템 + 기관별)
 /super/usage          사용량 모니터링 (실시간 + 차트 + 알림)
 /super/contracts      계약/과금 관리 (계약 + 매출 + 요금제)
-/super/notices        공지사항 관리
+/super/notices        공지사항 관리 — 직원 화면 띠(`NoticesBanner` ← `/api/notices`)는 2026-11-18까지 대상 칸을 고르지 않아 한 건도 안 보였다(`src/lib/notice-visibility.ts`, `tests/batch-0147.test.ts`)
 /super/settings       시스템 설정 (기본 + 점검모드 + 보안) — 2026-11-17부터 사실대로: 저장은 `src/lib/system-settings-spec.ts`의 다섯 열쇠만(점검 모드·안내 메시지만 서비스가 읽고, 서비스명·주소·고객지원 메일은 '보관만'이라 밝힘), 값 꼴 검사, 바꿀 때마다 `super_admin_logs` `system_setting_changed`(전·후 값). 예전 '로그인 실패 허용 횟수'·'허용 IP 목록'·'세션 유지 시간'·'최대 파일 크기'·'신규 기관 기본 플랜'은 저장만 되고 아무 일도 없어 뺐다 — 보안 탭은 실제 로그인 보호 규칙(계정 30분 5번·IP 30번, 슈퍼관리자 접속 IP 제한 없음)을 읽기 전용으로. 읽기 실패는 503(예전엔 빈 목록이라 기본값이 실제 값처럼 보였음). `tests/batch-0130.test.ts`
 /super/common-library 공통 자료실 (기관 유형별 정부 기준 문서 — S5)
 /super/logs           로그 관리 (접속 + 시스템 + 대리접근 + 관리자 조작 — 2026-11-17 `super_admin_logs`를 처음으로 읽는다: `GET /api/super/logs/admin`(`src/lib/super-admin-log-spec.ts` 잎 파일 — 종류·대상 이름·짧은 요약, jsonb 원문은 안 냄, 못 읽으면 503), 설정 보안 탭 '최근 슈퍼관리자 활동 이력'도 이것(예전엔 없는 `/api/super/logs`를 불러 늘 비어 있었다). 계정 사용 중지·권한 변경(`user_updated`)·슈퍼관리자 추가·사용 중지(`super_admin_created`·`super_admin_updated`)도 기록. 새 종류를 남기면 `ADMIN_LOG_ACTIONS`에 이름을 — `tests/batch-0137.test.ts`가 본다. 같은 날 계약 등록·변경·해지(`contractAudit`·`changedFields` — 달라진 칸만), API 키 교체(키 값·앞부분 없음), 공지 작성·수정·삭제(본문 없음), 관리자 초대 링크 만들기(초대 열쇠 없음), 기관 종료(`org_terminated`)도 기록 — `tests/batch-0138.test.ts`. 초대 링크 라우트는 역할 ADMIN·USER만·기관 최상위 부서(먼저 만든 것)로·부서 없으면 400. 세 로그 API는 못 읽으면 503(예전엔 빈 목록)) — 주소 ?tab=system&level=critical&category=payment&period=week로 그 거르기로 열림(2026-11-17, src/lib/super-log-links.ts). 대시보드 알림 띠가 최근 24시간 critical 기록을 문구별로 세어 여기로 잇는다. 5분 실행기(/api/cron/app-schedules)는 아직 알리지 않은 critical 기록을 활성 슈퍼관리자에게 메일로 알린다(한 시간에 한 번까지, system_settings critical_log_alert = 알린 마지막 기록 시각, 조건부로 차지한 한쪽만, src/lib/critical-alert.ts)
