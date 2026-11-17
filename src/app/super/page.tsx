@@ -117,6 +117,28 @@ export default function SuperDashboard() {
         </div>
       )}
 
+      {/* 사용자 수 상한(2026-11-17) — 닿은 기관은 직원 등록·초대 가입이 막힌다. 계약 인원을 늘리거나 기관이 쓰지 않는 계정을 끄게 한다 */}
+      {(al.seats?.orgs ?? []).length > 0 && (
+        <div className={`flex items-start gap-4 p-4 rounded-2xl border ${al.seats.full > 0 ? 'bg-red-950/30 border-red-700/40' : 'bg-amber-950/30 border-amber-700/40'}`}>
+          <span className="text-xl">👥</span>
+          <div className={`flex-1 text-sm ${al.seats.full > 0 ? 'text-red-300' : 'text-amber-300'}`}>
+            <p className="font-semibold">
+              {al.seats.full > 0 && <>사용자 수 상한에 닿은 기관 {al.seats.full}곳 — 새 계정·초대 가입이 막힙니다</>}
+              {al.seats.full > 0 && al.seats.near > 0 && <span className="mx-2 opacity-60">|</span>}
+              {al.seats.near > 0 && <>상한에 가까운 기관(90% 이상) {al.seats.near}곳</>}
+            </p>
+            <ul className="mt-1.5 space-y-0.5 text-xs">
+              {(al.seats.orgs as Array<{ id: string; name: string; used: number; limit: number; full: boolean }>).slice(0, 5).map((o) => (
+                <li key={o.id}>
+                  <Link href={`/super/organizations/${o.id}`} className="underline hover:opacity-80">{o.name}</Link>
+                  {' '}{o.used} / {o.limit}명{o.full ? ' (닿음)' : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {/* 알림 배너 */}
       {(al.tokenExceeded > 0 || al.expiringContracts > 0) && (
         <div className="flex items-center gap-4 p-4 bg-red-950/30 border border-red-700/40 rounded-2xl">

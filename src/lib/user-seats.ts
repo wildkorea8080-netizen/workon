@@ -99,6 +99,33 @@ export async function seatUsage(departmentId: string, deps: SeatDeps = seatDeps(
   }
 }
 
+/** 상한의 이만큼(%)을 넘으면 '가까움'으로 알린다(슈퍼관리자 대시보드) */
+export const SEAT_NEAR_PERCENT = 90;
+
+export interface SeatAlertOrg { id: string; name: string; used: number; limit: number; full: boolean }
+
+/**
+ * 상한에 닿았거나 가까운 기관(2026-11-17) — 슈퍼관리자 대시보드 띠. 상한을 지키기 시작해(`checkUserSeats`) 닿은 기관은
+ * 직원 등록·초대 가입이 막히므로 운영자가 먼저 안다. `orgs`는 활성 기관의 상한, `orgOfUsers`는 활성·탈퇴 안 한 계정마다 기관 id
+ * (세는 규칙은 `checkUserSeats`와 같다). 닿은 기관을 먼저, 그다음 쓴 비율이 높은 순
+ */
+export function seatAlerts(
+  orgs: Array<{ id: string; name: string | null; max_users: unknown }>,
+  orgOfUsers: Array<string | null | undefined>,
+): { near: number; full: number; orgs: SeatAlertOrg[] } {
+  const used = new Map<string, number>();
+  for (const id of orgOfUsers) if (id) used.set(id, (used.get(id) ?? 0) + 1);
+  const hits: SeatAlertOrg[] = [];
+  for (const o of orgs) {
+    const limit = seatLimitOf(o.max_users);
+    if (limit === null) continue;
+    const n = used.get(o.id) ?? 0;
+    if (n * 100 >= limit * SEAT_NEAR_PERCENT) hits.push({ id: o.id, name: o.name ?? '—', used: n, limit, full: n >= limit });
+  }
+  hits.sort((a, b) => Number(b.full) - Number(a.full) || b.used / b.limit - a.used / a.limit);
+  return { near: hits.filter((h) => !h.full).length, full: hits.filter((h) => h.full).length, orgs: hits };
+}
+
 /** 라우트가 그대로 돌려줄 응답 몸 */
 export function seatErrorBody(check: Extract<SeatCheck, { ok: false }>) {
   return { ok: false as const, error: { message: check.message, code: check.code } };

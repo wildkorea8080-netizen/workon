@@ -6,6 +6,7 @@ import { estimateCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
 import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-throttle';
+import { seatAlerts } from '@/lib/user-seats';
 import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
       todayUsage, monthUsage,
       revenueThis, revenueLast,
       tokenAlerts, tokenExceeded,
-      recentOrgs, recentLogs, criticalRecent, ipFailures, ipLockLogs,
+      recentOrgs, recentLogs, criticalRecent, ipFailures, ipLockLogs, seatOrgs, seatUsers,
     ] = await Promise.all([
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active'),
@@ -83,6 +84,11 @@ export async function GET(request: NextRequest) {
       // 그 사이 '막 잠김' 기록의 가린 IP(운영자가 기관 담당자에게 물을 단서)
       supabaseAdmin.from('system_logs').select('details, created_at').eq('message', IP_LOCK_STARTED)
         .gte('created_at', new Date(Date.now() - LOCK_WINDOW_MS).toISOString()).order('created_at', { ascending: false }).limit(20),
+      // 사용자 수 상한에 가깝거나 닿은 기관(2026-11-17) — 상한 판정(`checkUserSeats`)과 같이 활성·탈퇴 안 한 계정을 기관별로
+      supabaseAdmin.from('organizations').select('id, name, max_users').eq('status', 'active'),
+      pagedRows<{ departments: { organization_id: string | null } | Array<{ organization_id: string | null }> | null }>((a, b, w) => supabaseAdmin
+        .from('users').select('departments!inner(organization_id)', w ? { count: 'exact' } : undefined)
+        .eq('is_active', true).is('deleted_at', null).order('id').range(a, b)),
     ]);
 
     // ── 사용량 집계 ──────────────────────────────────────
@@ -173,6 +179,11 @@ export async function GET(request: NextRequest) {
           // 못 읽으면 null(0으로 보이면 '문제 없음'으로 읽힌다)
           critical24h: criticalRecent.error ? null : { count: criticalRecent.count ?? 0, top: criticalSummary((criticalRecent.data ?? []) as Array<{ message: string | null }>) },
           // 못 읽으면 null(0으로 보이면 '막힌 곳 없음'으로 읽힌다)
+          // 못 읽으면 null
+          seats: seatOrgs.error || seatUsers.error ? null : seatAlerts(
+            (seatOrgs.data ?? []) as Array<{ id: string; name: string | null; max_users: unknown }>,
+            (seatUsers.data ?? []).map((u: { departments: { organization_id: string | null } | Array<{ organization_id: string | null }> | null }) => (Array.isArray(u.departments) ? u.departments[0]?.organization_id : u.departments?.organization_id)),
+          ),
           lockedIps: ipFailures.error ? null : {
             count: lockedIpCount(((ipFailures.data ?? []) as Array<{ ip_hash: string | null }>).map((r) => r.ip_hash)),
             masked: Array.from(new Set(((ipLockLogs.data ?? []) as Array<{ details: { ip?: unknown } | null }>).map((r) => r.details?.ip).filter((v): v is string => typeof v === 'string'))).slice(0, 5),
