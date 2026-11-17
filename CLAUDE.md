@@ -1506,6 +1506,7 @@ MAIL_FROM=
 ## 코딩 규칙
 
 - 한국어 에러 메시지: `{ ok: false, error: { message: '...' } }`
+- **응답에 오류 원문을 싣지 않는다**(2026-11-17) — `details: error`·`message: err.message`·`error instanceof Error ? error.message`처럼 Supabase·Auth·내부 오류 글을 직원·관리자 응답에 넣지 말고 한국어 안내를 쓴다(원문은 `console`·`logSystem`에만). Auth 오류는 `authErrorMessage`(`src/lib/auth-error-text.ts`). `tests/batch-0133.test.ts`가 `src/app/api`(슈퍼관리자 라우트 제외)를 훑어 막는다 — 서버 기록 몸 안(`logSystem(`·`logSecurityEvent(`·`writeAuditRow(` 뒤 8줄)과 형식 있는 사용자 오류(`AppExportTemplateError` 등의 `err.message`)는 괜찮다. 슈퍼관리자 라우트 26곳은 일부러 던진 한국어 검사 문구를 원문 자리로 돌려줘 아직 그대로다
 - 서버 전용 DB: `supabaseAdmin` (service role), 클라이언트: `supabase` (anon key)
 - 모든 DB 쿼리에 `department_id` 필터 필수 (테넌트 격리)
 - 서버 API 응답: `{ ok: true, data: T }` 또는 `{ ok: false, error: {...} }`
