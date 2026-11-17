@@ -85,6 +85,20 @@ export async function checkUserSeats(departmentId: string, adding = 1, deps: Sea
   }
 }
 
+/**
+ * 화면에 보일 자리 현황(2026-11-17) — 상한이 없어도 쓴 수는 센다. 못 읽으면 null(표시만 빠진다).
+ * 세는 규칙은 `checkUserSeats`와 같다(그 기관의 활성·탈퇴 안 한 계정)
+ */
+export async function seatUsage(departmentId: string, deps: SeatDeps = seatDeps()): Promise<{ used: number; limit: number | null } | null> {
+  try {
+    const org = await deps.orgOfDepartment(departmentId);
+    if (!org) return null;
+    return { used: await deps.activeUsers(org.organizationId), limit: seatLimitOf(org.maxUsers) };
+  } catch {
+    return null;
+  }
+}
+
 /** 라우트가 그대로 돌려줄 응답 몸 */
 export function seatErrorBody(check: Extract<SeatCheck, { ok: false }>) {
   return { ok: false as const, error: { message: check.message, code: check.code } };

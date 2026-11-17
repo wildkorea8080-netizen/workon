@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
+import { checkUserSeats, seatErrorBody, seatUsage } from '@/lib/user-seats';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
@@ -56,7 +56,9 @@ export async function GET(_request: NextRequest) {
       return { ...user, departments: undefined, department_name: dept?.name ?? null, sign_in_locked_until: locks.get(user.email) ?? null };
     });
 
-    return NextResponse.json({ ok: true, data: normalized });
+    // 기관의 사용자 수 상한(2026-11-17) — 관리 범위가 아니라 기관 전체의 활성 계정. 못 읽으면 null
+    const seats = await seatUsage(departmentId);
+    return NextResponse.json({ ok: true, data: normalized, seats });
   } catch (error) {
     console.error('사용자 목록 조회 중 오류:', error);
     return NextResponse.json(

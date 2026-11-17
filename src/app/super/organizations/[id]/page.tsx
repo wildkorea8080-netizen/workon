@@ -196,9 +196,12 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
   const progressColor = (pct: number) =>
     pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-[#7C3AED]';
 
-  const userPct   = org.max_users   ? Math.min(100, Math.round((org.user_count   ?? 0) / org.max_users   * 100)) : 0;
-  const agentPct  = org.max_agents  ? Math.min(100, Math.round(((org.departments ?? []).length)           / org.max_agents  * 100)) : 0;
-  const tokenPct  = org.monthly_token_limit ? Math.min(100, Math.round((org.tokens_this_month ?? 0) / org.monthly_token_limit * 100)) : 0;
+  // 2026-11-17 — 비서 막대는 예전에 부서 수로 그렸다(비서 수 칸이 없어 늘 0으로 보임). 못 읽은 값(null)은 '—'
+  const pctOf = (current: number | null | undefined, max: number | null | undefined) =>
+    max && typeof current === 'number' ? Math.min(100, Math.round(current / max * 100)) : 0;
+  const userPct   = pctOf(org.user_count, org.max_users);
+  const agentPct  = pctOf(org.agent_count, org.max_agents);
+  const tokenPct  = pctOf(org.tokens_this_month, org.monthly_token_limit);
 
   const handleDelete = async () => {
     if (deleteInput !== org.name) { onToast('기관명이 일치하지 않습니다.'); return; }
@@ -244,9 +247,9 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
       {/* 한도 현황 */}
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-6 space-y-5">
         <h3 className="text-sm font-bold text-white">한도 현황</h3>
-        <LimitBar label="사용자"       current={org.user_count ?? 0}              max={org.max_users ?? 0}            unit="명" pct={userPct}  color={progressColor(userPct)} />
-        <LimitBar label="비서"         current={org.current_agents ?? 0}           max={org.max_agents ?? 0}           unit="개" pct={agentPct} color={progressColor(agentPct)} />
-        <LimitBar label="이번달 토큰"  current={org.tokens_this_month ?? 0}        max={org.monthly_token_limit ?? 0}  unit=""   pct={tokenPct} color={progressColor(tokenPct)} fmtFn={fmt} />
+        <LimitBar label="사용자(활성 — 상한을 넘으면 새 계정을 만들지 못함)" current={org.user_count ?? null} max={org.max_users ?? 0} unit="명" pct={userPct}  color={progressColor(userPct)} />
+        <LimitBar label="비서(표시만 — 상한을 아직 막지 않음)" current={org.agent_count ?? null} max={org.max_agents ?? 0} unit="개" pct={agentPct} color={progressColor(agentPct)} />
+        <LimitBar label="이번달 토큰"  current={org.tokens_this_month ?? null}     max={org.monthly_token_limit ?? 0}  unit=""   pct={tokenPct} color={progressColor(tokenPct)} fmtFn={fmt} />
       </div>
 
       {/* 관리자 초대 링크 */}
@@ -348,10 +351,11 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 function LimitBar({ label, current, max, unit, pct, color, fmtFn }: {
-  label: string; current: number; max: number; unit: string;
+  label: string; current: number | null; max: number; unit: string;
   pct: number; color: string; fmtFn?: (n: number) => string;
 }) {
-  const f = fmtFn ?? ((n: number) => String(n));
+  const fmtN = fmtFn ?? ((n: number) => String(n));
+  const f = (n: number | null) => (n === null ? '—' : fmtN(n));
   return (
     <div>
       <div className="flex justify-between text-xs mb-1.5">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { pagedRows } from '@/lib/paged-select';
+import { seatDeps } from '@/lib/user-seats';
 import { kstMonthStart } from '@/lib/kst-time';
 import { writeAuditRow } from '@/lib/audit-write';
 import { contractToRestore, reportContractSync, type ContractLite } from '@/lib/contract-sync';
@@ -106,29 +106,25 @@ export async function GET(
       return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
     }
 
-    // 사용자 수
-    const { count: userCount } = await supabaseAdmin
-      .from('users')
-      .select('id', { count: 'exact', head: true })
-      .in('department_id', (org.departments ?? []).map((d: any) => d.id))
-      .is('deleted_at', null);
-
-    // 이번달 토큰
-    const { data: usageLogs } = await pagedRows<{ details: any }>((a, b, w) => supabaseAdmin
-      .from('usage_logs')
-      .select('details', w ? { count: 'exact' } : undefined)
-      .eq('organization_id', params.id)
-      .eq('action', 'chat_message')
-      .gte('created_at', kstMonthStart().toISOString())
-      .order('id').range(a, b));
-
-    const tokensThisMonth = (usageLogs ?? []).reduce((sum: number, l: any) => {
-      return sum + ((l.details?.input_tokens ?? 0) + (l.details?.output_tokens ?? 0));
-    }, 0);
+    // 한도 현황(2026-11-17 고침) — 사용자는 상한 판정과 같은 수(활성·탈퇴 안 한 계정, `user-seats.ts`),
+    // 비서는 지우지 않은 비서 수(예전엔 칸이 없어 늘 0이었고 막대는 부서 수로 그렸다), 토큰은 한도 판정과 같은 DB 합(0057).
+    // 못 읽은 값은 null — 0으로 보이면 '여유 있음'으로 읽힌다
+    const [userCount, agentCount, tokens] = await Promise.all([
+      seatDeps().activeUsers(params.id).catch(() => null),
+      (async () => {
+        const { count, error: e } = await supabaseAdmin.from('agents').select('id', { count: 'exact', head: true })
+          .eq('organization_id', params.id).is('deleted_at', null);
+        return e || typeof count !== 'number' ? null : count;
+      })().catch(() => null),
+      (async () => {
+        const { data, error: e } = await supabaseAdmin.rpc('organization_chat_tokens', { p_organization_id: params.id, p_from: kstMonthStart().toISOString() });
+        return e ? null : Number(data ?? 0);
+      })().catch(() => null),
+    ]);
 
     return NextResponse.json({
       ok: true,
-      data: { ...org, user_count: userCount ?? 0, tokens_this_month: tokensThisMonth },
+      data: { ...org, user_count: userCount, agent_count: agentCount, tokens_this_month: tokens },
     });
   } catch (err: any) {
     console.error('[super/organizations/:id GET]', err);

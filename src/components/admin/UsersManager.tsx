@@ -42,6 +42,8 @@ function isExpired(d: string) {
 export default function UsersManager() {
   const [tab, setTab] = useState<Tab>('list');
   const [users, setUsers] = useState<User[]>([]);
+  // 기관의 사용자 수 상한(2026-11-17) — 기관 전체 활성 계정 수. 못 읽으면 null
+  const [seats, setSeats] = useState<{ used: number; limit: number | null } | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export default function UsersManager() {
         fetch('/api/admin/invite').then(r => r.json()),
         fetch('/api/departments').then(r => r.json()),
       ]);
-      if (usersRes.ok) setUsers(usersRes.data);
+      if (usersRes.ok) { setUsers(usersRes.data); setSeats(usersRes.seats ?? null); }
       if (invitesRes.ok) setInvitations(invitesRes.data);
       if (deptsRes.ok) setDepts(flattenDepts(deptsRes.data ?? []));
     } catch {
@@ -245,6 +247,16 @@ export default function UsersManager() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">사용자 관리</h1>
         <p className="text-sm text-slate-500 mt-1">내 부서와 하위 부서의 구성원을 초대하고 관리합니다. 소속 부서는 드롭다운에서 바로 바꿀 수 있습니다.</p>
+        {seats && (
+          <p className={`text-sm mt-2 ${seats.limit !== null && seats.used >= seats.limit ? 'text-amber-700 font-semibold' : 'text-slate-600'}`}>
+            {seats.limit === null
+              ? `기관 사용자 ${seats.used}명 · 인원 상한 없음`
+              : seats.used >= seats.limit
+                ? `기관 사용자 ${seats.used} / ${seats.limit}명 — 상한에 닿아 새 계정을 만들 수 없습니다. 쓰지 않는 계정을 사용 중지하거나 서비스 운영자에게 계약 인원 변경을 요청하세요.`
+                : `기관 사용자 ${seats.used} / ${seats.limit}명 · ${seats.limit - seats.used}명 더 만들 수 있음`}
+            <span className="text-xs text-slate-400 ml-2">(사용 중지 계정은 세지 않음)</span>
+          </p>
+        )}
       </div>
 
       {/* 탭 */}
