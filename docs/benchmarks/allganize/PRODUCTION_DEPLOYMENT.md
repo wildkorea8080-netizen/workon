@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(오후 7): 운영 SUPER_JWT_SECRET 넣기 — 코드·마이그레이션 없음
+
+- **발견**: 운영 슈퍼관리자 로그인이 "서버 오류가 발생했습니다"(500). Vercel 함수 로그 `[super/auth/login] Error: SUPER_JWT_SECRET이 설정되지 않았습니다.` — `vercel env ls`에는 이름이 있었지만(206일 전) `vercel env pull`로 길이만 재 보니 0. 2026-11-13 `super-secret.ts`가 운영의 빈 값을 거절하게 바꾼 뒤(`dpl_3xSQhSMwhu3xd55PV9peH1QBLkXJ`)부터 슈퍼관리자 로그인이 막혀 있었다. 그 전에는 소스의 고정 값으로 서명했다(토큰을 누구나 만들 수 있는 상태였음). 기관 관리자 로그인(NextAuth — `NEXTAUTH_SECRET` 44자)은 그대로였다.
+- **조치**(사용자 "넣고 다시 배포"): Production `SUPER_JWT_SECRET`을 지우고 64자 무작위 16진수(화면·기록에 찍지 않음)로 다시 넣음, 길이 64 확인. `2f23775`(오후 6 배포 기록)를 가지 Preview(`workon-9tqigpwy2`) Ready 뒤 `main`으로 올려 `dpl_HNEfiab9vYKWmVt8ULBhTL1giz6B`(2026-11-17 17:05 KST)로 다시 배포. 살아 있던 슈퍼관리자 토큰이 없어 끊긴 사람은 없다.
+- 되돌릴 때 이 값을 비우면 다시 로그인이 막힌다(코드가 빈 값을 거절) — 되돌리지 않는다.
+- **같이 비어 있는 값**: `SUPER_ADMIN_SETUP_KEY`(비면 최초 설정이 막힘 — 안전), `ENCRYPTION_KEY`(비면 `crypto.ts`가 소스의 고정 키로 API 키·보낼 곳 서명 비밀값을 암호화 — 넣으려면 기존 암호문을 다시 암호화해야 한다, 다음 묶음). Preview 환경의 `SUPER_JWT_SECRET`은 넣지 않았다.
+
 ## 2026-11-17(오후 6): 대시보드 사용자 수 상한 띠 — 마이그레이션 없음
 
 - 코드 배포 `dpl_GxDGprJJbhLgkyAwVLFHSbg3qdpK`(커밋 `2a61316`, 2026-11-17 16:41 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `3045cd6`(오후 5 배포 기록), `c60bf59` 기능 — 슈퍼관리자 대시보드 `alerts.seats`(`seatAlerts` — 활성 기관 상한 + 활성·탈퇴 안 한 계정의 기관을 `pagedRows`로, 닿은 기관 먼저·90% 이상 가까움, 못 읽으면 null)와 띠(기관 상세로 잇기), `2a61316` 문서. 가지 Preview(`workon-b2bxc72c5`) Ready 뒤 `main`. 배포 전 전체 시험 290파일 3,841개 통과·tsc 0.

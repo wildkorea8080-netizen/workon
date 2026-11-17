@@ -33,6 +33,7 @@
 - (2026-11-06 오후) 사이드바 접기(`4eadd5d`, 마이그레이션 없음)를 `dpl_52UMLxUB2xd3VuLCJbg9yiXFYJf9`로 배포했다.
 - (2026-11-06 밤) 기관 테마 색(0067 운영 적용)·위쪽 막대 없이 사이드바 하나·홈에서 바로 묻기·한글 조합 중 Enter·브랜딩 기억과 캐시(`04b83f1`까지 9개 커밋)를 `dpl_GMfSVYBHt43zHzY5TKrmz6n9rXiH`로 배포했다.
 - (2026-11-07 밤) 입력형 앱 실행 화면의 예상 AI 호출 수(`6a7d080`, 마이그레이션 없음)를 `dpl_8iudnDGn2B2xk2w7exnrb5mPDFZx`로 배포했다.
+- (2026-11-17 오후 7) **운영 `SUPER_JWT_SECRET`이 비어 있어 2026-11-13 배포부터 슈퍼관리자 로그인이 500**이던 것을 찾아(Vercel 함수 로그 `SUPER_JWT_SECRET이 설정되지 않았습니다`, 값 길이 0) 64자 무작위 값을 Production에 넣고 `dpl_HNEfiab9vYKWmVt8ULBhTL1giz6B`로 다시 배포했다(코드 변화 없음, 사용자 승인).
 - (2026-11-17 오후 6) 슈퍼관리자 대시보드 사용자 수 상한 띠(`2a61316`까지 2개 커밋, 마이그레이션 없음)를 `dpl_GxDGprJJbhLgkyAwVLFHSbg3qdpK`로 배포했다.
 - (2026-11-17 오후 5) 슈퍼관리자 응답에 DB 원문 대신 Postgres 코드로 가른 한국어(`dbErrorText` — `2133e2b`까지 2개 커밋, 마이그레이션 없음)를 `dpl_5EDGrJuuzjnB5YMcZJKyDeHQgdK8`로 배포했다.
 - (2026-11-17 오후 4) 직원·관리자 응답에 DB·Auth 오류 원문을 싣지 않음(`f308c5a`까지 2개 커밋, 마이그레이션 없음)을 `dpl_EvfGkrqnpGtHQDAxY4Bp6U6hLyGg`로 배포했다.
@@ -2011,7 +2012,7 @@ details: {
 - **JWT**: HMAC-SHA256, `SUPER_JWT_SECRET` 서명
 - **미들웨어**: Edge Runtime에서 Web Crypto API로 검증 (30초 캐시)
 - **(2026-11-13 고침)** ① 서명 비밀값은 `src/lib/super-secret.ts` `superJwtSecret` 한 곳 — 운영(`NODE_ENV=production`)에서 `SUPER_JWT_SECRET`이 비면 서명은 던지고 검증은 거절한다
-  (예전에는 소스에 적힌 고정 값으로 서명·검증해, 값이 빠지면 누구나 슈퍼관리자 토큰을 만들 수 있었다 — 운영에는 값이 있다). 서명 비교는 같은 시간 비교(`constantTimeEqual`)
+  (예전에는 소스에 적힌 고정 값으로 서명·검증해, 값이 빠지면 누구나 슈퍼관리자 토큰을 만들 수 있었다 — **운영에는 이름만 있고 값이 비어 있었다**: 그래서 이 배포부터 슈퍼관리자 로그인이 500이었고, 2026-11-17에 64자 무작위 값을 넣어 다시 배포했다. 그 전 슈퍼관리자 토큰은 소스의 고정 값으로 서명됐었다. 환경 변수는 `vercel env ls`의 이름만 믿지 말고 값 길이를 본다 — `SUPER_ADMIN_SETUP_KEY`·`ENCRYPTION_KEY`도 운영 값이 비어 있다(설정 키는 비면 설정이 막혀 안전, 암호화 키는 `crypto.ts`가 소스의 고정 키로 대신 — 기존 암호문을 다시 암호화해야 바꿀 수 있다). 서명 비교는 같은 시간 비교(`constantTimeEqual`)
   ② 설정(`/api/super/auth/setup`)의 '슈퍼관리자가 이미 있으면 막기'를 수로 센다 — 예전 `maybeSingle()`은 슈퍼관리자가 **둘 이상이면 오류로 비어 막이가 열렸고**(운영은 둘),
   설정 키만 있으면 아무 계정의 비밀번호를 바꾸고 슈퍼관리자로 올릴 수 있었다. 세지 못하면 503(닫힘), 설정 키도 같은 시간 비교
   ③ 슈퍼관리자 로그인이 `canSignIn`(비활성·삭제)을 본다 — 예전 '비활성화'는 `is_active`만 바꾸고 로그인은 보지 않았다.
