@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
 import { claimInvitation, invitationEmailMatches, releaseInvitation } from '@/lib/invitation-claim';
+import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -141,6 +142,10 @@ export async function POST(request: Request) {
       inviteRole   = inv.role ?? 'USER';
       inviteId     = inv.id;
 
+      // 기관의 사용자 수 상한(2026-11-17) — 초대를 쓰기 전에 센다(상한이면 초대는 그대로 남는다)
+      const seats = await checkUserSeats(inv.department_id, 1);
+      if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
+
       // 계정을 만들기 전에 초대를 차지한다 — 같은 링크로 거의 동시에 둘이 가입하지 못하게
       inviteClaimedAt = await claimInvitation(inv.id);
       if (!inviteClaimedAt) {
@@ -229,6 +234,15 @@ export async function POST(request: Request) {
           },
           { status: 403 }
         );
+      }
+
+      // 도메인으로 찾은 기관도 사용자 수 상한을 본다(2026-11-17, 초대 길은 위에서 봤다)
+      if (!inviteId) {
+        const seats = await checkUserSeats(departmentId, 1);
+        if (!seats.ok) {
+          await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+          return NextResponse.json(seatErrorBody(seats), { status: seats.status });
+        }
       }
 
       // users 행을 못 만들면 Auth 계정을 지우고(소속 없는 계정은 로그인도 못 한다) 초대 차지를 푼다 — 다시 가입할 수 있게

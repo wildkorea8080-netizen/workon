@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { claimInvitation, releaseInvitation } from '@/lib/invitation-claim';
+import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 
 export async function POST(request: NextRequest) {
   try {
@@ -70,6 +71,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // 기관의 사용자 수 상한(2026-11-17) — 초대를 쓰기 전에 센다(상한이면 초대는 그대로 남는다)
+    const seats = await checkUserSeats(invitation.department_id, 1);
+    if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
 
     // 계정을 만들기 전에 초대를 차지한다(2026-11-12) — 같은 링크로 거의 동시에 둘이 가입하지 못하게
     const claimedAt = await claimInvitation(invitation.id);

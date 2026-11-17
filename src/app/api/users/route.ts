@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
@@ -59,7 +60,7 @@ export async function GET(_request: NextRequest) {
   } catch (error) {
     console.error('사용자 목록 조회 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }
@@ -86,6 +87,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { email, full_name, role } = body;
 
+    // 역할은 직원·관리자 둘뿐(2026-11-17 — 예전엔 받은 글을 그대로 저장했다)
+    if (role !== undefined && role !== null && role !== '' && role !== 'USER' && role !== 'ADMIN') {
+      return NextResponse.json(
+        { ok: false, error: { message: '역할은 직원(USER) 또는 관리자(ADMIN)만 정할 수 있습니다.' } },
+        { status: 400 }
+      );
+    }
+
     if (!email) {
       return NextResponse.json(
         { ok: false, error: { message: '이메일은 필수입니다.' } },
@@ -106,6 +115,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // 기관의 사용자 수 상한(2026-11-17) — 만들기 전에 센다
+    const seats = await checkUserSeats(departmentId, 1);
+    if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
 
     // 임시 비밀번호 생성 후 bcrypt(saltRounds=12)로 해싱.
     //
@@ -152,7 +165,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('사용자 생성 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }

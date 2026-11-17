@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
@@ -6,6 +7,9 @@ import { sendTempPasswordEmail, isMailConfigured } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
+
+/** 한 번에 등록할 수 있는 직원 수(2026-11-17) */
+const MAX_BULK_ROWS = 500;
 
 interface CsvRow {
   부서명: string;
@@ -71,6 +75,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // 한 번에 500명까지(2026-11-17) — 줄마다 계정·메일을 만들어 함수 시간 안에 끝나야 한다
+    if (rows.length > MAX_BULK_ROWS) {
+      return NextResponse.json(
+        { ok: false, error: { message: `한 번에 ${MAX_BULK_ROWS}명까지 등록할 수 있습니다. 파일을 나눠 올려 주세요.` } },
+        { status: 400 }
+      );
+    }
+
+    // 기관의 사용자 수 상한(2026-11-17) — 남은 자리만큼만 만들고, 나머지 줄은 '상한'으로 알린다. 못 세면 아무것도 만들지 않는다
+    const seats = await checkUserSeats(adminDeptId, 0);
+    if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
+    let seatsLeft = seats.remaining; // null = 무제한
 
     // 관리자가 속한 기관. 모든 부서 조회·생성을 이 기관으로 한정한다.
     const { data: adminDept } = await supabaseAdmin
@@ -171,6 +187,14 @@ export async function POST(request: NextRequest) {
       const role = row.권한.trim().toUpperCase() as 'ADMIN' | 'USER';
       const tempPassword = generateTempPassword();
 
+      if (seatsLeft !== null && seatsLeft <= 0) {
+        results.push({
+          row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
+          부서명: row.부서명.trim(), success: false, error: `기관 사용자 수 상한(${seats.limit}명)에 닿아 등록하지 않음`,
+        });
+        continue;
+      }
+
       try {
         const deptId = await findOrCreateDept(row.부서명, row.상위부서명);
 
@@ -227,6 +251,7 @@ export async function POST(request: NextRequest) {
           loginUrl: `${APP_URL}/login`,
         });
 
+        if (seatsLeft !== null) seatsLeft -= 1;
         results.push({
           row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
           부서명: row.부서명.trim(), success: true, tempPassword,

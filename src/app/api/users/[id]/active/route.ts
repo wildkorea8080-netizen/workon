@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
@@ -55,6 +56,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
     if (!target || !target.department_id || !managedDeptIds.includes(target.department_id)) {
       return NextResponse.json({ ok: false, error: { message: '관리 권한이 없는 직원입니다.' } }, { status: 403 });
+    }
+
+    // 다시 켜면 자리를 하나 차지한다 — 기관의 사용자 수 상한(2026-11-17). 이미 켜진 계정은 세지 않는다
+    if (body.active && !target.is_active) {
+      const seats = await checkUserSeats(target.department_id, 1);
+      if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
     }
 
     const { data: updated, error: updateError } = await supabaseAdmin
