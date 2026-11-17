@@ -4,6 +4,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
 import { claimInvitation, invitationEmailMatches, releaseInvitation } from '@/lib/invitation-claim';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
+import { authErrorMessage } from '@/lib/auth-error-text';
+import { APP_URL } from '@/lib/config';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -170,14 +172,10 @@ export async function POST(request: Request) {
 
       if (authErr) {
         if (inviteId && inviteClaimedAt) await releaseInvitation(inviteId, inviteClaimedAt);
-        if (authErr.message?.includes('already registered') || authErr.message?.includes('already been registered')) {
-          return NextResponse.json<ApiResponse<null>>(
-            { ok: false, error: { message: '이미 가입된 이메일입니다. 로그인 페이지를 이용하세요.' } },
-            { status: 400 }
-          );
-        }
+        // Auth 원문(영문)은 서버 기록에만(2026-11-17)
+        console.warn('[signup] createUser failed', authErr.status ?? '', authErr.code ?? '');
         return NextResponse.json<ApiResponse<null>>(
-          { ok: false, error: { message: authErr.message || '회원가입 중 오류가 발생했습니다.' } },
+          { ok: false, error: { message: authErrorMessage(authErr) } },
           { status: 400 }
         );
       }
@@ -189,13 +187,14 @@ export async function POST(request: Request) {
         password,
         options: {
           data: { full_name: fullName },
-          emailRedirectTo: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/login`,
+          emailRedirectTo: `${APP_URL}/login`,
         },
       });
 
       if (signUpError && !signUpError.message?.includes('User already registered')) {
+        console.warn('[signup] signUp failed', signUpError.status ?? '', signUpError.code ?? '');
         return NextResponse.json<ApiResponse<null>>(
-          { ok: false, error: { message: signUpError.message || '회원가입 중 오류가 발생했습니다.' } },
+          { ok: false, error: { message: authErrorMessage(signUpError) } },
           { status: 400 }
         );
       }

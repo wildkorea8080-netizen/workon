@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
+import { authErrorMessage } from '@/lib/auth-error-text';
+
+/** 줄 결과에 보일 안내(2026-11-17) — Auth·DB 원문(영문)은 결과 표·CSV에 싣지 않고 서버 기록에만 */
+class RowError extends Error {}
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
@@ -164,7 +168,7 @@ export async function POST(request: NextRequest) {
         .select('id')
         .single();
 
-      if (error || !newDept) throw new Error(`부서 생성 실패: ${name}`);
+      if (error || !newDept) throw new RowError(`부서를 만들지 못했습니다: ${name}`);
       deptCache.set(name, newDept.id);
       return newDept.id;
     }
@@ -221,7 +225,8 @@ export async function POST(request: NextRequest) {
         });
 
         if (authError || !authUser.user) {
-          throw new Error(authError?.message ?? 'Auth 사용자 생성 실패');
+          console.warn('[bulk-register] createUser failed', authError?.status ?? '', authError?.code ?? '');
+          throw new RowError(authError ? authErrorMessage(authError).replace('회원가입', '계정 만들기') : '계정을 만들지 못했습니다.');
         }
 
         // users 테이블 삽입 (비밀번호는 Supabase Auth가 관리)
@@ -240,7 +245,8 @@ export async function POST(request: NextRequest) {
         if (insertError) {
           // Auth 사용자 롤백
           await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
-          throw new Error(insertError.message);
+          console.warn('[bulk-register] users insert failed', insertError.code);
+          throw new RowError('직원 정보를 저장하지 못했습니다.');
         }
 
         // 임시 비밀번호 안내 메일 (미설정이면 조용히 건너뛴다 — 등록 자체는 성공)
@@ -261,7 +267,7 @@ export async function POST(request: NextRequest) {
         results.push({
           row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
           부서명: row.부서명.trim(), success: false,
-          error: err instanceof Error ? err.message : '등록 실패',
+          error: err instanceof RowError ? err.message : '등록하지 못했습니다.',
         });
       }
     }

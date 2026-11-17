@@ -16,6 +16,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    console.error('[notices read]', err?.code ?? 'exception');
+    return NextResponse.json({ ok: false, error: '읽음을 저장하지 못했습니다.' }, { status: 500 });
   }
 }

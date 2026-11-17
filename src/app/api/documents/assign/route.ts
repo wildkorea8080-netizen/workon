@@ -107,6 +107,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, data: { added: inserted?.length ?? 0, documentIds: (inserted ?? []).map((r: { id: string }) => r.id) } });
   } catch (err: any) {
     console.error('[documents/assign]', err);
-    return NextResponse.json({ ok: false, error: { message: err.message } }, { status: 500 });
+    return NextResponse.json({ ok: false, error: { message: '문서를 비서에 붙이지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 500 });
   }
 }

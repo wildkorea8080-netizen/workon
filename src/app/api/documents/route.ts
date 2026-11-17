@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: { message: '문서 목록 조회 실패', details: error } },
+        { ok: false, error: { message: '문서 목록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
         { status: 500 }
       );
     }
@@ -194,7 +194,7 @@ export async function DELETE(request: NextRequest) {
     // NODA 삭제가 끝난 뒤 이 DB 삭제가 실패하면 다시 지워도 안전하다 — NODA는 이미 없는 사본에 404를 주고, 그건 성공으로 센다.
     const { error } = await supabaseAdmin.from('documents').delete().eq('id', documentId);
     if (error) {
-      return NextResponse.json({ ok: false, error: { message: '문서 삭제 실패', details: error } }, { status: 500 });
+      return NextResponse.json({ ok: false, error: { message: '문서를 지우지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 500 });
     }
 
     // 여러 비서에 한 번에 올린 문서는 저장소 파일 하나를 함께 쓴다.

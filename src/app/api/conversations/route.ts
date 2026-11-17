@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('대화 목록 조회 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('대화 생성 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }

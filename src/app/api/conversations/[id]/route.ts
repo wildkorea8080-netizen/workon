@@ -58,7 +58,7 @@ export async function GET(
   } catch (error) {
     console.error('대화 상세 조회 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }
@@ -109,7 +109,7 @@ export async function PUT(
   } catch (error) {
     console.error('대화 업데이트 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }
@@ -171,7 +171,7 @@ export async function DELETE(
   } catch (error) {
     console.error('대화 삭제 중 오류:', error);
     return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.', details: error } },
+      { ok: false, error: { message: '오류가 발생했습니다.' } },
       { status: 500 }
     );
   }

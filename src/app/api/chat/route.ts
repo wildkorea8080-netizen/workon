@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('채팅 오류:', error);
-    return jsonError(error instanceof Error ? error.message : '서버 오류가 발생했습니다.', 500);
+    // 원문은 서버 기록에만(2026-11-17) — 직원 화면에 DB·내부 오류 글이 나가지 않게
+    return jsonError('서버 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
   }
 }
