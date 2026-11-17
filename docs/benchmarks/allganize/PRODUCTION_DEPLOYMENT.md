@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-17(오후): 시스템 설정을 사실대로 — 마이그레이션 없음
+
+- 코드 배포 `dpl_8hqF9MAuMMi2t2XRG1pujY4XEyyr`(커밋 `30eb188`, 2026-11-17 13:07 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `e9a669d`(낮 배포 기록), `0dc4b03` 기능 — 슈퍼관리자 '시스템 설정' 저장을 `system-settings-spec.ts`의 다섯 열쇠만(실행기 자리 덮어쓰기 막음)·값 꼴 검사·바꿀 때마다 `super_admin_logs` `system_setting_changed`(전·후 값), 읽기 실패 503, 쓰이지 않던 '로그인 실패 허용 횟수'·'허용 IP 목록'·'세션 유지 시간'·'최대 파일 크기'·'신규 기관 기본 플랜'을 빼고 실제 로그인 보호 규칙을 읽기 전용으로, 바깥 IP 조회(api.ipify.org) 뺌, `30eb188` 문서. 가지 Preview(`workon-hk80abnrn`) Ready 뒤 `main`. 배포 전 전체 시험 286파일 3,815개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_26PQ9QqBjGrE4jqo353Mw2P6qoZv`(d31ac4b)로 promote.
+- 배포 뒤 확인(로그인 없이 + 읽기 전용): `/login`·`/forgot-password`·`/super/login`·`/api/branding`·`/api/system/maintenance` 200, `/api/super/settings` GET·PATCH 무인증 401. 실행기 하트비트 13:10 KST·pg_cron 호출 200. 최근 24시간 critical 0건·최근 20분 warning 이상 0건.
+- **확인하지 못한 것**: 로그인한 슈퍼관리자 화면(설정 탭 셋·저장·감사 기록) — 슈퍼관리자 로그인이 필요하다. DB의 옛 설정 행 다섯은 그대로 남아 있다(읽는 곳 없음).
+
 ## 2026-11-17(낮): IP 잠금을 운영자가 알게 — 마이그레이션 없음
 
 - 코드 배포 `dpl_26PQ9QqBjGrE4jqo353Mw2P6qoZv`(커밋 `d31ac4b`, 2026-11-17 11:21 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `2eb1650`(오전 배포 기록), 기능 커밋 — 실패를 남긴 뒤 그 IP의 30분 창 실패가 꼭 30번이면 `system_logs` warning·security `IP_LOCK_STARTED`(가린 IP·범위만), 슈퍼관리자 대시보드 '지금 로그인이 막힌 인터넷 주소(IP) N곳' 띠(30분 창 실패의 IP 해시를 `pagedRows`로 끝까지 읽어 30번 넘은 것 — `lockedIpCount`, 최근 잠긴 가린 IP 다섯, 계정 관리로 잇기), `d31ac4b` 문서. 가지 Preview(`workon-nz4unlhjq`) Ready 뒤 `main`. 배포 전 전체 시험 285파일 3,806개 통과·tsc 0(첫 전체 시험에서 `.limit(10000)`을 `paged-select` 시험이 잡아 `pagedRows`로 고침).
