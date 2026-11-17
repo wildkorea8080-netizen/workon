@@ -34,7 +34,7 @@ export async function POST(
 
   if (orgErr) {
     console.error('[impersonate] org query error:', orgErr.message, 'orgId:', orgId);
-    return NextResponse.json({ ok: false, error: `기관 조회 실패: ${orgErr.message}` }, { status: 500 });
+    return NextResponse.json({ ok: false, error: '기관을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 500 });
   }
   if (!org) {
     return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });

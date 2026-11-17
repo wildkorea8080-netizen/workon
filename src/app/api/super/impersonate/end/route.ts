@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getServerAuthSession } from '@/lib/auth';
 import { logSystem } from '@/lib/logger';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,6 @@ export async function POST(_request: NextRequest) {
     return response;
   } catch (err: any) {
     console.error('[impersonate/end]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

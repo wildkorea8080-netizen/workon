@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     .gte('expires_at', now.toISOString())
     .order('expires_at', { ascending: true });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
 
   const result = (data ?? []).map((c: any) => ({
     id: c.id,

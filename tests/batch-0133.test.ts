@@ -3,12 +3,13 @@ import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { AUTH_GENERIC_MESSAGE, authErrorMessage } from '@/lib/auth-error-text';
+import { DB_ERROR_FALLBACK, dbErrorCode, dbErrorText } from '@/lib/db-error-text';
 
 /**
  * 2026-11-17 — 직원·기관 관리자가 받는 API 응답에 DB·Auth 오류 원문을 싣지 않는다. 예전엔 대화·문서 라우트가 `details: error`로
  * Supabase 오류 객체(칸·제약 이름·힌트)를, 가입이 Auth 영문 원문을, 일괄 등록이 줄마다 DB 원문을 그대로 돌려줬다.
- * 원문은 서버 기록(console·system_logs)에만. 슈퍼관리자 라우트(`/api/super/**`)는 일부 라우트가 일부러 던진 한국어 검사 문구를
- * 원문 자리로 돌려줘 이번에는 보지 않는다.
+ * 원문은 서버 기록(console·system_logs)에만. 같은 날 슈퍼관리자 라우트 26곳도 `dbErrorText`(Postgres 코드로 가른 한국어)로 바꿨다 —
+ * 던지는 곳이 모두 DB 오류였고 일부러 던진 한국어 검사 문구는 없었다. 이제 `src/app/api` 전체를 본다.
  */
 
 function routeFiles(dir: string): string[] {
@@ -53,9 +54,10 @@ function findResponseLeaks(files: string[]): string[] {
 }
 
 describe('응답에 오류 원문이 없다', () => {
-  it('직원·기관 관리자 라우트 전체(슈퍼관리자 제외)', () => {
-    const files = routeFiles('src/app/api').filter((f) => !f.includes('/api/super/'));
-    expect(files.length).toBeGreaterThan(100);
+  it('API 라우트 전체(슈퍼관리자 포함)', () => {
+    const files = routeFiles('src/app/api');
+    expect(files.filter((f) => f.includes('/api/super/')).length).toBeGreaterThan(30);
+    expect(files.length).toBeGreaterThan(150);
     expect(findResponseLeaks(files)).toEqual([]);
   });
   it('찾개가 옛 꼴을 잡는다', () => {
@@ -76,6 +78,27 @@ describe('응답에 오류 원문이 없다', () => {
     expect(inServerLog(logBody, 2)).toBe(true);
     const resp = ['await logSystem({ x });', 'results.push({', "  error: err instanceof Error ? err.message : '실패',"];
     expect(inServerLog(resp, 2)).toBe(false);
+  });
+});
+
+describe('DB 오류 문구', () => {
+  it('Postgres 코드로 고칠 것을 알리고, 그 밖은 기본 문구 — 원문은 싣지 않음', () => {
+    const raw = { code: '23505', message: 'duplicate key value violates unique constraint "organizations_slug_key"' };
+    expect(dbErrorText(raw)).toContain('겹칩니다');
+    expect(dbErrorText(raw)).not.toContain('organizations_slug_key');
+    expect(dbErrorText({ code: '23503' })).toContain('연결된 기록');
+    expect(dbErrorText({ code: '23514' })).toContain('허용 범위');
+    expect(dbErrorText({ code: '42P01', message: 'relation "x" does not exist' })).toBe(DB_ERROR_FALLBACK);
+    expect(dbErrorText(new Error('boom'), '기관을 만들지 못했습니다.')).toBe('기관을 만들지 못했습니다.');
+    expect(dbErrorCode({ code: 'weak_password' })).toBeNull();
+    expect(dbErrorText(null)).toBe(DB_ERROR_FALLBACK);
+  });
+  it('슈퍼관리자 라우트가 원문을 Error로 감싸지 않고 그대로 던진다(코드가 남게)', () => {
+    for (const f of routeFiles('src/app/api/super')) {
+      const s = readFileSync(f, 'utf8');
+      if (!s.includes('dbErrorText(')) continue;
+      expect(s, f).not.toMatch(/throw new Error\(\w+\??\.message/);
+    }
   });
 });
 

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 import { kstDay, kstDayList, kstMonthStart } from '@/lib/kst-time';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,6 +111,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     });
   } catch (err: any) {
     console.error('[usage GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

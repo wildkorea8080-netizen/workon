@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { createClient } from '@supabase/supabase-js';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,11 +34,11 @@ export async function PATCH(request: NextRequest) {
     const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
       admin.sub, { password: newPassword }
     );
-    if (updateErr) throw new Error(updateErr.message);
+    if (updateErr) throw updateErr;
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error('[me/password PATCH]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

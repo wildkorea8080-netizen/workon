@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .in('department_id', deptIds)
     .order('created_at', { ascending: false });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'https://workon-ai.vercel.app';
   const result = (data ?? []).map((inv: any) => ({
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
   }).select().single();
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
 
   return NextResponse.json({
     ok: true,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (error) throw error;
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }
 
@@ -37,6 +38,6 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   const { error } = await supabaseAdmin.from('notices').delete().eq('id', params.id);
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

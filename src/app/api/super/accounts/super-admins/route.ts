@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
     .eq('is_super_admin', true)
     .order('created_at', { ascending: true });
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
   // 슈퍼관리자 로그인 실패로 잠긴 계정(0091) — 풀리는 때
   const locks = await accountLocks(lockReadDeps(), 'super', (data ?? []).map((u: { email: string }) => u.email)).catch(() => new Map<string, string>());
   return NextResponse.json({ ok: true, data: (data ?? []).map((u: { email: string }) => ({ ...u, sign_in_locked_until: locks.get(u.email) ?? null })) });
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
         email: normalizedEmail, password: tempPassword, email_confirm: true,
         user_metadata: { full_name: name },
       });
-      if (authErr || !newAuth.user) throw new Error(authErr?.message ?? 'Auth 생성 실패');
+      if (authErr || !newAuth.user) throw authErr ?? new Error('Auth 생성 실패');
       authUserId = newAuth.user.id;
     }
 
@@ -70,11 +71,11 @@ export async function POST(request: NextRequest) {
       .upsert({ id: authUserId, email: normalizedEmail, full_name: name, role: 'ADMIN', is_super_admin: true }, { onConflict: 'id' })
       .select('id, email, full_name').single();
 
-    if (insertErr) throw new Error(insertErr.message);
+    if (insertErr) throw insertErr;
 
     return NextResponse.json({ ok: true, data: { ...newUser, tempPassword } });
   } catch (err: any) {
     console.error('[super-admins POST]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { logSystem } from '@/lib/logger';
 import { writeAuditRow } from '@/lib/audit-write';
 import { reportContractSync } from '@/lib/contract-sync';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       });
     } catch (fallbackErr: any) {
       console.error('[super/organizations GET]', fallbackErr);
-      return NextResponse.json({ ok: false, error: fallbackErr.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: dbErrorText(fallbackErr) }, { status: 500 });
     }
   }
 }
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    if (orgError || !org) throw new Error(orgError?.message ?? '기관 생성 실패');
+    if (orgError || !org) throw orgError ?? new Error('기관 생성 실패');
 
     // 2) contracts INSERT
     const { error: contractError } = await supabaseAdmin
@@ -223,6 +224,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[super/organizations POST]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

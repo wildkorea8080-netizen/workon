@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { kstMonthStart } from '@/lib/kst-time';
 import { pagedRows } from '@/lib/paged-select';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
       pagedRows<{ id: string; name: string }>((a, b, w) => supabaseAdmin
         .from('organizations').select('id, name', w ? { count: 'exact' } : undefined).order('id').range(a, b)),
     ]);
-    if (deptError || orgError) throw new Error((deptError ?? orgError)!.message);
+    if (deptError || orgError) throw (deptError ?? orgError)!;
 
     const orgMap = Object.fromEntries((orgs ?? []).map((o: { id: string; name: string }) => [o.id, o.name]));
     const deptMap = Object.fromEntries(
@@ -95,6 +96,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[super/accounts/users GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { seatDeps } from '@/lib/user-seats';
 import { kstMonthStart } from '@/lib/kst-time';
 import { writeAuditRow } from '@/lib/audit-write';
 import { contractToRestore, reportContractSync, type ContractLite } from '@/lib/contract-sync';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +81,7 @@ export async function PATCH(
     return NextResponse.json({ ok: true, data: updated, ...(warning ? { warning } : {}) });
   } catch (err: any) {
     console.error('[super/organizations PATCH]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }
 
@@ -128,6 +129,6 @@ export async function GET(
     });
   } catch (err: any) {
     console.error('[super/organizations/:id GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

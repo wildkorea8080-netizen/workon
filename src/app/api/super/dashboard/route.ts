@@ -6,6 +6,7 @@ import { estimateCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { CRITICAL_WINDOW_MS, criticalSummary } from '@/lib/super-log-links';
 import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-throttle';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -186,6 +187,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[super/dashboard GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

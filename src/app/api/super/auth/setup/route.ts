@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error('[super/auth/setup]', err);
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : '서버 오류가 발생했습니다.' },
+      { ok: false, error: '슈퍼관리자 계정을 설정하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' },
       { status: 500 }
     );
   }

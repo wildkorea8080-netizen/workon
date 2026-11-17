@@ -3,6 +3,7 @@ import { reportContractSync } from '@/lib/contract-sync';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
+import { dbErrorText } from '@/lib/db-error-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[super/contracts GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }
 
@@ -137,6 +138,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, data: contract, ...(warning ? { warning } : {}) });
   } catch (err: any) {
     console.error('[super/contracts POST]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }

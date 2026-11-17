@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { estimateCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstHour, kstMonthStart } from '@/lib/kst-time';
+import { dbErrorText } from '@/lib/db-error-text';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -163,6 +164,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: any) {
     console.error('[super/usage GET]', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
   }
 }
