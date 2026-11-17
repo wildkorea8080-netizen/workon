@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ ok: true, data: rows, meta: { total: count ?? 0, page, limit } });
   } catch (err: any) {
-    console.warn('[super/logs/impersonation GET]', err.message);
-    return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit } });
+    console.warn('[super/logs/impersonation GET]', err?.code ?? err?.message);
+    return NextResponse.json({ ok: false, error: { message: '대리 접근 기록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
   }
 }

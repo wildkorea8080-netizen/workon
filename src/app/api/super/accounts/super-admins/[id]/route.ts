@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { dbErrorText } from '@/lib/db-error-text';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,14 @@ export async function PATCH(
       .select('id, email, is_active').single();
 
     if (error) throw error;
+    // 조작 기록(2026-11-17)
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'super_admin_updated',
+      target_type: 'user',
+      target_id: params.id,
+      after_data: { is_active: data.is_active },
+    }, 'super_admin_updated');
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 import { dbErrorText } from '@/lib/db-error-text';
+import { writeAuditRow } from '@/lib/audit-write';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +73,15 @@ export async function POST(request: NextRequest) {
       .select('id, email, full_name').single();
 
     if (insertErr) throw insertErr;
+
+    // 조작 기록(2026-11-17) — 임시 비밀번호는 남기지 않는다
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'super_admin_created',
+      target_type: 'user',
+      target_id: newUser.id,
+      after_data: { email: newUser.email },
+    }, 'super_admin_created');
 
     return NextResponse.json({ ok: true, data: { ...newUser, tempPassword } });
   } catch (err: any) {

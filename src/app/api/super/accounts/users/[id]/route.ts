@@ -11,7 +11,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  if (!getSuperAdminFromRequest(request))
+  const admin = getSuperAdminFromRequest(request);
+  if (!admin)
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
@@ -28,6 +29,13 @@ export async function PATCH(
         return NextResponse.json({ ok: false, error: '유효하지 않은 role' }, { status: 400 });
       update.role = body.role;
     }
+
+    if (Object.keys(update).length === 0)
+      return NextResponse.json({ ok: false, error: '바꿀 값이 없습니다.' }, { status: 400 });
+
+    // 바꾸기 전 값 — 조작 기록에 남긴다(2026-11-17, 예전엔 사용 중지·권한 변경이 어디에도 안 남았다)
+    const { data: before } = await supabaseAdmin
+      .from('users').select('is_active, role').eq('id', params.id).is('deleted_at', null).maybeSingle();
 
     const { data, error } = await supabaseAdmin
       .from('users')
@@ -49,6 +57,14 @@ export async function PATCH(
     }
     if (!data)
       return NextResponse.json({ ok: false, error: '사용자를 찾을 수 없습니다.' }, { status: 404 });
+    await writeAuditRow('super_admin_logs', {
+      admin_user_id: admin.sub,
+      action: 'user_updated',
+      target_type: 'user',
+      target_id: params.id,
+      before_data: before ? { ...('is_active' in update ? { is_active: before.is_active } : {}), ...('role' in update ? { role: before.role } : {}) } : null,
+      after_data: { ...('is_active' in update ? { is_active: update.is_active } : {}), ...('role' in update ? { role: update.role } : {}) },
+    }, 'user_updated');
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     console.error('[super/accounts/users PATCH]', err);

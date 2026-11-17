@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { SIGN_IN_RULES, STORED_SETTINGS_NOTICE } from '@/lib/system-settings-spec';
+import type { AdminLogRow } from '@/lib/super-admin-log-spec';
 
 type Tab = 'basic' | 'maintenance' | 'security';
 
@@ -226,11 +227,15 @@ function MaintenanceTab({ settings, onSave }: {
 // 2026-11-17 — 예전 '로그인 실패 허용 횟수'·'허용 IP 목록'은 저장만 되고 아무것도 막지 않았다. 실제 규칙을 읽기 전용으로 보인다.
 // 내 IP를 바깥 IP 조회 서비스에 묻던 것도 뺐다 — 슈퍼관리자 접속 IP를 남의 서버에 보낼 까닭이 없다
 function SecurityTab() {
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AdminLogRow[]>([]);
+  const [logError, setLogError] = useState(false);
 
   useEffect(() => {
-    // 슈퍼관리자 최근 활동 로그
-    fetch('/api/super/logs?limit=20').then(r => r.json()).then(d => { if (d.ok) setLogs(d.data); }).catch(() => {});
+    // 슈퍼관리자 최근 조작 기록(2026-11-17 — 예전엔 없는 주소 /api/super/logs를 불러 늘 비어 있었다)
+    fetch('/api/super/logs/admin?limit=10')
+      .then(r => r.json())
+      .then(d => { if (d.ok) setLogs(d.data); else setLogError(true); })
+      .catch(() => setLogError(true));
   }, []);
 
   return (
@@ -245,27 +250,31 @@ function SecurityTab() {
 
       {/* 최근 로그인 이력 */}
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-700/50">
+        <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
           <h3 className="text-sm font-bold text-white">최근 슈퍼관리자 활동 이력</h3>
+          <Link href="/super/logs?tab=admin" className="text-xs text-[#A78BFA] hover:underline">전체 보기 →</Link>
         </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-700/50">
-              {['작업','대상','IP','일시'].map(h => (
+              {['작업','대상','내용','한 사람','일시'].map(h => (
                 <th key={h} className="px-5 py-2.5 text-left text-xs font-semibold text-slate-500">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/30">
-            {logs.length === 0 ? (
-              <tr><td colSpan={4} className="px-5 py-8 text-center text-slate-500">이력이 없습니다.</td></tr>
+            {logError ? (
+              <tr><td colSpan={5} className="px-5 py-8 text-center text-red-400">조작 기록을 불러오지 못했습니다.</td></tr>
+            ) : logs.length === 0 ? (
+              <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500">이력이 없습니다.</td></tr>
             ) : (
-              logs.map((l, i) => (
-                <tr key={i} className="hover:bg-slate-700/20 transition-colors">
-                  <td className="px-5 py-2.5 text-slate-300">{l.action}</td>
-                  <td className="px-5 py-2.5 text-slate-500 text-xs">{l.target_type ?? '—'}</td>
-                  <td className="px-5 py-2.5 text-slate-500 text-xs font-mono">{l.ip_address ?? '—'}</td>
-                  <td className="px-5 py-2.5 text-slate-500 text-xs">{new Date(l.created_at).toLocaleString('ko-KR')}</td>
+              logs.map((l) => (
+                <tr key={l.id} className="hover:bg-slate-700/20 transition-colors">
+                  <td className="px-5 py-2.5 text-slate-300 whitespace-nowrap">{l.actionLabel}</td>
+                  <td className="px-5 py-2.5 text-slate-400 text-xs">{l.targetLabel}{l.targetName ? ` · ${l.targetName}` : ''}</td>
+                  <td className="px-5 py-2.5 text-slate-500 text-xs">{l.summary || '—'}</td>
+                  <td className="px-5 py-2.5 text-slate-500 text-xs">{l.adminEmail}</td>
+                  <td className="px-5 py-2.5 text-slate-500 text-xs whitespace-nowrap">{new Date(l.createdAt).toLocaleString('ko-KR')}</td>
                 </tr>
               ))
             )}

@@ -2,9 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
-import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState } from '@/lib/super-log-links';
+import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState, type LogTab } from '@/lib/super-log-links';
+import { ADMIN_LOG_ACTIONS, type AdminLogRow } from '@/lib/super-admin-log-spec';
 
-type Tab = 'access' | 'system' | 'impersonation';
+type Tab = LogTab;
+
+/** 기록을 못 읽었을 때(503) — 빈 목록과 가른다 */
+function LoadError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return <div className="p-3 bg-red-950/30 border border-red-700/40 rounded-xl text-sm text-red-300">{message}</div>;
+}
 
 const fmtDt = (s: string) => new Date(s).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
 
@@ -54,10 +61,10 @@ export default function LogsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white">로그 관리</h1>
-        <p className="text-slate-400 text-sm mt-1">접속·시스템·대리접근 이력</p>
+        <p className="text-slate-400 text-sm mt-1">접속·시스템·대리접근·관리자 조작 이력</p>
       </div>
       <div className="flex gap-1 border-b border-slate-700/50">
-        {([['access','접속 로그'],['system','시스템 로그'],['impersonation','대리 접근 로그']] as [Tab,string][]).map(([k,l]) => (
+        {([['access','접속 로그'],['system','시스템 로그'],['impersonation','대리 접근 로그'],['admin','관리자 조작']] as [Tab,string][]).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 ${
               tab === k ? 'border-[#7C3AED] text-[#A78BFA] bg-[#7C3AED]/10' : 'border-transparent text-slate-500 hover:text-slate-300'
@@ -67,6 +74,7 @@ export default function LogsPage() {
       {tab === 'access'        && <AccessLogsTab />}
       {tab === 'system'        && <SystemLogsTab key={link ? 'linked' : 'plain'} initial={link} />}
       {tab === 'impersonation' && <ImpersonationLogsTab />}
+      {tab === 'admin'         && <AdminLogsTab />}
     </div>
   );
 }
@@ -77,6 +85,7 @@ function AccessLogsTab() {
   const [suspicious, setSuspicious] = useState<any[]>([]);
   const [orgs, setOrgs]         = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [meta, setMeta]         = useState({ total: 0 });
   const [period, setPeriod]     = useState('today');
   const [filterOrg, setFilterOrg]     = useState('');
@@ -95,7 +104,8 @@ function AccessLogsTab() {
     if (search)               params.set('search', search);
     const res  = await fetch(`/api/super/logs/access?${params}`);
     const data = await res.json();
-    if (data.ok) { setRows(data.data); setMeta(data.meta); setSuspicious(data.suspiciousIps ?? []); }
+    if (data.ok) { setRows(data.data); setMeta(data.meta); setSuspicious(data.suspiciousIps ?? []); setLoadError(null); }
+    else { setRows([]); setLoadError(data.error?.message ?? '접속 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, [period, filterOrg, filterAction, search]);
 
@@ -150,6 +160,8 @@ function AccessLogsTab() {
           CSV
         </button>
       </div>
+
+      <LoadError message={loadError} />
 
       {/* 테이블 */}
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
@@ -210,6 +222,7 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
   const [rows, setRows]       = useState<any[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filterLevel, setFilterLevel]       = useState(initial?.level ?? 'all');
   const [filterCategory, setFilterCategory] = useState(initial?.category ?? 'all');
   const [period, setPeriod]   = useState(initial?.period ?? 'month');
@@ -222,7 +235,8 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
     const params = new URLSearchParams({ period, level: filterLevel, category: filterCategory, page: String(p), limit: String(LIMIT) });
     const res  = await fetch(`/api/super/logs/system?${params}`);
     const data = await res.json();
-    if (data.ok) { setRows(data.data); setSummary(data.summary ?? {}); }
+    if (data.ok) { setRows(data.data); setSummary(data.summary ?? {}); setLoadError(null); }
+    else { setRows([]); setLoadError(data.error?.message ?? '시스템 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, [period, filterLevel, filterCategory]);
 
@@ -267,6 +281,8 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
         </select>
         <button onClick={() => load(1)} className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-semibold rounded-xl">조회</button>
       </div>
+
+      <LoadError message={loadError} />
 
       {/* 테이블 */}
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
@@ -332,6 +348,7 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
 function ImpersonationLogsTab() {
   const [rows, setRows]       = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [meta, setMeta]       = useState({ total: 0 });
   const [page, setPage]       = useState(1);
   const LIMIT = 50;
@@ -340,7 +357,8 @@ function ImpersonationLogsTab() {
     setLoading(true);
     const res  = await fetch(`/api/super/logs/impersonation?page=${p}&limit=${LIMIT}`);
     const data = await res.json();
-    if (data.ok) { setRows(data.data); setMeta(data.meta); }
+    if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
+    else { setRows([]); setLoadError(data.error?.message ?? '대리 접근 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, []);
 
@@ -360,6 +378,7 @@ function ImpersonationLogsTab() {
       <div className="p-4 bg-blue-950/20 border border-blue-700/30 rounded-xl">
         <p className="text-sm text-slate-300">슈퍼관리자가 기관 관리자 화면에 대리 접근한 이력입니다.</p>
       </div>
+      <LoadError message={loadError} />
 
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
         <table className="w-full text-sm">
@@ -407,6 +426,97 @@ function ImpersonationLogsTab() {
               className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40">이전</button>
             <span className="text-sm text-slate-400">{page} / {totalPages}</span>
             <button onClick={() => { const p = page+1; setPage(p); load(p); }} disabled={page>=totalPages}
+              className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40">다음</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 관리자 조작 기록(2026-11-17) ─────────────────────────
+// super_admin_logs — 기관 등록·정지·계정 사용 중지·권한·삭제·비밀번호 재발급·잠금 풀기·설정 변경 등. 예전엔 쓰기만 하고 읽는 곳이 없었다
+function AdminLogsTab() {
+  const [rows, setRows]       = useState<AdminLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [meta, setMeta]       = useState({ total: 0 });
+  const [page, setPage]       = useState(1);
+  const [action, setAction]   = useState('all');
+  const LIMIT = 50;
+
+  const load = useCallback(async (p = 1, a = 'all') => {
+    setLoading(true);
+    const qs = new URLSearchParams({ page: String(p), limit: String(LIMIT) });
+    if (a !== 'all') qs.set('action', a);
+    try {
+      const res  = await fetch(`/api/super/logs/admin?${qs}`);
+      const data = await res.json();
+      if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
+      else { setRows([]); setLoadError(data.error?.message ?? '조작 기록을 불러오지 못했습니다.'); }
+    } catch {
+      setRows([]); setLoadError('조작 기록을 불러오지 못했습니다.');
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(1, 'all'); }, [load]);
+
+  const totalPages = Math.ceil(meta.total / LIMIT);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={action} onChange={e => { setAction(e.target.value); setPage(1); load(1, e.target.value); }}
+          className="px-3 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-300">
+          <option value="all">작업 전체</option>
+          {Object.entries(ADMIN_LOG_ACTIONS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        <button onClick={() => exportCsv(rows.map(r => ({ 일시: fmtDt(r.createdAt), 작업: r.actionLabel, 대상: `${r.targetLabel}${r.targetName ? ` ${r.targetName}` : ''}`, 내용: r.summary, 슈퍼관리자: r.adminEmail })), 'super_admin_logs.csv')}
+          disabled={rows.length === 0}
+          className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40">이 쪽 CSV</button>
+      </div>
+
+      <LoadError message={loadError} />
+
+      <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="border-b border-slate-700/50">
+            <tr>{['일시','작업','대상','내용','슈퍼관리자'].map(h => (
+              <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{h}</th>
+            ))}</tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/30">
+            {loading ? (
+              Array.from({length:3}).map((_,i) => <tr key={i}>{Array.from({length:5}).map((_,j) => (
+                <td key={j} className="px-4 py-3"><div className="h-3 bg-slate-700/50 rounded animate-pulse"/></td>
+              ))}</tr>)
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">{loadError ? '—' : '조작 기록이 없습니다.'}</td></tr>
+            ) : rows.map(r => (
+              <tr key={r.id} className="hover:bg-slate-700/20 transition-colors">
+                <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtDt(r.createdAt)}</td>
+                <td className="px-4 py-3 text-white text-xs font-semibold whitespace-nowrap">{r.actionLabel}</td>
+                <td className="px-4 py-3 text-slate-300 text-xs">{r.targetLabel}{r.targetName ? <span className="text-slate-500"> · {r.targetName}</span> : null}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{r.summary || '—'}</td>
+                <td className="px-4 py-3">
+                  <p className="text-white text-xs">{r.adminName}</p>
+                  <p className="text-slate-500 text-[10px]">{r.adminEmail}</p>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-500">총 {meta.total}건</p>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { const p = page-1; setPage(p); load(p, action); }} disabled={page===1}
+              className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40">이전</button>
+            <span className="text-sm text-slate-400">{page} / {totalPages}</span>
+            <button onClick={() => { const p = page+1; setPage(p); load(p, action); }} disabled={page>=totalPages}
               className="px-4 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-slate-400 disabled:opacity-40">다음</button>
           </div>
         </div>

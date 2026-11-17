@@ -7,8 +7,8 @@
  * 대시보드의 '전체 보기'도 접속 로그 탭으로 열렸다. 카테고리 거르기에는 쓰고 있던 `payment`가 없었다.
  */
 
-export type LogTab = 'access' | 'system' | 'impersonation';
-export const LOG_TABS: readonly LogTab[] = ['access', 'system', 'impersonation'];
+export type LogTab = 'access' | 'system' | 'impersonation' | 'admin';
+export const LOG_TABS: readonly LogTab[] = ['access', 'system', 'impersonation', 'admin'];
 export const SYSTEM_LOG_LEVELS = ['info', 'warning', 'error', 'critical'] as const;
 export const SYSTEM_LOG_CATEGORIES = ['auth', 'api', 'database', 'payment', 'security', 'admin'] as const;
 export const SYSTEM_LOG_PERIODS = ['today', 'week', 'month'] as const;

@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       summary: { todayErrors, weekErrors, weekTrend },
     });
   } catch (err: any) {
-    console.warn('[super/logs/system GET]', err.message);
-    return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit }, summary: { todayErrors: 0, weekErrors: 0, weekTrend: null } });
+    console.warn('[super/logs/system GET]', err?.code ?? err?.message);
+    return NextResponse.json({ ok: false, error: { message: '시스템 기록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
   }
 }
