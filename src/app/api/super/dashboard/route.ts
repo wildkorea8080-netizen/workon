@@ -9,6 +9,7 @@ import { IP_LOCK_STARTED, LOCK_WINDOW_MS, lockedIpCount } from '@/lib/sign-in-th
 import { seatAlerts } from '@/lib/user-seats';
 import { dbErrorText } from '@/lib/db-error-text';
 import { loadChatTokensByOrg } from '@/lib/org-chat-tokens';
+import { revenueIn, type RevenueContract } from '@/lib/contract-revenue';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
   const todayStart = kstDayStart(kstDay(now)).toISOString();
   const monthStart = kstMonthStart(now, 0).toISOString();
   const lastMonthStart = kstMonthStart(now, -1).toISOString();
+  const nextMonthStart = kstMonthStart(now, 1).toISOString();
   const in30 = new Date(now.getTime() + 30 * 86400000).toISOString();
 
   try {
@@ -31,7 +33,7 @@ export async function GET(request: NextRequest) {
       orgAll, orgActive, orgSuspended, orgExpiring,
       userAll, userNew, userToday,
       todayUsage, monthUsage,
-      revenueThis, revenueLast,
+      revenueContracts,
       tokenAlerts, tokenExceeded,
       recentOrgs, recentLogs, criticalRecent, ipFailures, ipLockLogs, seatOrgs, seatUsers,
     ] = await Promise.all([
@@ -45,8 +47,8 @@ export async function GET(request: NextRequest) {
       supabaseAdmin.from('usage_logs').select('user_id', { count: 'exact', head: true }).eq('action', 'chat_message').gte('created_at', todayStart),
       pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', todayStart).order('id').range(a, b)),
       pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b)),
-      supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', monthStart),
-      supabaseAdmin.from('contracts').select('price_per_month').eq('status', 'active').gte('started_at', lastMonthStart).lt('started_at', monthStart),
+      // 매출 — 그달에 유효했던 계약(2026-11-17, `contract-revenue.ts`). 예전엔 이번 달에 '시작한' 계약만 더해 이어지는 계약이 0원이었다
+      supabaseAdmin.from('contracts').select('status, price_per_month, started_at, expires_at, updated_at').in('status', ['active', 'cancelled']).lt('started_at', nextMonthStart),
       // 80~100% 경고 기관 — 기관별 이번 달 토큰은 한 번만 읽는다(예전엔 경고·초과·Top 5가 같은 기록을 세 번 읽었다, 2026-11-17)
       (async () => {
         const { data: orgs } = await supabaseAdmin.from('organizations').select('id, monthly_token_limit').eq('status', 'active');
@@ -95,8 +97,9 @@ export async function GET(request: NextRequest) {
     const estimatedCostUsd = estimateCostUsd({ input_tokens: monthInput, output_tokens: monthOutput });
 
     // ── 매출 집계 ──────────────────────────────────────
-    const thisMonthRevenue = (revenueThis.data ?? []).reduce((s: number, c: any) => s + Number(c.price_per_month ?? 0), 0);
-    const lastMonthRevenue = (revenueLast.data ?? []).reduce((s: number, c: any) => s + Number(c.price_per_month ?? 0), 0);
+    const revenueRows = (revenueContracts.data ?? []) as RevenueContract[];
+    const thisMonthRevenue = revenueIn(revenueRows, Date.parse(monthStart), Date.parse(nextMonthStart)).revenue;
+    const lastMonthRevenue = revenueIn(revenueRows, Date.parse(lastMonthStart), Date.parse(monthStart)).revenue;
     const growthPercent    = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100);
 
     // ── 최근 30일 일별 대화수 ──────────────────────────

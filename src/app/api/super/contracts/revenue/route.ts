@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { dbErrorText } from '@/lib/db-error-text';
+import { kstMonthRange, kstYearMonth, revenueIn, type RevenueContract } from '@/lib/contract-revenue';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,25 +12,31 @@ export async function GET(request: NextRequest) {
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const year = parseInt(new URL(request.url).searchParams.get('year') ?? String(new Date().getFullYear()));
+  // 연·월은 한국 시간(2026-11-17 — 예전엔 UTC 경계). 그해에 유효했던 계약은 그해 전에 시작했어도 센다(`contract-revenue.ts`)
+  const nowYm = kstYearMonth();
+  const yearRaw = parseInt(new URL(request.url).searchParams.get('year') ?? String(nowYm.year), 10);
+  const year = Number.isFinite(yearRaw) && yearRaw >= 2000 && yearRaw <= 2100 ? yearRaw : nowYm.year;
+  const [yearStartMs] = kstMonthRange(year, 1);
+  const [, yearEndExMs] = kstMonthRange(year, 12);
 
   try {
-    // 해당 연도 활성 계약 전체 조회
-    const { data: contracts } = await supabaseAdmin
+    // 그해가 끝나기 전에 시작한 계약 — 끝난 때는 아래 규칙으로 거른다
+    const { data: contracts, error: contractErr } = await supabaseAdmin
       .from('contracts')
-      .select('organization_id, plan, price_per_month, started_at, expires_at, status')
-      .or(`status.eq.active,status.eq.cancelled`)
-      .gte('started_at', `${year}-01-01`)
-      .lte('started_at', `${year}-12-31T23:59:59`);
+      .select('organization_id, plan, price_per_month, started_at, expires_at, updated_at, status')
+      .in('status', ['active', 'cancelled'])
+      .lt('started_at', new Date(yearEndExMs).toISOString());
+    if (contractErr) throw contractErr;
 
     // 해당 연도 usage_logs (API 비용 추정)
-    const { data: usageLogs } = await pagedRows<{ details: any; created_at: string }>((a, b, w) => supabaseAdmin
+    const { data: usageLogs, error: usageErr } = await pagedRows<{ details: any; created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs')
       .select('details, created_at', w ? { count: 'exact' } : undefined)
       .eq('action', 'chat_message')
-      .gte('created_at', `${year}-01-01`)
-      .lte('created_at', `${year}-12-31T23:59:59`)
+      .gte('created_at', new Date(yearStartMs).toISOString())
+      .lt('created_at', new Date(yearEndExMs).toISOString())
       .order('id').range(a, b));
+    if (usageErr) throw usageErr;
 
     // 월별 집계
     const monthly: any[] = [];
@@ -37,23 +44,16 @@ export async function GET(request: NextRequest) {
     let totalCostUsd = 0;
 
     for (let m = 1; m <= 12; m++) {
-      const mStart = new Date(year, m - 1, 1);
-      const mEnd   = new Date(year, m, 0, 23, 59, 59);
+      const [mStartMs, mEndExMs] = kstMonthRange(year, m);
+      // 아직 오지 않은 달은 매출로 세지 않는다(연간 합이 앞날까지 더해지지 않게)
+      const future = year > nowYm.year || (year === nowYm.year && m > nowYm.month);
 
-      // 해당 월에 활성인 계약 찾기
-      const activeContracts = (contracts ?? []).filter((c: { started_at: string; expires_at?: string }) => {
-        const s = new Date(c.started_at);
-        const e = c.expires_at ? new Date(c.expires_at) : new Date('2099-01-01');
-        return s <= mEnd && e >= mStart;
-      });
-
-      const revenue  = activeContracts.reduce((sum: number, c: { price_per_month?: number }) => sum + Number(c.price_per_month ?? 0), 0);
-      const orgCount = activeContracts.length;
+      const { revenue, count: orgCount } = future ? { revenue: 0, count: 0 } : revenueIn((contracts ?? []) as RevenueContract[], mStartMs, mEndExMs);
 
       // API 비용 (해당 월)
       const monthLogs = (usageLogs ?? []).filter((l: { created_at: string }) => {
-        const d = new Date(l.created_at);
-        return d >= mStart && d <= mEnd;
+        const d = Date.parse(l.created_at);
+        return d >= mStartMs && d < mEndExMs;
       });
       const inpTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + ((l.details?.input_tokens  as number) ?? 0), 0);
       const outTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + ((l.details?.output_tokens as number) ?? 0), 0);
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
       totalRevenue += revenue;
       totalCostUsd += apiCostUsd;
 
-      monthly.push({ month: m, revenue, orgCount, apiCostUsd, apiCostKrw, netProfit, inpTokens, outTokens });
+      monthly.push({ month: m, revenue, orgCount, apiCostUsd, apiCostKrw, netProfit, inpTokens, outTokens, future });
     }
 
     return NextResponse.json({
