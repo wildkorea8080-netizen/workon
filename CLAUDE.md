@@ -1990,7 +1990,7 @@ details: {
 /super/usage          사용량 모니터링 (실시간 + 차트 + 알림)
 /super/contracts      계약/과금 관리 (계약 + 매출 + 요금제)
 /super/notices        공지사항 관리
-/super/settings       시스템 설정 (기본 + 점검모드 + 보안)
+/super/settings       시스템 설정 (기본 + 점검모드 + 보안) — 2026-11-17부터 사실대로: 저장은 `src/lib/system-settings-spec.ts`의 다섯 열쇠만(점검 모드·안내 메시지만 서비스가 읽고, 서비스명·주소·고객지원 메일은 '보관만'이라 밝힘), 값 꼴 검사, 바꿀 때마다 `super_admin_logs` `system_setting_changed`(전·후 값). 예전 '로그인 실패 허용 횟수'·'허용 IP 목록'·'세션 유지 시간'·'최대 파일 크기'·'신규 기관 기본 플랜'은 저장만 되고 아무 일도 없어 뺐다 — 보안 탭은 실제 로그인 보호 규칙(계정 30분 5번·IP 30번, 슈퍼관리자 접속 IP 제한 없음)을 읽기 전용으로. 읽기 실패는 503(예전엔 빈 목록이라 기본값이 실제 값처럼 보였음). `tests/batch-0130.test.ts`
 /super/common-library 공통 자료실 (기관 유형별 정부 기준 문서 — S5)
 /super/logs           로그 관리 (접속 + 시스템 + 대리접근) — 주소 ?tab=system&level=critical&category=payment&period=week로 그 거르기로 열림(2026-11-17, src/lib/super-log-links.ts). 대시보드 알림 띠가 최근 24시간 critical 기록을 문구별로 세어 여기로 잇는다. 5분 실행기(/api/cron/app-schedules)는 아직 알리지 않은 critical 기록을 활성 슈퍼관리자에게 메일로 알린다(한 시간에 한 번까지, system_settings critical_log_alert = 알린 마지막 기록 시각, 조건부로 차지한 한쪽만, src/lib/critical-alert.ts)
 /maintenance          점검 모드 안내 페이지
