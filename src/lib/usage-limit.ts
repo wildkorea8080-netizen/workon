@@ -553,6 +553,50 @@ export async function departmentBudgetStatuses(
 }
 
 /** Personal monthly limit (0024) usage, for the budget alert mail. Same rule as `checkMonthlyBudget`'s personal part. */
+export interface MyBudgetStatus {
+  usedKrw: number;
+  limitKrw: number;
+  /** 내림 — 99.6%를 100%로 보이면 아직 안 막혔는데 막힌 것처럼 보인다 */
+  percent: number;
+  /** 한도에 닿아 다음 달 1일까지 이용이 멈춘 상태(판정과 같은 `>=`) */
+  exhausted: boolean;
+}
+
+/**
+ * 내 사용현황에 보일 **개인 월 한도**(2026-11-18). 개인 한도 알림 메일이 '내 사용현황 보기'로 보내는데 그 화면에 한도·사용액이 없었다.
+ * 규칙은 판정(`checkMonthlyBudget`)과 같다 — 개인 값(`users.monthly_budget_krw`) 우선, 없으면 부서 기본값, 사용액은 `user_spend_krw`(한국 시간 이번 달).
+ * 한도가 없으면 null. **못 읽으면 던진다** — 화면이 0원으로 꾸미지 않게(부른 쪽이 '확인하지 못함'으로 보인다)
+ */
+export async function myMonthlyBudget(userId: string): Promise<MyBudgetStatus | null> {
+  const { data: user, error: userError } = await supabaseAdmin
+    .from('users')
+    .select('department_id, monthly_budget_krw')
+    .eq('id', userId)
+    .maybeSingle();
+  if (userError) throw userError;
+  if (!user?.department_id) return null;
+
+  const { data: dept, error: deptError } = await supabaseAdmin
+    .from('departments')
+    .select('user_monthly_budget_krw')
+    .eq('id', user.department_id)
+    .maybeSingle();
+  if (deptError) throw deptError;
+
+  const limitKrw = Number(user.monthly_budget_krw ?? dept?.user_monthly_budget_krw ?? 0);
+  if (!(limitKrw > 0)) return null;
+
+  const { data, error } = await supabaseAdmin.rpc('user_spend_krw', {
+    p_user_id: userId,
+    p_from: monthStartISO(),
+    p_to: new Date().toISOString(),
+  });
+  if (error) throw error;
+  const usedKrw = Number(data ?? 0);
+  if (!Number.isFinite(usedKrw)) throw new Error('user_spend_krw: not a number');
+  return { usedKrw, limitKrw, percent: Math.floor((usedKrw / limitKrw) * 100), exhausted: usedKrw >= limitKrw };
+}
+
 export interface UserBudgetStatus {
   userId: string;
   periodKey: string;

@@ -26,6 +26,9 @@ interface Summary {
   monthlyTokens: number;
   topAgent: { name: string; icon?: string; convCount: number } | null;
   streakDays: number;
+  /** 개인 월 한도(없으면 null) — 판정과 같은 규칙으로 서버가 센다 */
+  budget?: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean } | null;
+  budgetUnknown?: boolean;
 }
 
 interface DailyPoint {
@@ -65,6 +68,30 @@ function formatDate(isoStr: string) {
 function formatDateFull(isoStr: string) {
   const d = new Date(isoStr);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function BudgetCard({ budget }: { budget: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean } }) {
+  const tone = budget.exhausted ? 'red' : budget.percent >= 80 ? 'amber' : 'slate';
+  const bar = tone === 'red' ? 'bg-red-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-emerald-500';
+  const text = tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-slate-700';
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <h2 className="text-sm font-bold text-slate-700">이번 달 개인 한도</h2>
+        <p className={`text-sm font-semibold ${text}`}>
+          {Math.round(budget.usedKrw).toLocaleString()}원 / {Math.round(budget.limitKrw).toLocaleString()}원 ({budget.percent}%)
+        </p>
+      </div>
+      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${bar}`} style={{ width: `${Math.min(budget.percent, 100)}%` }} />
+      </div>
+      <p className="mt-3 text-xs text-slate-500">
+        {budget.exhausted
+          ? '한도에 닿아 다음 달 1일까지 이용이 멈췄습니다. 더 써야 하면 기관 관리자에게 개인 한도 조정을 요청하세요.'
+          : '한도에 닿으면 다음 달 1일까지 이용이 멈춥니다. 매달 1일(한국 시간)에 다시 0원부터 셉니다.'}
+      </p>
+    </div>
+  );
 }
 
 function formatTokens(n: number) {
@@ -177,6 +204,14 @@ export default function MyStatsPage() {
             sub="오늘 포함"
           />
         </div>
+
+        {/* 개인 월 한도 — 한도 알림 메일이 이 화면으로 보낸다 */}
+        {!loading && data?.summary.budget && <BudgetCard budget={data.summary.budget} />}
+        {!loading && data?.summary.budgetUnknown && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
+            이번 달 개인 한도 사용액을 지금 확인하지 못했습니다. 잠시 뒤 다시 열어 주세요.
+          </div>
+        )}
 
         {/* 일별 대화 차트 */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">

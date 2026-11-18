@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { sumMyTokens } from '@/lib/my-usage-tokens';
+import { myMonthlyBudget, type MyBudgetStatus } from '@/lib/usage-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +122,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // 5) 개인 월 한도 — 한도 알림 메일이 이 화면으로 보낸다(2026-11-18). 못 읽으면 0원으로 꾸미지 않고 '확인하지 못함'
+    let budget: MyBudgetStatus | null = null;
+    let budgetUnknown = false;
+    try {
+      budget = await myMonthlyBudget(userId);
+    } catch {
+      budgetUnknown = true;
+    }
+
     // ── 집계 ──────────────────────────────────────────────
 
     // 일별 차트 (기간 내 모든 날짜 포함)
@@ -183,6 +193,8 @@ export async function GET(request: NextRequest) {
           monthlyTokens: tokens.monthly,
           topAgent: agentStats[0] ?? null,
           streakDays,
+          budget,
+          budgetUnknown,
         },
         dailyChart,
         agentStats,

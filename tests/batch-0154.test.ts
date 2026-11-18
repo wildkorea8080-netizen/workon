@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state: { paged: Array<{ data: unknown; error: unknown }>; tables: string[] } = { paged: [], tables: [] };
 
 vi.mock('@/lib/auth', () => ({ getServerAuthSession: async () => ({ user: { id: 'u1' } }) }));
+vi.mock('@/lib/usage-limit', () => ({ myMonthlyBudget: async () => null }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {
     from: (t: string) => {
