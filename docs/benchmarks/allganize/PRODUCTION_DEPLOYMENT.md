@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(오후): 관리자 대시보드·통계 첫 카드를 관리 범위로 — 마이그레이션 없음
+
+- 코드 배포 `dpl_GPk4kTymvDyFnv1jDxNM1EBVgcfs`(커밋 `c7f9d5f`, 2026-11-18 14:45 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `d11067d`(낮 3 기록), `52bfeb0` 기관 관리자 대시보드(`/admin`)·통계(`/admin/stats`)의 첫 카드(`GET /api/stats`)를 관리 범위(자기 부서 + 하위, 기관 직속 부서 관리자는 기관 전체)로 — 문서(지난 판 제외)·비서(지운 비서·나만의 비서 제외)·사용자(사용 중·탈퇴 안 함)·대화·메시지, 토큰은 이번 달(한국 시간)만(`monthlyTokens`), 읽기 실패는 0 대신 503, 옛 보고서 템플릿 수·늘 '정상'인 시스템 상태 카드 뺌, 최근 활동 이름표 채움(`chat_message` 등), '사용량 추이'(`/api/stats/usage`)도 읽기 실패는 503·토큰은 숫자만, `c7f9d5f` 문서. 가지 Preview(`workon-86urez0i0`) Ready 뒤 `main`. 배포 전 전체 시험 310파일 4,031개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_6iEpMy1WjCq3uS8anZMFsczfrAHd`(85801e7)로 promote.
+- 배포 전 운영 DB(읽기 전용, 수만): 새 코드가 읽는 칸(`documents.retired_at`·`agents.deleted_at`·`agents.tier`·`users.deleted_at`·`users.is_active`) 있음. 부서 3곳인 기관의 최상위 부서 관리자 기준 — 비서 21(옛 규칙: 자기 부서·지운 것 포함) → 23(새 규칙: 기관 전체·지운 것·나만의 비서 제외), 문서 3·사용자 4·대화 14는 같음, 토큰을 세는 기록은 전 기간 36건 → 이번 달 2건. 부서 1곳인 기관은 같음(비서 19·사용자 1).
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 인증 없는 `/api/stats` 401·`/api/stats/usage` 403·`/admin`은 로그인으로 보냄. 실행기 호출 14:50 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 관리자 화면은 운영에서 보지 못했다(관리자 로그인 없음) — 시험으로 대신.
+
 ## 2026-11-18(낮 3): 내 사용현황에 이번 달 개인 한도 — 마이그레이션 없음
 
 - 코드 배포 `dpl_6iEpMy1WjCq3uS8anZMFsczfrAHd`(커밋 `85801e7`, 2026-11-18 13:20 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `10813ef`(낮 2 기록), `5a842ea` 직원 '내 사용현황'에 이번 달 개인 한도 카드(사용액 / 한도·%·한도에 닿으면 멈춤 안내 — `myMonthlyBudget`, 판정과 같은 규칙: 개인 값 우선·부서 기본값·`user_spend_krw`), 한도가 없으면 카드 없음, 못 읽으면 0원 대신 '확인하지 못함'(나머지 통계는 그대로), `85801e7` 문서. 가지 Preview(`workon-10qa2vl2n`) Ready 뒤 `main`. 배포 전 전체 시험 309파일 4,013개 통과·tsc 0.
