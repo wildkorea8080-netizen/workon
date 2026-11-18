@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(밤 8): 필터에 걸린 것의 보안 로그·카드번호·주민등록번호 꼴 — 마이그레이션 없음
+
+- 코드 배포 `dpl_sAUYewNmggAicGfuP8J9a38fJ4M5`(커밋 `dcbf8c1`, 2026-11-18 22:14 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `24982af`(밤 7 기록), `23705c7` 대화 준비가 필터에 사람 id를 넘김(`actor.userId` — 예전 `undefined`라 대화에서 걸린 금지어·개인정보가 보안 로그에 한 번도 남지 않았다), 값을 한 번 더 보는 개인정보 규칙(`CHECKED_PATTERNS` — 붙여 쓰거나 띄어 쓴 카드번호는 발급사 첫 자리·Luhn, 띄어 쓴 주민등록번호는 날짜 꼴·뒤 첫 자리 1~8), 겹친 주민등록번호 규칙 하나로, 걸린 글 목록 겹침 없이, 감사 화면 상세 '개인정보 꼴 N곳'. `dcbf8c1` 문서. 가지 Preview(`workon-se7rcs0mv`) Ready 뒤 `main`. 배포 전 전체 시험 324파일 4,246개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_E2pcX6eQJyK4C8nGdW3HorkkbZCy`(f24e063)로 promote.
+- 배포 전 운영 확인(읽기 전용): 보안 로그(`security_logs`) 0건 — 대화에서 걸린 것이 남은 적이 없다. 새 칸·표 없음.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, `/admin/audit`는 로그인으로 보냄, 인증 없는 `POST /api/chat` 401·`GET /api/admin/audit-logs` 403. 업무 작업자·실행기 호출 22:13~22:15 KST 모두 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 대화에서 실제로 걸려 보안 로그에 남는 것은 운영에서 해 보지 못했다(로그인 없음) — 시험으로 대신. 다음에 누가 금지어·개인정보에 걸리면 `security_logs`에 첫 줄이 생긴다.
+- 그대로 둔 것(결정 필요): 긴 숫자 규칙이 나라장터 공고번호(`20261112345-00`)를 막는 것, 사업자등록번호 꼴(`123-45-67890`)을 막는 것.
+
 ## 2026-11-18(밤 7): 입력 필터의 읽기 실패·보이지 않는 글자·금지어 저장 — 마이그레이션 없음
 
 - 코드 배포 `dpl_E2pcX6eQJyK4C8nGdW3HorkkbZCy`(커밋 `f24e063`, 2026-11-18 21:53 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `255bd2a`(밤 6 기록), `84376d3` 대화 입력 필터(`src/lib/filter.ts`·`forbidden-match.ts`) — 금지어를 읽지 못해도 개인정보 패턴 검사는 그대로(예전엔 함께 꺼짐), 금지어 검사만 건너뛰고 `system_logs`(error·security, 부서마다 10분에 한 번), 맞춰 볼 때 보이지 않는 서식 글자(`\p{Cf}`)를 금지어·글·개인정보 패턴 검사에서 뺌, 금지어 저장은 다듬어서 2~50자·설명 200자·부서마다 300개, 설정 화면은 켜고 끈 응답을 앞 값에 합침. `f24e063` 문서. 가지 Preview(`workon-pq5xwrgdi`) Ready 뒤 `main`. 배포 전 전체 시험 323파일 4,234개 통과·tsc 0.
