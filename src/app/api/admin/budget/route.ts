@@ -5,6 +5,13 @@ import { checkTokenLimit } from '@/lib/usage-limit';
 
 export const dynamic = 'force-dynamic';
 
+function unavailable() {
+  return NextResponse.json(
+    { ok: false, error: { message: '예산 현황을 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+    { status: 503 }
+  );
+}
+
 /**
  * 기관 관리자용 예산·한도 현황.
  *
@@ -34,18 +41,21 @@ export async function GET() {
   }
 
   const status = await checkTokenLimit(departmentId);
+  // 한도를 확인하지 못했으면 0·무제한으로 보이지 않는다(2026-11-18 — 예전엔 읽기 실패가 '사용 0'·'한도 없음'으로 보였다)
+  if (status.unverified) return unavailable();
 
-  const { data: dept } = await supabaseAdmin
+  const { data: dept, error: deptError } = await supabaseAdmin
     .from('departments')
     .select('organization_id')
     .eq('id', departmentId)
     .maybeSingle();
+  if (deptError) return unavailable();
 
   let billingType: string | null = null;
   let contractEndsAt: string | null = null;
 
   if (dept?.organization_id) {
-    const { data: contract } = await supabaseAdmin
+    const { data: contract, error: contractError } = await supabaseAdmin
       .from('contracts')
       .select('billing_type, expires_at')
       .eq('organization_id', dept.organization_id)
@@ -53,6 +63,7 @@ export async function GET() {
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (contractError) return unavailable();
 
     billingType = contract?.billing_type ?? null;
     contractEndsAt = contract?.expires_at ?? null;

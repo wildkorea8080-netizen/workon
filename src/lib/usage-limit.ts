@@ -1,8 +1,19 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { logSystem } from '@/lib/logger';
+
+/** 읽지 못해 확인하지 못한 단계 — 그 단계는 '허용'으로 열어 두었다(2026-11-18) */
+export type LimitGap =
+  | 'department' | 'organization' | 'monthly' | 'department_spend' | 'user' | 'user_spend'
+  | 'contract' | 'annual_spend' | 'tokens' | 'exception';
 
 export interface TokenLimitStatus {
   /** false면 요청을 차단해야 한다 */
   allowed: boolean;
+  /**
+   * 읽기가 실패해 확인하지 못한 단계(2026-11-18). 있으면 `allowed: true`는 판정이 아니라 열어 둔 것이다 —
+   * 대화는 막지 않지만(과금 집계 오류로 서비스가 멈추면 안 됨) 화면이 이 값을 '사용량'으로 보이면 안 된다
+   */
+  unverified?: LimitGap[];
   usedTokens: number;
   limitTokens: number;
   organizationName?: string;
@@ -66,8 +77,9 @@ interface ActiveContract {
 }
 
 /** 기관의 현재 유효한 계약. 여러 건이면 가장 최근 시작 건. */
-async function getActiveContract(organizationId: string): Promise<ActiveContract | null> {
-  const { data } = await supabaseAdmin
+/** 읽기 실패: `gaps`를 주면 거기 적고 null(대화 판정 — 열어 둠), 없으면 던진다(알림 — 모르면 보내지 않음) */
+async function getActiveContract(organizationId: string, gaps?: LimitGap[]): Promise<ActiveContract | null> {
+  const { data, error } = await supabaseAdmin
     .from('contracts')
     .select('id, billing_type, annual_budget_krw, budget_alert_percent, started_at, expires_at')
     .eq('organization_id', organizationId)
@@ -75,6 +87,11 @@ async function getActiveContract(organizationId: string): Promise<ActiveContract
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) {
+    if (!gaps) throw new Error(`contracts: ${error.code ?? error.message}`);
+    gaps.push('contract');
+    return null;
+  }
 
   return (data as ActiveContract) ?? null;
 }
@@ -89,7 +106,8 @@ async function getActiveContract(organizationId: string): Promise<ActiveContract
 async function checkAnnualBudget(
   organizationId: string,
   organizationName: string,
-  contract: ActiveContract
+  contract: ActiveContract,
+  gaps: LimitGap[],
 ): Promise<TokenLimitStatus | null> {
   const totalKrw = Number(contract.annual_budget_krw ?? 0);
   if (totalKrw <= 0) return null; // 금액 미설정이면 이 판정을 건너뛴다
@@ -105,6 +123,7 @@ async function checkAnnualBudget(
 
   if (error) {
     console.warn('[usage-limit] organization_spend_krw 실패, 허용으로 진행:', error.message);
+    gaps.push('annual_spend');
     return null;
   }
 
@@ -188,13 +207,15 @@ export function limitMessage(status: TokenLimitStatus): string {
 async function checkMonthlyBudget(
   departmentId: string,
   userId: string | undefined,
-  organizationName: string
+  organizationName: string,
+  gaps: LimitGap[],
 ): Promise<TokenLimitStatus | null> {
-  const { data: dept } = await supabaseAdmin
+  const { data: dept, error: deptError } = await supabaseAdmin
     .from('departments')
     .select('monthly_budget_krw, user_monthly_budget_krw')
     .eq('id', departmentId)
     .maybeSingle();
+  if (deptError) { gaps.push('monthly'); return null; }
 
   if (!dept) return null;
 
@@ -213,6 +234,7 @@ async function checkMonthlyBudget(
     if (error) {
       // 집계 실패로 서비스를 멈추지 않는다 (기관 한도와 같은 규칙)
       console.warn('[usage-limit] department_spend_krw 실패, 허용으로 진행:', error.message);
+      gaps.push('department_spend');
     } else {
       const usedKrw = Number(data ?? 0);
       if (usedKrw >= deptLimit) {
@@ -237,11 +259,13 @@ async function checkMonthlyBudget(
   // users.monthly_budget_krw가 있으면 그 값을, 없으면 부서 기본값을 쓴다.
   if (!userId) return null;
 
-  const { data: user } = await supabaseAdmin
+  const { data: user, error: userError } = await supabaseAdmin
     .from('users')
     .select('monthly_budget_krw')
     .eq('id', userId)
     .maybeSingle();
+  // 개인 한도를 못 읽으면 부서 기본값으로 본다(확인하지 못한 것으로 적음)
+  if (userError) gaps.push('user');
 
   const userLimit = Number(user?.monthly_budget_krw ?? dept.user_monthly_budget_krw ?? 0);
   if (userLimit <= 0) return null;
@@ -254,6 +278,7 @@ async function checkMonthlyBudget(
 
   if (error) {
     console.warn('[usage-limit] user_spend_krw 실패, 허용으로 진행:', error.message);
+    gaps.push('user_spend');
     return null;
   }
 
@@ -277,25 +302,78 @@ async function checkMonthlyBudget(
   return null;
 }
 
+const GAP_REPORT_INTERVAL_MS = 10 * 60 * 1000;
+const lastGapReport = new Map<string, number>();
+
+/**
+ * 한도를 확인하지 못해 열어 둔 것을 운영 기록에(2026-11-18). 예전엔 `console.warn` 한 줄이거나 아무것도 없어
+ * DB가 잠깐 이상한 동안 한도·정지가 걸리지 않아도 운영자가 몰랐다. 대화마다 남기면 장애 중 기록이 쏟아지므로 부서마다 10분에 한 번
+ */
+export async function reportLimitGaps(
+  departmentId: string,
+  gaps: LimitGap[],
+  log: (p: Parameters<typeof logSystem>[0]) => Promise<void> = logSystem,
+  nowMs = Date.now(),
+): Promise<boolean> {
+  if (gaps.length === 0) return false;
+  const last = lastGapReport.get(departmentId);
+  if (last !== undefined && nowMs - last < GAP_REPORT_INTERVAL_MS) return false;
+  if (lastGapReport.size > 1000) lastGapReport.clear();
+  lastGapReport.set(departmentId, nowMs);
+  await log({
+    level: 'error',
+    category: 'payment',
+    message: '사용 한도를 확인하지 못해 허용했습니다(한도·정지가 걸리지 않았을 수 있음)',
+    details: { department_id: departmentId, steps: Array.from(new Set(gaps)) },
+  }).catch(() => {});
+  return true;
+}
+
+/** 시험용 — 10분 기억을 비운다 */
+export function resetLimitGapReports(): void {
+  lastGapReport.clear();
+}
+
 export async function checkTokenLimit(
   departmentId: string,
   userId?: string
 ): Promise<TokenLimitStatus> {
+  const gaps: LimitGap[] = [];
+  let status: TokenLimitStatus;
   try {
-    const { data: dept } = await supabaseAdmin
+    status = await evaluateTokenLimit(departmentId, userId, gaps);
+  } catch {
+    // 한도 확인 실패가 채팅을 막아서는 안 된다
+    gaps.push('exception');
+    status = ALLOWED;
+  }
+  if (gaps.length === 0) return status;
+  await reportLimitGaps(departmentId, gaps);
+  return { ...status, unverified: Array.from(new Set(gaps)) };
+}
+
+async function evaluateTokenLimit(
+  departmentId: string,
+  userId: string | undefined,
+  gaps: LimitGap[],
+): Promise<TokenLimitStatus> {
+  {
+    const { data: dept, error: deptError } = await supabaseAdmin
       .from('departments')
       .select('organization_id')
       .eq('id', departmentId)
       .maybeSingle();
+    if (deptError) { gaps.push('department'); return ALLOWED; }
 
     const organizationId = dept?.organization_id;
     if (!organizationId) return ALLOWED;
 
-    const { data: org } = await supabaseAdmin
+    const { data: org, error: orgError } = await supabaseAdmin
       .from('organizations')
       .select('name, status, monthly_token_limit')
       .eq('id', organizationId)
       .maybeSingle();
+    if (orgError) { gaps.push('organization'); return ALLOWED; }
 
     if (!org) return ALLOWED;
 
@@ -312,13 +390,13 @@ export async function checkTokenLimit(
     // ── 부서·개인 월 한도 (0024) ──
     // 기관보다 좁은 층이라 먼저 본다. 기관 예산이 남아 있어도 부서나 개인이
     // 소진했으면 거기서 끊긴다.
-    const monthly = await checkMonthlyBudget(departmentId, userId, org.name);
+    const monthly = await checkMonthlyBudget(departmentId, userId, org.name, gaps);
     if (monthly) return monthly;
 
     // ── 연간 정액 계약이면 금액 기준으로 판정 ──
-    const contract = await getActiveContract(organizationId);
+    const contract = await getActiveContract(organizationId, gaps);
     if (contract?.billing_type === 'annual_fixed') {
-      const budgetStatus = await checkAnnualBudget(organizationId, org.name, contract);
+      const budgetStatus = await checkAnnualBudget(organizationId, org.name, contract, gaps);
       if (budgetStatus) {
         // 기관 예산이 남아 있으면 부서·개인 사용액도 함께 실어 보낸다.
         // 화면이 두 값을 한 번에 보여줄 수 있다.
@@ -336,7 +414,7 @@ export async function checkTokenLimit(
       p_from: monthStartISO(),
     });
 
-    if (error) return ALLOWED;
+    if (error) { gaps.push('tokens'); return ALLOWED; }
 
     const usedTokens = Number(tokens ?? 0);
 
@@ -351,9 +429,6 @@ export async function checkTokenLimit(
     }
 
     return { allowed: true, usedTokens, limitTokens, organizationName: org.name };
-  } catch {
-    // 한도 확인 실패가 채팅을 막아서는 안 된다
-    return ALLOWED;
   }
 }
 

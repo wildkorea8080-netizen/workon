@@ -63,6 +63,7 @@ export default function OrganizationManager() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [budgetError, setBudgetError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [logoVersion, setLogoVersion] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -86,7 +87,9 @@ export default function OrganizationManager() {
     } else {
       setError(orgRes.error?.message ?? '기관 정보를 불러오지 못했습니다.');
     }
-    if (budgetRes.ok) setBudget(budgetRes.data);
+    // 예산을 확인하지 못했으면 카드를 조용히 감추지 않고 알린다(2026-11-18)
+    if (budgetRes.ok) { setBudget(budgetRes.data); setBudgetError(null); }
+    else setBudgetError(budgetRes.error?.message ?? '예산 현황을 불러오지 못했습니다.');
   }, []);
 
   useEffect(() => {
@@ -225,6 +228,9 @@ export default function OrganizationManager() {
 
       {/* ── 예산·한도 현황 ── */}
       {budget && <BudgetCard budget={budget} />}
+      {!budget && budgetError && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">{budgetError}</div>
+      )}
 
       {/* ── 기관 정보 ── */}
       <div className="p-5 bg-white border border-slate-100 rounded-xl space-y-4">
