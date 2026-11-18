@@ -25,6 +25,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   user_role_changed: '직원 권한 바꾸기(관리자)',
   user_department_changed: '직원 부서 옮기기(관리자)',
   user_budget_changed: '개인 월 한도 바꾸기(관리자)',
+  user_invited: '직원 초대(관리자)',
+  user_invite_canceled: '직원 초대 취소(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
   app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_outbound_result_retried: '앱 결과 다시 보내기(직원)',
@@ -88,6 +90,9 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
       : clean(d.target_user_id, 40);
     if (target) parts.push(`대상: ${target}`);
   }
+
+  const invited = clean(d.invited_email, 100);
+  if (invited) parts.push(`초대: ${invited}${typeof d.invited_role === 'string' ? ` (${roleText(d.invited_role)})` : ''}`);
 
   if ('from_role' in d || 'to_role' in d) parts.push(`권한: ${roleText(d.from_role)} → ${roleText(d.to_role)}`);
 

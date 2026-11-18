@@ -104,7 +104,14 @@ export default function UsersManager() {
   const handleCancelInvite = async (id: string) => {
     if (!confirm('이 초대를 취소하시겠습니까?')) return;
     try {
-      await fetch(`/api/admin/invite/${id}`, { method: 'DELETE' });
+      // 실패했는데 목록에서만 사라지지 않게 — 응답을 본다(이미 수락된 초대는 취소되지 않는다)
+      const res = await fetch(`/api/admin/invite/${id}`, { method: 'DELETE' });
+      const result = await res.json().catch(() => null);
+      if (!result?.ok) {
+        alert(result?.error?.message || '초대 취소에 실패했습니다.');
+        await loadData();
+        return;
+      }
       setInvitations(prev => prev.filter(i => i.id !== id));
     } catch { alert('초대 취소에 실패했습니다.'); }
   };
