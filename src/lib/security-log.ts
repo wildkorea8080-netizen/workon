@@ -71,7 +71,10 @@ export type SecurityEventType =
   | 'users_bulk_created'
   /** 기관 전체 관리자가 접속 허용 IP를 바꿈 / 기관 정보(기관명·로그인 경로·AI 고지·테마 색·로고)를 바꿈 (2026-11-18) */
   | 'org_access_ips_changed'
-  | 'organization_updated';
+  | 'organization_updated'
+  /** 직원이 대화를 로그인 없이 볼 수 있는 링크로 공유함 / 공유를 멈춤 (2026-11-18) */
+  | 'conversation_shared'
+  | 'conversation_unshared';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

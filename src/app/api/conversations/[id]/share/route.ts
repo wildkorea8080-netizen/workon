@@ -3,6 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { randomBytes } from 'crypto';
 import { APP_URL } from '@/lib/config';
+import { logSecurityEvent } from '@/lib/security-log';
 
 function nanoid12() {
   return randomBytes(9).toString('base64url').slice(0, 12);
@@ -13,55 +14,69 @@ function shareUrl(token: string) {
   return `${APP_URL}/shared/${token}`;
 }
 
+const fail = (message: string, status: number) =>
+  NextResponse.json({ ok: false, error: { message } }, { status });
+
+/**
+ * 공유 시작(또는 다시 복사).
+ *
+ * 2026-11-18:
+ * - **공유는 그때까지의 대화다**(`metadata.shared_at`). 예전에는 링크가 대화의 '지금'을 보여 줘, 공유한 뒤 이어 쓴 대화가
+ *   링크를 받은 사람에게 그대로 보였다(로그인 없이). 이제 공개 조회는 공유한 때까지의 메시지만 준다 —
+ *   이후 대화를 보이려면 '공유 링크 복사'를 다시 누른다(주소는 그대로, 범위만 지금까지로).
+ * - 공유한 것을 보안 로그에 남긴다(`conversation_shared` — 대화 id만, 제목·내용 없음). 로그인 없이 열리는 링크를 누가 언제 만들었는지
+ *   어디에도 남지 않았다.
+ */
 export async function POST(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
 
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from('conversations')
-      .select('id, share_token, is_shared')
+      .select('id, share_token, is_shared, department_id, metadata')
       .eq('id', params.id)
       .eq('user_id', session.user.id)
       .maybeSingle();
 
-    if (fetchError || !existing) {
-      return NextResponse.json(
-        { ok: false, error: { message: '대화를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
+    if (fetchError) return fail('대화를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
+    if (!existing) return fail('대화를 찾을 수 없습니다.', 404);
 
-    // 이미 공유 토큰이 있으면 재사용
-    const token = existing.share_token ?? nanoid12();
+    const wasShared = Boolean(existing.is_shared && existing.share_token);
+    // 공유 중이면 같은 주소를 쓴다(중단하면 주소를 버리므로 여기 남은 토큰은 살아 있는 링크다)
+    const token = wasShared ? (existing.share_token as string) : nanoid12();
+    const sharedAt = new Date().toISOString();
+    const metadata =
+      existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+        ? (existing.metadata as Record<string, unknown>)
+        : {};
 
-    const { error } = await supabaseAdmin
+    const { data: updated, error } = await supabaseAdmin
       .from('conversations')
-      .update({ share_token: token, is_shared: true })
-      .eq('id', params.id);
+      .update({ share_token: token, is_shared: true, metadata: { ...metadata, shared_at: sharedAt } })
+      .eq('id', params.id)
+      .eq('user_id', session.user.id)
+      .select('id');
 
-    if (error) {
-      return NextResponse.json(
-        { ok: false, error: { message: '공유 링크 생성 중 오류가 발생했습니다.' } },
-        { status: 500 }
-      );
-    }
+    if (error) return fail('공유 링크 생성 중 오류가 발생했습니다.', 500);
+    if (((updated ?? []) as unknown[]).length === 0) return fail('대화를 찾을 수 없습니다.', 404);
 
-    return NextResponse.json({ ok: true, data: { shareUrl: shareUrl(token), token } });
+    // 기록 실패는 공유를 되돌리지 않는다(실패는 운영 기록에 남는다)
+    await logSecurityEvent(
+      existing.department_id ?? session.user.departmentId ?? null,
+      session.user.id,
+      'conversation_shared',
+      { conversation_id: existing.id, ...(wasShared ? { share_updated: true } : {}) },
+      wasShared ? 'low' : 'medium'
+    );
+
+    return NextResponse.json({ ok: true, data: { shareUrl: shareUrl(token), token, sharedAt, updated: wasShared } });
   } catch (error) {
     console.error('[conversation share]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return fail('서버 오류가 발생했습니다.', 500);
   }
 }
 
@@ -78,40 +93,30 @@ export async function GET(
 ) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
 
     const { data, error } = await supabaseAdmin
       .from('conversations')
-      .select('share_token, is_shared')
+      .select('share_token, is_shared, metadata')
       .eq('id', params.id)
       .eq('user_id', session.user.id)
       .maybeSingle();
 
-    if (error || !data) {
-      return NextResponse.json(
-        { ok: false, error: { message: '대화를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
+    if (error || !data) return fail('대화를 찾을 수 없습니다.', 404);
 
+    const sharedAt = (data.metadata as { shared_at?: unknown } | null)?.shared_at;
     return NextResponse.json({
       ok: true,
       data: {
         isShared: Boolean(data.is_shared),
         shareUrl: data.is_shared && data.share_token ? shareUrl(data.share_token) : null,
+        // 링크에 보이는 범위 — 이때까지의 대화(없으면 이 기능 전에 공유한 것: 대화 전체)
+        sharedAt: data.is_shared && typeof sharedAt === 'string' ? sharedAt : null,
       },
     });
   } catch (error) {
     console.error('[conversation share GET]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return fail('서버 오류가 발생했습니다.', 500);
   }
 }
 
@@ -134,47 +139,50 @@ export async function DELETE(
 ) {
   try {
     const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
+    if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
 
     // 소유자만 중단할 수 있다. 남의 대화를 닫아 버리면 안 된다.
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from('conversations')
-      .select('id')
+      .select('id, is_shared, department_id, metadata')
       .eq('id', params.id)
       .eq('user_id', session.user.id)
       .maybeSingle();
 
-    if (fetchError || !existing) {
-      return NextResponse.json(
-        { ok: false, error: { message: '대화를 찾을 수 없습니다.' } },
-        { status: 404 }
-      );
-    }
+    if (fetchError) return fail('대화를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
+    if (!existing) return fail('대화를 찾을 수 없습니다.', 404);
+
+    const metadata =
+      existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+        ? { ...(existing.metadata as Record<string, unknown>) }
+        : {};
+    delete metadata.shared_at;
 
     const { error } = await supabaseAdmin
       .from('conversations')
-      .update({ is_shared: false, share_token: null })
-      .eq('id', params.id);
+      .update({ is_shared: false, share_token: null, metadata })
+      .eq('id', params.id)
+      .eq('user_id', session.user.id);
 
     if (error) {
       console.error('[conversation share DELETE]', error);
-      return NextResponse.json(
-        { ok: false, error: { message: '공유 중단 중 오류가 발생했습니다.' } },
-        { status: 500 }
+      return fail('공유 중단 중 오류가 발생했습니다.', 500);
+    }
+
+    // 공유 중이던 것을 멈췄을 때만 남긴다(이미 멈춘 대화에 다시 눌러도 기록은 없다)
+    if (existing.is_shared) {
+      await logSecurityEvent(
+        existing.department_id ?? session.user.departmentId ?? null,
+        session.user.id,
+        'conversation_unshared',
+        { conversation_id: existing.id },
+        'low'
       );
     }
 
     return NextResponse.json({ ok: true, data: { isShared: false } });
   } catch (error) {
     console.error('[conversation share DELETE]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '서버 오류가 발생했습니다.' } },
-      { status: 500 }
-    );
+    return fail('서버 오류가 발생했습니다.', 500);
   }
 }

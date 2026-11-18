@@ -31,6 +31,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   users_bulk_created: '직원 일괄 등록(관리자)',
   org_access_ips_changed: '접속 허용 IP 바꾸기(관리자)',
   organization_updated: '기관 정보 바꾸기(관리자)',
+  conversation_shared: '대화 공개 링크 만들기(직원)',
+  conversation_unshared: '대화 공개 링크 중단(직원)',
   department_created: '부서 만들기(관리자)',
   department_updated: '부서 고치기(관리자)',
   department_deleted: '부서 삭제(관리자)',
@@ -186,6 +188,9 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
   if ('from_budget_krw' in d || 'to_budget_krw' in d) {
     parts.push(`개인 월 한도: ${budgetText(d.from_budget_krw)} → ${budgetText(d.to_budget_krw)}`);
   }
+
+  // 대화 공개 공유 — 이미 공유 중인 링크의 범위를 지금까지로 넓힌 것
+  if (d.share_updated === true) parts.push('공유 범위를 지금까지로 갱신');
 
   if (d.impersonating === true) parts.push('대리 접근 중');
 
