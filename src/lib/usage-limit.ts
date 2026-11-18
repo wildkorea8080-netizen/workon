@@ -597,6 +597,43 @@ export async function myMonthlyBudget(userId: string): Promise<MyBudgetStatus | 
   return { usedKrw, limitKrw, percent: Math.floor((usedKrw / limitKrw) * 100), exhausted: usedKrw >= limitKrw };
 }
 
+/**
+ * 내 사용현황에 보일 **부서 월 한도**(2026-11-18). 부서 한도는 판정에서 가장 먼저 보고, 닿으면 그 부서 직원 전체가 멈춘다 —
+ * 그런데 막힌 직원이 볼 수 있는 곳이 없었다(안내 문구에 한 번 나올 뿐, 닿기 전에는 얼마나 남았는지 알 길이 없음).
+ * 규칙은 판정(`checkMonthlyBudget`의 부서 부분)과 같다 — **내 부서**의 `monthly_budget_krw`와 `department_spend_krw`(한국 시간 이번 달).
+ * 상위 부서의 한도는 보지 않는다(판정도 보지 않는다). 한도가 없으면 null. **못 읽으면 던진다**(0원으로 꾸미지 않게).
+ * 부서 전체의 합계 금액만 낸다 — 누가 얼마를 썼는지는 내지 않는다.
+ */
+export async function myDepartmentBudget(userId: string): Promise<MyBudgetStatus | null> {
+  const { data: user, error: userError } = await supabaseAdmin
+    .from('users')
+    .select('department_id')
+    .eq('id', userId)
+    .maybeSingle();
+  if (userError) throw userError;
+  if (!user?.department_id) return null;
+
+  const { data: dept, error: deptError } = await supabaseAdmin
+    .from('departments')
+    .select('monthly_budget_krw')
+    .eq('id', user.department_id)
+    .maybeSingle();
+  if (deptError) throw deptError;
+
+  const limitKrw = Number(dept?.monthly_budget_krw ?? 0);
+  if (!(limitKrw > 0)) return null;
+
+  const { data, error } = await supabaseAdmin.rpc('department_spend_krw', {
+    p_department_id: user.department_id,
+    p_from: monthStartISO(),
+    p_to: new Date().toISOString(),
+  });
+  if (error) throw error;
+  const usedKrw = Number(data ?? 0);
+  if (!Number.isFinite(usedKrw)) throw new Error('department_spend_krw: not a number');
+  return { usedKrw, limitKrw, percent: Math.floor((usedKrw / limitKrw) * 100), exhausted: usedKrw >= limitKrw };
+}
+
 export interface UserBudgetStatus {
   userId: string;
   periodKey: string;

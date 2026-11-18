@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstMonthStart } from '@/lib/kst-time';
 import { sumMyTokens } from '@/lib/my-usage-tokens';
-import { myMonthlyBudget, type MyBudgetStatus } from '@/lib/usage-limit';
+import { myMonthlyBudget, myDepartmentBudget, type MyBudgetStatus } from '@/lib/usage-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,6 +131,15 @@ export async function GET(request: NextRequest) {
       budgetUnknown = true;
     }
 
+    // 5-2) 부서 월 한도 — 닿으면 부서 직원 전체가 멈추는데 볼 곳이 없었다(2026-11-18). 못 읽으면 '확인하지 못함'
+    let departmentBudget: MyBudgetStatus | null = null;
+    let departmentBudgetUnknown = false;
+    try {
+      departmentBudget = await myDepartmentBudget(userId);
+    } catch {
+      departmentBudgetUnknown = true;
+    }
+
     // ── 집계 ──────────────────────────────────────────────
 
     // 일별 차트 (기간 내 모든 날짜 포함)
@@ -195,6 +204,8 @@ export async function GET(request: NextRequest) {
           streakDays,
           budget,
           budgetUnknown,
+          departmentBudget,
+          departmentBudgetUnknown,
         },
         dailyChart,
         agentStats,

@@ -29,6 +29,9 @@ interface Summary {
   /** 개인 월 한도(없으면 null) — 판정과 같은 규칙으로 서버가 센다 */
   budget?: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean } | null;
   budgetUnknown?: boolean;
+  // 부서 월 한도(2026-11-18) — 부서 직원이 함께 쓰는 한도. 없으면 null
+  departmentBudget?: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean } | null;
+  departmentBudgetUnknown?: boolean;
 }
 
 interface DailyPoint {
@@ -70,14 +73,14 @@ function formatDateFull(isoStr: string) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function BudgetCard({ budget }: { budget: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean } }) {
+function BudgetCard({ budget, scope = 'user' }: { budget: { usedKrw: number; limitKrw: number; percent: number; exhausted: boolean }; scope?: 'user' | 'department' }) {
   const tone = budget.exhausted ? 'red' : budget.percent >= 80 ? 'amber' : 'slate';
   const bar = tone === 'red' ? 'bg-red-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-emerald-500';
   const text = tone === 'red' ? 'text-red-600' : tone === 'amber' ? 'text-amber-700' : 'text-slate-700';
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
       <div className="flex items-baseline justify-between gap-3 mb-3">
-        <h2 className="text-sm font-bold text-slate-700">이번 달 개인 한도</h2>
+        <h2 className="text-sm font-bold text-slate-700">{scope === 'department' ? '이번 달 부서 한도' : '이번 달 개인 한도'}</h2>
         <p className={`text-sm font-semibold ${text}`}>
           {Math.round(budget.usedKrw).toLocaleString()}원 / {Math.round(budget.limitKrw).toLocaleString()}원 ({budget.percent}%)
         </p>
@@ -86,9 +89,13 @@ function BudgetCard({ budget }: { budget: { usedKrw: number; limitKrw: number; p
         <div className={`h-full rounded-full ${bar}`} style={{ width: `${Math.min(budget.percent, 100)}%` }} />
       </div>
       <p className="mt-3 text-xs text-slate-500">
-        {budget.exhausted
-          ? '한도에 닿아 다음 달 1일까지 이용이 멈췄습니다. 더 써야 하면 기관 관리자에게 개인 한도 조정을 요청하세요.'
-          : '한도에 닿으면 다음 달 1일까지 이용이 멈춥니다. 매달 1일(한국 시간)에 다시 0원부터 셉니다.'}
+        {scope === 'department'
+          ? budget.exhausted
+            ? '부서 한도에 닿아 다음 달 1일까지 부서 전체의 이용이 멈췄습니다. 더 써야 하면 부서 관리자에게 부서 한도 조정을 요청하세요.'
+            : '부서 직원이 함께 쓰는 한도입니다(부서 전체의 합계). 한도에 닿으면 다음 달 1일까지 부서 전체의 이용이 멈춥니다.'
+          : budget.exhausted
+            ? '한도에 닿아 다음 달 1일까지 이용이 멈췄습니다. 더 써야 하면 기관 관리자에게 개인 한도 조정을 요청하세요.'
+            : '한도에 닿으면 다음 달 1일까지 이용이 멈춥니다. 매달 1일(한국 시간)에 다시 0원부터 셉니다.'}
       </p>
     </div>
   );
@@ -210,6 +217,14 @@ export default function MyStatsPage() {
         {!loading && data?.summary.budgetUnknown && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
             이번 달 개인 한도 사용액을 지금 확인하지 못했습니다. 잠시 뒤 다시 열어 주세요.
+          </div>
+        )}
+
+        {/* 부서 월 한도 — 닿으면 부서 직원 전체가 멈춘다 */}
+        {!loading && data?.summary.departmentBudget && <BudgetCard budget={data.summary.departmentBudget} scope="department" />}
+        {!loading && data?.summary.departmentBudgetUnknown && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
+            이번 달 부서 한도 사용액을 지금 확인하지 못했습니다. 잠시 뒤 다시 열어 주세요.
           </div>
         )}
 
