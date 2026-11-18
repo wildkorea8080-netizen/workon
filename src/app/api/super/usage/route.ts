@@ -5,6 +5,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { sumCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstHour, kstMonthStart } from '@/lib/kst-time';
 import { dbErrorText } from '@/lib/db-error-text';
+import { loadChatTokensByOrg, sumByOrg } from '@/lib/org-chat-tokens';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -46,9 +47,11 @@ export async function GET(request: NextRequest) {
 
   try {
     // 기관 목록 (한도 포함)
-    const { data: orgs } = await supabaseAdmin
+    const { data: orgs, error: orgError } = await supabaseAdmin
       .from('organizations')
       .select('id, name, plan, monthly_token_limit, status');
+    // 못 읽으면 기관 이름·한도 없이(전부 '알 수 없음'·'한도 없음') 보이지 않는다(2026-11-18)
+    if (orgError) throw orgError;
     type OrgRow = {
       id: string;
       name: string;
@@ -74,6 +77,13 @@ export async function GET(request: NextRequest) {
     if (error) throw error;
 
     const rows = logs ?? [];
+
+    // 한도 사용률은 고른 기간이 아니라 **이번 달**(한국 시간 1일부터 chat_message 토큰 — 한도 판정 `organization_chat_tokens`와 같은 셈)로(2026-11-18).
+    // 예전엔 고른 기간의 토큰 ÷ 월 한도라 '오늘'·'이번 주'는 낮게, 두 달에 걸친 직접 고른 기간은 높게 보였다
+    const monthTokens = period === 'month' && orgId === 'all'
+      ? sumByOrg(rows)
+      : await loadChatTokensByOrg(kstMonthStart(new Date(), 0).toISOString());
+    if (!monthTokens) throw new Error('usage_logs: month tokens');
 
     // ── 집계 ────────────────────────────────────────────────
     let totalConversations = 0;
@@ -142,6 +152,7 @@ export async function GET(request: NextRequest) {
         const org  = orgMap.get(oid);
         const limit = org?.monthly_token_limit ?? 0;
         const total = u.inputTokens + u.outputTokens;
+        const used = monthTokens.get(oid) ?? 0;
         return {
           orgId: oid, orgName: org?.name ?? '알 수 없음', plan: org?.plan ?? '—',
           conversations: u.conversations, totalTokens: total,
@@ -149,7 +160,8 @@ export async function GET(request: NextRequest) {
           activeUsers: u.users.size,
           estimatedCost: orgCost.get(oid) ?? 0,
           tokenLimit: limit,
-          usagePercent: limit > 0 ? Math.round((total / limit) * 100) : 0,
+          monthTokens: used,
+          usagePercent: limit > 0 ? Math.round((used / limit) * 100) : 0,
         };
       })
       .sort((a, b) => b.totalTokens - a.totalTokens);

@@ -30,6 +30,7 @@ export default function UsagePage() {
   const [alerts, setAlerts]       = useState<any>(null);
   const [realtime, setRealtime]   = useState<any>(null);
   const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<any>(null);
   const realtimeRef = useRef<NodeJS.Timeout>();
 
@@ -45,11 +46,13 @@ export default function UsagePage() {
     if (period === 'custom' && startDate) p.set('startDate', startDate);
     if (period === 'custom' && endDate)   p.set('endDate',   endDate);
     const [main, alertRes] = await Promise.all([
-      fetch(`/api/super/usage?${p}`).then(r => r.json()),
-      fetch('/api/super/usage/alerts').then(r => r.json()),
+      fetch(`/api/super/usage?${p}`).then(r => r.json()).catch(() => null),
+      fetch('/api/super/usage/alerts').then(r => r.json()).catch(() => null),
     ]);
-    if (main.ok)    setData(main.data);
-    if (alertRes.ok) setAlerts(alertRes.data);
+    // 못 읽었으면 지난 숫자·'데이터 없음'으로 두지 않고 알린다(2026-11-18)
+    if (main?.ok) { setData(main.data); setLoadError(null); }
+    else { setData(null); setLoadError('사용량을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'); }
+    if (alertRes?.ok) setAlerts(alertRes.data);
     setLoading(false);
   }, [period, orgId, startDate, endDate]);
 
@@ -93,7 +96,7 @@ export default function UsagePage() {
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = [
-      '기관명,플랜,대화수,입력토큰,출력토큰,비용(USD),활성사용자,한도사용률(%)',
+      '기관명,플랜,대화수,입력토큰,출력토큰,비용(USD),활성사용자,이번달한도사용률(%)',
       ...data.orgStats.map((s: any) =>
         [s.orgName, s.plan, s.conversations, s.inputTokens, s.outputTokens, s.estimatedCost, s.activeUsers, s.usagePercent].map(q).join(',')
       ),
@@ -267,6 +270,10 @@ export default function UsagePage() {
         </div>
       </div>
 
+      {loadError && (
+        <div className="p-3 bg-red-950/30 border border-red-800/40 rounded-xl text-sm text-red-300">{loadError}</div>
+      )}
+
       {/* 한도 알림 섹션 */}
       {alerts && (alerts.exceeded?.length > 0 || alerts.warning?.length > 0) && (
         <div className="space-y-3">
@@ -349,7 +356,7 @@ export default function UsagePage() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-700/50">
               <tr>
-                {['기관명','플랜','대화수','입력 토큰','출력 토큰','비용(USD)','활성 사용자','한도 사용률'].map(h => (
+                {['기관명','플랜','대화수','입력 토큰','출력 토큰','비용(USD)','활성 사용자','이번 달 한도 사용률'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500">{h}</th>
                 ))}
               </tr>
