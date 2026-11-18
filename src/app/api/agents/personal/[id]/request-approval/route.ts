@@ -3,7 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import { canRequestOfficial } from '@/lib/agent-permissions';
-import { loadAgentAccess } from '@/lib/agent-store';
+import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
 import { jsonError } from '@/lib/agent-route-helpers';
 
 /**
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // 메모는 관리자 승인 화면에 그대로 보인다 — 500자에서 자른다
     const note: string | null = typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 500) : null;
 
-    const { error } = await supabaseAdmin
+    const { data: requested, error } = await supabaseAdmin
       .from('agents')
       .update({
         approval_status: 'pending',
@@ -39,9 +39,20 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         approval_version: agent.version,
         approval_requested_by: actor.userId,
       })
-      .eq('id', params.id);
+      .eq('id', params.id)
+      .is('deleted_at', null)
+      .select('id');
 
     if (error) return jsonError('승인 신청 중 오류가 발생했습니다.', 500);
+    // 그 사이 지워졌으면 신청된 것이 없다 — 성공으로 답하지 않는다
+    if (((requested ?? []) as unknown[]).length === 0) return jsonError('비서를 찾을 수 없습니다.', 404);
+
+    // 누가 언제 어느 판을 신청했는지를 변경 기록에(2026-11-18) — 신청 메모는 반려하면 사유로 덮인다
+    await recordAgentEvent(params.id, 'tier', actor.userId, {
+      event: 'official_requested',
+      requested_version: agent.version,
+      ...(note ? { note } : {}),
+    });
 
     return NextResponse.json({ ok: true, data: { success: true, message: '관리자에게 신청됐습니다.' } });
   } catch (error) {

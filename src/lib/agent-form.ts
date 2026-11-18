@@ -122,6 +122,12 @@ export function describeHistoryItem(item: HistoryItemLike): string {
     case 'revert':
       return `판 ${String(d.reverted_from)}로 되돌림`;
     case 'tier': {
+      // 공식 등록 신청·반려(2026-11-18) — 단계는 그대로이고 사건만 남는다
+      if (d.event === 'official_requested') return '공식 등록을 신청함';
+      if (d.event === 'official_rejected') {
+        const note = typeof d.note === 'string' ? d.note.trim() : '';
+        return note ? `공식 등록 신청이 반려됨 — ${note}` : '공식 등록 신청이 반려됨';
+      }
       const from = TIER_LABELS[d.from as keyof typeof TIER_LABELS] ?? String(d.from);
       const to = TIER_LABELS[d.to as keyof typeof TIER_LABELS] ?? String(d.to);
       return `${from} → ${to}`;

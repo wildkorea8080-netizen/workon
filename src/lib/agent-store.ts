@@ -112,10 +112,14 @@ export async function changeAgentTier(args: {
   return (data as { ok: boolean }).ok ? { ok: true } : { ok: false, reason: 'not_found' };
 }
 
-/** 판 번호가 없는 기록(문서 올림·지움, 지움). 실패해도 본 작업은 되돌리지 않는다. */
+/**
+ * 판 번호가 없는 기록(문서 올림·지움, 지움, 공식 등록 신청·반려). 실패해도 본 작업은 되돌리지 않는다.
+ * 공식 등록 신청·반려는 `kind: 'tier'`에 `detail.event`(`official_requested`·`official_rejected`)로 남긴다 —
+ * 단계가 실제로 바뀐 기록(`change_agent_tier`의 `from`·`to`)과 같은 갈래이고, 새 종류를 더하려면 DB CHECK를 고쳐야 한다.
+ */
 export async function recordAgentEvent(
   agentId: string,
-  kind: 'document_added' | 'document_removed' | 'deleted',
+  kind: 'document_added' | 'document_removed' | 'deleted' | 'tier',
   actorId: string | null,
   detail: Record<string, unknown> = {}
 ): Promise<void> {
