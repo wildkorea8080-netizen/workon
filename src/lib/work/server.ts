@@ -74,6 +74,7 @@ export async function getWorkActor(session: Session | null, ctx: WorkContext): P
     departmentId: scope.departmentId,
     isAdmin: scope.isAdmin,
     managedDepartmentIds: scope.managedDepartmentIds,
+    managesWholeOrganization: scope.managesWholeOrganization === true,
   };
 }
 

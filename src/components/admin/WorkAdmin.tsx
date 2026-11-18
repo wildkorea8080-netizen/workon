@@ -40,6 +40,8 @@ export default function WorkAdmin() {
   const [templates, setTemplates] = useState<AdminTemplate[]>([]);
   const [chat, setChat] = useState<ChatTemplate[]>([]);
   const [overview, setOverview] = useState<Overview[]>([]);
+  // 기관 업무 설정(켜고 끄기·기관 양식)을 바꿀 수 있는 사람인가 — 기관 전체 관리자만. 서버가 다시 본다
+  const [canManage, setCanManage] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,12 +51,13 @@ export default function WorkAdmin() {
   const [attestNote, setAttestNote] = useState('');
 
   const load = useCallback(async () => {
-    const [i, t, o] = await Promise.all([call<Installation[]>('/api/admin/work-installations'), call<{ templates: AdminTemplate[]; chatTemplates: ChatTemplate[] }>('/api/admin/work-templates'), call<Overview[]>('/api/admin/work-overview')]);
+    const [i, t, o] = await Promise.all([call<Installation[]>('/api/admin/work-installations'), call<{ templates: AdminTemplate[]; chatTemplates: ChatTemplate[]; canManage?: boolean }>('/api/admin/work-templates'), call<Overview[]>('/api/admin/work-overview')]);
     if (!i.ok) return setError(i.message);
     setInstalls(i.data);
     if (t.ok) {
       setTemplates(t.data.templates);
       setChat(t.data.chatTemplates);
+      setCanManage(t.data.canManage !== false);
     }
     if (o.ok) setOverview(o.data);
   }, []);
@@ -92,6 +95,11 @@ export default function WorkAdmin() {
       </div>
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
       {notice && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</p>}
+      {!canManage && (
+        <p role="note" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          업무 켜고 끄기와 기관 양식은 기관 전체를 관리하는 관리자(최상위 부서 소속)만 바꿀 수 있습니다. 목록은 볼 수 있고, 업무 현황은 관리 범위(내 부서와 하위 부서)의 작업만 셉니다.
+        </p>
+      )}
 
       <section className="rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-lg font-semibold">업무 비서 사용</h2>
@@ -104,7 +112,7 @@ export default function WorkAdmin() {
                 <span className="text-gray-400">준비 중</span>
               ) : (
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={w.status === 'available'} disabled={busy} onChange={(e) => run(call('/api/admin/work-installations', json('PATCH', { key: w.key, enabled: e.target.checked })), `${w.name}: ${e.target.checked ? '사용' : '사용 안 함'}으로 바꿨습니다.`)} />
+                  <input type="checkbox" checked={w.status === 'available'} disabled={busy || !canManage} onChange={(e) => run(call('/api/admin/work-installations', json('PATCH', { key: w.key, enabled: e.target.checked })), `${w.name}: ${e.target.checked ? '사용' : '사용 안 함'}으로 바꿨습니다.`)} />
                   {w.status === 'available' ? '사용' : '사용 안 함'}
                 </label>
               )}
@@ -127,7 +135,7 @@ export default function WorkAdmin() {
             <span className="text-gray-700">파일</span>
             <input type="file" accept=".hwpx,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="mt-1" />
           </label>
-          <button type="submit" disabled={busy || !file} className="rounded bg-[#003087] px-4 py-2 font-semibold text-white disabled:bg-gray-300">
+          <button type="submit" disabled={busy || !file || !canManage} className="rounded bg-[#003087] px-4 py-2 font-semibold text-white disabled:bg-gray-300">
             등록·시험 생성
           </button>
         </form>
@@ -159,7 +167,7 @@ export default function WorkAdmin() {
                   <span key={f.key} className="mr-3">{f.name}: {f.missing.length ? <span className="text-amber-700">필요한 칸 없음({f.missing.join(', ')})</span> : <span className="text-emerald-700">쓸 수 있음</span>}</span>
                 ))}
               </div>
-              {t.status !== 'retired' && (
+              {t.status !== 'retired' && canManage && (
                 <div className="mt-2 flex flex-wrap gap-3 text-xs">
                   <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'test' })), '시험 생성을 다시 했습니다.')} className="text-[#003087] underline">시험 생성 다시</button>
                   {t.status === 'mapped' && <button disabled={busy} onClick={() => { setAttestFor(t.id); setAttestNote(''); }} className="text-[#003087] underline">한글에서 확인함 기록</button>}

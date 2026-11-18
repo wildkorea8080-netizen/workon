@@ -441,11 +441,17 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
       if (error) fail(error);
       return ((data ?? []) as unknown as { id: string; name: string; file_name: string; storage_path: string; agents: { name: string } }[]).map((r) => ({ id: r.id, name: r.name, file_name: r.file_name, storage_path: r.storage_path, agent_name: r.agents.name }));
     },
-    async workStats(organizationId, sinceIso) {
+    async workStats(organizationId, sinceIso, departmentIds = null) {
+      // 관리 범위가 비었으면 볼 작업이 없다
+      if (departmentIds && departmentIds.length === 0) return [];
       // 실행 ↔ 작업은 (task_id, organization_id) 겹 외래 키라 PostgREST 끼워 넣기를 쓰지 않고 둘을 따로 읽어 맞춘다
       // 한도 1만(limit)은 API 상한(1,000행)을 넘지 못한다 — 쪽마다 끝까지(상한 50,000행)
       const [tasks, runs] = await Promise.all([
-        pagedRows<{ id: string; workflow_key: string; status: string }>((a, b, w) => db.from('work_tasks').select('id, workflow_key, status', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId).order('id').range(a, b)),
+        pagedRows<{ id: string; workflow_key: string; status: string }>((a, b, w) => {
+          const q = db.from('work_tasks').select('id, workflow_key, status', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId);
+          // 관리 범위(부서)로 좁힌다 — 실패 실행은 아래에서 이 작업들의 것만 센다(keyOf)
+          return (departmentIds ? q.in('department_id', departmentIds) : q).order('id').range(a, b);
+        }),
         pagedRows<{ task_id: string; error: { code?: string } | null }>((a, b, w) => db.from('work_runs').select('task_id, error', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId).eq('status', 'failed').gte('finished_at', sinceIso).order('id').range(a, b)),
       ]);
       if (tasks.error) fail(tasks.error);

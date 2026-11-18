@@ -51,7 +51,7 @@ describe.skipIf(!url)('P6 기관 운영(실제 Postgres)', () => {
     await pool.query('INSERT INTO departments (id, name, slug, organization_id) VALUES ($1, $2, $3, $4)', [deptId, '기획팀', `d-${deptId.slice(0, 8)}`, orgId]);
     await pool.query("INSERT INTO users (id, email, department_id, role) VALUES ($1, $2, $3, 'ADMIN'), ($4, $5, $3, 'USER'), ($6, $7, $3, 'USER')", [a, `${a}@t.local`, deptId, s, `${s}@t.local`, o, `${o}@t.local`]);
     await pool.query('INSERT INTO work_org_settings (organization_id, home_enabled, new_tasks_enabled) VALUES ($1, true, true)', [orgId]);
-    adminActor = { userId: a, organizationId: orgId, departmentId: deptId, isAdmin: true, managedDepartmentIds: [deptId] };
+    adminActor = { userId: a, organizationId: orgId, departmentId: deptId, isAdmin: true, managedDepartmentIds: [deptId], managesWholeOrganization: true };
     staff = { userId: s, organizationId: orgId, departmentId: deptId, isAdmin: false, managedDepartmentIds: [] };
     other = { userId: o, organizationId: orgId, departmentId: deptId, isAdmin: false, managedDepartmentIds: [] };
   });
@@ -125,6 +125,12 @@ describe.skipIf(!url)('P6 기관 운영(실제 Postgres)', () => {
     expect(overview.find((o) => o.workflow_key === 'meeting')).toMatchObject({ name: '회의·위원회 정리', tasks: 1 });
     expect(JSON.stringify(overview)).not.toContain('끄기 전 회의'); // 제목·내용 없음
     await expect(admin.workOverview(ctx, staff)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    // (2026-11-18) 하위 부서 관리자 — 업무를 끄지 못하고, 현황은 관리 범위 부서의 작업만 센다
+    const subAdmin = { ...adminActor, managesWholeOrganization: false };
+    await expect(admin.setInstallation(ctx, subAdmin, 'meeting', false)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect((await admin.workOverview(ctx, subAdmin)).find((o) => o.workflow_key === 'meeting')).toMatchObject({ tasks: 1 });
+    expect(await admin.workOverview(ctx, { ...subAdmin, managedDepartmentIds: [randomUUID()] })).toEqual([]);
   });
 
   it('M4 — 대화에서 만든 파일·대화 첨부를 본인만 원자료로 가져오고, 원래 기록이 사라져도 원자료는 남는다', async () => {

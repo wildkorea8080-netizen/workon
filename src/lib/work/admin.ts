@@ -23,6 +23,19 @@ export function requireWorkAdmin(actor: WorkActor) {
   if (!actor.isAdmin) throw new WorkError('FORBIDDEN', '기관 관리자만 할 수 있습니다.', 403);
 }
 
+export const WORK_WHOLE_ORG_ONLY =
+  '기관 업무 설정(업무 켜고 끄기·기관 양식)은 기관 전체를 관리하는 관리자(최상위 부서 소속)만 바꿀 수 있습니다.';
+
+/**
+ * 기관 업무 설정을 **바꾸는** 일은 기관 전체 관리자만(2026-11-18). 업무 켜고 끄기와 기관 양식은 기관의 모든 직원에게 걸리는데,
+ * 예전에는 하위 부서 관리자도 기관 전체의 업무를 끄고 기관 양식을 등록·중지할 수 있었다(기관 정보·비서 카테고리·태그 분류표와 같은 규칙).
+ * 보기(목록·현황)는 관리자 누구나 — 현황은 관리 범위로 센다.
+ */
+export function requireWholeOrgWorkAdmin(actor: WorkActor) {
+  requireWorkAdmin(actor);
+  if (actor.managesWholeOrganization !== true) throw new WorkError('FORBIDDEN', WORK_WHOLE_ORG_ONLY, 403);
+}
+
 function templatePath(orgId: string, id: string, ext: string) {
   return `work/${orgId}/templates/${id}.${ext}`;
 }
@@ -62,7 +75,7 @@ export async function registerOrgTemplate(
   actor: WorkActor,
   input: { name: unknown; fileName: string; bytes: Buffer; agentTemplateId?: string | null }
 ) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const name = typeof input.name === 'string' ? input.name.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
   if (!name) throw new WorkError('INVALID_INPUT', '양식 이름을 적어 주세요.');
   const ext = /\.(hwpx|docx)$/i.exec(input.fileName)?.[1]?.toLowerCase();
@@ -108,7 +121,7 @@ export async function registerOrgTemplate(
 
 /** 시험 생성 — 자리마다 시험 글을 넣어 실제 엔진으로 만들고 패키지 검사. 통과하면 '자동 검사 통과(한글 확인 전)'로 쓸 수 있다 */
 export async function testOrgTemplate(ctx: WorkContext, actor: WorkActor, id: string) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const tv = await ctx.store.getTemplateVersion(id, actor.organizationId);
   if (!tv || tv.organization_id !== actor.organizationId) throw new WorkError('NOT_FOUND', '양식을 찾을 수 없습니다.', 404);
   if (tv.status === 'retired') throw new WorkError('INVALID_INPUT', '사용 중지한 양식입니다.', 409);
@@ -131,7 +144,7 @@ export async function testOrgTemplate(ctx: WorkContext, actor: WorkActor, id: st
 
 /** 관리자가 한글에서 열어 본 기록 — 시험 생성을 통과한 양식만. 자동 검증이 아님을 기록에 남긴다 */
 export async function attestOrgTemplate(ctx: WorkContext, actor: WorkActor, id: string, note: unknown) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const tv = await ctx.store.getTemplateVersion(id, actor.organizationId);
   if (!tv || tv.organization_id !== actor.organizationId) throw new WorkError('NOT_FOUND', '양식을 찾을 수 없습니다.', 404);
   if (tv.status !== 'mapped') throw new WorkError('INVALID_INPUT', '시험 생성을 통과한 양식만 확인 기록을 남길 수 있습니다.', 409);
@@ -148,7 +161,7 @@ export async function attestOrgTemplate(ctx: WorkContext, actor: WorkActor, id: 
 
 /** 사용 중지 — 새 작업에서 고를 수 없게. 이미 이 판을 쓰는 작업은 그대로(판의 파일은 지우지 않음) */
 export async function retireOrgTemplate(ctx: WorkContext, actor: WorkActor, id: string) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const tv = await ctx.store.getTemplateVersion(id, actor.organizationId);
   if (!tv || tv.organization_id !== actor.organizationId) throw new WorkError('NOT_FOUND', '양식을 찾을 수 없습니다.', 404);
   const updated = await ctx.store.updateTemplateVersion(tv.id, actor.organizationId, { status: 'retired' });
@@ -158,7 +171,7 @@ export async function retireOrgTemplate(ctx: WorkContext, actor: WorkActor, id: 
 
 /** 대화 비서에 올려 둔 기관 양식(agent_templates)을 업무 양식으로 — 같은 기관의 것만, 바이트를 복사 */
 export async function importAgentTemplate(ctx: WorkContext, actor: WorkActor, agentTemplateId: unknown) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const list = await ctx.store.listOrgAgentTemplates(actor.organizationId);
   const t = list.find((x) => x.id === agentTemplateId);
   if (!t) throw new WorkError('NOT_FOUND', '기관 양식을 찾을 수 없습니다.', 404);
@@ -169,11 +182,18 @@ export async function importAgentTemplate(ctx: WorkContext, actor: WorkActor, ag
 
 export async function listAdminTemplates(ctx: WorkContext, actor: WorkActor) {
   requireWorkAdmin(actor);
-  const [mine, chat] = await Promise.all([ctx.store.listOrgTemplatesAdmin(actor.organizationId), ctx.store.listOrgAgentTemplates(actor.organizationId)]);
+  // 대화 비서에 올려 둔 양식 목록(다른 부서 비서의 이름이 실린다)은 가져올 수 있는 사람(기관 전체 관리자)에게만 준다
+  const canManage = actor.managesWholeOrganization === true;
+  const [mine, chat] = await Promise.all([
+    ctx.store.listOrgTemplatesAdmin(actor.organizationId),
+    canManage ? ctx.store.listOrgAgentTemplates(actor.organizationId) : Promise.resolve([]),
+  ]);
   const imported = new Set(mine.map((t) => t.agent_template_id).filter(Boolean));
   return {
     templates: mine.map(adminTemplateDto),
     chatTemplates: chat.map((c) => ({ id: c.id, name: c.name, fileName: c.file_name, agentName: c.agent_name, imported: imported.has(c.id) })),
+    /** 화면이 바꾸기 단추를 보일지 — 서버가 다시 본다 */
+    canManage,
   };
 }
 
@@ -190,7 +210,7 @@ export async function listInstallations(ctx: WorkContext, actor: WorkActor) {
 }
 
 export async function setInstallation(ctx: WorkContext, actor: WorkActor, key: unknown, enabled: unknown) {
-  requireWorkAdmin(actor);
+  requireWholeOrgWorkAdmin(actor);
   const w = WORKFLOWS.find((x) => x.key === key);
   if (!w) throw new WorkError('INVALID_INPUT', '알 수 없는 업무입니다.');
   if (!getWorkflowImpl(w.key)) throw new WorkError('WORKFLOW_NOT_READY', '아직 준비 중인 업무입니다.', 409);
@@ -205,11 +225,16 @@ export async function disabledWorkflows(ctx: WorkContext, organizationId: string
   return new Set(rows.filter((r) => r.status === 'disabled').map((r) => r.workflow_key as WorkflowKey));
 }
 
-/** 업무 현황 — 업무별 작업 수·완료·검토 대기·최근 30일 실패 실행과 가장 많은 실패 코드(원문·파일 없음) */
+/**
+ * 업무 현황 — 업무별 작업 수·완료·검토 대기·최근 30일 실패 실행과 가장 많은 실패 코드(원문·파일 없음).
+ * **관리 범위로 센다**(2026-11-18): 기관 전체 관리자는 기관 전체, 그 밖의 관리자는 자기 부서 + 하위 부서의 작업만 —
+ * 예전에는 하위 부서 관리자에게도 기관 전체의 수가 보였다(관리자 대시보드·이용통계와 같은 범위로).
+ */
 export async function workOverview(ctx: WorkContext, actor: WorkActor) {
   requireWorkAdmin(actor);
   const since = new Date(ctx.now().getTime() - 30 * 86_400_000).toISOString();
-  const rows = await ctx.store.workStats(actor.organizationId, since);
+  const departmentIds = actor.managesWholeOrganization === true ? null : actor.managedDepartmentIds;
+  const rows = await ctx.store.workStats(actor.organizationId, since, departmentIds);
   const names = new Map(WORKFLOWS.map((w) => [w.key, w.name]));
   return rows.map((r) => ({ ...r, name: names.get(r.workflow_key as WorkflowKey) ?? r.workflow_key }));
 }

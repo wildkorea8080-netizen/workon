@@ -40,6 +40,11 @@ export interface WorkActor {
   departmentId: string;
   isAdmin: boolean;
   managedDepartmentIds: string[];
+  /**
+   * 기관 전체를 관리하는 관리자인가(최상위 부서 소속 — `getActorScope`와 같은 규칙).
+   * 기관 업무 설정(업무 켜고 끄기·기관 양식)은 이 사람만 바꾼다. 없으면 아닌 것으로 본다(닫힘).
+   */
+  managesWholeOrganization?: boolean;
 }
 
 export interface WorkTaskRow {

@@ -386,17 +386,17 @@ export function createPgWorkStore(db: Pool): WorkStore {
       );
       return rows as { id: string; name: string; file_name: string; storage_path: string; agent_name: string }[];
     },
-    async workStats(organizationId, sinceIso) {
+    async workStats(organizationId, sinceIso, departmentIds = null) {
       const { rows } = await db.query(
         `SELECT t.workflow_key,
                 count(*)::int AS tasks,
                 count(*) FILTER (WHERE t.status = 'completed')::int AS completed,
                 count(*) FILTER (WHERE t.status = 'needs_review')::int AS needs_review,
-                (SELECT count(*)::int FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2) AS failed_runs_30d,
-                (SELECT r.error->>'code' FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2
+                (SELECT count(*)::int FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND ($3::uuid[] IS NULL OR t2.department_id = ANY($3::uuid[])) AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2) AS failed_runs_30d,
+                (SELECT r.error->>'code' FROM work_runs r JOIN work_tasks t2 ON t2.id = r.task_id WHERE t2.organization_id = $1 AND ($3::uuid[] IS NULL OR t2.department_id = ANY($3::uuid[])) AND t2.workflow_key = t.workflow_key AND r.status = 'failed' AND r.finished_at >= $2
                   GROUP BY r.error->>'code' ORDER BY count(*) DESC LIMIT 1) AS top_error
-           FROM work_tasks t WHERE t.organization_id = $1 GROUP BY t.workflow_key ORDER BY t.workflow_key`,
-        [organizationId, sinceIso]
+           FROM work_tasks t WHERE t.organization_id = $1 AND ($3::uuid[] IS NULL OR t.department_id = ANY($3::uuid[])) GROUP BY t.workflow_key ORDER BY t.workflow_key`,
+        [organizationId, sinceIso, departmentIds]
       );
       return rows as WorkStatsRow[];
     },

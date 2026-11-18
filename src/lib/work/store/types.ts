@@ -268,7 +268,8 @@ export interface WorkStore {
   getLegacyFile(kind: LegacyFileRow['kind'], id: string, userId: string, organizationId: string): Promise<{ file_name: string; storage_path: string; mime_type: string | null } | null>;
   /** 이 기관 비서에 올린 대화용 양식(지운 비서·사용 중지 제외) */
   listOrgAgentTemplates(organizationId: string): Promise<{ id: string; name: string; file_name: string; storage_path: string; agent_name: string }[]>;
-  workStats(organizationId: string, sinceIso: string): Promise<WorkStatsRow[]>;
+  /** `departmentIds`가 null이면 기관 전체, 배열이면 그 부서들의 작업만(빈 배열이면 아무것도 없음) */
+  workStats(organizationId: string, sinceIso: string, departmentIds?: string[] | null): Promise<WorkStatsRow[]>;
 
   // AI 수정 후보
   insertProposal(p: Omit<ProposalRow, 'id' | 'created_at' | 'proposal' | 'applied_version_id' | 'status' | 'run_id'>): Promise<ProposalRow>;
