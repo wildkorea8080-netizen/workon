@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { pagedRows } from '@/lib/paged-select';
+import { requireAdminOrg, cleanCategoryName, isCategoryId } from '@/lib/agent-category-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,189 +16,187 @@ export const dynamic = 'force-dynamic';
  * `agents.category`는 FK가 아니라 이름(text)이다. 그래서 카테고리를
  * 지워도 비서는 사라지지 않고 미분류로 떨어지며, 이름을 바꾸면 그 이름을
  * 쓰던 비서를 함께 갱신해야 한다(PATCH 참조).
+ *
+ * 2026-11-18: 목록은 관리자 누구나, **바꾸기는 기관 전체 관리자만**(`requireAdminOrg('edit')`). 읽기 실패를 '없음'·0으로 쓰지 않는다 —
+ * 순서 저장이 내 기관 카테고리를 못 읽으면 아무것도 안 바꾸고 성공으로 답했고, 비서 수를 못 읽으면 0개로 보여 삭제 확인 문구가 틀렸다.
  */
 
-const MAX_NAME_LENGTH = 30;
+const MAX_ORDER_IDS = 500;
 
-/** 관리자 세션에서 기관 id를 얻는다. 모든 작업을 이 기관으로 한정한다. */
-async function requireAdminOrg() {
-  const session = await getServerAuthSession();
-  if (!session?.user?.id || !isAdminSession(session)) {
-    return {
-      error: NextResponse.json(
-        { ok: false, error: { message: '관리자 권한이 필요합니다.' } },
-        { status: 403 }
-      ),
-    };
+const fail = (message: string, status: number) =>
+  NextResponse.json({ ok: false, error: { message } }, { status });
+
+/**
+ * 카테고리 이름 → 묶인 비서 수. 지운 비서와 나만의 비서는 세지 않는다(관리 화면·직원 목록에 보이는 비서만).
+ * 못 읽었거나 다 읽지 못했으면 null — 0으로 보이면 '삭제해도 영향 없음'으로 읽힌다.
+ */
+async function countAgentsByCategory(organizationId: string): Promise<Map<string, number> | null> {
+  const read = await pagedRows<{ category: string | null }>((from, to, withCount) =>
+    supabaseAdmin
+      .from('agents')
+      .select('category', withCount ? { count: 'exact' } : undefined)
+      .eq('organization_id', organizationId)
+      .is('deleted_at', null)
+      .neq('tier', 'personal')
+      .not('category', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
+  if (read.error || read.truncated) {
+    if (read.error) console.error('[agent-categories GET] 비서 수 조회 실패', read.error);
+    return null;
   }
-
-  const departmentId = session.user.departmentId;
-  if (!departmentId) {
-    return {
-      error: NextResponse.json(
-        { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
-        { status: 403 }
-      ),
-    };
-  }
-
-  const { data } = await supabaseAdmin
-    .from('departments')
-    .select('organization_id')
-    .eq('id', departmentId)
-    .maybeSingle();
-
-  const organizationId = data?.organization_id;
-  if (!organizationId) {
-    return {
-      error: NextResponse.json(
-        { ok: false, error: { message: '기관 정보를 찾을 수 없습니다.' } },
-        { status: 409 }
-      ),
-    };
-  }
-
-  return { session, departmentId, organizationId };
-}
-
-/** 목록 — 각 카테고리에 묶인 비서 수를 함께 준다(삭제 영향 확인용) */
-export async function GET() {
-  const ctx = await requireAdminOrg();
-  if ('error' in ctx) return ctx.error;
-
-  const { data: categories, error } = await supabaseAdmin
-    .from('agent_categories')
-    .select('id, name, display_order')
-    .eq('organization_id', ctx.organizationId)
-    .order('display_order', { ascending: true })
-    .order('name', { ascending: true });
-
-  if (error) {
-    console.error('[agent-categories GET]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '카테고리 조회에 실패했습니다.' } },
-      { status: 500 }
-    );
-  }
-
-  const { data: agents } = await supabaseAdmin
-    .from('agents')
-    .select('category')
-    .eq('organization_id', ctx.organizationId);
-
   const counts = new Map<string, number>();
-  for (const row of (agents ?? []) as { category: string | null }[]) {
+  for (const row of read.data) {
     const key = row.category?.trim();
     if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
   }
+  return counts;
+}
 
-  return NextResponse.json({
-    ok: true,
-    data: (categories ?? []).map((c: { id: string; name: string; display_order: number }) => ({
-      ...c,
-      agent_count: counts.get(c.name) ?? 0,
-    })),
-  });
+/** 목록 — 각 카테고리에 묶인 비서 수를 함께 준다(삭제 영향 확인용). `canEdit`은 바꿀 수 있는 사람인지 */
+export async function GET() {
+  const ctx = await requireAdminOrg('read');
+  if ('error' in ctx) return ctx.error;
+
+  try {
+    const { data: categories, error } = await supabaseAdmin
+      .from('agent_categories')
+      .select('id, name, display_order')
+      .eq('organization_id', ctx.organizationId)
+      .order('display_order', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('[agent-categories GET]', error);
+      return fail('카테고리 조회에 실패했습니다.', 500);
+    }
+
+    const counts = await countAgentsByCategory(ctx.organizationId);
+
+    return NextResponse.json({
+      ok: true,
+      data: (categories ?? []).map((c: { id: string; name: string; display_order: number }) => ({
+        ...c,
+        agent_count: counts ? counts.get(c.name) ?? 0 : null,
+      })),
+      canEdit: ctx.canEdit,
+    });
+  } catch (err) {
+    console.error('[agent-categories GET] 오류', err);
+    return fail('카테고리 조회에 실패했습니다.', 500);
+  }
 }
 
 /** 추가 */
 export async function POST(request: NextRequest) {
-  const ctx = await requireAdminOrg();
+  const ctx = await requireAdminOrg('edit');
   if ('error' in ctx) return ctx.error;
 
-  const body = await request.json();
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-
-  if (!name) {
-    return NextResponse.json(
-      { ok: false, error: { message: '카테고리 이름을 입력해주세요.' } },
-      { status: 400 }
-    );
-  }
-  if (name.length > MAX_NAME_LENGTH) {
-    return NextResponse.json(
-      { ok: false, error: { message: `카테고리는 ${MAX_NAME_LENGTH}자 이내로 입력해주세요.` } },
-      { status: 400 }
-    );
-  }
-
-  // 새 카테고리는 맨 뒤에 붙인다. 기존 순서를 흔들지 않는다.
-  const { data: last } = await supabaseAdmin
-    .from('agent_categories')
-    .select('display_order')
-    .eq('organization_id', ctx.organizationId)
-    .order('display_order', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const { data: created, error } = await supabaseAdmin
-    .from('agent_categories')
-    .insert({
-      organization_id: ctx.organizationId,
-      name,
-      display_order: (last?.display_order ?? -1) + 1,
-    })
-    .select('id, name, display_order')
-    .single();
-
-  if (error) {
-    if (error.code === '23505') {
-      return NextResponse.json(
-        { ok: false, error: { message: '같은 이름의 카테고리가 이미 있습니다.' } },
-        { status: 409 }
-      );
+  try {
+    let body: { name?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return fail('요청 형식이 올바르지 않습니다.', 400);
     }
-    console.error('[agent-categories POST]', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '카테고리 추가에 실패했습니다.' } },
-      { status: 500 }
-    );
-  }
 
-  return NextResponse.json({ ok: true, data: { ...created, agent_count: 0 } }, { status: 201 });
+    const cleaned = cleanCategoryName(body?.name);
+    if (!cleaned.ok) return fail(cleaned.message, 400);
+
+    // 새 카테고리는 맨 뒤에 붙인다. 기존 순서를 흔들지 않는다 — 마지막 순서를 못 읽으면 맨 앞(0)에 끼우지 않고 멈춘다
+    const { data: last, error: lastError } = await supabaseAdmin
+      .from('agent_categories')
+      .select('display_order')
+      .eq('organization_id', ctx.organizationId)
+      .order('display_order', { ascending: false })
+      .limit(1);
+
+    if (lastError) {
+      console.error('[agent-categories POST] 순서 조회 실패', lastError);
+      return fail('카테고리 추가에 실패했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
+    }
+    const lastOrder = ((last ?? []) as Array<{ display_order: number | null }>)[0]?.display_order;
+
+    const { data: created, error } = await supabaseAdmin
+      .from('agent_categories')
+      .insert({
+        organization_id: ctx.organizationId,
+        name: cleaned.name,
+        display_order: (lastOrder ?? -1) + 1,
+      })
+      .select('id, name, display_order')
+      .single();
+
+    if (error || !created) {
+      if (error?.code === '23505') return fail('같은 이름의 카테고리가 이미 있습니다.', 409);
+      console.error('[agent-categories POST]', error);
+      return fail('카테고리 추가에 실패했습니다.', 500);
+    }
+
+    return NextResponse.json({ ok: true, data: { ...created, agent_count: 0 } }, { status: 201 });
+  } catch (err) {
+    console.error('[agent-categories POST] 오류', err);
+    return fail('카테고리 추가에 실패했습니다.', 500);
+  }
 }
 
-/** 순서 일괄 저장 — 드래그 후 한 번에 보낸다 */
+/** 순서 일괄 저장 — 위/아래로 옮긴 뒤 한 번에 보낸다 */
 export async function PUT(request: NextRequest) {
-  const ctx = await requireAdminOrg();
+  const ctx = await requireAdminOrg('edit');
   if ('error' in ctx) return ctx.error;
 
-  const body = await request.json();
-  const order: unknown = body.order;
+  try {
+    let body: { order?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return fail('요청 형식이 올바르지 않습니다.', 400);
+    }
+    const order: unknown = body?.order;
 
-  if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
-    return NextResponse.json(
-      { ok: false, error: { message: '순서 정보가 올바르지 않습니다.' } },
-      { status: 400 }
-    );
-  }
+    if (!Array.isArray(order) || order.length > MAX_ORDER_IDS || order.some((id) => !isCategoryId(id))) {
+      return fail('순서 정보가 올바르지 않습니다.', 400);
+    }
+    // 같은 id가 두 번 오면 처음 자리만 쓴다
+    const ids = [...new Set(order as string[])];
 
-  // 내 기관 것만 대상으로 한다. 남의 기관 id가 섞여 와도 그건 갱신되지 않는다.
-  const { data: mine } = await supabaseAdmin
-    .from('agent_categories')
-    .select('id')
-    .eq('organization_id', ctx.organizationId);
-
-  const allowed = new Set((mine ?? []).map((c: { id: string }) => c.id));
-
-  let position = 0;
-  for (const id of order as string[]) {
-    if (!allowed.has(id)) continue;
-    const { error } = await supabaseAdmin
+    // 내 기관 것만 대상으로 한다. 남의 기관 id가 섞여 와도 그건 갱신되지 않는다.
+    // 못 읽은 것을 '내 것이 없음'으로 보면 아무것도 안 바꾸고 성공으로 답한다 — 실패로 알린다
+    const { data: mine, error: mineError } = await supabaseAdmin
       .from('agent_categories')
-      .update({ display_order: position })
-      .eq('id', id)
+      .select('id')
       .eq('organization_id', ctx.organizationId);
 
-    if (error) {
-      console.error('[agent-categories PUT]', error);
-      return NextResponse.json(
-        { ok: false, error: { message: '순서 저장에 실패했습니다.' } },
-        { status: 500 }
-      );
+    if (mineError) {
+      console.error('[agent-categories PUT] 카테고리 조회 실패', mineError);
+      return fail('순서 저장에 실패했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
     }
-    position += 1;
-  }
 
-  return NextResponse.json({ ok: true, data: { updated: position } });
+    const allowed = new Set(((mine ?? []) as Array<{ id: string }>).map((c) => c.id));
+    const targets = ids.filter((id) => allowed.has(id));
+    if (ids.length > 0 && targets.length === 0) {
+      return fail('순서를 바꿀 카테고리를 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 해 주세요.', 404);
+    }
+
+    let position = 0;
+    for (const id of targets) {
+      const { error } = await supabaseAdmin
+        .from('agent_categories')
+        .update({ display_order: position })
+        .eq('id', id)
+        .eq('organization_id', ctx.organizationId);
+
+      if (error) {
+        console.error('[agent-categories PUT]', error);
+        return fail('순서 저장에 실패했습니다.', 500);
+      }
+      position += 1;
+    }
+
+    return NextResponse.json({ ok: true, data: { updated: position } });
+  } catch (err) {
+    console.error('[agent-categories PUT] 오류', err);
+    return fail('순서 저장에 실패했습니다.', 500);
+  }
 }

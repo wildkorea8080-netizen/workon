@@ -54,7 +54,8 @@ const EMPTY_FORM: AgentFormData = {
 };
 
 type ConnectorInfo = { id: string; label: string; toolNames: string[] };
-type CategoryInfo = { id: string; name: string; display_order: number; agent_count: number };
+// agent_count가 null이면 서버가 비서 수를 세지 못한 것 — 0으로 보이지 않는다
+type CategoryInfo = { id: string; name: string; display_order: number; agent_count: number | null };
 
 /** 비서 → 수정 폼 초기값 */
 function toFormData(agent: Agent): AgentFormData {
@@ -332,6 +333,8 @@ export default function AgentsManager() {
   const [editFormData, setEditFormData] = useState<AgentFormData>(EMPTY_FORM);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
+  // 카테고리 바꾸기(추가·이름·순서·삭제)는 기관 전체 관리자만 — 서버가 다시 본다
+  const [canEditCategories, setCanEditCategories] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
@@ -366,7 +369,10 @@ export default function AgentsManager() {
   const loadCategories = useCallback(async () => {
     const res = await fetch('/api/admin/agent-categories');
     const result = await res.json();
-    if (result.ok) setCategories(result.data ?? []);
+    if (result.ok) {
+      setCategories(result.data ?? []);
+      setCanEditCategories(result.canEdit === true);
+    }
   }, []);
 
   const loadPendingAgents = useCallback(async () => {
@@ -520,11 +526,15 @@ export default function AgentsManager() {
       await Promise.all([loadCategories(), loadOfficialAgents()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '이름 변경 실패');
+      // 실패해도 서버 상태가 바뀌었을 수 있다 — 목록을 다시 읽는다
+      loadCategories();
     }
   };
 
   const handleDeleteCategory = async (category: CategoryInfo) => {
-    const warning = category.agent_count > 0
+    const warning = category.agent_count === null
+      ? `"${category.name}" 카테고리를 삭제하면 이 카테고리의 비서가 미분류로 이동합니다(비서 수는 확인하지 못했습니다). 비서 자체는 삭제되지 않습니다. 계속할까요?`
+      : category.agent_count > 0
       ? `"${category.name}" 카테고리를 삭제하면 소속 비서 ${category.agent_count}개가 미분류로 이동합니다. 비서 자체는 삭제되지 않습니다. 계속할까요?`
       : `"${category.name}" 카테고리를 삭제할까요?`;
     if (!confirm(warning)) return;
@@ -535,6 +545,8 @@ export default function AgentsManager() {
       await Promise.all([loadCategories(), loadOfficialAgents()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : '카테고리 삭제 실패');
+      // 비서만 미분류로 가고 카테고리는 남았을 수 있다 — 목록을 다시 읽는다
+      Promise.all([loadCategories(), loadOfficialAgents()]);
     }
   };
 
@@ -703,6 +715,13 @@ export default function AgentsManager() {
                 </p>
               </div>
 
+              {!canEditCategories && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  카테고리는 기관 전체를 관리하는 관리자(최상위 부서 소속)만 바꿀 수 있습니다. 목록은 볼 수 있습니다.
+                </p>
+              )}
+
+              {canEditCategories && (
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -718,6 +737,7 @@ export default function AgentsManager() {
                   추가
                 </button>
               </div>
+              )}
 
               {categories.length === 0 ? (
                 <p className="text-xs text-slate-400 py-2">카테고리가 없습니다. 모든 비서가 한 목록에 나옵니다.</p>
@@ -725,14 +745,19 @@ export default function AgentsManager() {
                 <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
                   {categories.map((category, index) => (
                     <li key={category.id} className="flex items-center gap-2 px-3 py-2 bg-white">
+                      {canEditCategories && (
                       <div className="flex flex-col">
                         <button onClick={() => handleMoveCategory(index, -1)} disabled={index === 0}
                           title="위로" className="px-1 text-slate-400 hover:text-slate-700 disabled:opacity-25 leading-none">▲</button>
                         <button onClick={() => handleMoveCategory(index, 1)} disabled={index === categories.length - 1}
                           title="아래로" className="px-1 text-slate-400 hover:text-slate-700 disabled:opacity-25 leading-none">▼</button>
                       </div>
+                      )}
                       <span className="flex-1 text-sm text-slate-800">{category.name}</span>
-                      <span className="text-xs text-slate-400">비서 {category.agent_count}개</span>
+                      <span className="text-xs text-slate-400">
+                        {category.agent_count === null ? '비서 수 확인 못 함' : `비서 ${category.agent_count}개`}
+                      </span>
+                      {canEditCategories && (<>
                       <button onClick={() => handleRenameCategory(category)}
                         className="px-2.5 py-1 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
                         이름 변경
@@ -741,6 +766,7 @@ export default function AgentsManager() {
                         className="px-2.5 py-1 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50">
                         삭제
                       </button>
+                      </>)}
                     </li>
                   ))}
                 </ul>
