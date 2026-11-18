@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(오전 2): 한도를 읽지 못해 연 것을 알림 — 마이그레이션 없음
+
+- 코드 배포 `dpl_DCXztmSDQj7d7t1kuAFVDLN6cpgf`(커밋 `7817c3b`, 2026-11-18 11:08 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `9fb9f77`(오전 기록), `4fa5c28` 사용 한도 판정이 읽기 실패로 허용한 단계를 `unverified`로 돌려주고 운영 기록(error·payment, 부서·단계만)에 부서마다 10분에 한 번(`reportLimitGaps`) — 예전엔 부서·기관·계약·부서/개인 한도 읽기 오류를 보지 않아 기관 미연결·한도 없음과 같게 열었고(기관 정지 확인도 건너뜀) 어디에도 안 남았다. 관리자 예산 현황은 그때 사용 0 대신 503·화면 안내, 예산 알림(`organizationBudgetStatus`)은 계약을 못 읽으면 던짐(보내지 않음). 대화는 그대로 막지 않음. `7817c3b` 문서. 가지 Preview(`workon-nl5lwlkb4`) Ready 뒤 `main`. 배포 전 전체 시험 306파일 3,985개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_7KeC2mmXRnKkKFQrGtxciFNGpwsC`(9926c19)로 promote.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 인증 없는 `/api/admin/budget` 403. 실행기 호출 11:08 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건(새 '한도를 확인하지 못해' 기록 없음). 읽기 실패 경로는 운영에서 일부러 일으킬 수 없어 시험으로 대신.
+
 ## 2026-11-18(오전): 계약 화면 요약 카드 — 마이그레이션 없음
 
 - 코드 배포 `dpl_7KeC2mmXRnKkKFQrGtxciFNGpwsC`(커밋 `9926c19`, 2026-11-18 10:17 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `dea6cce`(아침 3 기록), `2441df0` 슈퍼관리자 계약 화면 요약 카드를 대시보드와 같은 규칙으로(`contractsSummary` — 활성 = 끝날 날이 지나지 않은 활성 계약, 만료 임박 = 그중 30일 안, '이번 달 매출' = 이번 달(한국 시간)에 유효했던 계약, 쪽마다 끝까지 읽고 못 읽으면 503; 예전엔 상태가 활성인 계약을 모두 세고 더해 끝난·시작 전 계약까지 들고 이번 달 해지 계약은 빠졌으며 못 읽으면 0), `9926c19` 문서. 가지 Preview(`workon-3ary45kn4`) Ready 뒤 `main`. 배포 전 전체 시험 305파일 3,972개 통과·tsc 0.
