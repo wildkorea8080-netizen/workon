@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(밤 9): 대화 공개 공유의 범위·기록 — 마이그레이션 없음
+
+- 코드 배포 `dpl_DFS9DRhxSm5GbsBfx9s3RFx2CDwo`(커밋 `6eadcf7`, 2026-11-18 22:30 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `ab82251`(밤 8 기록), `23f2ffb` 대화 공개 공유 — 공유한 때(`conversations.metadata.shared_at`)까지의 메시지만 공개 조회에 보임(`messagesUntil`, 옛 공유는 전부), '공유 링크 복사'를 다시 누르면 같은 주소로 범위만 갱신, 공유·중단을 보안 로그에(`conversation_shared`·`conversation_unshared` — 대화 id만), 대화 주인의 계정이 사용 중지·탈퇴면 공개 조회 404(확인하지 못해도 404), 공개 응답은 정해 둔 칸만, 사이드바 안내. `6eadcf7` 문서. 가지 Preview(`workon-nrbk549lg`) Ready 뒤 `main`. 배포 전 전체 시험 325파일 4,263개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_sAUYewNmggAicGfuP8J9a38fJ4M5`(dcbf8c1)로 promote.
+- 배포 전 운영 확인(읽기 전용): `conversations`에 코드가 쓰는 칸(`share_token`·`is_shared`·`metadata`·`user_id`·`department_id`)이 있음. 대화 14개 중 공유 중 0·토큰만 남은 대화 0·주인 없는 대화 0 — 옛 방식(전체가 보이는)으로 열려 있는 링크는 없다.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 없는 토큰의 공개 조회 `GET /api/shared/{token}` 404(공유 화면 껍데기는 200), 인증 없는 공유 시작·중단 401. 업무 작업자·실행기 호출 22:33~22:35 KST 모두 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 실제로 공유해 범위가 잘리는 것은 운영에서 해 보지 못했다(로그인 없음·운영에 쓰지 않음) — 시험으로 대신.
+
 ## 2026-11-18(밤 8): 필터에 걸린 것의 보안 로그·카드번호·주민등록번호 꼴 — 마이그레이션 없음
 
 - 코드 배포 `dpl_sAUYewNmggAicGfuP8J9a38fJ4M5`(커밋 `dcbf8c1`, 2026-11-18 22:14 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `24982af`(밤 7 기록), `23705c7` 대화 준비가 필터에 사람 id를 넘김(`actor.userId` — 예전 `undefined`라 대화에서 걸린 금지어·개인정보가 보안 로그에 한 번도 남지 않았다), 값을 한 번 더 보는 개인정보 규칙(`CHECKED_PATTERNS` — 붙여 쓰거나 띄어 쓴 카드번호는 발급사 첫 자리·Luhn, 띄어 쓴 주민등록번호는 날짜 꼴·뒤 첫 자리 1~8), 겹친 주민등록번호 규칙 하나로, 걸린 글 목록 겹침 없이, 감사 화면 상세 '개인정보 꼴 N곳'. `dcbf8c1` 문서. 가지 Preview(`workon-se7rcs0mv`) Ready 뒤 `main`. 배포 전 전체 시험 324파일 4,246개 통과·tsc 0.
