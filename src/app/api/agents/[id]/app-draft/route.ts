@@ -42,7 +42,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (loaded === undefined) return jsonError('draft_saved_at이 필요합니다(불러온 시험 판이 없으면 null).', 400);
     if (typeof body.base_version !== 'number') return jsonError('base_version이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.', 400);
 
-    const { data: row } = await supabaseAdmin.from('agents').select('agent_type').eq('id', params.id).single();
+    const { data: row, error: rowError } = await supabaseAdmin.from('agents').select('agent_type').eq('id', params.id).single();
+    // 못 읽으면 유형을 모른다 — 외부 연결형에 시험 판을 남기지 않게 저장하지 않는다(2026-11-18)
+    if (rowError || !row) return jsonError('앱 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     if ((row as { agent_type?: string } | null)?.agent_type === 'link') return jsonError('외부 연결형 앱에는 시험 판을 둘 수 없습니다.', 400);
 
     // 시험 판에는 빌더 설정만 — 그 밖의 칸(모델·운영 값 등)은 받지 않는다
@@ -90,11 +92,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const loaded = isoOrNull(body?.draft_saved_at);
     if (!loaded) return jsonError('배포할 시험 판(draft_saved_at)이 필요합니다.', 400);
 
-    const { data: row } = await supabaseAdmin
+    const { data: row, error: rowError } = await supabaseAdmin
       .from('agents')
       .select(`version, app_draft, ${APP_DRAFT_KEYS.join(', ')}`)
       .eq('id', params.id)
       .single();
+    // 못 읽은 것을 '시험 판이 바뀌었거나 없음'(409)으로 보지 않는다(2026-11-18)
+    if (rowError || !row) return jsonError('앱 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     const current = (row ?? {}) as unknown as Record<string, unknown>;
     const draft = readAppDraft(current.app_draft);
     if (!draft || draft.saved_at !== loaded) return jsonError('배포할 시험 판이 바뀌었거나 없습니다. 앱을 새로 열어 확인해 주세요.', 409);

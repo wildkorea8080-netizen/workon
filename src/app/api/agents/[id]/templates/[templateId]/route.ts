@@ -24,11 +24,13 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     const baseVersion = parseBaseVersion(new URL(request.url).searchParams.get('base_version'));
     if (baseVersion === null) return jsonError('base_version이 필요합니다.', 400);
 
-    const { data } = await supabaseAdmin
+    const { data, error: readError } = await supabaseAdmin
       .from('agent_templates')
       .select('id, name')
       .eq('agent_id', params.id)
       .is('retired_at', null);
+    // 못 읽은 것을 '없음'(404)으로 보지 않는다(2026-11-18)
+    if (readError) return jsonError('비서 양식을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     const active = (data ?? []) as { id: string; name: string }[];
     const target = active.find((t) => t.id === params.templateId);
     if (!target) return jsonError('양식을 찾을 수 없습니다.', 404);

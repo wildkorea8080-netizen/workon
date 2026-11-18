@@ -32,11 +32,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     // 옛 화면은 바꾸지 않은 칸까지 전부 보낸다. 그대로 저장하면 매번 빈 판이
     // 쌓이고, 바뀐 칸 기록(fields)도 실제 변경과 어긋난다. /api/agents/[id]와 같은 규칙.
-    const { data: current } = await supabaseAdmin
+    const { data: current, error: currentError } = await supabaseAdmin
       .from('agents')
       .select(SNAPSHOT_KEYS.filter((k) => k !== 'template_ids').join(', '))
       .eq('id', params.id)
       .single();
+    // 지금 값을 못 읽으면 저장하지 않는다(2026-11-18) — 예전엔 빈 값으로 보아 모든 칸을 '바뀜'으로 저장해 빈 판·틀린 변경 기록이 남았다
+    // (`/api/agents/[id]`는 batch-0149에서 같은 규칙으로 고쳤다)
+    if (currentError || !current) return jsonError('비서 설정을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     const changed = changedSettingKeys((current ?? {}) as unknown as Record<string, unknown>, split.settings);
     if (changed.length === 0) return NextResponse.json({ ok: true, data: { version: agent.version } });
 
