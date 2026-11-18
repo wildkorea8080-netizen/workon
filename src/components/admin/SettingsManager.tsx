@@ -126,7 +126,8 @@ export default function SettingsManager() {
 
       setForbiddenWords(prev =>
         prev.map(word =>
-          word.id === wordId ? result.data : word
+          // 응답에는 부서 이름이 없다 — 앞 값에 합친다(통째로 바꾸면 켜고 끌 때마다 '부서(하위 부서 포함)' 표시가 사라졌다)
+          word.id === wordId ? { ...word, ...result.data } : word
         )
       );
     } catch (err) {

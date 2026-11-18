@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
 import { listManagedForbiddenWords } from '@/lib/forbidden-words-scope';
 import { writeUsageLog } from '@/lib/assistant/persist';
+import { cleanForbiddenContext, cleanForbiddenWord, FORBIDDEN_WORDS_PER_DEPARTMENT } from '@/lib/forbidden-match';
 
 export async function GET(request: NextRequest) {
   try {
@@ -66,15 +67,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { word, context } = body;
-
-    if (!word || typeof word !== 'string' || !word.trim()) {
-      return NextResponse.json(
-        { ok: false, error: { message: '금지어는 필수 입력 항목입니다.' } },
-        { status: 400 }
-      );
+    const body = (await request.json().catch(() => null)) as { word?: unknown; context?: unknown } | null;
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
     }
+
+    // 다듬어 저장한다(2026-11-18) — 보이지 않는 글자가 딸려 온 금지어는 영영 걸리지 않고, 한 글자 금지어는 그 글자가 든 질문을 모두 막는다
+    const cleaned = cleanForbiddenWord(body.word);
+    if (!cleaned.ok) {
+      return NextResponse.json({ ok: false, error: { message: cleaned.message } }, { status: 400 });
+    }
+    const word = cleaned.word;
+    const context = cleanForbiddenContext(body.context);
 
     // 사용자의 부서 확인
     const { data: user, error: userError } = await supabaseAdmin
@@ -95,7 +99,7 @@ export async function POST(request: NextRequest) {
       .from('forbidden_words')
       .select('id')
       .eq('department_id', user.department_id)
-      .eq('word', word.trim())
+      .eq('word', word)
       .single();
 
     if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows returned
@@ -112,13 +116,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 부서마다 상한 — 대화마다 이 부서와 상위 부서의 금지어를 모두 읽어 맞춘다. 못 세면 넣지 않는다
+    const { count: wordCount, error: countError } = await supabaseAdmin
+      .from('forbidden_words')
+      .select('id', { count: 'exact', head: true })
+      .eq('department_id', user.department_id);
+    if (countError || typeof wordCount !== 'number') {
+      return NextResponse.json(
+        { ok: false, error: { message: '금지어 수를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+        { status: 500 }
+      );
+    }
+    if (wordCount >= FORBIDDEN_WORDS_PER_DEPARTMENT) {
+      return NextResponse.json(
+        { ok: false, error: { message: `금지어는 부서마다 ${FORBIDDEN_WORDS_PER_DEPARTMENT}개까지 둘 수 있습니다. 쓰지 않는 금지어를 지운 뒤 추가해 주세요.` } },
+        { status: 400 }
+      );
+    }
+
     // 금지어 추가
     const { data: newWord, error: insertError } = await supabaseAdmin
       .from('forbidden_words')
       .insert({
         department_id: user.department_id,
-        word: word.trim(),
-        context: context?.trim() || null,
+        word,
+        context,
       })
       .select()
       .single();
@@ -137,7 +159,7 @@ export async function POST(request: NextRequest) {
       action: 'add_forbidden_word',
       resourceType: 'forbidden_word',
       resourceId: newWord.id,
-      details: { word: word.trim() },
+      details: { word },
     });
 
     return NextResponse.json({ ok: true, data: newWord });

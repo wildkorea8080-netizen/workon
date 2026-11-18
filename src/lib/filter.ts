@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { containsForbiddenWord } from '@/lib/forbidden-match';
+import { containsForbiddenWord, stripInvisible } from '@/lib/forbidden-match';
+import { logSystem } from '@/lib/logger';
 
 // 보안 로그는 한 곳(security-log.ts)에서 쓴다 — 예전 이름으로도 부를 수 있게 다시 내보낸다
 export { logSecurityEvent, type SecurityEventType } from '@/lib/security-log';
@@ -51,6 +52,31 @@ export interface SecurityEvent {
  * 대화 입력 필터. `options.departmentIds`(직원 부서 + 상위 부서 — `ActorScope.visibleDepartmentIds`)를 주면 그 부서들의 켜진 금지어를 건다
  * (2026-11-12 — 기관 직속 부서 관리자가 넣은 금지어가 하위 부서 직원에게도 걸리게, `forbidden-words-scope.ts`). 없으면 직원 부서 것만.
  */
+const FILTER_GAP_REPORT_INTERVAL_MS = 10 * 60 * 1000;
+const lastFilterGapReport = new Map<string, number>();
+
+/** 시험용 — 알림 간격 기억을 비운다 */
+export function resetFilterGapReports(): void {
+  lastFilterGapReport.clear();
+}
+
+/**
+ * 금지어를 읽지 못해 금지어 검사 없이 통과시킨 것을 운영 기록에(2026-11-18) — 예전엔 `console.warn` 한 줄뿐이라
+ * DB가 이상한 동안 금지어 통제가 꺼져도 운영자가 몰랐다. 대화마다 남기면 장애 중 기록이 쏟아지므로 부서마다 10분에 한 번.
+ */
+async function reportFilterGap(departmentId: string, code: string): Promise<void> {
+  const now = Date.now();
+  const last = lastFilterGapReport.get(departmentId);
+  if (last !== undefined && now - last < FILTER_GAP_REPORT_INTERVAL_MS) return;
+  lastFilterGapReport.set(departmentId, now);
+  await logSystem({
+    level: 'error',
+    category: 'security',
+    message: '금지어를 읽지 못해 금지어 검사 없이 대화를 통과시켰습니다',
+    details: { department_id: departmentId, code },
+  }).catch(() => {});
+}
+
 export async function filterUserInput(departmentId: string, text: string, userId?: string, options: { departmentIds?: string[] } = {}): Promise<FilterResult> {
   const result: FilterResult = {
     isValid: true,
@@ -71,11 +97,11 @@ export async function filterUserInput(departmentId: string, text: string, userId
     .eq('is_active', true);
 
   if (error) {
-    console.warn('[filter] 금지어 조회 실패, 필터링 스킵:', error.message);
-    return result; // 필터 실패 시 차단하지 않고 통과
-  }
-
-  if (forbiddenWords) {
+    // 금지어를 못 읽으면 금지어 검사만 건너뛴다(대화를 막지는 않는다) — **개인정보 패턴 검사는 그대로 한다.**
+    // 예전에는 여기서 바로 돌아가, DB가 이상한 동안 주민등록번호·카드번호 검사까지 함께 꺼졌다(그 검사는 DB가 필요 없다).
+    console.warn('[filter] 금지어 조회 실패, 금지어 검사만 건너뜀:', error.message);
+    await reportFilterGap(departmentId, (error as { code?: string }).code ?? 'error');
+  } else if (forbiddenWords) {
     const seen = new Set<string>();
     for (const fw of forbiddenWords) {
       // 상위·하위 부서에 같은 금지어가 있으면 한 번만
@@ -93,9 +119,10 @@ export async function filterUserInput(departmentId: string, text: string, userId
     }
   }
 
-  // 개인정보 패턴 확인
+  // 개인정보 패턴 확인 — 보이지 않는 글자를 끼워(900101\u200B-1234567) 피하지 못하게 뺀 글로 본다
+  const visible = stripInvisible(text);
   for (const pattern of PERSONAL_INFO_PATTERNS) {
-    const matches = text.match(pattern);
+    const matches = visible.match(pattern);
     if (matches) {
       result.isValid = false;
       result.blockedPatterns.push(...matches);
