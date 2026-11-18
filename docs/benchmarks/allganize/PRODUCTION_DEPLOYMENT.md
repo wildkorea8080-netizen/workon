@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(오후 3): 설정 화면 보안 이벤트 로그가 기록 원문을 내보내지 않음 — 마이그레이션 없음
+
+- 코드 배포 `dpl_EH3VYyvDUeGMRXVRVcQegmqwYbVm`(커밋 `ea162a1`, 2026-11-18 15:51 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `1f13ed5`(오후 2 기록), `e98c53b` 관리자 설정 화면 '보안 이벤트 로그'(`GET /api/security-logs`)가 기록 원문(`details` — 금지어 기록에는 직원 질문 앞 100자)을 싣지 않고 사건 이름·심각도(한국어)와 상세 한 줄(`securityDetailParts`)만, 범위는 관리 범위(예전엔 자기 부서만), 수·대상 이름을 못 읽으면 500, 화면은 원문 펼치기를 없애고 실패를 '없음'으로 보이지 않음, 이름표는 감사 화면과 한 곳(`SECURITY_EVENT_LABELS` — `src/lib/security-event-text.ts`), `ea162a1` 문서. 가지 Preview(`workon-7yqdlzpgk`) Ready 뒤 `main`. 배포 전 전체 시험 312파일 4,060개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_6jyTpmPu3uyQoLuuVxWWbDT76nhj`(7f9e2b4)로 promote.
+- 운영 `security_logs`는 0행(오후 2 배포 전 확인) — 운영에서 이 길로 보인 질문은 없다.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 인증 없는 `/api/security-logs` 401·`/api/admin/audit-logs` 403·`/admin/settings`는 로그인으로 보냄. 실행기 호출 15:55 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 설정 화면은 운영에서 보지 못했다(관리자 로그인 없음) — 시험으로 대신.
+
 ## 2026-11-18(오후 2): 직원 권한·부서·한도 변경 기록과 감사 화면 보안 이벤트 — 마이그레이션 없음
 
 - 코드 배포 `dpl_6jyTpmPu3uyQoLuuVxWWbDT76nhj`(커밋 `7f9e2b4`, 2026-11-18 15:06 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `049dc26`(오후 기록), `0e4e1de` 기관 관리자의 직원 정보 수정(`PATCH /api/users/[id]`)이 권한(`user_role_changed`, high)·부서(`user_department_changed`)·개인 월 한도(`user_budget_changed`)를 전후 값과 함께 보안 로그에(달라진 것만, 부서는 그때의 이름도), 슈퍼관리자·탈퇴 계정은 대상에서 빼고 대상을 못 읽으면 500, 대리 접근 중 권한 변경 403, 너무 큰 한도 400. 감사 화면 '보안 이벤트' 이름표를 실제 사건 종류에 맞추고(금지어·개인정보 감지·업로드 차단·IP 차단 등이 코드 그대로 보였다) 상세에 대상 이름(관리 범위 안만)·사유·전후 값(`securityDetailParts`), `7f9e2b4` 문서. 가지 Preview(`workon-g3h8yxp1e`) Ready 뒤 `main`. 배포 전 전체 시험 311파일 4,049개 통과·tsc 0.
