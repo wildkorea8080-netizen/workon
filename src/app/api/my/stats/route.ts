@@ -3,6 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstMonthStart } from '@/lib/kst-time';
+import { sumMyTokens } from '@/lib/my-usage-tokens';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,14 @@ function getPeriodRange(period: Period): { start: Date; end: Date } {
   }
 }
 
+// 못 읽었으면 0건·0토큰으로 보이지 않는다(2026-11-18)
+function unavailable() {
+  return NextResponse.json(
+    { ok: false, error: { message: '사용 현황을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+    { status: 503 }
+  );
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerAuthSession();
@@ -41,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     // 1) 기간 내 대화 (agent 정보 포함)
     // 쪽마다 끝까지 — API는 한 번에 1,000행까지만 돌려준다(2026-11-05)
-    const { data: periodConvs } = await pagedRows<any>((a, b, w) => supabaseAdmin
+    const { data: periodConvs, error: periodError } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('conversations')
       .select('id, agent_id, title, created_at, agents(name, icon)', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
@@ -50,30 +59,30 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: true })
       .order('id')
       .range(a, b));
+    if (periodError) return unavailable();
 
     const convs = periodConvs ?? [];
-    const convIds = convs.map((c: { id: string }) => c.id);
 
-    // 2) 기간 내 메시지 (토큰 추정용)
-    let msgData: { conversation_id: string; content: string }[] = [];
-    if (convIds.length > 0) {
-      // 대화 id 목록을 in()으로 넘기면 주소가 길어지고 1,000행에서 잘린다 — 대화를 끼워 걸러 쪽마다 끝까지
-      const { data: msgs } = await pagedRows<{ conversation_id: string; content: string }>((a, b, w) => supabaseAdmin
-        .from('messages')
-        .select('conversation_id, content, conversation:conversations!inner(user_id, created_at)', w ? { count: 'exact' } : undefined)
-        .eq('conversation.user_id', userId)
-        .gte('conversation.created_at', periodStart.toISOString())
-        .lte('conversation.created_at', periodEnd.toISOString())
-        .in('role', ['user', 'assistant'])
-        .order('id')
-        .range(a, b));
-      msgData = (msgs ?? []).map((m) => ({ conversation_id: m.conversation_id, content: m.content }));
-    }
-
-    // 3) 이번달 전체 대화 수 + 토큰 (summary 카드용 — 기간 필터와 무관)
+    // 2) 토큰 — 기록한 실제 사용량(`usage_logs`). 예전엔 메시지 글자 수 ÷ 4로 어림해 실제의 몇 분의 일로 보였다(2026-11-18, `my-usage-tokens.ts`)
     const now = new Date();
     const thisMonthStart = kstMonthStart(now, 0);
-    const { data: thisMonthConvs } = await pagedRows<{ id: string }>((a, b, w) => supabaseAdmin
+    const usageFrom = new Date(Math.min(periodStart.getTime(), thisMonthStart.getTime()));
+    const { data: usageRows, error: usageError } = await pagedRows<{ details: unknown; created_at: string }>((a, b, w) => supabaseAdmin
+      .from('usage_logs')
+      .select('details, created_at', w ? { count: 'exact' } : undefined)
+      .eq('user_id', userId)
+      .gte('created_at', usageFrom.toISOString())
+      .order('id')
+      .range(a, b));
+    if (usageError) return unavailable();
+    const tokens = sumMyTokens(usageRows ?? [], {
+      monthStartMs: thisMonthStart.getTime(),
+      periodStartMs: periodStart.getTime(),
+      periodEndMs: periodEnd.getTime(),
+    });
+
+    // 3) 이번달 전체 대화 수 (summary 카드용 — 기간 필터와 무관)
+    const { data: thisMonthConvs, error: monthError } = await pagedRows<{ id: string }>((a, b, w) => supabaseAdmin
       .from('conversations')
       .select('id', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
@@ -81,31 +90,18 @@ export async function GET(request: NextRequest) {
       .order('id')
       .range(a, b));
 
+    if (monthError) return unavailable();
     const thisMonthIds = (thisMonthConvs ?? []).map((c: { id: string }) => c.id);
-    let monthlyTokenEstimate = 0;
-    if (thisMonthIds.length > 0) {
-      const { data: monthMsgs } = await pagedRows<{ content: string }>((a, b, w) => supabaseAdmin
-        .from('messages')
-        .select('content, conversation:conversations!inner(user_id, created_at)', w ? { count: 'exact' } : undefined)
-        .eq('conversation.user_id', userId)
-        .gte('conversation.created_at', thisMonthStart.toISOString())
-        .in('role', ['user', 'assistant'])
-        .order('id')
-        .range(a, b));
-      monthlyTokenEstimate = (monthMsgs ?? []).reduce(
-        (sum: number, m: { content: string }) => sum + Math.ceil(m.content.length / 4),
-        0
-      );
-    }
 
     // 4) 연속 사용일 (전체 기간)
-    const { data: allConvDates } = await pagedRows<{ created_at: string }>((a, b, w) => supabaseAdmin
+    const { data: allConvDates, error: datesError } = await pagedRows<{ created_at: string }>((a, b, w) => supabaseAdmin
       .from('conversations')
       .select('created_at', w ? { count: 'exact' } : undefined)
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .order('id')
       .range(a, b));
+    if (datesError) return unavailable();
 
     const dateSet = new Set<string>();
     for (const c of allConvDates ?? []) {
@@ -127,15 +123,6 @@ export async function GET(request: NextRequest) {
 
     // ── 집계 ──────────────────────────────────────────────
 
-    // 대화당 토큰 추정
-    const tokenByConv = new Map<string, number>();
-    for (const m of msgData) {
-      tokenByConv.set(
-        m.conversation_id,
-        (tokenByConv.get(m.conversation_id) ?? 0) + Math.ceil(m.content.length / 4)
-      );
-    }
-
     // 일별 차트 (기간 내 모든 날짜 포함)
     const dailyMap = new Map<string, number>();
     for (const c of convs) {
@@ -148,23 +135,22 @@ export async function GET(request: NextRequest) {
     // 비서별 통계
     const agentMap = new Map<
       string,
-      { name: string; icon?: string; convCount: number; tokenEstimate: number; lastUsed: string }
+      { name: string; icon?: string; convCount: number; tokens: number; lastUsed: string }
     >();
     for (const c of convs) {
       if (!c.agent_id) continue;
       const agentInfo = (c as { agents?: { name?: string; icon?: string } | null }).agents;
-      const tokens = tokenByConv.get(c.id) ?? 0;
       const existing = agentMap.get(c.agent_id);
       if (existing) {
         existing.convCount++;
-        existing.tokenEstimate += tokens;
         if (c.created_at > existing.lastUsed) existing.lastUsed = c.created_at;
       } else {
         agentMap.set(c.agent_id, {
           name: agentInfo?.name ?? '알 수 없음',
           icon: agentInfo?.icon ?? undefined,
           convCount: 1,
-          tokenEstimate: tokens,
+          // 이 기간에 그 비서로 쓴 토큰(기록 기준)
+          tokens: tokens.byAgent.get(c.agent_id) ?? 0,
           lastUsed: c.created_at,
         });
       }
@@ -194,7 +180,7 @@ export async function GET(request: NextRequest) {
       data: {
         summary: {
           monthlyConvCount: thisMonthIds.length,
-          monthlyTokenEstimate,
+          monthlyTokens: tokens.monthly,
           topAgent: agentStats[0] ?? null,
           streakDays,
         },

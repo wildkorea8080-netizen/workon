@@ -23,7 +23,7 @@ const PERIODS: { key: Period; label: string }[] = [
 
 interface Summary {
   monthlyConvCount: number;
-  monthlyTokenEstimate: number;
+  monthlyTokens: number;
   topAgent: { name: string; icon?: string; convCount: number } | null;
   streakDays: number;
 }
@@ -38,7 +38,7 @@ interface AgentStat {
   name: string;
   icon?: string;
   convCount: number;
-  tokenEstimate: number;
+  tokens: number;
   lastUsed: string;
 }
 
@@ -152,7 +152,7 @@ export default function MyStatsPage() {
           <SummaryCard
             emoji="🔤"
             label="이번달 사용 토큰"
-            value={loading ? '—' : formatTokens(data?.summary.monthlyTokenEstimate ?? 0)}
+            value={loading ? '—' : formatTokens(data?.summary.monthlyTokens ?? 0)}
           />
           <SummaryCard
             emoji="⭐"
@@ -256,7 +256,7 @@ export default function MyStatsPage() {
                           {s.name}
                         </td>
                         <td className="py-2.5 text-right text-slate-600">{s.convCount}건</td>
-                        <td className="py-2.5 text-right text-slate-600">{formatTokens(s.tokenEstimate)}</td>
+                        <td className="py-2.5 text-right text-slate-600">{formatTokens(s.tokens)}</td>
                         <td className="py-2.5 text-right text-slate-400">{formatDate(s.lastUsed)}</td>
                       </tr>
                     ))}
