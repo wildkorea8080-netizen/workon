@@ -1,5 +1,6 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import SettingsManager from '@/components/admin/SettingsManager';
+import SharedLinksPanel from '@/components/admin/SharedLinksPanel';
 
 export default async function AdminSettingsPage() {
   const session = await getServerAuthSession();
@@ -18,10 +19,13 @@ export default async function AdminSettingsPage() {
     <section className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">설정</h1>
-        <p className="text-slate-600 mt-2">부서 설정과 금지어를 관리합니다.</p>
+        <p className="text-slate-600 mt-2">금지어, 보안 이벤트 로그, 직원이 공개 링크로 공유 중인 대화를 관리합니다.</p>
       </div>
 
       <SettingsManager />
+
+      {/* 직원이 로그인 없이 볼 수 있는 링크로 공유한 대화 — 기관이 알고 멈출 수 있게(2026-11-18) */}
+      <SharedLinksPanel />
     </section>
   );
 }

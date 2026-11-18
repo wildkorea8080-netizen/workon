@@ -33,6 +33,7 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   organization_updated: '기관 정보 바꾸기(관리자)',
   conversation_shared: '대화 공개 링크 만들기(직원)',
   conversation_unshared: '대화 공개 링크 중단(직원)',
+  conversation_unshared_by_admin: '대화 공개 링크 중단(관리자)',
   department_created: '부서 만들기(관리자)',
   department_updated: '부서 고치기(관리자)',
   department_deleted: '부서 삭제(관리자)',

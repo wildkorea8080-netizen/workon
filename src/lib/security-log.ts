@@ -74,7 +74,9 @@ export type SecurityEventType =
   | 'organization_updated'
   /** 직원이 대화를 로그인 없이 볼 수 있는 링크로 공유함 / 공유를 멈춤 (2026-11-18) */
   | 'conversation_shared'
-  | 'conversation_unshared';
+  | 'conversation_unshared'
+  /** 기관 관리자가 직원의 대화 공개 링크를 멈춤 (2026-11-18) */
+  | 'conversation_unshared_by_admin';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 
