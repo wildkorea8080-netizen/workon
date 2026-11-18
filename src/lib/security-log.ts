@@ -54,7 +54,11 @@ export type SecurityEventType =
   | 'user_deactivated'
   | 'user_reactivated'
   | 'user_dormant_locked'
-  | 'dormant_lock_changed';
+  | 'dormant_lock_changed'
+  /** 기관 관리자가 직원의 권한 / 부서 / 개인 월 한도를 바꿈 (2026-11-18 — 그 전에는 어디에도 남지 않았다) */
+  | 'user_role_changed'
+  | 'user_department_changed'
+  | 'user_budget_changed';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 
