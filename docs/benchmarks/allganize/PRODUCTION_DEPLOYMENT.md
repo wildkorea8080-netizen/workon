@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(밤 4): 기관 업무 설정 권한·업무 현황 범위 — 마이그레이션 없음
+
+- 코드 배포 `dpl_49o5bixFccnvZZza3MZsrjcckDr9`(커밋 `b21851d`, 2026-11-18 21:07 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `8483edc`(밤 3 기록), `fa048d3` 기관 업무 관리(`src/lib/work/admin.ts`) — 바꾸는 일 여섯(업무 켜고 끄기·기관 양식 등록·시험 생성·확인 기록·사용 중지·대화 양식 가져오기)은 기관 전체 관리자만(`requireWholeOrgWorkAdmin`, `WorkActor.managesWholeOrganization`), 보기는 관리자 누구나(양식 목록 `canManage`·화면은 단추를 막고 안내, 대화 비서의 양식 목록은 기관 전체 관리자에게만), 업무 현황은 관리 범위로(`workStats(org, since, departmentIds)` — Postgres 직결·Supabase 두 저장소). `b21851d` 문서. 가지 Preview(`workon-4631ktaop`) Ready 뒤 `main`. 배포 전 전체 시험 320파일 4,201개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_C2rRASFhYB8q2r5hT2RJCBhiVUGn`(37306a9)로 promote.
+- 배포 전 운영 확인: 새 칸·표 없음(`work_tasks.department_id`는 저녁 확인에서 부서 외래 키로 확인, 활성 관리자 4명 모두 최상위 부서 소속 — 이번 변경으로 막히는 관리자 없음).
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, `/admin/work`는 로그인으로 보냄, 인증 없는 업무 관리 API 넷(목록 둘·현황·켜고 끄기) 403, 비밀값 없는 업무 작업자 401. 업무 작업자(1분)·실행기(5분) 호출 21:08~21:10 KST 모두 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 업무 관리 화면은 운영에서 해 보지 못했다(관리자 로그인 없음·운영에 쓰지 않음) — 시험으로 대신.
+
 ## 2026-11-18(밤 3): 비서 공식 등록 신청·반려 기록 — 마이그레이션 없음
 
 - 코드 배포 `dpl_C2rRASFhYB8q2r5hT2RJCBhiVUGn`(커밋 `37306a9`, 2026-11-18 20:50 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `34743d4`(밤 2 기록), `c268fde` 공식 등록 신청(`POST /api/agents/personal/[id]/request-approval`)·반려(`POST /api/admin/agents/[id]/reject`) — 신청(누가·어느 판·메모)과 반려(누가·사유)를 비서 변경 기록에(`agent_history` `kind: 'tier'`의 `detail.event` — `official_requested`·`official_rejected`, 기록 탭 문장 `describeHistoryItem`), 반려는 아직 승인 대기일 때만(`.eq('approval_status', 'pending')` — 바뀐 줄이 없으면 409, 예전엔 그 사이 승인된 비서의 상태를 '반려'로 덮었다), 반려 응답은 id·상태·사유만, 사유 500자·깨진 요청 400, 신청은 그 사이 지워졌으면 404. `37306a9` 문서. 가지 Preview(`workon-mlmlk9rjs`) Ready 뒤 `main`. 배포 전 전체 시험 319파일 4,185개 통과·tsc 0.
