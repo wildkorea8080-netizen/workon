@@ -44,6 +44,8 @@ export default function UsersManager() {
   const [users, setUsers] = useState<User[]>([]);
   // 기관의 사용자 수 상한(2026-11-17) — 기관 전체 활성 계정 수. 못 읽으면 null
   const [seats, setSeats] = useState<{ used: number; limit: number | null } | null>(null);
+  // 지금 로그인한 관리자 — 본인 줄에서는 부서 옮기기·권한 바꾸기를 막는다(서버도 막는다)
+  const [meId, setMeId] = useState<string | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export default function UsersManager() {
         fetch('/api/admin/invite').then(r => r.json()),
         fetch('/api/departments').then(r => r.json()),
       ]);
-      if (usersRes.ok) { setUsers(usersRes.data); setSeats(usersRes.seats ?? null); }
+      if (usersRes.ok) { setUsers(usersRes.data); setSeats(usersRes.seats ?? null); setMeId(typeof usersRes.me === 'string' ? usersRes.me : null); }
       if (invitesRes.ok) setInvitations(invitesRes.data);
       if (deptsRes.ok) setDepts(flattenDepts(deptsRes.data ?? []));
     } catch {
@@ -230,6 +232,34 @@ export default function UsersManager() {
     }
   };
 
+  /**
+   * 관리자 지정·해제(2026-11-18) — API(`PATCH /api/users/[id]`의 `role`)는 있었지만 화면에 단추가 없어,
+   * 직원을 관리자로 올리려면 새로 초대하거나 서비스 운영자에게 요청해야 했다. 바꾼 것은 보안 로그에 남는다(서버).
+   */
+  const handleRole = async (userId: string, email: string, toAdmin: boolean) => {
+    const question = toAdmin
+      ? `${email} 계정을 관리자로 지정할까요?\n소속 부서와 그 하위 부서의 직원·비서·문서를 관리하게 됩니다.`
+      : `${email} 계정의 관리자 권한을 해제할까요?\n일반 직원이 되고, 열려 있는 로그인은 곧 끝납니다.`;
+    if (!confirm(question)) return;
+    setMovingId(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: toAdmin ? 'ADMIN' : 'USER' }),
+      });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error?.message);
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '권한을 바꾸지 못했습니다.');
+      await loadData();
+    } finally {
+      setMovingId(null);
+    }
+  };
+
   const handleCopy = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
@@ -334,7 +364,10 @@ export default function UsersManager() {
                           {(user.full_name || user.email).charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-slate-900">{user.full_name || '(이름 없음)'}</p>
+                          <p className="text-sm font-medium text-slate-900">
+                            {user.full_name || '(이름 없음)'}
+                            {user.id === meId && <span className="ml-1.5 text-xs font-normal text-slate-400">(나)</span>}
+                          </p>
                           <p className="text-xs text-slate-400">{user.email}</p>
                         </div>
                       </div>
@@ -359,8 +392,8 @@ export default function UsersManager() {
                         <select
                           value={(user as any).department_id ?? ''}
                           onChange={e => handleMoveDepartment(user.id, e.target.value)}
-                          disabled={movingId === user.id || depts.length === 0}
-                          title="소속 부서 변경"
+                          disabled={movingId === user.id || depts.length === 0 || user.id === meId}
+                          title={user.id === meId ? '본인의 소속 부서는 직접 옮길 수 없습니다' : '소속 부서 변경'}
                           className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white text-slate-700 max-w-[180px] disabled:opacity-50"
                         >
                           {depts.map(d => (
@@ -391,6 +424,17 @@ export default function UsersManager() {
                         }`}>
                           {user.role === 'ADMIN' ? '관리자' : '일반 직원'}
                         </span>
+                        {user.id !== meId && user.is_active !== false && (
+                          <button
+                            type="button"
+                            onClick={() => handleRole(user.id, user.email, user.role !== 'ADMIN')}
+                            disabled={movingId === user.id}
+                            title={user.role === 'ADMIN' ? '관리자 권한을 해제합니다(보안 로그에 남습니다)' : '이 직원을 관리자로 지정합니다(보안 로그에 남습니다)'}
+                            className="text-xs font-medium text-slate-500 hover:text-purple-700 disabled:opacity-50"
+                          >
+                            {user.role === 'ADMIN' ? '관리자 해제' : '관리자로 지정'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleResetPassword(user.id, user.email)}

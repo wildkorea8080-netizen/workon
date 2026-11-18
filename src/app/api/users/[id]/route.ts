@@ -65,7 +65,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       );
     }
 
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await request.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+      body = parsed as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
+    }
     const update: Record<string, unknown> = {};
 
     if (body.department_id !== undefined) {
@@ -73,6 +80,15 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       if (!newDeptId) {
         return NextResponse.json(
           { ok: false, error: { message: '옮길 부서를 지정해주세요.' } },
+          { status: 400 }
+        );
+      }
+      // 본인의 소속 부서는 직접 옮기지 못한다(2026-11-18). 관리 범위는 자기 부서 + 하위라 아래로만 옮길 수 있는데,
+      // 옮기는 순간 관리 범위가 줄어 **스스로 되돌릴 수 없다** — 기관 직속 관리자가 한 명뿐이면 기관 전체를 관리할 사람이 없어진다
+      // (본인의 관리자 권한을 해제하지 못하게 한 것과 같은 까닭). 사용자 목록에 본인도 나오고 부서 드롭다운으로 바로 옮겨졌다.
+      if (params.id === session.user.id && newDeptId !== target.department_id) {
+        return NextResponse.json(
+          { ok: false, error: { message: '본인의 소속 부서는 직접 옮길 수 없습니다. 옮기면 관리 범위가 줄어 되돌릴 수 없습니다 — 상위 부서의 관리자나 서비스 운영자에게 요청해 주세요.' } },
           { status: 400 }
         );
       }
