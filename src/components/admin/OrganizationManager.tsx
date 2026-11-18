@@ -147,8 +147,10 @@ export default function OrganizationManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setOrg(result.data);
-      setAllowedIps((result.data.allowed_ips ?? []).join('\n'));
+      // 응답에 없는 칸이 있어도 앞 값을 잃지 않게 합친다 — 접속 허용 IP 칸은 응답에 그 값이 있을 때만 바꾼다
+      // (예전 응답에는 없어 칸이 비었고, 그대로 다시 저장하면 허용 목록이 지워졌다)
+      setOrg((prev) => (prev ? { ...prev, ...result.data } : result.data));
+      if ('allowed_ips' in result.data) setAllowedIps((result.data.allowed_ips ?? []).join('\n'));
       setThemeColor(result.data.theme_color ?? '');
       // 화면 머리·업무 틀이 새 색을 다시 받아 가게
       resetBrandingCache();
@@ -169,7 +171,7 @@ export default function OrganizationManager() {
       const res = await fetch('/api/admin/organization', { method: 'PATCH', body: form });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setOrg(result.data);
+      setOrg((prev) => (prev ? { ...prev, ...result.data } : result.data));
       // 같은 주소에 덮어쓰므로 브라우저 캐시를 우회할 값이 필요하다
       setLogoVersion((v) => v + 1);
       notify('로고를 변경했습니다.');
@@ -192,7 +194,7 @@ export default function OrganizationManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setOrg(result.data);
+      setOrg((prev) => (prev ? { ...prev, ...result.data } : result.data));
       notify('로고를 제거했습니다.');
     } catch (err) {
       setError(err instanceof Error ? err.message : '제거에 실패했습니다.');

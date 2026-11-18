@@ -9,6 +9,8 @@ import { DEFAULT_THEME_COLOR, normalizeHex, themeColorProblem } from '@/lib/them
 import { getActorScope } from '@/lib/actor-scope';
 import { writeAuditRow } from '@/lib/audit-write';
 import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
+import { logSecurityEvent } from '@/lib/security-log';
+import { organizationChanges, sameList } from '@/lib/organization-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,11 +50,21 @@ async function requireAdminOrg() {
     };
   }
 
-  const { data } = await supabaseAdmin
+  const { data, error: readError } = await supabaseAdmin
     .from('departments')
     .select('organization_id')
     .eq('id', departmentId)
     .maybeSingle();
+
+  // 못 읽은 것을 '기관 없음'으로 보지 않는다(2026-11-18)
+  if (readError) {
+    return {
+      error: NextResponse.json(
+        { ok: false, error: { message: '기관 정보를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+        { status: 503 }
+      ),
+    };
+  }
 
   const organizationId = data?.organization_id;
   if (!organizationId) {
@@ -64,7 +76,36 @@ async function requireAdminOrg() {
     };
   }
 
-  return { session, organizationId };
+  return { session, departmentId, organizationId };
+}
+
+/** 화면이 받는 기관 칸 — 조회와 저장 응답이 **같은 칸**을 돌려준다 */
+const ORG_COLUMNS =
+  'id, name, slug, logo_url, ai_notice, theme_color, domain, type, allowed_models, allowed_ips, dormant_lock_days, dormant_lock_since';
+
+/**
+ * 화면이 받는 기관 정보 — 조회(GET)와 저장(PATCH)이 같은 꼴을 돌려준다(2026-11-18).
+ * 예전 저장 응답에는 `allowed_ips`·`currentIp`·`availableModels`가 없었고 화면은 그 응답으로 상태를 통째로 바꿨다 —
+ * 저장하고 나면 접속 허용 IP 칸이 비고 모델 목록이 사라졌으며, **그대로 한 번 더 저장하면 접속 허용 IP가 지워졌다.**
+ */
+async function organizationPayload(row: Record<string, unknown>, organizationId: string, request: NextRequest) {
+  // 고를 수 있는 전체 모델과, 실제로 적용 중인 목록을 함께 준다.
+  // 저장된 값에 레지스트리에서 사라진 모델이 남아 있을 수 있어
+  // 화면이 그대로 믿으면 안 된다.
+  return {
+    ...row,
+    // 지금 관리자가 접속한 주소. 허용 목록을 정할 때 이 값을 넣지 않으면
+    // 저장하는 순간 본인부터 잠긴다. 화면이 그걸 막으려면 값을 알아야 한다.
+    currentIp: clientIpFrom(request.headers, request.ip),
+    effectiveModels: await getAllowedModelIds(organizationId),
+    availableModels: enabledModels().map((m) => ({
+      id: m.id,
+      label: m.label,
+      provider: m.provider,
+      inputPerMTok: m.inputPerMTok,
+      outputPerMTok: m.outputPerMTok,
+    })),
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -73,7 +114,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, slug, logo_url, ai_notice, theme_color, domain, type, allowed_models, allowed_ips, dormant_lock_days, dormant_lock_since')
+    .select(ORG_COLUMNS)
     .eq('id', ctx.organizationId)
     .maybeSingle();
 
@@ -85,26 +126,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 고를 수 있는 전체 모델과, 실제로 적용 중인 목록을 함께 준다.
-  // 저장된 값에 레지스트리에서 사라진 모델이 남아 있을 수 있어
-  // 화면이 그대로 믿으면 안 된다.
-  return NextResponse.json({
-    ok: true,
-    data: {
-      ...data,
-      // 지금 관리자가 접속한 주소. 허용 목록을 정할 때 이 값을 넣지 않으면
-      // 저장하는 순간 본인부터 잠긴다. 화면이 그걸 막으려면 값을 알아야 한다.
-      currentIp: clientIpFrom(request.headers, request.ip),
-      effectiveModels: await getAllowedModelIds(ctx.organizationId),
-      availableModels: enabledModels().map((m) => ({
-        id: m.id,
-        label: m.label,
-        provider: m.provider,
-        inputPerMTok: m.inputPerMTok,
-        outputPerMTok: m.outputPerMTok,
-      })),
-    },
-  });
+  return NextResponse.json({ ok: true, data: await organizationPayload(data as Record<string, unknown>, ctx.organizationId, request) });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -168,7 +190,14 @@ export async function PATCH(request: NextRequest) {
     const name = form.get('name');
     if (typeof name === 'string' && name.trim()) update.name = name.trim();
   } else {
-    const body = await request.json();
+    let body: Record<string, any>;
+    try {
+      const parsed = await request.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+      body = parsed;
+    } catch {
+      return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
+    }
 
     if (typeof body.name === 'string') {
       const name = body.name.trim();
@@ -278,27 +307,33 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  // 모델 정책은 이력을 남긴다. 보안성 검토와 감사에서 "그 시점에 무엇이
+  // 고치기 전 값 — 모델 정책·접속 허용 IP는 이력을 남긴다. 보안성 검토와 감사에서 "그 시점에 무엇이
   // 허용돼 있었는가"를 실제로 묻는데, 현재 값만 보관하면 답할 수 없다.
-  let beforeModels: string[] | null = null;
-  if (update.allowed_models !== undefined) {
-    const { data: before } = await supabaseAdmin
-      .from('organizations')
-      .select('allowed_models')
-      .eq('id', ctx.organizationId)
-      .maybeSingle();
-    beforeModels = before?.allowed_models ?? null;
+  // 못 읽으면 저장하지 않는다 — 예전에는 읽기 오류를 '정한 적 없음'으로 보고 이력에 남겼다(2026-11-18).
+  const { data: beforeRow, error: beforeError } = await supabaseAdmin
+    .from('organizations')
+    .select(ORG_COLUMNS)
+    .eq('id', ctx.organizationId)
+    .maybeSingle();
+  if (beforeError || !beforeRow) {
+    console.error('[organization PATCH] 고치기 전 값 조회 실패', beforeError);
+    return NextResponse.json(
+      { ok: false, error: { message: '기관 정보를 확인하지 못해 저장하지 않았습니다. 잠시 뒤 다시 시도해 주세요.' } },
+      { status: 503 }
+    );
   }
+  const before = beforeRow as Record<string, unknown>;
+  const beforeModels = (before.allowed_models as string[] | null) ?? null;
 
   const { data, error } = await supabaseAdmin
     .from('organizations')
     .update(update)
     .eq('id', ctx.organizationId)
-    .select('id, name, slug, logo_url, ai_notice, theme_color, domain, type, allowed_models')
+    .select(ORG_COLUMNS)
     .single();
 
-  if (error) {
-    if (error.code === '23505') {
+  if (error || !data) {
+    if (error?.code === '23505') {
       return NextResponse.json(
         { ok: false, error: { message: '이미 사용 중인 로그인 경로입니다.' } },
         { status: 409 }
@@ -311,14 +346,27 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  if (update.allowed_models !== undefined) {
+  // 화면은 저장할 때마다 모든 칸을 보낸다 — **실제로 달라졌을 때만** 이력을 남긴다(예전엔 이름만 고쳐도 모델 정책 이력이 한 줄씩 쌓였다)
+  const afterModels = (update.allowed_models as string[] | null | undefined) ?? null;
+  if (update.allowed_models !== undefined && !sameList(beforeModels, afterModels)) {
     await writeAuditRow('model_policy_logs', {
       organization_id: ctx.organizationId,
       changed_by: ctx.session.user.id,
       before_models: beforeModels,
-      after_models: (update.allowed_models as string[] | null) ?? null,
+      after_models: afterModels,
     }, 'allowed_models_changed');
   }
 
-  return NextResponse.json({ ok: true, data });
+  // 접속 허용 IP·기관 정보 변경을 보안 로그에(2026-11-18 — 접속 허용 IP를 바꾸거나 없애도 어디에도 남지 않았다).
+  // 기록 실패는 저장을 되돌리지 않는다(실패는 운영 기록에 남는다)
+  const changed = organizationChanges(before, update);
+  const mark = ctx.session.user.isImpersonating ? { impersonating: true } : {};
+  if (changed.ips) {
+    await logSecurityEvent(ctx.departmentId, ctx.session.user.id, 'org_access_ips_changed', { ...changed.ips, ...mark }, 'high');
+  }
+  if (changed.info) {
+    await logSecurityEvent(ctx.departmentId, ctx.session.user.id, 'organization_updated', { ...changed.info, ...mark }, 'low');
+  }
+
+  return NextResponse.json({ ok: true, data: await organizationPayload(data as Record<string, unknown>, ctx.organizationId, request) });
 }

@@ -133,7 +133,9 @@ describe('테마 색 연결', () => {
     const route = read('src/app/api/admin/organization/route.ts');
     expect(route).toContain('const problem = themeColorProblem(raw);');
     expect(route).toContain('update.theme_color = hex === DEFAULT_THEME_COLOR ? null : hex;');
-    expect(route).toMatch(/select\('id, name, slug, logo_url, ai_notice, theme_color, domain/);
+    // 조회와 저장 응답이 같은 칸 목록(ORG_COLUMNS)을 쓴다(2026-11-18) — 테마 색이 그 안에 있어야 한다
+    expect(route).toMatch(/ORG_COLUMNS =\s*'id, name, slug, logo_url, ai_notice, theme_color, domain/);
+    expect(route.match(/\.select\(ORG_COLUMNS\)/g)).toHaveLength(3);
     const ui = read('src/components/admin/OrganizationManager.tsx');
     expect(ui).toContain('theme_color: themeColor.trim() || null');
     expect(ui).toContain('resetBrandingCache();');

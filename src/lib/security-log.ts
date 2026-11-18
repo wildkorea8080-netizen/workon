@@ -68,7 +68,10 @@ export type SecurityEventType =
   | 'department_deleted'
   /** 기관 관리자가 계정을 바로 만듦(직원 등록) / CSV 일괄 등록 (2026-11-18) */
   | 'user_created'
-  | 'users_bulk_created';
+  | 'users_bulk_created'
+  /** 기관 전체 관리자가 접속 허용 IP를 바꿈 / 기관 정보(기관명·로그인 경로·AI 고지·테마 색·로고)를 바꿈 (2026-11-18) */
+  | 'org_access_ips_changed'
+  | 'organization_updated';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

@@ -29,6 +29,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   user_invite_canceled: '직원 초대 취소(관리자)',
   user_created: '계정 만들기(관리자)',
   users_bulk_created: '직원 일괄 등록(관리자)',
+  org_access_ips_changed: '접속 허용 IP 바꾸기(관리자)',
+  organization_updated: '기관 정보 바꾸기(관리자)',
   department_created: '부서 만들기(관리자)',
   department_updated: '부서 고치기(관리자)',
   department_deleted: '부서 삭제(관리자)',
@@ -121,6 +123,32 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
   }
 
   if (d.via === 'bulk_register') parts.push('일괄 등록으로');
+
+  // ── 접속 허용 IP·기관 정보 (2026-11-18) ──
+  if ('from_ips' in d || 'to_ips' in d) {
+    const ips = (v: unknown, n: unknown) => {
+      const list = Array.isArray(v) ? v.map((x) => clean(x, 50)).filter(Boolean) : [];
+      if (list.length === 0) return '제한 없음';
+      const total = typeof n === 'number' && n > list.length ? n : list.length;
+      const shown = list.slice(0, 5).join(', ');
+      return total > Math.min(list.length, 5) ? `${shown} 외 ${total - Math.min(list.length, 5)}개` : shown;
+    };
+    parts.push(`접속 허용 IP: ${ips(d.from_ips, d.from_ip_count)} → ${ips(d.to_ips, d.to_ip_count)}`);
+  }
+
+  if ('from_org_name' in d || 'to_org_name' in d) {
+    parts.push(`기관명: ${clean(d.from_org_name, 60) || '(없음)'} → ${clean(d.to_org_name, 60) || '(없음)'}`);
+  }
+
+  if ('from_slug' in d || 'to_slug' in d) {
+    parts.push(`로그인 경로: ${clean(d.from_slug, 40) || '(없음)'} → ${clean(d.to_slug, 40) || '(없음)'}`);
+  }
+
+  if (Array.isArray(d.changed_fields)) {
+    const FIELD: Record<string, string> = { ai_notice: 'AI 고지 문구', theme_color: '테마 색', logo: '로고' };
+    const names = d.changed_fields.map((f) => (typeof f === 'string' ? FIELD[f] : '')).filter(Boolean);
+    if (names.length > 0) parts.push(`바꾼 것: ${names.join(', ')}`);
+  }
 
   if ('from_department_id' in d || 'to_department_id' in d) {
     const from = clean(d.from_department_name, 40) || '(이름 모름)';
