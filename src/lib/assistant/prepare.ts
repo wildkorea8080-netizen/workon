@@ -206,7 +206,8 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     if (!checked.ok) return reject(checked.message, 403);
   }
 
-  const filterResult = await filterUserInput(actor.departmentId, message, undefined, { departmentIds: actor.visibleDepartmentIds });
+  // 사람 id를 넘겨야 걸린 것이 보안 로그에 남는다 — 예전에는 넘기지 않아 대화에서 금지어·개인정보가 걸려도 **한 번도 남지 않았다**(2026-11-18)
+  const filterResult = await filterUserInput(actor.departmentId, message, actor.userId, { departmentIds: actor.visibleDepartmentIds });
   if (!filterResult.isValid) {
     return reject('메시지에 금지된 내용이 포함되어 있습니다.', 400, {
       blockedWords: filterResult.blockedWords,

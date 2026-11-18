@@ -157,7 +157,8 @@ describe('securityDetailParts — 감사 화면 상세', () => {
   });
   it('탐지어는 보이고 질문 글·패턴 원문은 싣지 않음', () => {
     expect(securityDetailParts({ word: '기밀', context: '기밀 문서를 요약해 줘' }, nameOf)).toEqual(['탐지어: 기밀']);
-    expect(securityDetailParts({ pattern: '\\d{6}-\\d{7}', matches: 1 }, nameOf)).toEqual([]);
+    // 몇 곳인지만 보인다(2026-11-18 batch-0170) — 규칙 원문(정규식)은 여전히 싣지 않는다
+    expect(securityDetailParts({ pattern: '\\d{6}-\\d{7}', matches: 1 }, nameOf)).toEqual(['개인정보 꼴 1곳']);
   });
   it('줄바꿈·긴 사유는 다듬고, 이상한 값은 빈 목록', () => {
     expect(securityDetailParts({ reason: `퇴직\n${'가'.repeat(200)}` }, nameOf)[0]).toHaveLength('사유: '.length + 100);

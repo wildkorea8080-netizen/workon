@@ -91,6 +91,7 @@ describe('연결(원본)', () => {
   });
   it('대화 준비가 상위 부서까지 넘긴다', () => {
     const prepare = readFileSync('src/lib/assistant/prepare.ts', 'utf8');
-    expect(prepare).toContain('filterUserInput(actor.departmentId, message, undefined, { departmentIds: actor.visibleDepartmentIds })');
+    // 셋째 인자는 사람 id(2026-11-18 batch-0170 — 예전 `undefined`라 걸린 것이 보안 로그에 남지 않았다)
+    expect(prepare).toContain('filterUserInput(actor.departmentId, message, actor.userId, { departmentIds: actor.visibleDepartmentIds })');
   });
 });

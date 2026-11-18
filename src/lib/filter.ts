@@ -27,11 +27,50 @@ const PERSONAL_INFO_PATTERNS = [
   // 이메일은 막지 않는다(2026-11-06, 사용자 결정) — 담당자 업무 메일이 공문·안내문에 늘 들어간다.
   // '미국 전화번호'(3-3-4) 규칙도 뺐다 — 031-123-4567 같은 국내 지역 번호를 막았다
   /\b\d{2}\.\d{2}\.\d{2}-\d{3}\.\d{3}\b/g, // 사업자등록번호
-  /\b\d{6}-\d{7}\b/g, // 외국인등록번호 (주민등록번호와 동일 패턴)
+  // 외국인등록번호는 주민등록번호와 같은 꼴이라 맨 위 규칙이 잡는다(같은 규칙을 한 번 더 두면 한 번 걸릴 때 사건이 두 번 남는다)
   /\b[가-힣]{2,4}\s*\d{1,2}년\s*\d{1,2}월\s*\d{1,2}일\s*생\b/g, // 생년월일 (한글)
   /\b\d{4}년\s*\d{1,2}월\s*\d{1,2}일\b/g, // 생년월일 (숫자)
   /\b[가-힣]+시\s*[가-힣]+구\s*[가-힣]+동\s*\d+(-\d+)?\b/g, // 주소 패턴
   /\b\d{3}-\d{2}-\d{5}\b/g, // 미국 ITIN
+];
+
+/**
+ * 꼴만으로는 가를 수 없어 **값을 한 번 더 보는** 개인정보 규칙(2026-11-18). 위 규칙은 하이픈으로 쓴 꼴만 잡아
+ * - 띄어 쓴 주민등록번호(`900101 1234567`·`900101 - 1234567`)
+ * - 붙여 쓰거나 띄어 쓴 카드번호(`1234567890123456`·`1234 5678 9012 3456` — 16자리는 긴 숫자 규칙(9~15자리)에도 안 걸렸다)
+ * 가 그대로 통과했다. 넓히기만 하면 `2023 2024 2025 2026`(연도 넷)·`500000 1200000`(금액 둘) 같은 업무 글이 막히므로
+ * 주민등록번호는 앞 여섯 자리가 날짜이고 뒤 첫 자리가 1~8일 때만, 카드번호는 발급사 첫 자리(3·4·5·6·9)이고 검증식(Luhn)이 맞을 때만 본다.
+ */
+const SPACED_RESIDENT_NUMBER = /(?<!\d)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\s*[-–—\s]\s*[1-8]\d{6}(?!\d)/g;
+const LOOSE_CARD_NUMBER = /(?<![\d-])\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?![\d-])/g;
+
+/** 카드번호 검증식(Luhn) — 아무 16자리 숫자의 열에 하나만 통과한다 */
+export function passesLuhn(digits: string): boolean {
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    if (d < 0 || d > 9) return false;
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return digits.length > 0 && sum % 10 === 0;
+}
+
+const CHECKED_PATTERNS: Array<{ kind: string; pattern: RegExp; accept: (match: string) => boolean }> = [
+  { kind: 'resident_number_spaced', pattern: SPACED_RESIDENT_NUMBER, accept: () => true },
+  {
+    kind: 'card_number',
+    pattern: LOOSE_CARD_NUMBER,
+    accept: (match) => {
+      const digits = match.replace(/\D/g, '');
+      return digits.length === 16 && '34569'.includes(digits[0]) && passesLuhn(digits);
+    },
+  },
 ];
 
 export interface FilterResult {
@@ -133,6 +172,22 @@ export async function filterUserInput(departmentId: string, text: string, userId
       });
     }
   }
+
+  // 값을 한 번 더 보는 규칙 — 위 규칙이 이미 잡은 글(하이픈으로 쓴 카드번호 등)은 다시 세지 않는다
+  for (const rule of CHECKED_PATTERNS) {
+    const matches = (visible.match(rule.pattern) ?? []).filter((m) => rule.accept(m) && !result.blockedPatterns.includes(m));
+    if (matches.length > 0) {
+      result.isValid = false;
+      result.blockedPatterns.push(...matches);
+      result.securityEvents.push({
+        type: 'personal_info_detected',
+        details: { pattern: rule.kind, matches: matches.length },
+        severity: 'critical',
+      });
+    }
+  }
+  // 같은 글이 두 규칙에 걸려도 한 번만 알린다
+  result.blockedPatterns = Array.from(new Set(result.blockedPatterns));
 
   // 보안 이벤트가 발생한 경우 로그 기록
   if (result.securityEvents.length > 0 && userId) {

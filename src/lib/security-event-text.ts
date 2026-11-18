@@ -98,6 +98,11 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
   const word = clean(d.word, 40);
   if (word) parts.push(`탐지어: ${word}`);
 
+  // 개인정보 패턴 감지 — 걸린 글은 기록에 없다(몇 곳인지만). 규칙 원문(정규식)은 보이지 않는다
+  if (typeof d.matches === 'number' && Number.isFinite(d.matches) && d.matches > 0) {
+    parts.push(`개인정보 꼴 ${Math.round(d.matches)}곳`);
+  }
+
   if (typeof d.target_user_id === 'string' && d.target_user_id) {
     const target = UUID.test(d.target_user_id)
       ? nameOf(d.target_user_id) ?? '(관리 범위 밖이거나 삭제된 계정)'
