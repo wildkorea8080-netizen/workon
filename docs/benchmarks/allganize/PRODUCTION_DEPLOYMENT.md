@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(밤 5): 본인 부서 옮기기 막기·관리자 지정/해제 단추 — 마이그레이션 없음
+
+- 코드 배포 `dpl_2yrkLUa3M4EPoHNb7EAtDnxgQr62`(커밋 `9e6068e`, 2026-11-18 21:22 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `3c2bf98`(밤 4 기록), `c9fbd8a` 사용자 관리 — `PATCH /api/users/[id]`가 본인의 소속 부서 옮기기를 400으로 막음(옮기는 순간 관리 범위가 줄어 스스로 되돌릴 수 없다 — 같은 부서 다시 보내기·본인 한도는 그대로), 깨진 요청 400, `GET /api/users` 응답에 `me`, 화면은 본인 줄 '(나)'·부서 드롭다운 막기, **'관리자로 지정/관리자 해제' 단추**(본인·사용 중지 계정 제외, 확인 뒤 `role` — API는 있었지만 화면에 없었다). `9e6068e` 문서. 가지 Preview(`workon-ql5zzthj4`) Ready 뒤 `main`. 배포 전 전체 시험 321파일 4,209개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_49o5bixFccnvZZza3MZsrjcckDr9`(b21851d)로 promote.
+- 배포 전 운영 확인: 새 칸·표 없음.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, `/admin/users`는 로그인으로 보냄, 인증 없는 `GET /api/users`·`PATCH /api/users/{id}` 403. 업무 작업자·실행기 호출 21:23~21:25 KST 모두 200, 최근 24시간 critical 0건·20분 warning 이상 0건. **새 단추가 든 사용자 관리 화면은 브라우저로 보지 못했다**(관리자 로그인 없음) — 줄 배치는 사용자가 한 번 열어 확인.
+
 ## 2026-11-18(밤 4): 기관 업무 설정 권한·업무 현황 범위 — 마이그레이션 없음
 
 - 코드 배포 `dpl_49o5bixFccnvZZza3MZsrjcckDr9`(커밋 `b21851d`, 2026-11-18 21:07 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `8483edc`(밤 3 기록), `fa048d3` 기관 업무 관리(`src/lib/work/admin.ts`) — 바꾸는 일 여섯(업무 켜고 끄기·기관 양식 등록·시험 생성·확인 기록·사용 중지·대화 양식 가져오기)은 기관 전체 관리자만(`requireWholeOrgWorkAdmin`, `WorkActor.managesWholeOrganization`), 보기는 관리자 누구나(양식 목록 `canManage`·화면은 단추를 막고 안내, 대화 비서의 양식 목록은 기관 전체 관리자에게만), 업무 현황은 관리 범위로(`workStats(org, since, departmentIds)` — Postgres 직결·Supabase 두 저장소). `b21851d` 문서. 가지 Preview(`workon-4631ktaop`) Ready 뒤 `main`. 배포 전 전체 시험 320파일 4,201개 통과·tsc 0.
