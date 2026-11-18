@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(밤 10): 관리자의 공개 링크 목록·중단 — 마이그레이션 없음
+
+- 코드 배포 `dpl_AUKCRVfShdJWhyitHMU74ZKmma4n`(커밋 `76ca53b`, 2026-11-18 22:50 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `9d5a8d1`(밤 9 기록), `554909c` 관리자 설정 화면 '공개 링크로 공유 중인 대화'(`SharedLinksPanel`) + `GET /api/admin/shared-conversations`(관리 범위 부서의 공유 중인 대화 200건 — 누가·어느 부서·언제 공유했는지만, 제목·내용·링크 주소 없음, 못 읽으면 503) + `DELETE /api/admin/shared-conversations/[id]`(사유 5~300자, 관리 범위·공유 중일 때만, 주소와 `shared_at`을 버림, 보안 로그 `conversation_unshared_by_admin` high). `76ca53b` 문서. 새 라우트가 든 묶음이라 가지 Preview(`workon-1oyc5vdkd`) Ready를 먼저 본 뒤 `main`. 배포 전 전체 시험 326파일 4,274개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_DFS9DRhxSm5GbsBfx9s3RFx2CDwo`(6eadcf7)로 promote.
+- 배포 전 운영 확인: 새 칸·표 없음(밤 9 확인에서 `conversations` 칸 확인, 공유 중인 대화 0 — 배포해도 목록은 비어 있다).
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, `/admin/settings`는 로그인으로 보냄, 인증 없는 `GET`·`DELETE /api/admin/shared-conversations` 403. 업무 작업자·실행기 호출 22:53~22:55 KST 모두 200, 최근 24시간 critical 0건·20분 warning 이상 0건. **새 패널이 든 설정 화면은 브라우저로 보지 못했다**(관리자 로그인 없음) — 배치는 사용자가 한 번 열어 확인.
+
 ## 2026-11-18(밤 9): 대화 공개 공유의 범위·기록 — 마이그레이션 없음
 
 - 코드 배포 `dpl_DFS9DRhxSm5GbsBfx9s3RFx2CDwo`(커밋 `6eadcf7`, 2026-11-18 22:30 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `ab82251`(밤 8 기록), `23f2ffb` 대화 공개 공유 — 공유한 때(`conversations.metadata.shared_at`)까지의 메시지만 공개 조회에 보임(`messagesUntil`, 옛 공유는 전부), '공유 링크 복사'를 다시 누르면 같은 주소로 범위만 갱신, 공유·중단을 보안 로그에(`conversation_shared`·`conversation_unshared` — 대화 id만), 대화 주인의 계정이 사용 중지·탈퇴면 공개 조회 404(확인하지 못해도 404), 공개 응답은 정해 둔 칸만, 사이드바 안내. `6eadcf7` 문서. 가지 Preview(`workon-nrbk549lg`) Ready 뒤 `main`. 배포 전 전체 시험 325파일 4,263개 통과·tsc 0.
