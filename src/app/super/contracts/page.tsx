@@ -120,7 +120,7 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
         {[
           { icon: '📋', label: '활성 계약',          value: `${summary.totalActive}건` },
           { icon: '⚠️', label: '만료 임박 (30일)',   value: `${summary.expiringIn30Days}건`, warn: summary.expiringIn30Days > 0 },
-          { icon: '💰', label: '월 매출',             value: fmtMoney(summary.totalMonthlyRevenue) },
+          { icon: '💰', label: '이번 달 매출',        value: fmtMoney(summary.totalMonthlyRevenue) },
         ].map(c => (
           <div key={c.label} className={`bg-[#1E293B] border rounded-2xl p-5 ${c.warn ? 'border-amber-700/40' : 'border-slate-700/50'}`}>
             <span className="text-2xl">{c.icon}</span>

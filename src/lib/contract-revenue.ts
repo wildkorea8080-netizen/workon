@@ -60,6 +60,36 @@ const price = (v: RevenueContract['price_per_month']) => {
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
 
+export interface ContractsSummary {
+  /** 상태가 활성이고 끝날 날이 지나지 않은 계약 수 */
+  totalActive: number;
+  /** 그중 30일 안에 끝나는 계약 수 */
+  expiringIn30Days: number;
+  /** 이번 달(한국 시간)에 유효했던 계약의 월 이용료 합 — 대시보드 '이번달 매출'과 같은 규칙 */
+  totalMonthlyRevenue: number;
+}
+
+/**
+ * 계약 화면 요약 카드(2026-11-18). 예전엔 상태가 활성인 계약을 모두 세고 월 이용료를 모두 더해,
+ * 끝날 날이 지난 계약(상태를 자동으로 바꾸는 작업이 없다)·아직 시작하지 않은 계약까지 '활성'·'월 매출'에 들어갔고,
+ * 이번 달 중에 해지한 계약은 빠져 대시보드 '이번달 매출'과 숫자가 달랐다
+ */
+export function contractsSummary(contracts: RevenueContract[], nowMs = Date.now()): ContractsSummary {
+  const in30 = nowMs + 30 * 86_400_000;
+  let totalActive = 0;
+  let expiringIn30Days = 0;
+  for (const c of contracts) {
+    if (c.status !== 'active') continue;
+    const end = ms(c.expires_at);
+    if (Number.isFinite(end) && end < nowMs) continue;
+    totalActive += 1;
+    if (Number.isFinite(end) && end <= in30) expiringIn30Days += 1;
+  }
+  const { year, month } = kstYearMonth(nowMs);
+  const [start, endEx] = kstMonthRange(year, month);
+  return { totalActive, expiringIn30Days, totalMonthlyRevenue: revenueIn(contracts, start, endEx).revenue };
+}
+
 /** 그 기간에 유효했던 계약의 월 이용료 합·수 */
 export function revenueIn(contracts: RevenueContract[], startMs: number, endExMs: number): { revenue: number; count: number } {
   let revenue = 0;

@@ -6,6 +6,8 @@ import { getPlan } from '@/lib/plans';
 import { dbErrorText } from '@/lib/db-error-text';
 import { writeAuditRow } from '@/lib/audit-write';
 import { contractAudit } from '@/lib/super-admin-log-spec';
+import { contractsSummary, type RevenueContract } from '@/lib/contract-revenue';
+import { pagedRows } from '@/lib/paged-select';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,15 +57,17 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 요약
-    const { data: allActive } = await supabaseAdmin
-      .from('contracts').select('price_per_month, expires_at').eq('status', 'active');
-
-    const totalActive = (allActive ?? []).length;
-    const expiringIn30 = (allActive ?? []).filter((c: { expires_at?: string }) =>
-      c.expires_at && Math.ceil((new Date(c.expires_at).getTime() - now) / 86400000) <= 30 && new Date(c.expires_at).getTime() > now
-    ).length;
-    const totalMonthlyRevenue = (allActive ?? []).reduce((s: number, c: { price_per_month?: number }) => s + Number(c.price_per_month ?? 0), 0);
+    // 요약 — 대시보드 '이번달 매출'과 같은 규칙(2026-11-18, `contractsSummary`). 못 읽으면 0으로 꾸미지 않는다
+    const all = await pagedRows<RevenueContract>((a, b, w) => supabaseAdmin
+      .from('contracts')
+      .select('status, price_per_month, started_at, expires_at, updated_at', w ? { count: 'exact' } : undefined)
+      .in('status', ['active', 'cancelled'])
+      .order('id')
+      .range(a, b));
+    if (all.error) {
+      return NextResponse.json({ ok: false, error: '계약 요약을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+    }
+    const { totalActive, expiringIn30Days: expiringIn30, totalMonthlyRevenue } = contractsSummary(all.data, now);
 
     return NextResponse.json({
       ok: true,
