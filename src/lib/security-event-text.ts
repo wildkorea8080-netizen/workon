@@ -27,6 +27,9 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   user_budget_changed: '개인 월 한도 바꾸기(관리자)',
   user_invited: '직원 초대(관리자)',
   user_invite_canceled: '직원 초대 취소(관리자)',
+  department_created: '부서 만들기(관리자)',
+  department_updated: '부서 고치기(관리자)',
+  department_deleted: '부서 삭제(관리자)',
   app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
   app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
   app_outbound_result_retried: '앱 결과 다시 보내기(직원)',
@@ -72,6 +75,13 @@ const roleText = (v: unknown) => (typeof v === 'string' ? ROLE_LABEL[v] ?? clean
 const budgetText = (v: unknown) =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 ? `${Math.round(v).toLocaleString('ko-KR')}원` : '부서 기본값';
 
+/** 부서 월 한도·1인당 월 한도(기본값) — 비어 있으면 제한 없음 */
+const limitText = (v: unknown) =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 ? `${Math.round(v).toLocaleString('ko-KR')}원` : '제한 없음';
+
+/** 상위 부서 — id가 없으면 최상위, 이름을 못 읽었으면 '(이름 모름)' */
+const parentText = (id: unknown, name: unknown) => (id ? clean(name, 40) || '(이름 모름)' : '(최상위)');
+
 /**
  * 기록의 `details`에서 감사 화면에 보일 조각들. `nameOf`는 관리 범위 안 직원의 이름(없으면 null) —
  * 범위 밖 사람의 이름은 내보내지 않는다.
@@ -100,6 +110,28 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
     const from = clean(d.from_department_name, 40) || '(이름 모름)';
     const to = clean(d.to_department_name, 40) || '(이름 모름)';
     parts.push(`부서: ${from} → ${to}`);
+  }
+
+  // ── 부서 만들기·고치기·삭제 (2026-11-18) ──
+  const deptName = clean(d.dept_name, 40);
+  if (deptName) parts.push(`대상 부서: ${deptName}`);
+
+  if ('from_dept_name' in d || 'to_dept_name' in d) {
+    parts.push(`부서명: ${clean(d.from_dept_name, 40) || '(이름 모름)'} → ${clean(d.to_dept_name, 40) || '(이름 모름)'}`);
+  }
+
+  if ('from_parent_id' in d || 'to_parent_id' in d) {
+    parts.push(`상위 부서: ${parentText(d.from_parent_id, d.from_parent_name)} → ${parentText(d.to_parent_id, d.to_parent_name)}`);
+  } else if ('parent_id' in d) {
+    parts.push(`상위 부서: ${parentText(d.parent_id, d.parent_name)}`);
+  }
+
+  if ('from_dept_budget_krw' in d || 'to_dept_budget_krw' in d) {
+    parts.push(`부서 월 한도: ${limitText(d.from_dept_budget_krw)} → ${limitText(d.to_dept_budget_krw)}`);
+  }
+
+  if ('from_user_default_budget_krw' in d || 'to_user_default_budget_krw' in d) {
+    parts.push(`1인당 월 한도(부서 기본값): ${limitText(d.from_user_default_budget_krw)} → ${limitText(d.to_user_default_budget_krw)}`);
   }
 
   if ('from_budget_krw' in d || 'to_budget_krw' in d) {

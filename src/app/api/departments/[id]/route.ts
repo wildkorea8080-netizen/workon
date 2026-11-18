@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { departmentDescendantsStrict, getManagedDepartmentIds } from '@/lib/department-scope';
+import { checkDepartmentDelete, departmentDeleteMessage } from '@/lib/department-delete';
+import { departmentChanges, departmentNameOf } from '@/lib/department-audit';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,17 +39,35 @@ async function requireAdminOrg() {
   return { session, departmentId, organizationId, isRootAdmin };
 }
 
-/** 대상 부서가 관리자의 관리 범위(자기 부서 + 하위) 안인지 확인 */
-async function loadDepartment(id: string, organizationId: string, managedIds: string[]) {
+const READ_FAILED = { ok: false, error: { message: '부서 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } };
+
+type TargetDepartment = {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  // 고치기 전 값 — 무엇이 달라졌는지 보안 로그에 남긴다
+  monthly_budget_krw?: unknown;
+  user_monthly_budget_krw?: unknown;
+};
+
+/**
+ * 대상 부서가 관리자의 관리 범위(자기 부서 + 하위) 안인지 확인.
+ * 못 읽은 것은 `'failed'` — '없음'(null)과 가른다(2026-11-18).
+ */
+async function loadDepartment(id: string, organizationId: string, managedIds: string[]): Promise<TargetDepartment | null | 'failed'> {
   if (!managedIds.includes(id)) return null;
 
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('departments')
-    .select('id, name, parent_id')
+    .select('id, name, parent_id, monthly_budget_krw, user_monthly_budget_krw')
     .eq('id', id)
     .eq('organization_id', organizationId)
     .maybeSingle();
-  return data;
+  if (error) {
+    console.error('[departments] 부서 조회 실패', error);
+    return 'failed';
+  }
+  return (data as TargetDepartment | null) ?? null;
 }
 
 /** 부서 수정 — 이름 변경 / 상위 부서 이동 */
@@ -56,11 +77,19 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   const managedIds = await getManagedDepartmentIds(ctx.departmentId);
   const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
+  if (target === 'failed') return NextResponse.json(READ_FAILED, { status: 503 });
   if (!target) {
     return NextResponse.json({ ok: false, error: { message: '부서를 찾을 수 없습니다.' } }, { status: 404 });
   }
 
-  const body = await request.json();
+  let body: Record<string, unknown>;
+  try {
+    const parsed = await request.json();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
+  }
   const update: Record<string, unknown> = {};
 
   if (typeof body.name === 'string') {
@@ -95,6 +124,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     update[key] = n > 0 ? n : null;
   }
 
+  // 새 상위 부서의 이름 — 보안 로그에 그때의 이름으로 남긴다
+  let newParentName: string | null = null;
+
   if (body.parent_id !== undefined) {
     const parentId = typeof body.parent_id === 'string' && body.parent_id ? body.parent_id : null;
 
@@ -115,9 +147,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
     if (parentId) {
       const parent = await loadDepartment(parentId, ctx.organizationId, managedIds);
+      if (parent === 'failed') return NextResponse.json(READ_FAILED, { status: 503 });
       if (!parent) {
         return NextResponse.json({ ok: false, error: { message: '상위 부서를 찾을 수 없습니다.' } }, { status: 400 });
       }
+      newParentName = parent.name;
 
       // 순환 방지: 자기 하위 부서를 상위로 지정하면 트리가 끊어진 고리가 된다.
       // 그 부서들은 어떤 최상위에도 닿지 못해 화면에서 사라지고 조회도 무한루프에 빠진다.
@@ -157,6 +191,27 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ ok: false, error: { message: '부서 수정에 실패했습니다.' } }, { status: 500 });
   }
 
+  // 실제로 달라진 것만 보안 로그에(2026-11-18 — 그 전에는 부서를 옮기거나 한도를 바꿔도 어디에도 남지 않았다).
+  // 상위 부서 바꾸기는 관리 범위를 바꾸므로 high. 기록 실패는 고친 것을 되돌리지 않는다(실패는 운영 기록에 남는다)
+  const changed = departmentChanges(target, update);
+  if (changed) {
+    await logSecurityEvent(
+      ctx.departmentId,
+      ctx.session.user.id,
+      'department_updated',
+      {
+        department_id: target.id,
+        dept_name: target.name,
+        ...changed.changes,
+        ...(changed.parentChanged
+          ? { from_parent_name: await departmentNameOf(target.parent_id, ctx.organizationId), to_parent_name: newParentName }
+          : {}),
+        ...(ctx.session.user.isImpersonating ? { impersonating: true } : {}),
+      },
+      changed.severity
+    );
+  }
+
   return NextResponse.json({ ok: true, data: updated });
 }
 
@@ -167,6 +222,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
 
   const managedIds = await getManagedDepartmentIds(ctx.departmentId);
   const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
+  if (target === 'failed') return NextResponse.json(READ_FAILED, { status: 503 });
   if (!target) {
     return NextResponse.json({ ok: false, error: { message: '부서를 찾을 수 없습니다.' } }, { status: 404 });
   }
@@ -175,28 +231,20 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
     return NextResponse.json({ ok: false, error: { message: '본인이 속한 부서는 삭제할 수 없습니다.' } }, { status: 400 });
   }
 
-  // 하위 부서·소속 인원·비서가 남아 있으면 지우지 않는다.
-  // departments.parent_id는 ON DELETE SET NULL이라 하위 부서가 조용히 최상위로
-  // 올라가고, users.department_id도 끊겨 소속을 잃는다.
-  const [{ count: childCount }, { count: userCount }, { count: agentCount }] = await Promise.all([
-    supabaseAdmin.from('departments').select('id', { count: 'exact', head: true }).eq('parent_id', target.id),
-    supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('department_id', target.id),
-    supabaseAdmin.from('agents').select('id', { count: 'exact', head: true }).eq('department_id', target.id),
-  ]);
-
-  const blockers: string[] = [];
-  if (childCount) blockers.push(`하위 부서 ${childCount}개`);
-  if (userCount) blockers.push(`소속 직원 ${userCount}명`);
-  if (agentCount) blockers.push(`비서 ${agentCount}개`);
-
-  if (blockers.length > 0) {
+  // 하위 부서·소속 인원·비서, 그리고 **이 부서로 남은 기록**이 있으면 지우지 않는다(`department-delete.ts`).
+  // 부서 행을 지우면 DB가 그 부서의 대화·문서를 함께 지우고, 직원·사용 기록·보안 로그의 부서 칸을 비운다.
+  // 남은 것을 못 세면 지우지 않는다 — 예전에는 조회 오류가 '없음'이 되어 그대로 지웠다(2026-11-18).
+  const check = await checkDepartmentDelete(target.id);
+  if (!check.ok) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: { message: `${blockers.join(', ')}이(가) 남아 있어 삭제할 수 없습니다. 먼저 옮기거나 정리해주세요.` },
-      },
-      { status: 409 }
+      { ok: false, error: { message: '부서에 남은 것을 확인하지 못해 삭제하지 않았습니다. 잠시 뒤 다시 시도해 주세요.' } },
+      { status: 503 }
     );
+  }
+
+  const blocked = departmentDeleteMessage(check);
+  if (blocked) {
+    return NextResponse.json({ ok: false, error: { message: blocked } }, { status: 409 });
   }
 
   const { error } = await supabaseAdmin
@@ -206,9 +254,30 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
     .eq('organization_id', ctx.organizationId);
 
   if (error) {
+    // 확인과 삭제 사이에 생긴 기록·검사에 없는 표가 가리키면 DB가 막는다(23503)
+    if (error.code === '23503') {
+      return NextResponse.json(
+        { ok: false, error: { message: '이 부서를 가리키는 기록이 남아 있어 삭제할 수 없습니다. 쓰지 않는 부서는 이름을 바꾸거나 다른 부서 아래로 옮겨 정리해 주세요.' } },
+        { status: 409 }
+      );
+    }
     console.error('[departments DELETE]', error);
     return NextResponse.json({ ok: false, error: { message: '부서 삭제에 실패했습니다.' } }, { status: 500 });
   }
+
+  await logSecurityEvent(
+    ctx.departmentId,
+    ctx.session.user.id,
+    'department_deleted',
+    {
+      department_id: target.id,
+      dept_name: target.name,
+      parent_id: target.parent_id,
+      parent_name: await departmentNameOf(target.parent_id, ctx.organizationId),
+      ...(ctx.session.user.isImpersonating ? { impersonating: true } : {}),
+    },
+    'medium'
+  );
 
   return NextResponse.json({ ok: true, data: { id: target.id } });
 }

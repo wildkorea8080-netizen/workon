@@ -61,7 +61,11 @@ export type SecurityEventType =
   | 'user_budget_changed'
   /** 기관 관리자가 직원을 초대함 / 초대를 취소함 (2026-11-18) */
   | 'user_invited'
-  | 'user_invite_canceled';
+  | 'user_invite_canceled'
+  /** 기관 관리자가 부서를 만듦 / 고침(이름·상위 부서·월 한도) / 지움 (2026-11-18 — 그 전에는 어디에도 남지 않았다) */
+  | 'department_created'
+  | 'department_updated'
+  | 'department_deleted';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

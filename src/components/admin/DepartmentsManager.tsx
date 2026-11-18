@@ -11,8 +11,9 @@ interface DepartmentNode {
   monthly_budget_krw: number | null;
   /** 이 부서 직원 1인당 월 기본 한도(원) */
   user_monthly_budget_krw: number | null;
-  userCount: number;
-  agentCount: number;
+  // null이면 서버가 수를 세지 못한 것 — 0으로 보이지 않는다
+  userCount: number | null;
+  agentCount: number | null;
   children: DepartmentNode[];
 }
 
@@ -230,7 +231,7 @@ export default function DepartmentsManager() {
                   </span>
                 )}
                 <span className="ml-2 text-xs text-slate-400">
-                  직원 {node.userCount} · 비서 {node.agentCount}
+                  직원 {node.userCount ?? '—'} · 비서 {node.agentCount ?? '—'}
                 </span>
                 {/* 한도를 목록에서 바로 보여준다. 부서마다 수정 화면을 열어야
                     알 수 있으면 어디에 얼마를 걸어 뒀는지 파악할 수 없다. */}
