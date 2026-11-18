@@ -7,8 +7,12 @@ import type { ForbiddenWord } from '@/lib/db';
 interface SecurityLog {
   id: string;
   event_type: string;
+  /** 사건 이름(한국어) — 서버가 감사 화면과 같은 이름표로 붙인다 */
+  label: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
-  details: Record<string, any>;
+  severity_label: string;
+  /** 대상·사유·전후 값 한 줄 — 기록 원문(질문 글이 들어 있을 수 있음)은 받지 않는다 */
+  detail: string;
   created_at: string;
   // users에는 name 칸이 없다(full_name) — 예전 name을 고르던 조회는 늘 실패했다(2026-11-17)
   users: {
@@ -23,6 +27,7 @@ export default function SettingsManager() {
   const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
   const [newWord, setNewWord] = useState('');
   const [newContext, setNewContext] = useState('');
   const [adding, setAdding] = useState(false);
@@ -52,6 +57,7 @@ export default function SettingsManager() {
 
   const loadSecurityLogs = async () => {
     setLogsLoading(true);
+    setLogsError(null);
     try {
       const response = await fetch('/api/security-logs?limit=20');
       const result = await response.json();
@@ -63,6 +69,9 @@ export default function SettingsManager() {
       setSecurityLogs(result.data.logs);
     } catch (err) {
       console.error('보안 로그 로드 오류:', err);
+      // 실패를 '보안 이벤트가 없습니다'로 보이지 않는다
+      setSecurityLogs([]);
+      setLogsError(err instanceof Error ? err.message : '보안 로그를 불러오지 못했습니다.');
     } finally {
       setLogsLoading(false);
     }
@@ -259,6 +268,13 @@ export default function SettingsManager() {
             {logsLoading ? '로딩 중...' : '새로고침'}
           </button>
         </div>
+        <p className="text-sm text-slate-500 mb-4">
+          내 부서와 하위 부서의 최근 20건입니다. 전체 기간과 CSV는{' '}
+          <a href="/admin/audit" className="text-blue-600 hover:underline">사용 내역 조회</a>의 보안 이벤트에서 봅니다.
+        </p>
+        {logsError && (
+          <div className="p-3 mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{logsError}</div>
+        )}
         <div className="space-y-4">
           {securityLogs.map((log) => (
             <div key={log.id} className="p-4 border rounded-lg bg-white">
@@ -271,10 +287,10 @@ export default function SettingsManager() {
                       log.severity === 'medium' ? 'text-yellow-700 bg-yellow-100' :
                       'text-blue-700 bg-blue-100'
                     }`}>
-                      {log.severity.toUpperCase()}
+                      {log.severity_label}
                     </span>
                     <span className="text-sm font-medium text-slate-900">
-                      {log.event_type.replace(/_/g, ' ').toUpperCase()}
+                      {log.label}
                     </span>
                   </div>
                   <p className="text-sm text-slate-600">
@@ -283,22 +299,15 @@ export default function SettingsManager() {
                   <p className="text-xs text-slate-500 mt-1">
                     발생 시간: {new Date(log.created_at).toLocaleString('ko-KR')}
                   </p>
-                  {log.details && Object.keys(log.details).length > 0 && (
-                    <details className="mt-2">
-                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">
-                        상세 정보
-                      </summary>
-                      <pre className="text-xs text-slate-600 mt-1 bg-slate-50 p-2 rounded overflow-x-auto">
-                        {JSON.stringify(log.details, null, 2)}
-                      </pre>
-                    </details>
+                  {log.detail && (
+                    <p className="text-xs text-slate-600 mt-1">{log.detail}</p>
                   )}
                 </div>
               </div>
             </div>
           ))}
 
-          {securityLogs.length === 0 && !logsLoading && (
+          {securityLogs.length === 0 && !logsLoading && !logsError && (
             <div className="text-center py-8 text-slate-500 border rounded-lg bg-white">
               보안 이벤트가 없습니다.
             </div>

@@ -174,7 +174,8 @@ describe('원본', () => {
     const union = types.slice(types.indexOf('export type SecurityEventType'), types.indexOf('export type SecuritySeverity'));
     const events = [...union.matchAll(/\|\s*'([a-z_]+)'|=\s*\n?\s*'([a-z_]+)'/g)].map((m) => m[1] ?? m[2]);
     expect(events.length).toBeGreaterThan(30);
-    const labels = audit.slice(audit.indexOf('const SECURITY_LABEL'), audit.indexOf('const ACCESS_LABEL'));
+    const text = readFileSync('src/lib/security-event-text.ts', 'utf8');
+    const labels = text.slice(text.indexOf('export const SECURITY_EVENT_LABELS'), text.indexOf('export const SECURITY_SEVERITY_LABELS'));
     for (const e of events) expect(labels, e).toMatch(new RegExp(`\\n\\s+${e}: '`));
     // 어느 기록과도 맞지 않던 옛 열쇠
     expect(labels).not.toMatch(/\n\s+(forbidden_word|personal_info|blocked_upload|rate_limit): '/);
@@ -182,7 +183,7 @@ describe('원본', () => {
 
   it('감사 화면 상세가 대상·사유를 싣는 함수를 씀', () => {
     expect(audit).toContain("...securityDetailParts(details, (id) => memberMap.get(id)?.name ?? null)");
-    expect(audit).toContain("user_role_changed: '직원 권한 바꾸기(관리자)'");
+    expect(readFileSync('src/lib/security-event-text.ts', 'utf8')).toContain("user_role_changed: '직원 권한 바꾸기(관리자)'");
   });
 
   it('상세 함수는 잎 파일', () => {

@@ -157,7 +157,7 @@ describe('연결(원본)', () => {
     expect(req).toContain('status: 503');
     const conf = readFileSync('src/app/api/password-reset/confirm/route.ts', 'utf8');
     expect(conf).toContain("logSecurityEvent(result.departmentId, result.userId, 'password_reset_by_email'");
-    expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("password_reset_by_email: '비밀번호 재설정(메일 링크)'");
+    expect(readFileSync('src/lib/security-event-text.ts', 'utf8')).toContain("password_reset_by_email: '비밀번호 재설정(메일 링크)'");
   });
   it('로그인 화면 링크·재설정 화면은 열쇠를 주소에서 지운다·임시 비밀번호로 묶인 동안에도 열림', () => {
     expect(readFileSync('src/components/auth/LoginForm.tsx', 'utf8')).toContain('href="/forgot-password"');

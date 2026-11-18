@@ -108,7 +108,7 @@ describe('기관 전체 예약 스위치(0070) — 같은 규칙, 예약 칸·�
     const sql = readFileSync('supabase/migrations/0070_org_schedule_switch.sql', 'utf8');
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS app_schedules_disabled_at timestamptz');
     expect(sql).toContain('(app_schedules_disabled_at IS NULL) = (app_schedules_disabled_reason IS NULL)');
-    const audit = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');
+    const audit = readFileSync('src/lib/security-event-text.ts', 'utf8');
     expect(audit).toContain("app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)'");
     expect(readFileSync('src/components/admin/AppAutomationAdmin.tsx', 'utf8')).toContain('<OrgAutomationSwitch kind="schedules"');
   });
@@ -170,7 +170,7 @@ describe('라우트·화면·마이그레이션', () => {
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS app_webhooks_disabled_reason text');
     expect(sql).toContain('(app_webhooks_disabled_at IS NULL) = (app_webhooks_disabled_reason IS NULL)');
     expect(sql).not.toMatch(/DROP|DELETE/);
-    const audit = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');
+    const audit = readFileSync('src/lib/security-event-text.ts', 'utf8');
     expect(audit).toContain("app_webhooks_org_disabled: '기관 외부 연동 끄기(관리자)'");
     expect(audit).toContain("app_webhooks_org_enabled: '기관 외부 연동 켜기(관리자)'");
   });

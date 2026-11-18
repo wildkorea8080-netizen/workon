@@ -97,7 +97,7 @@ describe('연결', () => {
     expect(readFileSync('src/app/api/apps/batches/[id]/export/route.ts', 'utf8')).toContain('loadBatchDeliveries(session.user.id, params.id)');
     expect(readFileSync('src/app/api/admin/app-automations/batch-limit/route.ts', 'utf8')).toContain('isAdminSession(session)');
     expect(readFileSync('src/lib/apps/automation-admin.ts', 'utf8')).toContain('batchLimit: await batchLimitPromise');
-    expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)'");
+    expect(readFileSync('src/lib/security-event-text.ts', 'utf8')).toContain("app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)'");
   });
 });
 

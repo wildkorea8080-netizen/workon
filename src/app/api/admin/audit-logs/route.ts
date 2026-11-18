@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { securityDetailParts } from '@/lib/security-event-text';
+import { SECURITY_EVENT_LABELS, SECURITY_SEVERITY_LABELS, securityDetailParts } from '@/lib/security-event-text';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { logSecurityEvent } from '@/lib/filter';
@@ -83,61 +83,12 @@ const ACTION_LABEL: Record<string, string> = {
   deactivate_forbidden_word: '금지어 비활성화',
 };
 
-const SECURITY_LABEL: Record<string, string> = {
-  query_revealed: '질문 원문 열람',
-  app_webhook_revoked: '앱 연동 회수(관리자)',
-  app_schedule_paused: '앱 예약 멈춤(관리자)',
-  app_schedule_unlocked: '앱 예약 잠금 풀기(관리자)',
-  sign_in_unlocked: '로그인 잠금 풀기(관리자)',
-  password_changed: '비밀번호 바꾸기(본인)',
-  password_reset_by_admin: '임시 비밀번호 재발급(관리자)',
-  password_reset_by_email: '비밀번호 재설정(메일 링크)',
-  user_deactivated: '계정 사용 중지(관리자)',
-  user_reactivated: '계정 다시 사용(관리자)',
-  user_dormant_locked: '장기 미접속으로 사용 중지(자동)',
-  dormant_lock_changed: '장기 미접속 잠금 설정 바꾸기(관리자)',
-  user_role_changed: '직원 권한 바꾸기(관리자)',
-  user_department_changed: '직원 부서 옮기기(관리자)',
-  user_budget_changed: '개인 월 한도 바꾸기(관리자)',
-  app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
-  app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
-  app_outbound_result_retried: '앱 결과 다시 보내기(직원)',
-  app_webhooks_org_disabled: '기관 외부 연동 끄기(관리자)',
-  app_webhooks_org_enabled: '기관 외부 연동 켜기(관리자)',
-  app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)',
-  app_schedules_org_enabled: '기관 앱 예약 켜기(관리자)',
-  org_api_key_created: '기관 통계 API 키 만들기(관리자)',
-  org_api_key_revoked: '기관 통계 API 키 회수(관리자)',
-  app_outbound_endpoint_created: '앱 결과 보낼 곳 만들기(관리자)',
-  app_outbound_endpoint_revoked: '앱 결과 보낼 곳 회수(관리자)',
-  app_outbound_endpoint_updated: '앱 결과 보낼 곳 — 보내기 전 확인 바꾸기(관리자)',
-  app_outbound_result_approved: '앱 결과 보내기 확인(직원)',
-  app_outbound_result_rejected: '앱 결과 보내지 않기(직원)',
-  // 실제로 남는 사건 종류(`SecurityEventType`)와 같은 열쇠여야 한다 — 예전 열쇠(forbidden_word·personal_info·blocked_upload·rate_limit)는
-  // 어느 기록과도 맞지 않아 가장 흔한 금지어·개인정보 감지가 코드 그대로 보였다(2026-11-18, `tests/batch-0157.test.ts`가 빠진 종류를 막음)
-  forbidden_word_detected: '금지어 감지',
-  personal_info_detected: '개인정보 패턴 감지',
-  file_upload_blocked: '업로드 차단',
-  suspicious_content: '의심스러운 내용 감지',
-  rate_limit_exceeded: '요청 제한',
-  ip_blocked: '접속 허용 IP 밖 접속 차단',
-  preset_agents_installed: '기본 비서·앱 세트 설치(관리자)',
-  preset_agents_updated: '기본 비서·앱 세트 갱신(관리자)',
-};
-
 /** 직원 접속 기록(0094) */
 const ACCESS_LABEL: Record<string, string> = {
   login: '로그인',
   login_failed: '로그인 실패',
   login_locked: '로그인 잠김(실패 반복)',
   login_rejected: '로그인 거절(비활성·소속 없음)',
-};
-
-const SEVERITY_LABEL: Record<string, string> = {
-  low: '낮음',
-  medium: '보통',
-  high: '높음',
-  critical: '심각',
 };
 
 function formatDateTime(iso: string) {
@@ -338,10 +289,10 @@ export async function GET(request: NextRequest) {
           직원: member.name,
           이메일: member.email,
           부서: member.dept,
-          활동: SECURITY_LABEL[log.event_type] ?? log.event_type,
+          활동: SECURITY_EVENT_LABELS[log.event_type] ?? log.event_type,
           // 대상·사유·전후 값까지(2026-11-18) — 대상 이름은 관리 범위 안 직원만
           상세: [
-            `심각도 ${SEVERITY_LABEL[log.severity] ?? log.severity}`,
+            `심각도 ${SECURITY_SEVERITY_LABELS[log.severity] ?? log.severity}`,
             ...securityDetailParts(details, (id) => memberMap.get(id)?.name ?? null),
           ].join(' / '),
           모델: '',

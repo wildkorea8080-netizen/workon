@@ -146,7 +146,7 @@ describe('연결(원본)', () => {
     expect(readFileSync('src/components/admin/UsersManager.tsx', 'utf8')).toContain('`/api/users/${userId}/password-reset`');
     expect(readFileSync('src/components/auth/LoginForm.tsx', 'utf8')).toContain("redirectError === 'password_changed'");
     expect(readFileSync('src/app/my/password/page.tsx', 'utf8')).toContain("signOut({ callbackUrl: '/login?error=password_changed' })");
-    expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("password_reset_by_admin: '임시 비밀번호 재발급(관리자)'");
+    expect(readFileSync('src/lib/security-event-text.ts', 'utf8')).toContain("password_reset_by_admin: '임시 비밀번호 재발급(관리자)'");
     expect(readFileSync('src/lib/mailer.ts', 'utf8')).toContain('export function sendPasswordResetEmail(');
   });
 });

@@ -51,7 +51,7 @@ describe('연결(원본)', () => {
     expect(ui).toContain('`/api/users/${userId}/active`');
     expect(ui).toContain('matchesUserFilter(u, listFilter)');
     expect(ui).toContain('사용 중지됨');
-    const audit = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');
+    const audit = readFileSync('src/lib/security-event-text.ts', 'utf8');
     expect(audit).toContain("user_deactivated: '계정 사용 중지(관리자)'");
     expect(audit).toContain("user_reactivated: '계정 다시 사용(관리자)'");
     expect(readFileSync('src/lib/user-list-filter.ts', 'utf8')).not.toMatch(/^import /m);

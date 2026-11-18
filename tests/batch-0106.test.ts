@@ -132,6 +132,6 @@ describe('연결(원본)', () => {
     expect(page).toContain("fetch('/api/my/password'");
     expect(readFileSync('src/lib/password-policy.ts', 'utf8')).not.toMatch(/^import /m);
     expect(readFileSync('src/components/layout/UserMenu.tsx', 'utf8')).toContain('href="/my/password"');
-    expect(readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8')).toContain("password_changed: '비밀번호 바꾸기(본인)'");
+    expect(readFileSync('src/lib/security-event-text.ts', 'utf8')).toContain("password_changed: '비밀번호 바꾸기(본인)'");
   });
 });

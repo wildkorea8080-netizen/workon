@@ -5,6 +5,59 @@
 // 감사에서 묻는 것은 "누가 누구에게 무엇을 했는가"다. 기록에는 대상 id·사유·전후 값이 이미 있으므로 읽을 말로 푼다.
 // 질문 글(금지어 기록의 `context`)·패턴 원문은 싣지 않는다 — 질문 원문은 사유를 적고 열람하는 길이 따로 있다.
 
+/**
+ * 보안 사건 종류 → 한국어(감사 화면 '보안 이벤트'·관리자 설정 화면 '보안 이벤트 로그'가 함께 쓴다).
+ * 열쇠는 실제로 남는 사건 종류(`SecurityEventType`)와 같아야 한다 — 새 종류를 더하면 여기도(`tests/batch-0157.test.ts`).
+ */
+export const SECURITY_EVENT_LABELS: Record<string, string> = {
+  query_revealed: '질문 원문 열람',
+  app_webhook_revoked: '앱 연동 회수(관리자)',
+  app_schedule_paused: '앱 예약 멈춤(관리자)',
+  app_schedule_unlocked: '앱 예약 잠금 풀기(관리자)',
+  sign_in_unlocked: '로그인 잠금 풀기(관리자)',
+  password_changed: '비밀번호 바꾸기(본인)',
+  password_reset_by_admin: '임시 비밀번호 재발급(관리자)',
+  password_reset_by_email: '비밀번호 재설정(메일 링크)',
+  user_deactivated: '계정 사용 중지(관리자)',
+  user_reactivated: '계정 다시 사용(관리자)',
+  user_dormant_locked: '장기 미접속으로 사용 중지(자동)',
+  dormant_lock_changed: '장기 미접속 잠금 설정 바꾸기(관리자)',
+  user_role_changed: '직원 권한 바꾸기(관리자)',
+  user_department_changed: '직원 부서 옮기기(관리자)',
+  user_budget_changed: '개인 월 한도 바꾸기(관리자)',
+  app_batch_stopped: '앱 일괄 실행 멈춤(관리자)',
+  app_batch_limit_changed: '앱 일괄 실행 상한 바꾸기(관리자)',
+  app_outbound_result_retried: '앱 결과 다시 보내기(직원)',
+  app_webhooks_org_disabled: '기관 외부 연동 끄기(관리자)',
+  app_webhooks_org_enabled: '기관 외부 연동 켜기(관리자)',
+  app_schedules_org_disabled: '기관 앱 예약 끄기(관리자)',
+  app_schedules_org_enabled: '기관 앱 예약 켜기(관리자)',
+  org_api_key_created: '기관 통계 API 키 만들기(관리자)',
+  org_api_key_revoked: '기관 통계 API 키 회수(관리자)',
+  app_outbound_endpoint_created: '앱 결과 보낼 곳 만들기(관리자)',
+  app_outbound_endpoint_revoked: '앱 결과 보낼 곳 회수(관리자)',
+  app_outbound_endpoint_updated: '앱 결과 보낼 곳 — 보내기 전 확인 바꾸기(관리자)',
+  app_outbound_result_approved: '앱 결과 보내기 확인(직원)',
+  app_outbound_result_rejected: '앱 결과 보내지 않기(직원)',
+  // 실제로 남는 사건 종류(`SecurityEventType`)와 같은 열쇠여야 한다 — 예전 열쇠(forbidden_word·personal_info·blocked_upload·rate_limit)는
+  // 어느 기록과도 맞지 않아 가장 흔한 금지어·개인정보 감지가 코드 그대로 보였다(2026-11-18, `tests/batch-0157.test.ts`가 빠진 종류를 막음)
+  forbidden_word_detected: '금지어 감지',
+  personal_info_detected: '개인정보 패턴 감지',
+  file_upload_blocked: '업로드 차단',
+  suspicious_content: '의심스러운 내용 감지',
+  rate_limit_exceeded: '요청 제한',
+  ip_blocked: '접속 허용 IP 밖 접속 차단',
+  preset_agents_installed: '기본 비서·앱 세트 설치(관리자)',
+  preset_agents_updated: '기본 비서·앱 세트 갱신(관리자)',
+};
+
+export const SECURITY_SEVERITY_LABELS: Record<string, string> = {
+  low: '낮음',
+  medium: '보통',
+  high: '높음',
+  critical: '심각',
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const clean = (v: unknown, max: number): string =>
