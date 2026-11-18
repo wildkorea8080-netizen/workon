@@ -5,6 +5,12 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(오전): 계약 화면 요약 카드 — 마이그레이션 없음
+
+- 코드 배포 `dpl_7KeC2mmXRnKkKFQrGtxciFNGpwsC`(커밋 `9926c19`, 2026-11-18 10:17 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `dea6cce`(아침 3 기록), `2441df0` 슈퍼관리자 계약 화면 요약 카드를 대시보드와 같은 규칙으로(`contractsSummary` — 활성 = 끝날 날이 지나지 않은 활성 계약, 만료 임박 = 그중 30일 안, '이번 달 매출' = 이번 달(한국 시간)에 유효했던 계약, 쪽마다 끝까지 읽고 못 읽으면 503; 예전엔 상태가 활성인 계약을 모두 세고 더해 끝난·시작 전 계약까지 들고 이번 달 해지 계약은 빠졌으며 못 읽으면 0), `9926c19` 문서. 가지 Preview(`workon-3ary45kn4`) Ready 뒤 `main`. 배포 전 전체 시험 305파일 3,972개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_G5DN9XFYxVgHuimNaDQKptXsFu69`(28eb99d)로 promote.
+- 배포 뒤 확인: 운영 브라우저(슈퍼관리자) 계약 화면 요약 2건·0건·1,090,000원('이번 달 매출'), API `summary` 같음 — 운영 계약 둘 다 끝날 날 없는 활성이라 고치기 전과 숫자가 같다. 인증 없는 `/api/super/contracts` 401. `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200. 실행기 호출 10:27 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건.
+
 ## 2026-11-18(아침 3): 여러 턴 대화 이력 순서 — 마이그레이션 없음
 
 - 코드 배포 `dpl_G5DN9XFYxVgHuimNaDQKptXsFu69`(커밋 `28eb99d`, 2026-11-18 08:54 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `0b01488`(아침 2 기록), 고침 — 한 턴의 질문·답은 `created_at`이 같아(운영 10턴 모두) 시각만으로 줄 세우면 이력(`loadHistory`)이 질문1 → 답2처럼 한 칸씩 밀린 채 모델에 가던 것(첫 답은 빠짐, 오류 없음)을 같은 시각이면 역할로 가르게(이력은 `created_at desc, role asc`, 대화 열기·공유 화면은 `created_at asc, role desc`), `28eb99d` 문서. 가지 Preview(`workon-duw73khce`) Ready 뒤 `main`. 배포 전 전체 시험 304파일 3,962개 통과·tsc 0.
