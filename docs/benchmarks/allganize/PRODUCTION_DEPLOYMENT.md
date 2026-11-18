@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-18(오후 2): 직원 권한·부서·한도 변경 기록과 감사 화면 보안 이벤트 — 마이그레이션 없음
+
+- 코드 배포 `dpl_6jyTpmPu3uyQoLuuVxWWbDT76nhj`(커밋 `7f9e2b4`, 2026-11-18 15:06 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `049dc26`(오후 기록), `0e4e1de` 기관 관리자의 직원 정보 수정(`PATCH /api/users/[id]`)이 권한(`user_role_changed`, high)·부서(`user_department_changed`)·개인 월 한도(`user_budget_changed`)를 전후 값과 함께 보안 로그에(달라진 것만, 부서는 그때의 이름도), 슈퍼관리자·탈퇴 계정은 대상에서 빼고 대상을 못 읽으면 500, 대리 접근 중 권한 변경 403, 너무 큰 한도 400. 감사 화면 '보안 이벤트' 이름표를 실제 사건 종류에 맞추고(금지어·개인정보 감지·업로드 차단·IP 차단 등이 코드 그대로 보였다) 상세에 대상 이름(관리 범위 안만)·사유·전후 값(`securityDetailParts`), `7f9e2b4` 문서. 가지 Preview(`workon-g3h8yxp1e`) Ready 뒤 `main`. 배포 전 전체 시험 311파일 4,049개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_GPk4kTymvDyFnv1jDxNM1EBVgcfs`(c7f9d5f)로 promote.
+- 배포 전 운영 DB(읽기 전용): `security_logs`에 사건 종류·심각도를 막는 CHECK 없음(기본 키·외래 키 둘뿐) — 새 사건 종류가 거절되지 않는다. `users.is_super_admin`·`deleted_at`·`monthly_budget_krw` 있음. `security_logs`는 0행(표가 2026-11-16에 생김).
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/branding`·`/api/system/maintenance`·`/api/notices` 200, 인증 없는 `/api/admin/audit-logs`·`PATCH /api/users/{id}` 403·`/admin/audit`은 로그인으로 보냄. 실행기 호출 15:10 KST 200, 최근 24시간 critical 0건·20분 warning 이상 0건. 감사 화면·실제 기록은 운영에서 보지 못했다(관리자 로그인 없음, 운영 DB에 쓰지 않음) — 시험으로 대신.
+
 ## 2026-11-18(오후): 관리자 대시보드·통계 첫 카드를 관리 범위로 — 마이그레이션 없음
 
 - 코드 배포 `dpl_GPk4kTymvDyFnv1jDxNM1EBVgcfs`(커밋 `c7f9d5f`, 2026-11-18 14:45 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `d11067d`(낮 3 기록), `52bfeb0` 기관 관리자 대시보드(`/admin`)·통계(`/admin/stats`)의 첫 카드(`GET /api/stats`)를 관리 범위(자기 부서 + 하위, 기관 직속 부서 관리자는 기관 전체)로 — 문서(지난 판 제외)·비서(지운 비서·나만의 비서 제외)·사용자(사용 중·탈퇴 안 함)·대화·메시지, 토큰은 이번 달(한국 시간)만(`monthlyTokens`), 읽기 실패는 0 대신 503, 옛 보고서 템플릿 수·늘 '정상'인 시스템 상태 카드 뺌, 최근 활동 이름표 채움(`chat_message` 등), '사용량 추이'(`/api/stats/usage`)도 읽기 실패는 503·토큰은 숫자만, `c7f9d5f` 문서. 가지 Preview(`workon-86urez0i0`) Ready 뒤 `main`. 배포 전 전체 시험 310파일 4,031개 통과·tsc 0.
