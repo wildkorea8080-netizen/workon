@@ -1599,6 +1599,8 @@ MAIL_FROM=
 맞춤 트리거가 겸하던 승인 판 도장(대기로 바뀌는 순간의 판을 `approval_version`에 찍음)은
 `trg_agents_stamp_approval_version`으로 따로 남는다 — 비면 승인이 판 확인을 건너뛴다.
 
+**공식 등록 신청·반려도 변경 기록에 남는다**(2026-11-18, `recordAgentEvent(…, 'tier', …, { event })` — `official_requested`(신청한 판·메모)·`official_rejected`(사유·신청한 판), 문장은 `describeHistoryItem`). 승인은 단계 변경(`change_agent_tier`)으로 이미 남았지만 반려는 어디에도 없었다 — 사유 칸(`approval_note`)은 다시 신청하면 덮인다. 새 종류를 만들지 않고 `kind: 'tier'`에 `detail.event`로 남긴다(`agent_history.kind`는 DB CHECK라 새 종류는 마이그레이션이 필요). **반려는 아직 승인 대기일 때만**(`.eq('approval_status', 'pending')` — 바뀐 줄이 없으면 409): 예전에는 조건이 없어, 대기 상태를 본 뒤 다른 관리자가 승인하면 공식이 된 비서의 상태를 '반려'로 덮었다. 반려 응답은 `id`·상태·사유만(예전엔 행 전체 — 지시문까지), 사유는 500자, 깨진 요청은 400. 신청은 그 사이 지워졌으면 404. `tests/batch-0165.test.ts`
+
 ### 비서 카탈로그 — 표시와 권한을 섞지 말 것
 
 편집 화면은 `AgentEditorModal`(`src/components/agents/`) 하나다. 판 설정(이름·지시문·모델·능력·양식)은
