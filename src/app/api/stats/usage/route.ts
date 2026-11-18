@@ -3,6 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { chatTokensOf } from '@/lib/org-chat-tokens';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +90,14 @@ export async function GET(request: NextRequest) {
       supabaseAdmin.from('usage_logs').select('created_at, action, details', withCount ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).gte('created_at', from).lte('created_at', to).order('id').range(a, b)),
   ]);
 
+  // 하나라도 못 읽었으면 0으로 그리지 않는다(2026-11-18) — 빈 차트가 '사용 없음'으로 읽힌다
+  if (documents.error || conversations.error || logs.error) {
+    return NextResponse.json(
+      { ok: false, error: { message: '사용량 추이를 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+      { status: 503 }
+    );
+  }
+
   // 기간 안의 모든 날짜를 미리 채운다. 빈 날을 건너뛰면 차트에서
   // 사용이 없던 날과 데이터가 없는 날이 구분되지 않는다.
   const buckets = new Map<string, DayBucket>();
@@ -107,8 +116,8 @@ export async function GET(request: NextRequest) {
 
   for (const row of (logs.data ?? []) as { created_at: string; action: string; details: any }[]) {
     bump(row.created_at, (b) => {
-      const d = row.details ?? {};
-      b.tokens += Number(d.input_tokens ?? 0) + Number(d.output_tokens ?? 0);
+      // 숫자가 아닌 값은 0(한도 판정과 같은 셈) — 예전 `Number()`는 글자 하나로 그날 합계를 NaN으로 만들었다
+      b.tokens += chatTokensOf(row.details);
       if (row.action === 'generate_report') b.reports += 1;
     });
   }

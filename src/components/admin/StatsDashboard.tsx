@@ -4,15 +4,15 @@ import { useState, useEffect } from 'react';
 import UsageChart from './UsageChart';
 
 interface Stats {
+  /** 센 범위 — 내 부서 + 하위 부서(기관 직속 부서 관리자는 기관 전체)의 부서 수 */
+  departmentCount: number;
   totalDocuments: number;
   totalAgents: number;
   totalConversations: number;
   totalMessages: number;
-  totalReports: number;
-  totalTemplates: number;
   totalUsers: number;
-  totalTokens: number;
-  recentReports: number;
+  /** 이번 달(한국 시간) 토큰 */
+  monthlyTokens: number;
   recentActivity: Array<{
     action: string;
     created_at: string;
@@ -46,6 +46,7 @@ export default function StatsDashboard() {
   };
 
   const getActionLabel = (action: string) => {
+    // 이용통계(`USAGE_ACTION_LABELS`)와 같은 어휘 — 빠지면 코드가 그대로 보인다(예전엔 가장 흔한 chat_message가 없었다)
     const labels: Record<string, string> = {
       login: '로그인',
       upload_document: '문서 업로드',
@@ -54,6 +55,18 @@ export default function StatsDashboard() {
       update_template: '템플릿 수정',
       delete_document: '문서 삭제',
       chat_query: '질문하기',
+      chat_message: 'AI 대화',
+      qna_search: '문서 질의',
+      document_ocr: '스캔 문서 판독',
+      file_attached: '파일 첨부',
+      table_merged: '표 합치기',
+      document_tag_suggest: '문서 태그 초안(AI)',
+      answer_revised: '근거로 고쳐 쓰기(AI)',
+      create_agent: '비서 생성',
+      add_forbidden_word: '금지어 추가',
+      delete_forbidden_word: '금지어 삭제',
+      activate_forbidden_word: '금지어 활성화',
+      deactivate_forbidden_word: '금지어 비활성화',
       conversation_title: '대화 제목 생성',
       document_generated: '문서 파일 생성',
       work_generate: '업무 파일 만들기(AI)',
@@ -76,63 +89,47 @@ export default function StatsDashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">부서 통계</h2>
-        <p className="text-slate-600 mt-1">현재 부서의 사용 현황을 확인하세요.</p>
+        <h2 className="text-xl font-semibold">관리 범위 현황</h2>
+        <p className="text-slate-600 mt-1">
+          내 부서와 하위 부서{stats?.departmentCount ? `(부서 ${stats.departmentCount}곳)` : ''}의 현황입니다. 기관 직속 부서의 관리자는 기관 전체를 봅니다.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="p-6 border rounded-lg bg-white">
           <h3 className="text-lg font-medium text-slate-900">문서</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalDocuments || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">업로드된 문서 수</p>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.totalDocuments ?? 0).toLocaleString()}</p>
+          <p className="text-sm text-slate-500 mt-1">올린 문서 수(지난 판 제외)</p>
         </div>
 
         <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">AI 에이전트</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalAgents || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">등록된 AI 에이전트 수</p>
+          <h3 className="text-lg font-medium text-slate-900">AI 비서</h3>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.totalAgents ?? 0).toLocaleString()}</p>
+          <p className="text-sm text-slate-500 mt-1">공식·부서 비서 수(나만의 비서·지운 비서 제외)</p>
+        </div>
+
+        <div className="p-6 border rounded-lg bg-white">
+          <h3 className="text-lg font-medium text-slate-900">활성 사용자</h3>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.totalUsers ?? 0).toLocaleString()}</p>
+          <p className="text-sm text-slate-500 mt-1">사용 중인 계정 수(사용 중지·탈퇴 제외)</p>
         </div>
 
         <div className="p-6 border rounded-lg bg-white">
           <h3 className="text-lg font-medium text-slate-900">대화 세션</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalConversations || 0}</p>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.totalConversations ?? 0).toLocaleString()}</p>
           <p className="text-sm text-slate-500 mt-1">진행된 대화 수</p>
         </div>
 
         <div className="p-6 border rounded-lg bg-white">
           <h3 className="text-lg font-medium text-slate-900">메시지</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalMessages || 0}</p>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.totalMessages ?? 0).toLocaleString()}</p>
           <p className="text-sm text-slate-500 mt-1">전송된 메시지 수</p>
         </div>
 
         <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">보고서</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalReports || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">생성된 보고서 수</p>
-        </div>
-
-        <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">템플릿</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalTemplates || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">활성 보고서 템플릿 수</p>
-        </div>
-
-        <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">토큰 사용량</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.totalTokens?.toLocaleString() || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">AI API 토큰 총 사용량</p>
-        </div>
-
-        <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">최근 보고서</h3>
-          <p className="text-3xl font-bold text-slate-700 mt-2">{stats?.recentReports || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">최근 30일 생성 수</p>
-        </div>
-
-        <div className="p-6 border rounded-lg bg-white">
-          <h3 className="text-lg font-medium text-slate-900">활성 상태</h3>
-          <p className="text-3xl font-bold text-green-600 mt-2">정상</p>
-          <p className="text-sm text-slate-500 mt-1">시스템 상태</p>
+          <h3 className="text-lg font-medium text-slate-900">이번 달 토큰</h3>
+          <p className="text-3xl font-bold text-slate-700 mt-2">{(stats?.monthlyTokens ?? 0).toLocaleString()}</p>
+          <p className="text-sm text-slate-500 mt-1">이번 달(한국 시간) AI 사용 토큰</p>
         </div>
       </div>
 
