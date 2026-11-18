@@ -65,7 +65,10 @@ export type SecurityEventType =
   /** 기관 관리자가 부서를 만듦 / 고침(이름·상위 부서·월 한도) / 지움 (2026-11-18 — 그 전에는 어디에도 남지 않았다) */
   | 'department_created'
   | 'department_updated'
-  | 'department_deleted';
+  | 'department_deleted'
+  /** 기관 관리자가 계정을 바로 만듦(직원 등록) / CSV 일괄 등록 (2026-11-18) */
+  | 'user_created'
+  | 'users_bulk_created';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

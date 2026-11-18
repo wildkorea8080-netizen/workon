@@ -27,6 +27,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   user_budget_changed: '개인 월 한도 바꾸기(관리자)',
   user_invited: '직원 초대(관리자)',
   user_invite_canceled: '직원 초대 취소(관리자)',
+  user_created: '계정 만들기(관리자)',
+  users_bulk_created: '직원 일괄 등록(관리자)',
   department_created: '부서 만들기(관리자)',
   department_updated: '부서 고치기(관리자)',
   department_deleted: '부서 삭제(관리자)',
@@ -105,6 +107,20 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
   if (invited) parts.push(`초대: ${invited}${typeof d.invited_role === 'string' ? ` (${roleText(d.invited_role)})` : ''}`);
 
   if ('from_role' in d || 'to_role' in d) parts.push(`권한: ${roleText(d.from_role)} → ${roleText(d.to_role)}`);
+
+  // ── 계정 만들기·일괄 등록 (2026-11-18) ──
+  if (typeof d.created_role === 'string') parts.push(`만든 권한: ${roleText(d.created_role)}`);
+
+  if (typeof d.created_count === 'number' && Number.isFinite(d.created_count)) {
+    const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+    const bits = [`등록 ${count(d.created_count)}명`];
+    if (count(d.created_admins)) bits.push(`관리자 ${count(d.created_admins)}명`);
+    if (count(d.created_departments)) bits.push(`새 부서 ${count(d.created_departments)}개`);
+    if (count(d.failed_count)) bits.push(`실패 ${count(d.failed_count)}줄`);
+    parts.push(bits.join(' · '));
+  }
+
+  if (d.via === 'bulk_register') parts.push('일괄 등록으로');
 
   if ('from_department_id' in d || 'to_department_id' in d) {
     const from = clean(d.from_department_name, 40) || '(이름 모름)';

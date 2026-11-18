@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export async function GET(_request: NextRequest) {
   try {
@@ -86,8 +87,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { email, full_name, role } = body;
+    let body: { email?: unknown; full_name?: unknown; role?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
+    }
+    const role = body?.role;
+    const email = typeof body?.email === 'string' ? body.email.trim() : '';
+    const full_name = typeof body?.full_name === 'string' ? body.full_name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) : '';
 
     // 역할은 직원·관리자 둘뿐(2026-11-17 — 예전엔 받은 글을 그대로 저장했다)
     if (role !== undefined && role !== null && role !== '' && role !== 'USER' && role !== 'ADMIN') {
@@ -103,13 +111,34 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json(
+        { ok: false, error: { message: '이메일 주소가 올바르지 않습니다.' } },
+        { status: 400 }
+      );
+    }
 
-    // 이메일 중복 확인
-    const { data: existingUser } = await supabaseAdmin
+    // 대리 접근 중의 조작은 그 기관 관리자 이름으로 기록된다 — 관리자 계정은 만들지 않는다(직원 권한 바꾸기·관리자 초대와 같은 규칙, 2026-11-18)
+    if (role === 'ADMIN' && session.user.isImpersonating) {
+      return NextResponse.json(
+        { ok: false, error: { message: '대리 접근 중에는 관리자 계정을 만들 수 없습니다. 슈퍼관리자 기관 화면의 초대 링크를 쓰세요.' } },
+        { status: 403 }
+      );
+    }
+
+    // 이메일 중복 확인 — 못 읽으면 '없음'으로 보지 않는다(예전 `.single()`은 실패와 없음을 가르지 못했다)
+    const { data: existingUsers, error: existingError } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('email', email)
-      .single();
+      .limit(1);
+    if (existingError) {
+      return NextResponse.json(
+        { ok: false, error: { message: '등록 여부를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+        { status: 500 }
+      );
+    }
+    const existingUser = (existingUsers ?? [])[0];
 
     if (existingUser) {
       return NextResponse.json(
@@ -144,16 +173,37 @@ export async function POST(request: NextRequest) {
         password_hash: hashedPassword,
         password_must_change: true, // 임시 비밀번호 — 첫 로그인 때 바꾸게 한다(0093)
       })
-      .select()
+      .select('id, email, role')
       .single();
 
-    if (error) {
+    if (error || !newUser) {
+      // 확인과 만들기 사이에 같은 이메일이 생겼다
+      if (error?.code === '23505') {
+        return NextResponse.json(
+          { ok: false, error: { message: '이미 존재하는 이메일입니다.' } },
+          { status: 400 }
+        );
+      }
       console.error('사용자 생성 오류:', error);
       return NextResponse.json(
         { ok: false, error: { message: '사용자를 생성할 수 없습니다.' } },
         { status: 500 }
       );
     }
+
+    // 계정 만들기를 보안 로그에(2026-11-18 — 관리자 계정을 바로 만들어도 어디에도 남지 않았다). 이메일·임시 비밀번호는 싣지 않는다.
+    // 기록 실패는 만든 계정을 되돌리지 않는다(실패는 운영 기록에 남는다)
+    await logSecurityEvent(
+      departmentId,
+      session.user.id,
+      'user_created',
+      {
+        target_user_id: newUser.id,
+        created_role: newUser.role,
+        ...(session.user.isImpersonating ? { impersonating: true } : {}),
+      },
+      newUser.role === 'ADMIN' ? 'high' : 'low'
+    );
 
     // TODO: 초대 이메일 발송 (임시 비밀번호 포함)
     // tempPassword를 이메일로 전송해야 사용자가 최초 로그인 가능

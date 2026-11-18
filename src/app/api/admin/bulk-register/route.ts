@@ -9,6 +9,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
 import { sendTempPasswordEmail, isMailConfigured } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
+import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,8 +72,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const rows: CsvRow[] = body.rows ?? [];
+    let body: { rows?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
+    }
+    const rows = ((body?.rows ?? []) as CsvRow[]);
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json(
@@ -93,11 +100,19 @@ export async function POST(request: NextRequest) {
     let seatsLeft = seats.remaining; // null = 무제한
 
     // 관리자가 속한 기관. 모든 부서 조회·생성을 이 기관으로 한정한다.
-    const { data: adminDept } = await supabaseAdmin
+    const { data: adminDept, error: adminDeptError } = await supabaseAdmin
       .from('departments')
-      .select('name, organization_id')
+      .select('name, organization_id, parent_id')
       .eq('id', adminDeptId)
-      .single();
+      .maybeSingle();
+
+    // 못 읽은 것을 '기관에 연결 안 됨'으로 보지 않는다(2026-11-18)
+    if (adminDeptError) {
+      return NextResponse.json(
+        { ok: false, error: { message: '부서 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+        { status: 503 }
+      );
+    }
 
     const organizationId = adminDept?.organization_id;
     if (!organizationId) {
@@ -110,8 +125,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // **관리 범위**(2026-11-18) — 예전에는 기관 안의 아무 부서나 이름으로 찾아 넣었다. 하위 부서 관리자가 CSV에 기관 직속 부서 이름과
+    // 권한 ADMIN을 적으면 기관 전체 관리자 계정이 만들어졌고(임시 비밀번호는 응답으로 받는다), 상위 없는 새 부서도 만들 수 있었다
+    // (부서 화면은 기관 직속 관리자만 최상위 부서를 만든다). 이제 있는 부서는 관리 범위 안일 때만, 새 부서는 관리 범위 안의 부서 아래에만 만든다.
+    const managedIds = new Set(await getManagedDepartmentIds(adminDeptId));
+    const isRootAdmin = adminDept?.parent_id == null;
+
     // 부서 캐시 (같은 이름 중복 조회 방지)
     const deptCache = new Map<string, string>();
+    // 이번에 만든 부서 — 보안 로그에 남긴다
+    const createdDepartments: Array<{ id: string; name: string; parentId: string | null; parentName: string | null }> = [];
 
     function makeSlug(name: string) {
       return (
@@ -136,21 +159,27 @@ export async function POST(request: NextRequest) {
       const name = deptName.trim();
       if (deptCache.has(name)) return deptCache.get(name)!;
 
-      const { data: existing } = await supabaseAdmin
+      const { data: existing, error: existingError } = await supabaseAdmin
         .from('departments')
         .select('id')
         .eq('organization_id', organizationId)
         .eq('name', name)
         .maybeSingle();
 
+      // 못 읽은 것을 '없는 부서'로 보고 새로 만들지 않는다
+      if (existingError) throw new RowError(`부서를 확인하지 못했습니다: ${name}`);
+
       if (existing) {
+        if (!managedIds.has(existing.id)) throw new RowError(`관리 범위 밖의 부서에는 등록할 수 없습니다: ${name}`);
         deptCache.set(name, existing.id);
         return existing.id;
       }
 
-      // 상위 부서가 지정돼 있으면 먼저 만들어 계층을 잇는다.
+      // 상위 부서가 지정돼 있으면 먼저 만들어 계층을 잇는다(그 상위도 관리 범위 안이어야 한다).
       // 자기 자신을 상위로 지정한 행은 무시한다.
-      let parentId: string | null = null;
+      // 상위가 없으면: 기관 직속 관리자는 최상위 부서로(예전과 같음), 그 밖의 관리자는 **자기 부서 아래**로 —
+      // 최상위로 만들면 그 부서가 상위 부서 관리자의 관리 범위에서 빠진다.
+      let parentId: string | null = isRootAdmin ? null : (adminDeptId ?? null);
       const parent = parentName?.trim();
       if (parent && parent !== name) {
         parentId = await findOrCreateDept(parent);
@@ -170,10 +199,15 @@ export async function POST(request: NextRequest) {
 
       if (error || !newDept) throw new RowError(`부서를 만들지 못했습니다: ${name}`);
       deptCache.set(name, newDept.id);
+      managedIds.add(newDept.id);
+      createdDepartments.push({ id: newDept.id, name, parentId, parentName: parent && parent !== name ? parent : parentId ? adminDept?.name ?? null : null });
       return newDept.id;
     }
 
     const results: RegisterResult[] = [];
+    // 이번에 만든 관리자 계정 — 하나씩 보안 로그에 남긴다
+    const createdAdminIds: string[] = [];
+    const impersonating = session.user.isImpersonating === true;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -199,15 +233,26 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // 대리 접근 중의 조작은 그 기관 관리자 이름으로 기록된다 — 관리자 계정은 만들지 않는다(직원 권한 바꾸기·관리자 초대와 같은 규칙)
+      if (role === 'ADMIN' && impersonating) {
+        results.push({
+          row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
+          부서명: row.부서명.trim(), success: false, error: '대리 접근 중에는 관리자 계정을 만들 수 없습니다',
+        });
+        continue;
+      }
+
       try {
         const deptId = await findOrCreateDept(row.부서명, row.상위부서명);
 
-        // 이미 존재하는 이메일 확인
-        const { data: existingUser } = await supabaseAdmin
+        // 이미 존재하는 이메일 확인 — 못 읽으면 '없음'으로 보고 계정을 만들지 않는다
+        const { data: existingUsers, error: existingUserError } = await supabaseAdmin
           .from('users')
           .select('id')
           .eq('email', email)
-          .maybeSingle();
+          .limit(1);
+        if (existingUserError) throw new RowError('등록 여부를 확인하지 못했습니다. 잠시 뒤 다시 올려 주세요.');
+        const existingUser = (existingUsers ?? [])[0];
 
         if (existingUser) {
           results.push({
@@ -258,6 +303,7 @@ export async function POST(request: NextRequest) {
         });
 
         if (seatsLeft !== null) seatsLeft -= 1;
+        if (role === 'ADMIN') createdAdminIds.push(authUser.user.id);
         results.push({
           row: i + 1, 이메일: email, 직원이름: row.직원이름.trim(),
           부서명: row.부서명.trim(), success: true, tempPassword,
@@ -274,6 +320,23 @@ export async function POST(request: NextRequest) {
 
     const successCount = results.filter(r => r.success).length;
     const failCount = results.filter(r => !r.success).length;
+
+    // ── 보안 로그(2026-11-18 — 그 전에는 일괄 등록으로 관리자 계정을 만들어도 어디에도 남지 않았다) ──
+    // 관리자 계정은 하나씩(high), 전체는 수만 한 줄로, 새로 만든 부서는 부서 화면에서 만든 것과 같은 사건으로. 이메일·임시 비밀번호는 싣지 않는다.
+    const mark = impersonating ? { impersonating: true } : {};
+    for (const dept of createdDepartments) {
+      await logSecurityEvent(adminDeptId, session.user.id, 'department_created',
+        { department_id: dept.id, dept_name: dept.name, parent_id: dept.parentId, parent_name: dept.parentName, via: 'bulk_register', ...mark }, 'low');
+    }
+    for (const id of createdAdminIds) {
+      await logSecurityEvent(adminDeptId, session.user.id, 'user_created',
+        { target_user_id: id, created_role: 'ADMIN', via: 'bulk_register', ...mark }, 'high');
+    }
+    if (successCount > 0) {
+      await logSecurityEvent(adminDeptId, session.user.id, 'users_bulk_created',
+        { created_count: successCount, created_admins: createdAdminIds.length, created_departments: createdDepartments.length, failed_count: failCount, ...mark },
+        createdAdminIds.length > 0 ? 'high' : 'low');
+    }
 
     return NextResponse.json({
       ok: true,
