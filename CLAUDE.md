@@ -549,7 +549,7 @@ WORKON은 원본을 보관하고 읽기 상태를 `documents` 행에 적을 뿐�
   판 기록(`agent_history` `deleted`)에 `documents_removed`·`documents_kept`·`noda_cleared`를 남긴다
 - **NODA에서 지우면 사본·색인·캐시는 즉시 사라지지만, NODA의 일일 백업에는 최대 7일 남는다.** 보안 심사 자료(서비스 정의서 6절·8.5절)에도 그렇게 적는다
 - **옛 문서(`noda_status` NULL)는 `npm run noda:migrate` 전까지 대화에서 찾지 못한다.** `ready` 문서가 없는 비서는 NODA를 부르지 않고 평소처럼 답한다
-- **정지된 기관(`organizations.status='suspended'`)은 문서를 올리지 못한다** — 주소 발급·확인 두 곳이 403 `기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.`
+- **정지·종료된 기관(`organizations.status`가 `'suspended'`·`'terminated'` — `isStoppedOrgStatus`, 종료는 2026-11-19부터)은 문서를 올리지 못한다** — 주소 발급·확인 두 곳이 403 `기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.`
   (기관 상태만 본다 — 토큰 예산과는 상관없다. 조회 실패는 `checkTokenLimit`처럼 막지 않는다). 형식은 **확장자로만** 가른다(MIME만 맞는 파일은 415) — NODA가 확장자로 읽는 방식을 정한다
 
 ### NODA 배포 순서 (S4-a)
@@ -2061,7 +2061,7 @@ details: {
 부서 → 기관 → 이번 달 `usage_logs` 합산 순으로 확인합니다.
 
 - 기관 월 토큰 한도는 슈퍼관리자 사용량 화면 '한도 증량'(→ `PATCH /api/super/organizations/[id]` `monthly_token_limit`, 0 = 무제한, 조작 기록)이나 계약 변경(요금제 기본값)으로 바뀐다 — 2026-11-18 전에는 이 PATCH가 그 칸을 받지 않아 '한도 증량'이 저장된 척만 했다(`tests/batch-0146.test.ts`)
-- 기관 `status='suspended'` → 차단 (429)
+- 기관 `status='suspended'`(정지)·`'terminated'`(종료) → 차단 (429) — 판정은 `isStoppedOrgStatus`(`src/lib/org-status.ts`, 잎 파일) 한 곳(2026-11-19 — 예전엔 'suspended'만 보아 슈퍼관리자가 '기관 종료'한 기관의 직원이 대화를 계속하고 문서를 올리고 예산 알림 메일을 받았다. 종료면 `org_terminated`·'기관 이용이 종료되었습니다'). 기관 종료(`PATCH /api/super/organizations/[id]` `status: 'terminated'`)는 정지처럼 active 계약도 해지한다(예전엔 계약이 그대로 active라 매출에 남았다 — 실패면 `contract_cancel_after_org_terminate` 경고). 같은 묶음: 그 PATCH는 깨진 요청·메모(글 1,000자, 빈 글은 지움)·상태 값 400, 기관을 못 읽으면 503·없으면 404(GET도). `tests/batch-0183.test.ts`
 - 이번 달 토큰 합산 ≥ `monthly_token_limit` → 차단 (429)
 - 기관 미연결 부서, `monthly_token_limit=0`(무제한), 집계 실패 → **허용**
   (과금 집계 오류로 서비스가 멈추면 안 되므로 fail-open)
