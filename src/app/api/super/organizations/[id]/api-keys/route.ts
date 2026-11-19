@@ -13,13 +13,17 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { data: keys } = await supabaseAdmin
+  // 못 읽으면 '키 없음(시스템 키)'으로 보이지 않는다(2026-11-19)
+  const { data: keys, error: keysError } = await supabaseAdmin
     .from('api_keys')
     .select('id, provider, key_prefix, key_value, is_active, is_default, label')
     .eq('organization_id', params.id)
     .eq('is_active', true);
+  if (keysError) return NextResponse.json({ ok: false, error: 'API 키 상태를 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
 
   const anthropic = (keys ?? []).find((k: { provider: string; [x: string]: any }) => k.provider === 'anthropic');
+  // 풀지 못하는 암호문(키를 바꾼 뒤 등)이어도 화면은 열린다
+  const masked = (v: string) => { try { return maskKey(decryptApiKey(v)); } catch { return '(풀지 못함)'; } };
 
   return NextResponse.json({
     ok: true,
@@ -28,7 +32,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       anthropic: anthropic ? {
         id: anthropic.id,
         prefix: anthropic.key_prefix ?? '',
-        masked: anthropic.key_value ? maskKey(decryptApiKey(anthropic.key_value)) : '',
+        masked: anthropic.key_value ? masked(anthropic.key_value) : '',
         hasKey: !!anthropic.key_value,
       } : null,
     },
@@ -39,7 +43,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const admin = getSuperAdminFromRequest(request);
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { provider, keyValue, useSystemDefault } = await request.json();
+  const body = await request.json().catch(() => null) as { provider?: unknown; keyValue?: unknown; useSystemDefault?: unknown } | null;
+  if (!body || typeof body !== 'object') return NextResponse.json({ ok: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 });
+  const { provider, useSystemDefault } = body;
+  // 키는 앞뒤 공백을 떼고 글자로만(2026-11-19 — 숫자 등이 오면 slice에서 500이었다)
+  const keyValue = typeof body.keyValue === 'string' ? body.keyValue.trim() : '';
 
   // useSystemDefault ON → 기존 키 비활성화
   if (useSystemDefault === true) {
@@ -59,7 +67,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ ok: true });
   }
 
-  if (!provider || !keyValue) {
+  if (!provider || !keyValue || keyValue.length > 500) {
     return NextResponse.json({ ok: false, error: 'provider와 keyValue 필수' }, { status: 400 });
   }
   if (!isApiKeyProvider(provider)) {

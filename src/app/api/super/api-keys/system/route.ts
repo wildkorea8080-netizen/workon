@@ -18,17 +18,20 @@ export async function GET(request: NextRequest) {
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { data: keys } = await supabaseAdmin
+  // 못 읽으면 '(미설정)'으로 보이지 않는다(2026-11-19)
+  const { data: keys, error: keysError } = await supabaseAdmin
     .from('api_keys')
     .select('id, provider, key_prefix, key_value, is_active, updated_at')
     .is('organization_id', null)
     .eq('is_active', true);
+  if (keysError) return NextResponse.json({ ok: false, error: 'API 키 상태를 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+  const masked = (v: string) => { try { return maskApiKey(decryptApiKey(v)); } catch { return '(풀지 못함)'; } };
 
   const result: Record<string, any> = {};
   for (const p of PROVIDERS) {
     const k = (keys ?? []).find((r: { provider: string }) => r.provider === p);
     result[p] = k
-      ? { id: k.id, masked: k.key_value ? maskApiKey(decryptApiKey(k.key_value)) : '(미설정)', updatedAt: k.updated_at, hasKey: !!k.key_value }
+      ? { id: k.id, masked: k.key_value ? masked(k.key_value) : '(미설정)', updatedAt: k.updated_at, hasKey: !!k.key_value }
       : { id: null, masked: '(미설정)', updatedAt: null, hasKey: false };
   }
 

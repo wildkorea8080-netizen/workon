@@ -13,8 +13,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { data: depts } = await supabaseAdmin
+  // 부서를 못 읽으면 '초대 없음'이 아니라 실패(2026-11-19)
+  const { data: depts, error: deptError } = await supabaseAdmin
     .from('departments').select('id').eq('organization_id', params.id);
+  if (deptError) return NextResponse.json({ ok: false, error: '부서 목록을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
 
   const deptIds = (depts ?? []).map((d: { id: string }) => d.id);
   if (!deptIds.length) return NextResponse.json({ ok: true, data: [] });

@@ -58,10 +58,14 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/super/api-keys/system');
-    const d   = await res.json();
-    if (d.ok) setData(d.data);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/super/api-keys/system');
+      const d   = await res.json().catch(() => null);
+      if (res.ok && d?.ok) setData(d.data);
+      else onToast(typeof d?.error === 'string' ? d.error : 'API 키 상태를 불러오지 못했습니다.');
+    } catch { onToast('API 키 상태를 불러오지 못했습니다.'); }
+    finally { setLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { load(); }, [load]);

@@ -174,7 +174,9 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
 
   useEffect(() => {
     fetch(`/api/super/organizations/${org.id}/invitations`)
-      .then(r => r.json()).then(d => { if (d.ok) setInvitations(d.data); }).catch(() => {});
+      .then(r => r.json()).then(d => { if (d?.ok) setInvitations(d.data); else onToast('초대 링크 목록을 불러오지 못했습니다.'); })
+      .catch(() => onToast('초대 링크 목록을 불러오지 못했습니다.'));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id]);
 
   const handleNewInvite = async () => {
@@ -383,14 +385,19 @@ function UsersTab({ orgId }: { orgId: string }) {
   const [users, setUsers]   = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const fetch_ = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ search });
-    const res  = await fetch(`/api/super/organizations/${orgId}/users?${params}`);
-    const data = await res.json();
-    if (data.ok) setUsers(data.data);
-    setLoading(false);
+    try {
+      const res  = await fetch(`/api/super/organizations/${orgId}/users?${params}`);
+      const data = await res.json().catch(() => null);
+      // 못 읽으면 '사용자가 없습니다'가 아니라 실패로 보인다(2026-11-19)
+      if (res.ok && data?.ok) { setUsers(data.data); setLoadError(false); }
+      else { setUsers([]); setLoadError(true); }
+    } catch { setUsers([]); setLoadError(true); }
+    finally { setLoading(false); }
   }, [orgId, search]);
 
   useEffect(() => { fetch_(); }, [fetch_]);
@@ -418,6 +425,8 @@ function UsersTab({ orgId }: { orgId: string }) {
               Array.from({length:3}).map((_,i) => (
                 <tr key={i}>{Array.from({length:6}).map((_,j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-700/50 rounded animate-pulse" /></td>)}</tr>
               ))
+            ) : loadError ? (
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-red-400">사용자 목록을 불러오지 못했습니다. 잠시 뒤 다시 검색해 주세요.</td></tr>
             ) : users.length === 0 ? (
               <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-500">사용자가 없습니다.</td></tr>
             ) : (
@@ -547,10 +556,14 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/super/organizations/${orgId}/api-keys`);
-    const d   = await res.json();
-    if (d.ok) { setKeyData(d.data); setUseSystem(d.data.useSystemDefault); }
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/super/organizations/${orgId}/api-keys`);
+      const d   = await res.json().catch(() => null);
+      if (res.ok && d?.ok) { setKeyData(d.data); setUseSystem(d.data.useSystemDefault); }
+      else onToast(typeof d?.error === 'string' ? d.error : 'API 키 상태를 불러오지 못했습니다.');
+    } catch { onToast('API 키 상태를 불러오지 못했습니다.'); }
+    finally { setLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
 
   useEffect(() => { load(); }, [load]);
@@ -558,11 +571,13 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
   const handleToggleSystem = async (val: boolean) => {
     setUseSystem(val);
     if (val) {
-      await fetch(`/api/super/organizations/${orgId}/api-keys`, {
+      const res = await fetch(`/api/super/organizations/${orgId}/api-keys`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ useSystemDefault: true }),
-      });
-      onToast('이 기관의 키를 더 보관하지 않습니다.');
+      }).catch(() => null);
+      const d = res ? await res.json().catch(() => null) : null;
+      if (res?.ok && d?.ok) onToast('이 기관의 키를 더 보관하지 않습니다.');
+      else { onToast(typeof d?.error === 'string' ? d.error : '바꾸지 못했습니다.'); load(); }
     }
   };
 
@@ -573,9 +588,9 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, keyValue: inputVal }),
     });
-    const d = await res.json();
-    if (d.ok) { onToast('API 키가 저장됐습니다.'); setEditing(null); setInputVal(''); load(); }
-    else onToast('저장에 실패했습니다.');
+    const d = await res.json().catch(() => null);
+    if (res.ok && d?.ok) { onToast('API 키가 저장됐습니다.'); setEditing(null); setInputVal(''); load(); }
+    else onToast(typeof d?.error === 'string' ? d.error : '저장에 실패했습니다.');
     setSaving(false);
   };
 

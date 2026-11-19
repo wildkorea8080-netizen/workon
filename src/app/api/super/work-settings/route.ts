@@ -42,12 +42,21 @@ export async function PATCH(request: NextRequest) {
   if (!body || typeof body.organizationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.organizationId) || typeof body.homeEnabled !== 'boolean' || typeof body.newTasksEnabled !== 'boolean') {
     return NextResponse.json({ ok: false, error: { message: '요청 형식이 올바르지 않습니다.' } }, { status: 400 });
   }
-  const { data: org } = await supabaseAdmin.from('organizations').select('id').eq('id', body.organizationId).maybeSingle();
+  // 기관을 못 읽으면 '없음'(404)이 아니라 503(2026-11-19)
+  const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('id').eq('id', body.organizationId).maybeSingle();
+  if (orgError) return NextResponse.json({ ok: false, error: { message: '기관을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
   if (!org) return NextResponse.json({ ok: false, error: { message: '기관을 찾을 수 없습니다.' } }, { status: 404 });
   const store = createSupabaseWorkStore();
-  const before = await store.getOrgSettings(body.organizationId);
-  // updated_by는 기관 사용자 칸이라 슈퍼관리자 id는 기록(super_admin_logs)에만 남긴다
-  const after = await store.upsertOrgSettings(body.organizationId, { homeEnabled: body.homeEnabled, newTasksEnabled: body.newTasksEnabled, updatedBy: null });
+  let before: Awaited<ReturnType<typeof store.getOrgSettings>>;
+  let after: Awaited<ReturnType<typeof store.upsertOrgSettings>>;
+  try {
+    before = await store.getOrgSettings(body.organizationId);
+    // updated_by는 기관 사용자 칸이라 슈퍼관리자 id는 기록(super_admin_logs)에만 남긴다
+    after = await store.upsertOrgSettings(body.organizationId, { homeEnabled: body.homeEnabled, newTasksEnabled: body.newTasksEnabled, updatedBy: null });
+  } catch (err) {
+    console.error('[super/work-settings PATCH]', (err as { code?: string })?.code ?? err);
+    return NextResponse.json({ ok: false, error: { message: '업무 화면 설정을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 500 });
+  }
   await writeAuditRow('super_admin_logs', {
     admin_user_id: admin.sub,
     action: 'work_settings_changed',

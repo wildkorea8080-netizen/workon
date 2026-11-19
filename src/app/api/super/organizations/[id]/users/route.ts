@@ -15,11 +15,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') ?? '';
 
-    // 기관 소속 부서 ID 목록
-    const { data: depts } = await supabaseAdmin
+    // 기관 소속 부서 ID 목록 — 못 읽으면 '사용자 없음'이 아니라 실패(2026-11-19), 쪽마다 끝까지
+    const { data: depts, error: deptError } = await pagedRows<{ id: string; name: string }>((a, b, w) => supabaseAdmin
       .from('departments')
-      .select('id, name')
-      .eq('organization_id', params.id);
+      .select('id, name', w ? { count: 'exact' } : undefined)
+      .eq('organization_id', params.id)
+      .order('id').range(a, b));
+    if (deptError) return NextResponse.json({ ok: false, error: '부서 목록을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
 
     if (!depts?.length) return NextResponse.json({ ok: true, data: [] });
 
