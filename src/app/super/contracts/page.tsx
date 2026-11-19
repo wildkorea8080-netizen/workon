@@ -108,9 +108,9 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'cancelled' }),
     });
-    const d = await res.json();
-    if (d.ok) { load(); onToast(d.warning ?? '계약이 해지됐습니다.'); }
-    else onToast(d.error);
+    const d = await res.json().catch(() => null);
+    if (res.ok && d?.ok) { load(); onToast(d.warning ?? '계약이 해지됐습니다.'); }
+    else onToast(typeof d?.error === 'string' ? d.error : '해지하지 못했습니다.');
   };
 
   return (
@@ -398,15 +398,21 @@ function RenewModal({ contract: c, onClose, onSaved }: { contract: any; onClose:
   const [fee, setFee]         = useState(c.monthlyFee ?? 0);
   const [notes, setNotes]     = useState('');
   const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState('');
 
   const handleSave = async () => {
-    setSaving(true);
-    const res = await fetch(`/api/super/contracts/${c.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endDate: endDate || undefined, planType: plan, monthlyFee: fee, notes }),
-    });
-    const d = await res.json();
-    if (d.ok) { if (d.warning) alert(d.warning); onSaved(); } setSaving(false);
+    setSaving(true); setError('');
+    try {
+      // 메모를 비워 두면 있던 메모를 그대로 둔다(예전엔 빈 글로 덮어 지웠다, 2026-11-19)
+      const res = await fetch(`/api/super/contracts/${c.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endDate: endDate || undefined, planType: plan, monthlyFee: fee, ...(notes.trim() ? { notes: notes.trim() } : {}) }),
+      });
+      const d = await res.json().catch(() => null);
+      if (res.ok && d?.ok) { if (d.warning) alert(d.warning); onSaved(); }
+      else setError(typeof d?.error === 'string' ? d.error : '갱신하지 못했습니다.');
+    } catch { setError('갱신하지 못했습니다.'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -440,9 +446,10 @@ function RenewModal({ contract: c, onClose, onSaved }: { contract: any; onClose:
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-400 mb-1.5">메모</label>
-          <input value={notes} onChange={e => setNotes(e.target.value)}
+          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="비워 두면 있던 메모를 그대로 둡니다"
             className="w-full px-3 py-2.5 bg-[#0F172A] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]"/>
         </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 border border-slate-700 rounded-xl text-sm text-slate-400 hover:text-white">취소</button>
           <button onClick={handleSave} disabled={saving}
