@@ -101,6 +101,8 @@ export default function OrganizationsPage() {
       const data = await res.json();
       if (!data.ok) { showToast(data.error ?? '접속 실패'); return; }
       window.open('/admin', '_blank');
+      // 하위 부서 관리자로 들어갔으면 그렇다고(2026-11-19)
+      if (typeof data.warning === 'string') showToast(data.warning);
     } catch {
       showToast('접속 중 오류가 발생했습니다.');
     } finally {

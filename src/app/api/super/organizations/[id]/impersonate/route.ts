@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encode } from 'next-auth/jwt';
 import { logSystem } from '@/lib/logger';
 import { NEXTAUTH_SECRET } from '@/lib/config';
+import { narrowImpersonationNotice, pickImpersonationTarget } from '@/lib/impersonation-target';
 
 const IMPERSONATION_NOT_LOGGED = '대리 접근 기록을 남기지 못해 대리 접근을 내주지 않았습니다';
 
@@ -40,14 +41,15 @@ export async function POST(
     return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
   }
 
-  // 2) 기관 소속 부서 조회
+  // 2) 기관 소속 부서 조회 — 못 읽으면 '부서가 없습니다'가 아니라 그렇다고(2026-11-19)
   const { data: depts, error: deptErr } = await supabaseAdmin
     .from('departments')
-    .select('id')
+    .select('id, name, parent_id')
     .eq('organization_id', orgId);
 
   if (deptErr) {
-    console.error('[impersonate] dept query error:', deptErr.message);
+    console.error('[impersonate] dept query error:', deptErr.code);
+    return NextResponse.json({ ok: false, error: '기관의 부서를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
   }
 
   const deptIds = (depts ?? []).map((d: { id: string }) => d.id);
@@ -58,24 +60,28 @@ export async function POST(
   // 3) 기관 소속 ADMIN 사용자 조회
   const { data: adminUsers, error: adminErr } = await supabaseAdmin
     .from('users')
-    .select('id, email, full_name, department_id')
+    .select('id, email, full_name, department_id, created_at')
     .in('department_id', deptIds)
     .eq('role', 'ADMIN')
     .eq('is_super_admin', false)
     .eq('is_active', true) // 비활성·탈퇴한 관리자로 들어가지 않는다(2026-11-16 — 미들웨어가 바로 끊는다)
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
-    .limit(5);
+    .limit(200);
 
   if (adminErr) {
-    console.error('[impersonate] admin user query error:', adminErr.message);
+    console.error('[impersonate] admin user query error:', adminErr.code);
+    return NextResponse.json({ ok: false, error: '기관의 관리자를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
   }
 
-  // 슈퍼관리자 본인 계정 제외 후 첫 번째 ADMIN 선택
-  const adminUser = (adminUsers ?? []).find((u: { id: string }) => u.id !== admin.sub) ?? (adminUsers ?? [])[0];
-  if (!adminUser) {
+  // 최상위 부서의 관리자(= 기관 전체 관리자)를 먼저, 없으면 하위 부서 관리자로 들어가되 알린다(2026-11-19 —
+  // 예전엔 가장 먼저 만든 관리자로 들어가 하위 부서 관리자면 그 부서 아래만 보였다)
+  type AdminRow = { id: string; email: string; full_name: string | null; department_id: string | null; created_at: string | null };
+  const pick = pickImpersonationTarget<AdminRow>((adminUsers ?? []) as AdminRow[], depts ?? [], admin.sub);
+  if (!pick) {
     return NextResponse.json({ ok: false, error: '해당 기관에 관리자가 없습니다.' }, { status: 404 });
   }
+  const adminUser = pick.user;
 
   // 4) impersonation_logs 기록
   const { data: logRow, error: logError } = await supabaseAdmin
@@ -121,7 +127,8 @@ export async function POST(
   const isProd = (process.env.NEXTAUTH_URL ?? '').startsWith('https://');
   const response = NextResponse.json({
     ok: true,
-    data: { redirectUrl: '/admin', orgName: org.name },
+    data: { redirectUrl: '/admin', orgName: org.name, wholeOrganization: pick.wholeOrganization },
+    ...(pick.wholeOrganization ? {} : { warning: narrowImpersonationNotice(pick.departmentName) }),
   });
   response.cookies.set({
     name: nextAuthCookieName(),
@@ -135,7 +142,7 @@ export async function POST(
 
   logSystem({ level: 'warning', category: 'security',
     message: `대리 접근: ${org.name}`,
-    details: { superAdminId: admin.sub, targetUserId: adminUser.id },
+    details: { superAdminId: admin.sub, targetUserId: adminUser.id, wholeOrganization: pick.wholeOrganization },
     orgId });
 
   return response;
