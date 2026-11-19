@@ -6,6 +6,7 @@ import { SECURITY_EVENT_LABELS, SECURITY_SEVERITY_LABELS, securityDetailParts } 
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { logSecurityEvent } from '@/lib/filter';
+import { csvCell } from '@/lib/csv-cell';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,11 +97,7 @@ function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
 }
 
-/** CSV 한 칸 이스케이프 */
-function csvCell(value: unknown): string {
-  const text = value == null ? '' : String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
+// CSV 한 칸은 `csvCell`(src/lib/csv-cell.ts) — 직원 이름·비서 이름·질문처럼 사용자가 정한 글이 '='로 시작하면 엑셀이 수식으로 실행했다(2026-11-18)
 
 function toCsv(rows: AuditRow[]): string {
   if (rows.length === 0) return '조회된 내역이 없습니다.\n';

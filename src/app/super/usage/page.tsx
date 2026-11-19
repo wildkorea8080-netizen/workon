@@ -6,6 +6,7 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, BarChart,
 } from 'recharts';
+import { csvCell } from '@/lib/csv-cell';
 
 const fmt = (n: number) =>
   n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n/1_000).toFixed(0)}K` : String(n ?? 0);
@@ -90,11 +91,7 @@ export default function UsagePage() {
   const exportCsv = () => {
     if (!data?.orgStats) return;
     // 칸 감싸기·수식 주입 막기(2026-11-18 — 예전엔 쉼표가 든 기관명이 칸을 밀고 '='로 시작하면 엑셀이 수식으로 읽었다)
-    const q = (v: unknown) => {
-      let s = String(v ?? '');
-      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+    const q = csvCell;
     const rows = [
       '기관명,플랜,대화수,입력토큰,출력토큰,비용(USD),활성사용자,이번달한도사용률(%)',
       ...data.orgStats.map((s: any) =>

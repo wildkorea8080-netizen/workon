@@ -3,7 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { validateAppDefinition } from '@/lib/apps/definition';
-import { batchWorkbook, getBatch, loadBatchDeliveries, loadBatchResults } from '@/lib/apps/batches';
+import { BatchReadError, batchWorkbook, getBatch, loadBatchDeliveries, loadBatchResults } from '@/lib/apps/batches';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
@@ -12,7 +12,14 @@ const fail = (message: string, status: number) => NextResponse.json({ ok: false,
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const out = await getBatch(session.user.id, params.id);
+  let out: Awaited<ReturnType<typeof getBatch>>;
+  try {
+    out = await getBatch(session.user.id, params.id);
+  } catch (err) {
+    // 못 읽은 줄을 빈 표로 내려보내지 않는다(2026-11-18)
+    if (err instanceof BatchReadError) return fail('일괄 실행을 지금 읽지 못했습니다. 잠시 뒤 다시 내려받아 주세요.', 503);
+    throw err;
+  }
   if (!out) return fail('일괄 실행을 찾을 수 없습니다.', 404);
   const results = await loadBatchResults(session.user.id, params.id);
   if (!results) return fail('결과를 불러오지 못했습니다.', 503);

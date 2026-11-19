@@ -3,6 +3,7 @@ import { reportContractSync } from '@/lib/contract-sync';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getPlan } from '@/lib/plans';
+import { parseContractInput } from '@/lib/contract-input';
 import { dbErrorText } from '@/lib/db-error-text';
 import { writeAuditRow } from '@/lib/audit-write';
 import { contractAudit } from '@/lib/super-admin-log-spec';
@@ -86,9 +87,10 @@ export async function POST(request: NextRequest) {
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const { orgId, planType, monthlyFee, startDate, endDate, notes, billingType, annualBudgetKrw, budgetAlertPercent } =
-      await request.json();
-    if (!orgId || !planType) return NextResponse.json({ ok: false, error: 'orgId, planType 필수' }, { status: 400 });
+    // 입력은 기존 계약을 끝내기 **전에** 본다 — 표 밖 요금제는 예전엔 체험 한도로 조용히 저장됐다(2026-11-19)
+    const parsed = parseContractInput(await request.json().catch(() => null));
+    if (!parsed.ok) return NextResponse.json({ ok: false, error: parsed.message }, { status: 400 });
+    const { orgId, planType, monthlyFee, startDate, endDate, notes, billingType, annualBudgetKrw, budgetAlertPercent } = parsed.value;
 
     const plan = getPlan(planType);
 
@@ -112,19 +114,13 @@ export async function POST(request: NextRequest) {
         max_users: plan.maxUsers,
         max_agents: plan.maxAgents,
         monthly_token_limit: plan.maxTokensPerMonth,
-        price_per_month: monthlyFee ?? plan.monthlyFee,
+        price_per_month: monthlyFee,
         // 공공기관은 확정 금액으로 예산을 편성하므로 연간 정액 계약을 지원한다.
         // annual_fixed일 때는 토큰이 아니라 누적 사용액(원)으로 한도를 판정한다.
-        billing_type: billingType === 'annual_fixed' ? 'annual_fixed' : 'pay_as_you_go',
-        annual_budget_krw:
-          billingType === 'annual_fixed' && Number(annualBudgetKrw) > 0
-            ? Number(annualBudgetKrw)
-            : null,
-        budget_alert_percent:
-          Number(budgetAlertPercent) > 0 && Number(budgetAlertPercent) <= 100
-            ? Number(budgetAlertPercent)
-            : 80,
-        notes: notes ?? null,
+        billing_type: billingType,
+        annual_budget_krw: annualBudgetKrw,
+        budget_alert_percent: budgetAlertPercent,
+        notes,
         created_by: admin.sub,
       })
       .select().single();

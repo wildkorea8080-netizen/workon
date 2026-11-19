@@ -151,9 +151,18 @@ export async function listBatches(userId: string, agentId?: string | null): Prom
   return rows.map((r) => batchView(r, (Array.isArray(r.agent) ? r.agent[0]?.name : r.agent?.name) ?? null, counts.get(r.id)!));
 }
 
+/** 일괄 실행을 못 읽었다 — '없음'(404)·'빈 묶음'으로 꾸미지 않는다(2026-11-18) */
+export class BatchReadError extends Error {
+  constructor() {
+    super('batch read failed');
+    this.name = 'BatchReadError';
+  }
+}
+
 async function ownBatch(userId: string, id: string): Promise<(BatchRowView & { user_id: string }) | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const { data } = await supabaseAdmin.from('app_batches').select(`${BATCH_COLUMNS}, user_id`).eq('id', id).eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabaseAdmin.from('app_batches').select(`${BATCH_COLUMNS}, user_id`).eq('id', id).eq('user_id', userId).maybeSingle();
+  if (error) throw new BatchReadError();
   return (data as (BatchRowView & { user_id: string }) | null) ?? null;
 }
 
@@ -161,7 +170,9 @@ async function ownBatch(userId: string, id: string): Promise<(BatchRowView & { u
 export async function getBatch(userId: string, id: string): Promise<{ batch: BatchView; items: BatchItemView[] } | null> {
   const batch = await ownBatch(userId, id);
   if (!batch) return null;
-  const { data } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs, file, expect, expect_missing').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  const { data, error: itemsError } = await supabaseAdmin.from('app_batch_items').select('position, status, error, conversation_id, inputs, file, expect, expect_missing').eq('batch_id', id).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);
+  // 줄을 못 읽으면 '0줄'로 보이지 않는다 — 결과 엑셀이 빈 표로 내려갔다(2026-11-18)
+  if (itemsError) throw new BatchReadError();
   const items = ((data ?? []) as Array<{ position: number; status: BatchItemStatus; error: string | null; conversation_id: string | null; inputs: Record<string, string>; file?: unknown; expect?: string | null; expect_missing?: string[] | null }>)
     .map((r) => ({ position: r.position, status: r.status, error: r.error, conversationId: r.conversation_id, inputs: r.inputs ?? {}, fileName: batchFileOf(r.file)?.name ?? null, expect: r.expect ?? null, expectMissing: r.expect_missing ?? null }));
   const counts: Counts = { done: 0, failed: 0, skipped: 0, pending: 0 };
@@ -175,7 +186,8 @@ export async function getBatch(userId: string, id: string): Promise<{ batch: Bat
 
 /** 그만두기 — 만든 사람만, 실행 중일 때만. 기다리던 줄은 건너뜀(이미 실행 중인 줄은 끝까지 간다) */
 export async function cancelBatch(userId: string, id: string, nowMs = Date.now()): Promise<{ ok: true } | Fail> {
-  const batch = await ownBatch(userId, id);
+  const batch = await ownBatch(userId, id).catch((err) => { if (err instanceof BatchReadError) return 'failed' as const; throw err; });
+  if (batch === 'failed') return { ok: false, status: 503, message: '일괄 실행을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!batch) return { ok: false, status: 404, message: '일괄 실행을 찾을 수 없습니다.' };
   const now = new Date(nowMs).toISOString();
   const { data, error } = await supabaseAdmin.from('app_batches').update({ status: 'cancelled', finished_at: now }).eq('id', id).eq('user_id', userId).eq('status', 'running').select('id');
@@ -211,7 +223,8 @@ export async function skipPendingItems(batchId: string, nowIso: string, reason: 
  * 만들기와 같은 길(`createBatch`)이라 지금 앱 판·앱 규칙·실행 중 3개·기관 상한을 그대로 본다. 파일마다 한 건의 줄은 사본을 이미 지워 다시 실행할 수 없어 빼고 수를 알린다
  */
 export async function retryUnfinished(actor: ActorScope, batchId: string): Promise<{ ok: true; batch: BatchView; skippedFiles: number } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
-  const batch = await ownBatch(actor.userId, batchId);
+  const batch = await ownBatch(actor.userId, batchId).catch((err) => { if (err instanceof BatchReadError) return 'failed' as const; throw err; });
+  if (batch === 'failed') return { ok: false, status: 503, message: '일괄 실행을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!batch) return { ok: false, status: 404, message: '일괄 실행을 찾을 수 없습니다.' };
   if (batch.status === 'running') return { ok: false, status: 409, message: '아직 실행 중인 일괄 실행입니다. 끝난 뒤에 다시 실행할 수 있습니다.' };
   const { data, error } = await supabaseAdmin.from('app_batch_items').select('position, inputs, file, status, expect').eq('batch_id', batchId).in('status', ['failed', 'skipped']).order('position', { ascending: true }).limit(BATCH_MAX_ROWS);

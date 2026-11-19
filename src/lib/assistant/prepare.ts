@@ -23,7 +23,7 @@ import {
 import { attachmentRequestError, toTurnAttachments } from './attachments';
 import type { RetrievedChunk } from '@/lib/db';
 import { buildSystemPrompt, buildUserContent, storedUserContent } from './prompt';
-import { loadHistory } from './history';
+import { HistoryReadError, loadHistory } from './history';
 import { validateAppDefinition, renderAppInput, appOutputInstruction, appLookupAgentIds, APP_MAX_FILES } from '@/lib/apps/definition';
 import { checkLookupAgents } from '@/lib/apps/app-doc-lookup';
 import { appAttachmentMaterial } from '@/lib/apps/attachment-context';
@@ -44,6 +44,8 @@ type AgentRow = AgentAccessInfo & {
   agent_type: string | null;
   app_draft?: unknown;
 };
+
+const READ_FAILED_MESSAGE = '대화 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 보내 주세요.';
 
 function reject(message: string, status: number, details?: Record<string, unknown>): PrepareOutcome {
   return { ok: false, status, message, details };
@@ -127,11 +129,13 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
     });
   }
 
-  const { data } = await supabaseAdmin
+  const { data, error: agentReadError } = await supabaseAdmin
     .from('agents')
     .select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, capabilities, agent_type, app_definition, app_draft`)
     .eq('id', agent_id)
     .maybeSingle();
+  // 못 읽은 것을 '비서 없음'(404)으로 보지 않는다(2026-11-18) — 직원은 비서가 지워진 줄 안다
+  if (agentReadError) return reject(READ_FAILED_MESSAGE, 503);
   const loadedAgent = data as AgentRow | null;
 
   if (!loadedAgent || loadedAgent.deleted_at || !loadedAgent.is_active) return reject('에이전트를 찾을 수 없습니다.', 404);
@@ -261,20 +265,27 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   let conversationId: string;
   let history: Awaited<ReturnType<typeof loadHistory>> = [];
   if (!isNewConversation) {
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: conversationReadError } = await supabaseAdmin
       .from('conversations')
       .select('id')
       .eq('id', conversation_id)
       .eq('user_id', actor.userId)
       .eq('agent_id', agent_id)
       .maybeSingle();
+    if (conversationReadError) return reject(READ_FAILED_MESSAGE, 503);
     if (!existing) return reject('대화를 찾을 수 없습니다.', 404);
     conversationId = existing.id;
     if (sentIds.length > 0) {
       const check = await checkAttachable(actor.userId, sentIds, conversationId);
       if (!check.ok) return reject(check.message, 400);
     }
-    history = await loadHistory(conversationId);
+    // 앞 턴을 못 읽으면 답하지 않는다 — 빈 이력으로 이어 가면 앞 대화 없이 엉뚱한 답이 오류 없이 나간다(2026-11-18)
+    try {
+      history = await loadHistory(conversationId);
+    } catch (err) {
+      if (err instanceof HistoryReadError) return reject('앞 대화를 지금 읽지 못해 답하지 않았습니다. 잠시 뒤 다시 보내 주세요.', 503);
+      throw err;
+    }
   } else {
     // 묶을 수 없는 첨부면 대화를 만들기 전에 돌려보낸다 — 거절될 요청으로 빈 대화가 남지 않게
     if (sentIds.length > 0) {

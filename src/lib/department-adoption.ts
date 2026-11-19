@@ -1,6 +1,7 @@
 // src/lib/department-adoption.ts
 // 부서별 도입 현황(0065) — 순수 규칙. 화면과 라우트가 함께 쓴다(서버 모듈을 가져오지 않는다).
 // 부서마다 자기 부서의 기록만 센다(하위 부서를 올려 더하지 않는다). 기록된 숫자만 — 추정치는 없다.
+import { csvCell } from '@/lib/csv-cell';
 
 export interface DepartmentAdoption {
   departmentId: string;
@@ -64,10 +65,7 @@ export function hasActivity(row: DepartmentAdoption): boolean {
   return NUMBER_KEYS.some((k) => k !== 'registered_users' && row[k] > 0);
 }
 
-function csvCell(s: string): string {
-  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-}
+// CSV 한 칸은 `csvCell`(src/lib/csv-cell.ts) — 수식 주입 막기·감싸기를 한 곳에서
 
 /** CSV(엑셀에서 한글이 깨지지 않게 BOM) — 부서 이름은 수식 주입을 막는다. 끝 줄은 합계 */
 export function departmentAdoptionCsv(month: string, rows: DepartmentAdoption[]): string {

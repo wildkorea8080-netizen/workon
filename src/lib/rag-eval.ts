@@ -8,6 +8,7 @@
 import Papa from 'papaparse';
 import type { RagEvalAnswer, RagEvalAnswerSummary, RagEvalAnswerVerdict } from '@/lib/rag-eval-answer';
 import { RAG_EVAL_JUDGE_LABELS, judgeNote } from '@/lib/rag-eval-judge';
+import { csvCell } from '@/lib/csv-cell';
 
 export const RAG_EVAL_MAX_QUESTIONS = 50;
 export const RAG_EVAL_QUESTION_MAX = 500;
@@ -308,11 +309,7 @@ export function answerNote(a: RagEvalAnswer): string {
 
 /** 결과를 CSV로(엑셀에서 열리게 BOM) — 화면 내려받기용 */
 export function ragEvalCsv(results: RagEvalResult[]): string {
-  const cell = (v: unknown) => {
-    const s = v === null || v === undefined ? '' : String(v);
-    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s; // 수식 주입 막기
-    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-  };
+  const cell = csvCell; // 수식 주입 막기·감싸기는 한 곳(src/lib/csv-cell.ts)
   // 답변까지 평가한 실행만 답 칸을 더한다(옛 CSV는 그대로)
   const withAnswers = results.some((r) => r.answer);
   // AI 채점을 한 실행만 채점 두 칸을 더한다(2026-11-09)

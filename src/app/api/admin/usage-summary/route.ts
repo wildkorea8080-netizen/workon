@@ -5,6 +5,7 @@ import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { LEGACY_PRICING_MODEL_ID } from '@/lib/models';
 import { pagedRows } from '@/lib/paged-select';
 import { parseUsageGroups, usageRowsFromGroups, type UsageAxis } from '@/lib/usage-summary';
+import { csvCell } from '@/lib/csv-cell';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,10 +24,7 @@ export const dynamic = 'force-dynamic';
 
 type Axis = UsageAxis;
 
-function csvCell(value: unknown): string {
-  const text = value == null ? '' : String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
+// CSV 한 칸은 `csvCell`(src/lib/csv-cell.ts) — 나만의 비서 이름처럼 직원이 정한 글이 '='로 시작하면 엑셀이 수식으로 실행했다(2026-11-18)
 
 export async function GET(request: NextRequest) {
   const session = await getServerAuthSession();

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { isImeComposing } from '@/lib/ime';
 import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState, type LogTab } from '@/lib/super-log-links';
 import { ADMIN_LOG_ACTIONS, type AdminLogRow } from '@/lib/super-admin-log-spec';
+import { csvLine, CSV_BOM } from '@/lib/csv-cell';
 
 type Tab = LogTab;
 
@@ -40,8 +41,10 @@ const PERIOD_OPTS = [
 function exportCsv(rows: any[], filename: string) {
   if (!rows.length) return;
   const keys = Object.keys(rows[0]);
-  const csv  = [keys.join(','), ...rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(','))].join('\n');
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  // 칸은 csvLine(2026-11-18) — 예전 JSON.stringify는 CSV 감싸기가 아니라(따옴표를 \" 로, 줄바꿈을 \n 글자로) 엑셀에서 칸이 깨졌고,
+  // '='로 시작하는 브라우저 정보·IP 칸 등을 엑셀이 수식으로 실행했다
+  const csv  = [csvLine(keys), ...rows.map(r => csvLine(keys.map(k => r[k] ?? '')))].join('\n');
+  const blob = new Blob([CSV_BOM + csv], { type: 'text/csv;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react';
 import Papa from 'papaparse';
 import type { RegisterResult } from '@/app/api/admin/bulk-register/route';
+import { csvLine, CSV_BOM } from '@/lib/csv-cell';
 
 interface CsvRow {
   row: number;
@@ -110,13 +111,15 @@ export default function CsvRegisterTab() {
 
   const downloadResult = () => {
     if (!results) return;
+    // 칸 감싸기·수식 주입 막기(2026-11-18) — 예전엔 칸을 그냥 쉼표로 이어, 쉼표가 든 이름·부서명이 칸을 밀고(임시 비밀번호가
+    // 다른 사람 줄로 보일 수 있었다) '='로 시작하는 이름을 엑셀이 수식으로 실행했다. 이름·부서명은 올린 CSV에서 온 글이다
     const csv = [
-      '이름,이메일,부서명,결과,임시비밀번호,오류사유',
+      csvLine(['이름', '이메일', '부서명', '결과', '임시비밀번호', '오류사유']),
       ...results.map(r =>
-        `${r.직원이름},${r.이메일},${r.부서명},${r.success ? '성공' : '실패'},${r.tempPassword ?? ''},${r.error ?? ''}`
+        csvLine([r.직원이름, r.이메일, r.부서명, r.success ? '성공' : '실패', r.tempPassword ?? '', r.error ?? ''])
       ),
     ].join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([CSV_BOM + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = '등록결과.csv'; a.click();

@@ -1,5 +1,6 @@
 // src/lib/adoption-report.ts
 // 월별 도입 현황 보고서(0056) — 순수 규칙. 화면과 라우트가 함께 쓴다(서버 모듈을 가져오지 않는다).
+import { csvCell } from '@/lib/csv-cell';
 //
 // 기록된 사실만 센다(채택·완료·재작업). '절약한 시간'·'생산성 n%' 같은 추정치는 만들지 않는다 —
 // 실제 작업 시간을 재는 장치가 없는데 숫자를 만들면 보고서가 근거 없는 주장이 된다.
@@ -155,10 +156,7 @@ export function formatAdoptionChange(row: AdoptionRow): string {
 
 /** CSV(엑셀에서 열리게 BOM) — 기관 보고에 그대로 붙인다 */
 export function adoptionCsv(month: string, previous: string, rows: AdoptionRow[]): string {
-  const cell = (s: string) => {
-    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-  };
+  const cell = csvCell;
   const head = ['구분', '지표', `${month}`, `${previous}(전월)`, '전월 대비', '읽는 법'];
   const lines = rows.map((r) => [r.group, r.label, formatAdoptionValue(r.unit, r.value), formatAdoptionValue(r.unit, r.previous), formatAdoptionChange(r), r.note].map(cell).join(','));
   return `﻿${[head.join(','), ...lines].join('\n')}`;

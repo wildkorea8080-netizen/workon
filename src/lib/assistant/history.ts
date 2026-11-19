@@ -25,13 +25,26 @@ export function trimHistory(rowsNewestFirst: { role: string; content: string | n
  * [답1, 질문1, 답2, 질문2, …] → 앞 답을 떼어 **질문1 → 답2**처럼 한 칸씩 밀린 이력이 모델에 갔다(오류 없이). 같은 시각이면 역할로 가른다:
  * 최신순은 답(assistant)이 먼저, 시간순은 질문(user)이 먼저('assistant' < 'user')
  */
+/** 이력을 못 읽었다 — 빈 이력으로 이어 가지 않는다(2026-11-18) */
+export class HistoryReadError extends Error {
+  constructor(public readonly code: string) {
+    super('history read failed');
+    this.name = 'HistoryReadError';
+  }
+}
+
+/**
+ * 이어지는 대화의 앞 턴들. **못 읽으면 던진다**(2026-11-18) — 예전에는 빈 이력으로 보아, 이어지는 질문('그럼 국외 출장은?')이
+ * 앞 대화 없이 모델에 가서 엉뚱한 답이 오류 없이 나갔다(대화 화면에는 앞 턴이 그대로 보여 직원은 알 수 없다).
+ */
 export async function loadHistory(conversationId: string): Promise<LlmMessage[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('messages')
     .select('role, content, revised:source_references->revision->>text')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
     .order('role', { ascending: true })
     .limit(HISTORY_MESSAGE_LIMIT);
+  if (error) throw new HistoryReadError((error as { code?: string }).code ?? 'error');
   return trimHistory((data ?? []) as unknown as { role: string; content: string | null; revised: string | null }[]);
 }

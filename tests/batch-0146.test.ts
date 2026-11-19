@@ -70,6 +70,8 @@ describe('기록 요약·화면', () => {
   it('사용량 CSV는 칸을 감싸고 수식 주입을 막는다', () => {
     const s = readFileSync('src/app/super/usage/page.tsx', 'utf8');
     expect(s).toContain('.map(q).join(\',\')');
-    expect(s).toMatch(/s = `'\$\{s\}`/);
+    // 수식 주입 막기는 한 곳(src/lib/csv-cell.ts — 2026-11-18 batch-0174)
+    expect(s).toContain('const q = csvCell;');
+    expect(s).toContain("from '@/lib/csv-cell'");
   });
 });

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { isImeComposing } from '@/lib/ime';
+import { MAX_CONVERSATION_TITLE } from '@/lib/conversation-title';
 
 interface Conversation {
   id: string;
@@ -84,7 +85,13 @@ export default function Sidebar({
     e.stopPropagation();
     if (!confirm('이 대화를 삭제하시겠습니까?')) return;
     try {
-      await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+      // 서버가 지운 것을 확인한 뒤에만 목록에서 뺀다 — 예전엔 실패해도 사라져 지운 줄 알았다(2026-11-19)
+      const res = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+      const result = await res.json().catch(() => null);
+      if (!res.ok || !result?.ok) {
+        alert(result?.error?.message || '삭제에 실패했습니다.');
+        return;
+      }
       setConversations(prev => prev.filter(c => c.id !== id));
       if (selectedConversationId === id) onNewConversation();
     } catch {
@@ -101,14 +108,21 @@ export default function Sidebar({
   const submitRename = async (id: string) => {
     if (!renameValue.trim()) { setRenamingId(null); return; }
     try {
-      await fetch(`/api/conversations/${id}`, {
+      // 서버가 저장한 이름으로만 바꾼다 — 예전엔 실패해도 화면에서만 바뀌어 다시 열면 옛 이름이었다(2026-11-19)
+      const res = await fetch(`/api/conversations/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: renameValue.trim() }),
       });
-      setConversations(prev => prev.map(c => c.id === id ? { ...c, title: renameValue.trim() } : c));
+      const result = await res.json().catch(() => null);
+      if (!res.ok || !result?.ok || typeof result.data?.title !== 'string') {
+        showToast(result?.error?.message || '이름을 바꾸지 못했습니다.');
+        return;
+      }
+      const saved: string = result.data.title;
+      setConversations(prev => prev.map(c => c.id === id ? { ...c, title: saved } : c));
     } catch {
-      // silent
+      showToast('이름을 바꾸지 못했습니다.');
     } finally {
       setRenamingId(null);
     }
@@ -300,6 +314,7 @@ function ConvItem({
         {isRenaming ? (
           <input
             autoFocus
+            maxLength={MAX_CONVERSATION_TITLE}
             value={renameValue}
             onChange={e => onRenameChange(e.target.value)}
             onBlur={() => onRenameSubmit(c.id)}

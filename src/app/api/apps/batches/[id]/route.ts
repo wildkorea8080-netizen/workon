@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
-import { cancelBatch, getBatch, retryUnfinished } from '@/lib/apps/batches';
+import { BatchReadError, cancelBatch, getBatch, retryUnfinished } from '@/lib/apps/batches';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
@@ -10,7 +10,14 @@ const fail = (message: string, status: number) => NextResponse.json({ ok: false,
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const out = await getBatch(session.user.id, params.id);
+  let out: Awaited<ReturnType<typeof getBatch>>;
+  try {
+    out = await getBatch(session.user.id, params.id);
+  } catch (err) {
+    // 못 읽은 것을 '없음'·'0줄'로 보이지 않는다(2026-11-18)
+    if (err instanceof BatchReadError) return fail('일괄 실행을 지금 읽지 못했습니다. 잠시 뒤 다시 열어 주세요.', 503);
+    throw err;
+  }
   if (!out) return fail('일괄 실행을 찾을 수 없습니다.', 404);
   return NextResponse.json({ ok: true, data: out });
 }

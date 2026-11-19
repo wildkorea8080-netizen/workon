@@ -10,6 +10,7 @@ import { kstDay } from '@/lib/kst-time';
 import { isImeComposing } from '@/lib/ime';
 import { STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
 import { orgSignInPath } from '@/lib/org-slug';
+import { PLANS } from '@/lib/plans';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -676,7 +677,7 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm]           = useState({ plan: 'basic', startDate: kstDay(), endDate: '', fee: 99000, notes: '' });
+  const [form, setForm]           = useState({ plan: 'basic', startDate: kstDay(), endDate: '', fee: PLANS.basic.monthlyFee as number, notes: '' });
   const [saving, setSaving]       = useState(false);
 
   const load = useCallback(async () => {
@@ -693,21 +694,32 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
   const daysLeft = active?.expires_at
     ? Math.ceil((new Date(active.expires_at).getTime() - Date.now()) / 86400000) : null;
 
+  // 계약 화면과 같은 계약 만들기(`POST /api/super/contracts`)로 — 예전엔 기관의 요금제 이름만 바꾸고
+  // 시작일·종료일·이용료는 버린 채 '계약이 업데이트됐습니다'라고 알렸다(계약도·한도도 그대로, 2026-11-19)
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    // 직접 supabase insert는 API 없이 server action으로 처리 — 여기서는 PATCH로 메타 업데이트
-    // 실제로는 /api/super/organizations/[id]/contracts POST가 필요 — 여기선 organizations PATCH 재사용
-    await fetch(`/api/super/organizations/${orgId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan: form.plan }),
-    });
-    onToast('계약이 업데이트됐습니다.');
-    setShowModal(false); load();
-    setSaving(false);
+    try {
+      const res = await fetch('/api/super/contracts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgId, planType: form.plan, monthlyFee: form.fee,
+          startDate: form.startDate || null, endDate: form.endDate || null, notes: form.notes || null,
+        }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok || !d?.ok) { onToast(typeof d?.error === 'string' ? d.error : '계약을 저장하지 못했습니다.'); return; }
+      if (d.warning) alert(d.warning);
+      onToast('새 계약을 저장했습니다. 앞 계약은 끝났습니다.');
+      setShowModal(false); load();
+    } catch {
+      onToast('계약을 저장하지 못했습니다.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const PLAN_PRESETS_FEE: Record<string,number> = { trial: 0, basic: 99000, pro: 299000, enterprise: 990000 };
+  const PLAN_PRESETS_FEE: Record<string, number> = Object.fromEntries(Object.entries(PLANS).map(([k, p]) => [k, p.monthlyFee]));
 
   return (
     <div className="space-y-6">
@@ -718,7 +730,7 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
             <h3 className="text-sm font-bold text-white">현재 계약</h3>
             <button onClick={() => setShowModal(true)}
               className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-semibold rounded-xl transition-colors">
-              계약 수정
+              새 계약으로 바꾸기
             </button>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -778,7 +790,8 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
           <div className="bg-[#1E293B] border border-slate-700 rounded-2xl p-6 w-full max-w-md">
-            <h3 className="text-base font-bold text-white mb-5">계약 수정 / 새 계약</h3>
+            <h3 className="text-base font-bold text-white mb-2">새 계약</h3>
+            <p className="text-xs text-slate-400 mb-5">저장하면 지금 계약은 끝나고 이 계약이 시작됩니다. 기관 한도는 요금제에 맞춰집니다.</p>
             <form onSubmit={handleAdd} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1.5">요금제</label>
