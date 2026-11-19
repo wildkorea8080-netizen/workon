@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { kstDay } from '@/lib/kst-time';
 
 const IMPORTANCE_META: Record<string, { label: string; badge: string; icon: string }> = {
   normal:    { label: '일반', badge: 'bg-slate-700 text-slate-300', icon: '📌' },
@@ -44,15 +45,17 @@ export default function NoticesPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isPublished: !n.is_published }),
     });
-    const d = await res.json();
-    if (d.ok) { load(); showToast(n.is_published ? '발행이 취소됐습니다.' : '공지가 발행됐습니다.'); }
+    const d = await res.json().catch(() => null);
+    if (res.ok && d?.ok) { load(); showToast(n.is_published ? '발행이 취소됐습니다.' : '공지가 발행됐습니다.'); }
+    else showToast(typeof d?.error === 'string' ? d.error : '바꾸지 못했습니다.');
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('공지를 삭제하시겠습니까?')) return;
     const res = await fetch(`/api/super/notices/${id}`, { method: 'DELETE' });
-    const d = await res.json();
-    if (d.ok) { load(); showToast('삭제됐습니다.'); }
+    const d = await res.json().catch(() => null);
+    if (res.ok && d?.ok) { load(); showToast('삭제됐습니다.'); }
+    else showToast(typeof d?.error === 'string' ? d.error : '삭제하지 못했습니다.');
   };
 
   return (
@@ -109,7 +112,7 @@ export default function NoticesPage() {
               <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">공지사항이 없습니다.</td></tr>
             ) : (
               filtered.map(n => {
-                const meta = IMPORTANCE_META[n.importance ?? 'normal'];
+                const meta = IMPORTANCE_META[n.importance ?? 'normal'] ?? IMPORTANCE_META.normal;
                 return (
                   <tr key={n.id} className="hover:bg-slate-700/20 transition-colors">
                     <td className="px-4 py-3 font-medium text-white max-w-xs truncate">{n.title}</td>
@@ -178,7 +181,7 @@ function NoticePanel({ notice, orgs, onClose, onSaved }: {
     importance: notice?.importance   ?? 'normal',
     targetType: notice?.target_type  ?? 'all',
     targetOrgIds: (notice?.target_org_ids ?? []) as string[],
-    expiresAt:  notice?.expires_at   ? notice.expires_at.slice(0, 10) : '',
+    expiresAt:  notice?.expires_at   ? kstDay(notice.expires_at) : '',
     isPublished: notice?.is_published ?? false,
   });
   const [saving, setSaving] = useState(false);
@@ -214,8 +217,8 @@ function NoticePanel({ notice, orgs, onClose, onSaved }: {
         expiresAt: form.expiresAt || null,
       }),
     });
-    const d = await res.json();
-    if (d.ok) onSaved(); else setError(d.error);
+    const d = await res.json().catch(() => null);
+    if (res.ok && d?.ok) onSaved(); else setError(typeof d?.error === 'string' ? d.error : '저장하지 못했습니다.');
     setSaving(false);
   };
 

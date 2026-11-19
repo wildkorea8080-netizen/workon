@@ -3,6 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { dbErrorText } from '@/lib/db-error-text';
 import { writeAuditRow } from '@/lib/audit-write';
+import { parseNoticeInput } from '@/lib/notice-input';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,14 +42,16 @@ export async function POST(request: NextRequest) {
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const { title, content, importance, targetType, targetOrgIds, isPublished, expiresAt } = await request.json();
-    if (!title || !content) return NextResponse.json({ ok: false, error: '제목, 내용 필수' }, { status: 400 });
+    // 입력 검사(2026-11-19) — 만료일은 그날 한국 23:59:59까지, 중요도·대상·기관 id·길이를 본다
+    const parsed = parseNoticeInput(await request.json().catch(() => null), false);
+    if (!parsed.ok) return NextResponse.json({ ok: false, error: parsed.message }, { status: 400 });
+    const { title, content, importance, targetType, targetOrgIds, isPublished, expiresAt } = parsed.value;
 
     const { data, error } = await supabaseAdmin.from('notices').insert({
       title, content,
       importance:      importance  ?? 'normal',
       target_type:     targetType  ?? 'all',
-      target_org_ids:  targetOrgIds ?? [],
+      target_org_ids:  targetType === 'specific' ? (targetOrgIds ?? []) : [],
       is_published:    isPublished ?? false,
       published_at:    isPublished ? new Date().toISOString() : null,
       expires_at:      expiresAt   ?? null,
