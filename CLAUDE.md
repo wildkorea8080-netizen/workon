@@ -2156,6 +2156,8 @@ ENCRYPTION_KEY=          # API 키 AES-256 암호화 키 (64자 hex)
 `next-auth/jwt encode()`로 임시 admin 세션 생성 → 기존 admin 코드 무수정 재사용.
 세션에 `isImpersonating: true` 포함 → admin layout에서 노란 배너 표시.
 
+**들어갈 관리자는 최상위 부서의 관리자부터**(2026-11-19, `src/lib/impersonation-target.ts` `pickImpersonationTarget`): 관리 범위는 자기 부서 + 하위라 최상위 부서의 관리자만 기관 전체를 본다. 예전에는 가장 먼저 만든 관리자(5명 중)로 들어가, 그 사람이 하위 부서 관리자면 슈퍼관리자가 그 부서 아래만 보며 기관 전체를 본 줄 알았다. 최상위 부서의 관리자가 없으면 하위 부서 관리자로 들어가되 응답 `warning`(`narrowImpersonationNotice`)을 화면이 알린다(`data.wholeOrganization`). 부서·관리자를 못 읽으면 '없습니다'(404) 대신 503. `tests/batch-0186.test.ts`
+
 ---
 
 ## 구현 완료 기능 (2026-04-27 기준)
