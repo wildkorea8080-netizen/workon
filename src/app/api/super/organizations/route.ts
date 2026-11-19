@@ -8,7 +8,7 @@ import { writeAuditRow } from '@/lib/audit-write';
 import { reportContractSync } from '@/lib/contract-sync';
 import { dbErrorText } from '@/lib/db-error-text';
 import { APP_URL } from '@/lib/config';
-import { normalizeOrgSlug } from '@/lib/org-slug';
+import { parseOrgCreateInput } from '@/lib/org-create-input';
 import { orgChatTokens } from '@/lib/org-chat-tokens';
 import { kstMonthStart } from '@/lib/kst-time';
 import { searchTerm } from '@/lib/postgrest-search';
@@ -24,8 +24,9 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search') ?? '';
   const status = searchParams.get('status') ?? 'all';
   const plan   = searchParams.get('plan')   ?? 'all';
-  const page   = Math.max(1, parseInt(searchParams.get('page')  ?? '1'));
-  const limit  = Math.min(100, parseInt(searchParams.get('limit') ?? '20'));
+  // 숫자가 아니면 기본값(2026-11-19 — 예전엔 NaN이 범위로 가 오류였다)
+  const page   = Math.max(1, Number.parseInt(searchParams.get('page')  ?? '1', 10) || 1);
+  const limit  = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') ?? '20', 10) || 20));
 
   try {
     let query = supabaseAdmin
@@ -71,9 +72,11 @@ export async function GET(request: NextRequest) {
       if (status !== 'all') q = q.eq('status', status);
       if (plan   !== 'all') q = q.eq('plan', plan);
 
-      const { data, count } = await q
+      const { data, count, error: fallbackError } = await q
         .order('created_at', { ascending: false })
         .range((page - 1) * limit, page * limit - 1);
+      // 예비 길도 못 읽으면 빈 목록이 아니라 오류(2026-11-19 — 예전엔 '기관 없음'으로 보였다)
+      if (fallbackError) throw fallbackError;
 
       return NextResponse.json({
         ok: true,
@@ -93,28 +96,18 @@ export async function POST(request: NextRequest) {
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const body = await request.json();
+    // 입력은 아무것도 만들기 전에 본다(2026-11-19, `org-create-input.ts`) — 예전엔 틀린 날짜가 기관을 만든 뒤 던져 반쪽 기관이 남았다
+    const parsed = parseOrgCreateInput(await request.json().catch(() => null));
+    if (!parsed.ok) return NextResponse.json({ ok: false, error: parsed.message }, { status: 400 });
     const {
-      name, slug, type, plan,
+      name, type, plan,
       contractStart, contractEnd,
       maxUsers, maxAgents, maxTokensPerMonth,
       adminEmail,
       monthlyFee, notes,
-    } = body;
-
-    if (!name || !slug || !adminEmail) {
-      return NextResponse.json(
-        { ok: false, error: '기관명, Slug, 관리자 이메일은 필수입니다.' },
-        { status: 400 }
-      );
-    }
-
+    } = parsed.value;
     // slug 형식 — 기관 관리자 '기관 정보'와 같은 규칙(2026-11-17, `org-slug.ts`)
-    const slugCheck = normalizeOrgSlug(slug);
-    if (!slugCheck.ok) {
-      return NextResponse.json({ ok: false, error: slugCheck.message }, { status: 400 });
-    }
-    const orgSlug = slugCheck.slug;
+    const orgSlug = parsed.value.slug;
 
     // slug 중복 — 기관 로그인 경로(organizations.slug, 0020 유일)와 기본 부서 slug 둘 다
     const [{ data: existingOrg, error: orgSlugErr }, { data: existingDept, error: deptSlugErr }] = await Promise.all([
@@ -136,15 +129,15 @@ export async function POST(request: NextRequest) {
     const { data: org, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
-        name: name.trim(),
+        name,
         slug: orgSlug,
-        type: type ?? '공공기관',
+        type,
         status: 'active',
-        plan: plan ?? 'basic',
-        max_users: maxUsers ?? 20,
-        max_agents: maxAgents ?? 10,
-        monthly_token_limit: maxTokensPerMonth ?? 2000000,
-        notes: notes ?? null,
+        plan,
+        max_users: maxUsers,
+        max_agents: maxAgents,
+        monthly_token_limit: maxTokensPerMonth,
+        notes,
       })
       .select()
       .single();
@@ -156,18 +149,20 @@ export async function POST(request: NextRequest) {
       .from('contracts')
       .insert({
         organization_id: org.id,
-        plan: plan ?? 'basic',
+        plan,
         status: 'active',
         started_at: contractStart ? new Date(contractStart).toISOString() : new Date().toISOString(),
         expires_at: contractEnd   ? new Date(contractEnd).toISOString()   : null,
-        max_users: maxUsers ?? 20,
-        max_agents: maxAgents ?? 10,
-        monthly_token_limit: maxTokensPerMonth ?? 2000000,
-        price_per_month: monthlyFee ?? 0,
+        max_users: maxUsers,
+        max_agents: maxAgents,
+        monthly_token_limit: maxTokensPerMonth,
+        price_per_month: monthlyFee,
         created_by: admin.sub,
       });
 
-    if (contractError) console.warn('[contracts insert]', contractError.message);
+    // 계약을 못 넣으면 알린다(2026-11-19 — 예전엔 `console.warn` 한 줄뿐이라 계약 없는 기관이 '등록됨'으로 보였다)
+    const warnings: string[] = [];
+    if (contractError) warnings.push(await reportContractSync('org_contract_create', org.id, contractError.code ?? 'error'));
 
     // 3) 관리자 초대 토큰 생성 (invitations INSERT)
     //    먼저 기관에 기본 부서 생성
@@ -175,9 +170,9 @@ export async function POST(request: NextRequest) {
     const { data: dept, error: deptError } = await supabaseAdmin
       .from('departments')
       .insert({
-        name: `${name.trim()} 본청`,
+        name: `${name} 본청`,
         slug: `${orgSlug}-main`,
-        description: `${name.trim()} 기본 부서`,
+        description: `${name} 기본 부서`,
         organization_id: org.id,
       })
       .select('id')
@@ -199,20 +194,19 @@ export async function POST(request: NextRequest) {
     const baseUrl = APP_URL;
 
     // 초대를 저장하지 못하면 링크가 동작하지 않는다 — 예전에는 그래도 링크를 돌려줘 기관 관리자가 가입할 수 없었다(2026-11-17)
-    let inviteWarning: string | undefined;
     let inviteUrl: string | null = null;
     if (!dept?.id) {
-      inviteWarning = await reportContractSync('org_default_department', org.id, deptError?.code ?? 'no_row');
+      warnings.push(await reportContractSync('org_default_department', org.id, deptError?.code ?? 'no_row'));
     } else {
       const { error: inviteErr } = await supabaseAdmin.from('invitations').insert({
-        email: adminEmail.trim().toLowerCase(),
+        email: adminEmail,
         department_id: dept.id,
         role: 'ADMIN',
         token: inviteToken,
         invited_by: admin.sub,
         expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
       });
-      if (inviteErr) inviteWarning = await reportContractSync('org_admin_invitation', org.id, inviteErr.code ?? 'error');
+      if (inviteErr) warnings.push(await reportContractSync('org_admin_invitation', org.id, inviteErr.code ?? 'error'));
       else inviteUrl = `${baseUrl}/signup?invite=${inviteToken}`;
     }
 
@@ -230,7 +224,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       data: { org, inviteUrl, presetAgents: presetResult.installed },
-      ...(inviteWarning ? { warning: inviteWarning } : {}),
+      ...(warnings.length ? { warning: warnings.join(' ') } : {}),
     });
   } catch (err: any) {
     console.error('[super/organizations POST]', err);

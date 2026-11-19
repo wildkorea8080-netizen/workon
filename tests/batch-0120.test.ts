@@ -66,7 +66,8 @@ describe('연결(원본)', () => {
   it('기관 만들기 — 초대를 못 저장하면 링크를 주지 않고 경고, 화면도 안내', () => {
     const src = readFileSync('src/app/api/super/organizations/route.ts', 'utf8');
     // 2026-11-17: 기본 부서를 못 만들면 초대도 만들지 않는다(batch-0126) — 초대를 저장했을 때만 링크
-    expect(src).toContain("if (inviteErr) inviteWarning = await reportContractSync('org_admin_invitation'");
+    // 2026-11-19: 경고는 목록(warnings)에 모은다 — 계약 저장 실패도 함께(batch-0184)
+    expect(src).toContain("if (inviteErr) warnings.push(await reportContractSync('org_admin_invitation'");
     expect(src).toContain('else inviteUrl = `${baseUrl}/signup?invite=${inviteToken}`;');
     const page = readFileSync('src/app/super/organizations/page.tsx', 'utf8');
     expect(page).toContain('{result.inviteUrl ? (');

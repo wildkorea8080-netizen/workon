@@ -326,8 +326,8 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
           monthlyFee: form.monthlyFee, notes: form.notes,
         }),
       });
-      const data = await res.json();
-      if (!data.ok) { setError(data.error); return; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) { setError(typeof data?.error === 'string' ? data.error : '기관을 등록하지 못했습니다.'); return; }
       setResult({ inviteUrl: data.data.inviteUrl ?? null, warning: data.warning });
     } catch (err: any) { setError(err.message); }
     finally { setSubmitting(false); }

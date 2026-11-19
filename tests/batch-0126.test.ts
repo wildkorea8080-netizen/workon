@@ -40,7 +40,7 @@ describe('기관 만들기 — 기본 부서를 못 만들면', () => {
   const src = readFileSync('src/app/api/super/organizations/route.ts', 'utf8');
   it('초대를 만들지 않고 경고(소속 없는 초대는 가입에서 거절되므로)', () => {
     expect(src).toContain('const { data: dept, error: deptError } = await supabaseAdmin');
-    expect(src).toContain("inviteWarning = await reportContractSync('org_default_department', org.id, deptError?.code ?? 'no_row')");
+    expect(src).toContain("warnings.push(await reportContractSync('org_default_department', org.id, deptError?.code ?? 'no_row'))");
     expect(src).not.toContain('department_id: dept?.id ?? null');
     expect(SYNC_WARNINGS.org_default_department).toContain('기본 부서');
   });
