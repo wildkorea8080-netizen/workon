@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { constantTimeEqual } from '@/lib/super-secret';
+import { findAuthUserByEmail } from '@/lib/super-admin-create';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,16 +60,22 @@ export async function POST(request: NextRequest) {
     //    존재하면 새로 생성하지 않고 기존 계정을 슈퍼관리자로 승격
     let authUserId: string;
 
-    const { data: authList } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-    const existingAuthUser = authList?.users?.find(u => u.email === normalizedEmail);
+    // 쪽마다 끝까지 찾는다(예전엔 첫 1,000명만), 못 읽으면 만들지 않는다(2026-11-19)
+    const existingAuthId = await findAuthUserByEmail(normalizedEmail);
+    if (existingAuthId === undefined) {
+      return NextResponse.json({ ok: false, error: '로그인 계정을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+    }
 
-    if (existingAuthUser) {
-      // 기존 Auth 계정 재사용 — 비밀번호 변경도 적용
-      authUserId = existingAuthUser.id;
-      await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+    if (existingAuthId) {
+      // 기존 Auth 계정 재사용 — 비밀번호 변경도 적용(실패하면 멈춘다 — 예전엔 보지 않아 새 비밀번호로 로그인이 안 됐다)
+      authUserId = existingAuthId;
+      const { error: pwError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
         password,
         email_confirm: true,
       });
+      if (pwError) {
+        return NextResponse.json({ ok: false, error: '로그인 계정의 비밀번호를 정하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+      }
     } else {
       // 신규 Auth 계정 생성
       const { data: newAuth, error: authError } = await supabaseAdmin.auth.admin.createUser({

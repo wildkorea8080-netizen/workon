@@ -16,10 +16,14 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object')
+      return NextResponse.json({ ok: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 });
     const update: Record<string, unknown> = {};
 
     if (body.isActive !== undefined) {
+      if (typeof body.isActive !== 'boolean')
+        return NextResponse.json({ ok: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 });
       update.is_active = body.isActive;
       // 다시 켜면 그때부터 장기 미접속을 센다(0095)
       if (body.isActive === true) update.reactivated_at = new Date().toISOString();
@@ -34,13 +38,22 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: '바꿀 값이 없습니다.' }, { status: 400 });
 
     // 바꾸기 전 값 — 조작 기록에 남긴다(2026-11-17, 예전엔 사용 중지·권한 변경이 어디에도 안 남았다)
-    const { data: before } = await supabaseAdmin
-      .from('users').select('is_active, role').eq('id', params.id).is('deleted_at', null).maybeSingle();
+    // 2026-11-19 — 슈퍼관리자 계정은 이 길로 바꾸지 않는다(슈퍼관리자 탭의 '본인 아님·마지막 1명' 검사를 건너뛰어
+    // 본인이나 마지막 슈퍼관리자를 끌 수 있었다). 전 값을 못 읽으면 바꾸지 않는다(예전엔 기록만 비었다)
+    const { data: before, error: beforeError } = await supabaseAdmin
+      .from('users').select('is_active, role, is_super_admin').eq('id', params.id).is('deleted_at', null).maybeSingle();
+    if (beforeError)
+      return NextResponse.json({ ok: false, error: '계정을 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+    if (!before)
+      return NextResponse.json({ ok: false, error: '사용자를 찾을 수 없습니다.' }, { status: 404 });
+    if (before.is_super_admin)
+      return NextResponse.json({ ok: false, error: '슈퍼관리자 계정은 슈퍼관리자 탭에서 바꿔 주세요.' }, { status: 400 });
 
     const { data, error } = await supabaseAdmin
       .from('users')
       .update(update)
       .eq('id', params.id)
+      .eq('is_super_admin', false)
       .is('deleted_at', null) // 삭제(탈퇴)한 계정을 다시 켜지 못하게
       .select('id, email, full_name, role')
       .maybeSingle();
@@ -62,7 +75,7 @@ export async function PATCH(
       action: 'user_updated',
       target_type: 'user',
       target_id: params.id,
-      before_data: before ? { ...('is_active' in update ? { is_active: before.is_active } : {}), ...('role' in update ? { role: before.role } : {}) } : null,
+      before_data: { ...('is_active' in update ? { is_active: before.is_active } : {}), ...('role' in update ? { role: before.role } : {}) },
       after_data: { ...('is_active' in update ? { is_active: update.is_active } : {}), ...('role' in update ? { role: update.role } : {}) },
     }, 'user_updated');
     return NextResponse.json({ ok: true, data });

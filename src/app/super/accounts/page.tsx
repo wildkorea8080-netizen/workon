@@ -152,9 +152,9 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
     const res  = await fetch(`/api/super/accounts/users/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (data.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
-    else onToast(data.error);
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
+    else onToast(typeof data?.error === 'string' ? data.error : '바꾸지 못했습니다.');
   };
 
   const handleUnlock = async (id: string) => {
@@ -400,9 +400,9 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
     const res  = await fetch(`/api/super/accounts/super-admins/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive }),
     });
-    const data = await res.json();
-    if (data.ok) { load(); onToast(isActive ? '활성화됐습니다.' : '비활성화됐습니다.'); }
-    else onToast(data.error);
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.ok) { load(); onToast(isActive ? '활성화됐습니다.' : '비활성화됐습니다.'); }
+    else { load(); onToast(typeof data?.error === 'string' ? data.error : '바꾸지 못했습니다.'); }
   };
 
   const handleUnlockSuper = async (id: string) => {
@@ -539,14 +539,19 @@ function AddSuperAdminModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true); setError(null);
-    const res  = await fetch('/api/super/accounts/super-admins', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email }),
-    });
-    const data = await res.json();
-    if (data.ok) onCreated(data.data);
-    else setError(data.error);
-    setSaving(false);
+    try {
+      const res  = await fetch('/api/super/accounts/super-admins', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) onCreated(data.data);
+      else setError(typeof data?.error === 'string' ? data.error : '슈퍼관리자를 추가하지 못했습니다.');
+    } catch {
+      setError('슈퍼관리자를 추가하지 못했습니다.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
