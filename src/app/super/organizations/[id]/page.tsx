@@ -11,6 +11,7 @@ import { isImeComposing } from '@/lib/ime';
 import { STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
 import { orgSignInPath } from '@/lib/org-slug';
 import { PLANS } from '@/lib/plans';
+import { orgStatusLabel, orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -76,14 +77,11 @@ export default function OrgDetailPage() {
   useEffect(() => { fetchOrg(); }, [fetchOrg]);
 
   const handleStatusChange = async (status: string) => {
-    const res = await fetch(`/api/super/organizations/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    const d = await res.json().catch(() => null);
+    if (status === 'suspended' && !window.confirm(orgSuspendConfirmText(org?.name ?? '이'))) return;
+    // 실패도 알린다 — 계약을 맞추지 못했으면 그 경고를(2026-11-17, 2026-11-19)
+    const notice = await requestOrgStatusChange(id, status);
     fetchOrg();
-    // 계약을 맞추지 못했으면 그 경고를(2026-11-17)
-    showToast(d?.warning ?? (status === 'suspended' ? '기관이 정지됐습니다.' : '기관이 활성화됐습니다.'));
+    showToast(notice.message);
   };
 
   if (loading) return (
@@ -105,7 +103,7 @@ export default function OrgDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-white">{org.name}</h1>
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${org.status === 'active' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-              {org.status === 'active' ? '활성' : '정지'}
+              {orgStatusLabel(org.status)}
             </span>
             <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${PLAN_BADGE[org.plan] ?? 'bg-slate-700 text-slate-300'}`}>
               {(org.plan ?? 'trial').toUpperCase()}
@@ -148,7 +146,7 @@ export default function OrgDetailPage() {
       </div>
 
       {/* 탭 콘텐츠 */}
-      {tab === 'overview'  && <OverviewTab  org={org} onRefresh={fetchOrg} onToast={showToast} />}
+      {tab === 'overview'  && <OverviewTab  org={org} onRefresh={fetchOrg} onToast={showToast} onSuspend={() => handleStatusChange('suspended')} />}
       {tab === 'users'     && <UsersTab     orgId={id} />}
       {tab === 'usage'     && <UsageTab     orgId={id} />}
       {tab === 'apikeys'   && <ApiKeysTab   orgId={id} onToast={showToast} />}
@@ -164,7 +162,7 @@ export default function OrgDetailPage() {
 }
 
 // ─── 1. 기본정보 탭 ──────────────────────────────────────────
-function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => void; onToast: (m: string) => void }) {
+function OverviewTab({ org, onRefresh, onToast, onSuspend }: { org: any; onRefresh: () => void; onToast: (m: string) => void; onSuspend: () => void }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteInput, setDeleteInput]         = useState('');
   const [invitations, setInvitations]         = useState<any[]>([]);
@@ -307,7 +305,7 @@ function OverviewTab({ org, onRefresh, onToast }: { org: any; onRefresh: () => v
         <div className="flex gap-3">
           {org.status === 'active' ? (
             <button
-              onClick={async () => { await fetch(`/api/super/organizations/${org.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'suspended' }) }); onRefresh(); onToast('기관이 정지됐습니다.'); }}
+              onClick={onSuspend}
               className="px-4 py-2 bg-amber-900/40 hover:bg-amber-900/60 border border-amber-700/50 text-amber-400 text-sm font-medium rounded-xl transition-colors">
               기관 정지
             </button>

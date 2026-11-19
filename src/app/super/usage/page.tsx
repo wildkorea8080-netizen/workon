@@ -7,6 +7,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, BarChart,
 } from 'recharts';
 import { csvCell } from '@/lib/csv-cell';
+import { orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
 
 const fmt = (n: number) =>
   n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n/1_000).toFixed(0)}K` : String(n ?? 0);
@@ -294,7 +295,13 @@ export default function UsagePage() {
                         <div className="flex gap-1.5">
                           <button onClick={() => setLimitModal(a)}
                             className="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded-lg">한도 증량</button>
-                          <button onClick={() => fetch(`/api/super/organizations/${a.orgId}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status:'suspended'}) }).then(() => fetchMain())}
+                          <button onClick={async () => {
+                              if (!window.confirm(orgSuspendConfirmText(a.orgName))) return;
+                              // 응답을 보고 알린다(2026-11-19 — 예전엔 실패해도 말이 없었다)
+                              const notice = await requestOrgStatusChange(a.orgId, 'suspended');
+                              window.alert(notice.message);
+                              fetchMain();
+                            }}
                             className="px-2.5 py-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 text-xs rounded-lg">서비스 정지</button>
                         </div>
                       </td>

@@ -50,7 +50,7 @@ export default function SuperDashboard() {
 
   const CARDS_ROW1 = [
     { icon: '🏢', label: '전체 기관',   value: `${o.total ?? 0}개`,  sub: `활성 ${o.active ?? 0}개` },
-    { icon: '✅', label: '활성 기관',   value: `${o.active ?? 0}개`, sub: `정지 ${o.suspended ?? 0}개` },
+    { icon: '✅', label: '활성 기관',   value: `${o.active ?? 0}개`, sub: `정지·종료 ${o.suspended ?? 0}개` },
     { icon: '👥', label: '전체 사용자', value: `${u.total ?? 0}명`,  sub: `오늘 활성 ${u.activeToday ?? 0}명` },
     { icon: '🆕', label: '이번달 신규', value: `${u.newThisMonth ?? 0}명`, sub: '신규 가입' },
   ];

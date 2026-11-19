@@ -10,6 +10,7 @@ import { seatAlerts } from '@/lib/user-seats';
 import { dbErrorText } from '@/lib/db-error-text';
 import { chatTokensOf, loadChatTokensByOrg } from '@/lib/org-chat-tokens';
 import { revenueIn, type RevenueContract } from '@/lib/contract-revenue';
+import { STOPPED_ORG_STATUSES } from '@/lib/org-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,8 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active'),
-      supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'suspended'),
+      // 멈춘 기관 — 정지·종료(2026-11-19 — 예전엔 정지만 셌다)
+      supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).in('status', [...STOPPED_ORG_STATUSES]),
       supabaseAdmin.from('contracts').select('id', { count: 'exact', head: true })
         .eq('status', 'active').not('expires_at', 'is', null).lte('expires_at', in30).gte('expires_at', now.toISOString()),
       // 사용자 수 — 탈퇴 처리한 계정은 빼고(2026-11-17, 0047)

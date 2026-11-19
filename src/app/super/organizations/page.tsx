@@ -5,6 +5,7 @@ import { ORG_TYPES } from '@/lib/org-types';
 import { kstDay } from '@/lib/kst-time';
 import { isImeComposing } from '@/lib/ime';
 import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
+import { orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
 
 const PLAN_PRESETS: Record<string, { maxUsers: number; maxAgents: number; maxTokens: number; price: number }> = {
   trial:      { maxUsers: 5,   maxAgents: 3,   maxTokens: 500000,   price: 0       },
@@ -23,6 +24,7 @@ const PLAN_BADGE: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   active:    'bg-emerald-900/40 text-emerald-400',
   suspended: 'bg-slate-700 text-slate-400',
+  terminated: 'bg-slate-800 text-slate-500',
   expired:   'bg-red-900/40 text-red-400',
   임박:      'bg-amber-900/40 text-amber-400',
 };
@@ -35,6 +37,8 @@ interface Org {
 }
 
 function getDisplayStatus(org: Org): { label: string; key: string } {
+  // 종료한 기관도 따로(2026-11-19 — 예전엔 '활성'으로 보였다)
+  if (org.status === 'terminated') return { label: '종료', key: 'terminated' };
   if (org.status === 'suspended') return { label: '정지', key: 'suspended' };
   if (org.days_until_expiry !== null && org.days_until_expiry !== undefined && org.days_until_expiry <= 0)
     return { label: '만료', key: 'expired' };
@@ -61,6 +65,7 @@ export default function OrganizationsPage() {
   const [activeMenu, setActiveMenu]     = useState<string | null>(null);
   const [toast, setToast]     = useState<string | null>(null);
   const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const LIMIT = 20;
 
   const fetchOrgs = useCallback(async (p = 1) => {
@@ -71,8 +76,12 @@ export default function OrganizationsPage() {
       if (filterStatus !== 'all') params.set('status', filterStatus);
       if (filterPlan   !== 'all') params.set('plan', filterPlan);
       const res = await fetch(`/api/super/organizations?${params}`);
-      const result = await res.json();
-      if (result.ok) { setOrgs(result.data); setTotal(result.meta.total); }
+      const result = await res.json().catch(() => null);
+      // 못 읽으면 '등록된 기관이 없습니다'가 아니라 그렇다고(2026-11-19)
+      if (res.ok && result?.ok) { setOrgs(result.data); setTotal(result.meta?.total ?? 0); setLoadError(null); }
+      else { setOrgs([]); setTotal(0); setLoadError(typeof result?.error === 'string' ? result.error : '기관 목록을 불러오지 못했습니다.'); }
+    } catch {
+      setOrgs([]); setTotal(0); setLoadError('기관 목록을 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
@@ -99,18 +108,13 @@ export default function OrganizationsPage() {
     }
   };
 
-  const handleStatusChange = async (id: string, status: string) => {
+  const handleStatusChange = async (org: Org, status: string) => {
     setActiveMenu(null);
-    const res = await fetch(`/api/super/organizations/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    const result = await res.json();
-    if (result.ok) {
-      fetchOrgs(page);
-      showToast(status === 'suspended' ? '기관이 정지됐습니다.' : '기관이 활성화됐습니다.');
-    }
+    if (status === 'suspended' && !window.confirm(orgSuspendConfirmText(org.name))) return;
+    // 실패·계약 경고도 알린다(2026-11-19 — 예전엔 실패하면 아무 말이 없었다)
+    const notice = await requestOrgStatusChange(org.id, status);
+    fetchOrgs(page);
+    showToast(notice.message);
   };
 
   const totalPages = Math.ceil(total / LIMIT);
@@ -155,8 +159,10 @@ export default function OrganizationsPage() {
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           className="px-4 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="all">상태 전체</option>
+          <option value="trial">체험</option>
           <option value="active">활성</option>
           <option value="suspended">정지</option>
+          <option value="terminated">종료</option>
         </select>
         <button onClick={() => fetchOrgs(1)}
           className="px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-sm font-semibold rounded-xl transition-colors">
@@ -181,6 +187,8 @@ export default function OrganizationsPage() {
                   <td key={j} className="px-5 py-4"><div className="h-4 bg-slate-700/50 rounded animate-pulse" /></td>
                 ))}</tr>
               ))
+            ) : loadError ? (
+              <tr><td colSpan={7} className="px-5 py-12 text-center text-red-400">{loadError}</td></tr>
             ) : orgs.length === 0 ? (
               <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-500">등록된 기관이 없습니다.</td></tr>
             ) : (
@@ -233,12 +241,12 @@ export default function OrganizationsPage() {
                           {activeMenu === org.id && (
                             <div className="absolute right-0 top-full mt-1 w-36 bg-[#0F172A] border border-slate-700 rounded-xl shadow-xl z-20 py-1">
                               {org.status === 'active' ? (
-                                <button onClick={() => handleStatusChange(org.id, 'suspended')}
+                                <button onClick={() => handleStatusChange(org, 'suspended')}
                                   className="w-full text-left px-4 py-2 text-sm text-amber-400 hover:bg-slate-800 transition-colors">
                                   기관 정지
                                 </button>
                               ) : (
-                                <button onClick={() => handleStatusChange(org.id, 'active')}
+                                <button onClick={() => handleStatusChange(org, 'active')}
                                   className="w-full text-left px-4 py-2 text-sm text-emerald-400 hover:bg-slate-800 transition-colors">
                                   기관 활성화
                                 </button>
