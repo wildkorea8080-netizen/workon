@@ -18,10 +18,17 @@ export async function PATCH(
   if (!admin) return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
   try {
-    const { status, plan, notes, monthly_token_limit } = await request.json();
+    // 깨진 요청은 400(2026-11-19 — 예전엔 500)
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body))
+      return NextResponse.json({ ok: false, error: '요청 형식이 올바르지 않습니다.' }, { status: 400 });
+    const { status, plan, notes, monthly_token_limit } = body as Record<string, unknown>;
     const { id } = params;
+    // 메모는 글 1,000자까지(빈 글은 지움)
+    if (notes !== undefined && notes !== null && !(typeof notes === 'string' && notes.length <= 1000))
+      return NextResponse.json({ ok: false, error: '메모는 1,000자까지 적을 수 있습니다.' }, { status: 400 });
     // 상태는 정해 둔 넷만(2026-11-17 — 예전엔 아무 글이나 받았다)
-    if (status !== undefined && !['trial', 'active', 'suspended', 'terminated'].includes(status))
+    if (status !== undefined && !(typeof status === 'string' && ['trial', 'active', 'suspended', 'terminated'].includes(status)))
       return NextResponse.json({ ok: false, error: '기관 상태 값이 올바르지 않습니다.' }, { status: 400 });
     // 요금제는 정해 둔 것만(2026-11-18)
     if (plan !== undefined && !(typeof plan === 'string' && Object.prototype.hasOwnProperty.call(PLANS, plan)))
@@ -31,12 +38,16 @@ export async function PATCH(
     if (tokenLimit === 'invalid')
       return NextResponse.json({ ok: false, error: '월 토큰 한도는 0(무제한) 이상의 정수여야 합니다.' }, { status: 400 });
 
-    const { data: before } = await supabaseAdmin
+    // 못 읽으면 503, 없으면 404(2026-11-19 — 예전 `.single()`은 읽기 오류도 '없음'으로 보았다)
+    const { data: before, error: beforeError } = await supabaseAdmin
       .from('organizations')
       .select('id, name, status, plan, monthly_token_limit')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
+    if (beforeError) {
+      return NextResponse.json({ ok: false, error: '기관을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+    }
     if (!before) {
       return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
     }
@@ -44,7 +55,7 @@ export async function PATCH(
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (status !== undefined) updateData.status = status;
     if (plan    !== undefined) updateData.plan   = plan;
-    if (notes   !== undefined) updateData.notes  = notes;
+    if (notes   !== undefined) updateData.notes  = typeof notes === 'string' && notes.trim() ? notes : null;
     if (tokenLimit !== undefined) updateData.monthly_token_limit = tokenLimit;
 
     const { data: updated, error } = await supabaseAdmin
@@ -52,20 +63,21 @@ export async function PATCH(
       .update(updateData)
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!updated) return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
 
-    // 정지 시 active 계약을 해지, 다시 활성화하면 계약 하나만 되살린다(2026-11-17 — 예전에는 해지된 계약을 모두 되살려
+    // 정지·종료 시 active 계약을 해지(2026-11-19 — 예전엔 종료한 기관의 계약이 그대로 active라 매출·한도 판정에 남았다), 다시 활성화하면 계약 하나만 되살린다(2026-11-17 — 예전에는 해지된 계약을 모두 되살려
     // 오래전에 끝난 계약까지 active가 되고 매출 합계가 부풀었다). 실패는 기관 변경을 되돌리지 않고 경고로
     let warning: string | undefined;
-    if (status === 'suspended') {
+    if (status === 'suspended' || status === 'terminated') {
       const { error: cancelErr } = await supabaseAdmin
         .from('contracts')
         .update({ status: 'cancelled' })
         .eq('organization_id', id)
         .eq('status', 'active');
-      if (cancelErr) warning = await reportContractSync('contract_cancel_after_org_suspend', id, cancelErr.code ?? 'error');
+      if (cancelErr) warning = await reportContractSync(status === 'terminated' ? 'contract_cancel_after_org_terminate' : 'contract_cancel_after_org_suspend', id, cancelErr.code ?? 'error');
     }
     if (status === 'active') {
       const { data: contracts, error: readErr } = await supabaseAdmin
@@ -119,9 +131,13 @@ export async function GET(
         contracts (id, plan, status, started_at, expires_at, price_per_month, max_users, max_agents)
       `)
       .eq('id', params.id)
-      .single();
+      .maybeSingle();
 
-    if (error || !org) {
+    // 못 읽으면 503, 없으면 404(2026-11-19)
+    if (error) {
+      return NextResponse.json({ ok: false, error: '기관을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+    }
+    if (!org) {
       return NextResponse.json({ ok: false, error: '기관을 찾을 수 없습니다.' }, { status: 404 });
     }
 

@@ -29,6 +29,7 @@ export type ContractSyncStage =
   | 'org_suspend_after_cancel'
   | 'org_plan_after_contract_change'
   | 'contract_cancel_after_org_suspend'
+  | 'contract_cancel_after_org_terminate'
   | 'contract_restore_after_org_active'
   | 'org_admin_invitation'
   | 'org_default_department';
@@ -39,6 +40,7 @@ export const SYNC_WARNINGS: Record<ContractSyncStage, string> = {
   org_suspend_after_cancel: '계약은 해지했지만 기관을 정지하지 못했습니다. 기관 화면에서 상태를 확인해 주세요.',
   org_plan_after_contract_change: '계약은 바꿨지만 기관의 요금제·한도를 맞추지 못했습니다. 기관 화면에서 한도를 확인해 주세요.',
   contract_cancel_after_org_suspend: '기관은 정지했지만 계약을 해지하지 못했습니다. 계약 화면에서 확인해 주세요.',
+  contract_cancel_after_org_terminate: '기관은 종료했지만 계약을 해지하지 못했습니다. 계약 화면에서 확인해 주세요.',
   contract_restore_after_org_active: '기관은 활성화했지만 계약을 되살리지 못했습니다. 계약 화면에서 확인해 주세요.',
   org_admin_invitation: '기관은 만들었지만 관리자 초대를 저장하지 못했습니다. 기관 상세의 초대에서 새로 만들어 주세요.',
   org_default_department: '기관은 만들었지만 기본 부서를 만들지 못해 기본 비서와 관리자 초대가 빠졌습니다. 기관 상세에서 부서와 초대를 만들어 주세요.',

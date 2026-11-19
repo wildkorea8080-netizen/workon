@@ -16,6 +16,7 @@ function builder() {
   b.single = () => Promise.resolve(mode === 'update'
     ? { data: { id: 'org-1', ...state.updates.at(-1) }, error: null }
     : { data: { id: 'org-1', name: '기관', status: 'active', plan: 'basic', monthly_token_limit: 2_000_000 }, error: null });
+  b.maybeSingle = b.single; // 2026-11-19 — 라우트가 읽기 오류와 '없음'을 가르려 maybeSingle을 쓴다
   return b;
 }
 

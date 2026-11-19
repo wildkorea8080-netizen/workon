@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { isStoppedOrgStatus } from '@/lib/org-status';
 import {
   UPLOAD_FORMATS_LABEL,
   MAX_UPLOAD_BYTES,
@@ -38,7 +39,7 @@ async function organizationStatus(organizationId: string): Promise<string | null
 }
 
 /**
- * 기관이 정지(`status='suspended'`)됐는지 (판정 D). 주소 발급·확인 두 곳이 본다.
+ * 기관이 정지(`status='suspended'`)·종료(`'terminated'`, 2026-11-19)됐는지 (판정 D). 주소 발급·확인 두 곳이 본다.
  * 기관 상태만 본다 — 토큰 예산은 문서 올리기와 상관없다.
  * `checkTokenLimit`과 같이 기관이 없거나 조회가 실패하면 막지 않는다(조회 오류로 업무가 멈추지 않게).
  */
@@ -48,7 +49,7 @@ export async function isOrganizationSuspended(
 ): Promise<boolean> {
   if (!organizationId) return false;
   try {
-    return (await lookup(organizationId)) === 'suspended';
+    return isStoppedOrgStatus(await lookup(organizationId));
   } catch (error) {
     console.error('[document-upload] 기관 상태 조회 실패:', error instanceof Error ? error.message : error);
     return false;

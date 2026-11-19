@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSystem } from '@/lib/logger';
+import { isStoppedOrgStatus } from '@/lib/org-status';
 
 /** 읽지 못해 확인하지 못한 단계 — 그 단계는 '허용'으로 열어 두었다(2026-11-18) */
 export type LimitGap =
@@ -20,6 +21,8 @@ export interface TokenLimitStatus {
   /** 차단 사유 (allowed=false일 때만) */
   reason?:
     | 'org_suspended'
+    /** 슈퍼관리자가 '기관 종료'한 기관(2026-11-19 — 예전엔 종료한 기관의 직원도 대화를 계속했다) */
+    | 'org_terminated'
     | 'token_limit_exceeded'
     | 'budget_exhausted'
     | 'department_budget_exhausted'
@@ -173,6 +176,9 @@ async function checkAnnualBudget(
 export function limitMessage(status: TokenLimitStatus): string {
   if (status.reason === 'org_suspended') {
     return '기관 이용이 정지되었습니다. 관리자에게 문의하세요.';
+  }
+  if (status.reason === 'org_terminated') {
+    return '기관 이용이 종료되었습니다. 관리자에게 문의하세요.';
   }
   if (status.reason === 'budget_exhausted') {
     const used = Math.round(status.budget?.usedKrw ?? 0).toLocaleString();
@@ -377,13 +383,14 @@ async function evaluateTokenLimit(
 
     if (!org) return ALLOWED;
 
-    if (org.status === 'suspended') {
+    // 정지·종료한 기관은 막는다(2026-11-19 — 예전엔 'suspended'만 보아 '기관 종료'한 기관의 직원이 계속 대화했다)
+    if (isStoppedOrgStatus(org.status)) {
       return {
         allowed: false,
         usedTokens: 0,
         limitTokens: org.monthly_token_limit ?? 0,
         organizationName: org.name,
-        reason: 'org_suspended',
+        reason: org.status === 'terminated' ? 'org_terminated' : 'org_suspended',
       };
     }
 

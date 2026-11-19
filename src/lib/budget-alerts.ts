@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_URL } from '@/lib/config';
 import { logSystem } from '@/lib/logger';
+import { STOPPED_ORG_STATUS_LIST } from '@/lib/org-status';
 import { budgetAlertMail, isMailConfigured, personalBudgetAlertMail, sendBudgetAlertEmail, type MailResult } from '@/lib/mailer';
 import {
   departmentBudgetStatuses, organizationBudgetStatus, userBudgetStatuses,
@@ -282,7 +283,7 @@ export function budgetAlertDeps(): BudgetAlertDeps {
   return {
     mailConfigured: isMailConfigured,
     async organizations() {
-      const { data, error } = await supabaseAdmin.from('organizations').select('id, name, status').neq('status', 'suspended');
+      const { data, error } = await supabaseAdmin.from('organizations').select('id, name, status').not('status', 'in', STOPPED_ORG_STATUS_LIST); // 정지·종료한 기관은 빼고(2026-11-19 — 예전엔 종료한 기관에도 보냄)
       if (error) throw new Error(`organizations: ${error.message}`);
       return (data ?? []).map((o: { id: string; name: string }) => ({ id: o.id, name: o.name }));
     },
