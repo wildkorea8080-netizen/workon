@@ -22,11 +22,13 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     if (!UUID.test(params.id)) return jsonError('문서를 찾을 수 없습니다.', 404);
 
     // 감사 기록에 남길 값은 지우기 전에 읽는다(이름·유형·연도·사용 조건 — 설계 4절. 파일 경로는 남기지 않는다)
-    const { data: before } = await supabaseAdmin
+    const { data: before, error: beforeError } = await supabaseAdmin
       .from('common_documents')
       .select('title, org_type, edition_year, usage_terms')
       .eq('id', params.id)
       .maybeSingle();
+    // 못 읽으면 지우지 않는다(2026-11-20 — 예전엔 그대로 지워, 되돌릴 수 없는 삭제의 감사 기록에 무엇을 지웠는지가 비었다)
+    if (beforeError) return jsonError('문서를 지금 읽지 못해 지우지 않았습니다. 잠시 뒤 다시 지워 주세요.', 503);
 
     const result = await deleteCommonDocument(params.id);
     if (!result.ok) {

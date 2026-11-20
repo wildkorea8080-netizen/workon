@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
+import { chatTokensOf } from '@/lib/org-chat-tokens';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '@/lib/crypto';
 import { logSystem } from '@/lib/logger';
 import { estimateCostUsd } from '@/lib/models';
@@ -36,30 +37,30 @@ export async function GET(request: NextRequest) {
   }
 
   // 시스템 키를 사용 중인 기관 수 (자체 키 없는 기관)
-  const { count: orgTotal } = await supabaseAdmin
+  const { count: orgTotal, error: orgError } = await supabaseAdmin
     .from('organizations').select('id', { count: 'exact', head: true }).eq('status', 'active');
 
   // 이번달 시스템 키 사용 토큰 (org_id가 없는 usage_logs)
   const monthStart = kstMonthStart().toISOString();
-  const { data: usage } = await pagedRows<{ details: any }>((a, b, w) => supabaseAdmin
+  const { data: usage, error: usageError } = await pagedRows<{ details: any }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
     .select('details', w ? { count: 'exact' } : undefined)
     .is('organization_id', null)
     .gte('created_at', monthStart)
     .order('id').range(a, b));
 
-  const totalTokens = (usage ?? []).reduce((s: number, r: any) =>
-    s + ((r.details?.input_tokens ?? 0) + (r.details?.output_tokens ?? 0)), 0);
+  // 못 읽으면 null(2026-11-20 — 예전엔 0개·0토큰), 숫자만 더한다(예전엔 글 값이 이어 붙었다)
+  const totalTokens = usageError ? null : (usage ?? []).reduce((s: number, r: { details: unknown }) => s + chatTokensOf(r.details), 0);
 
   return NextResponse.json({
     ok: true,
     data: {
       keys: result,
       stats: {
-        systemKeyOrgCount: orgTotal ?? 0,
+        systemKeyOrgCount: orgError ? null : orgTotal ?? 0,
         totalTokensThisMonth: totalTokens,
         // 입출력 비율을 알 수 없어 절반씩으로 가정한 개략 추정치
-        estimatedCostUsd: estimateCostUsd({ input_tokens: totalTokens / 2, output_tokens: totalTokens / 2 }),
+        estimatedCostUsd: totalTokens === null ? null : estimateCostUsd({ input_tokens: totalTokens / 2, output_tokens: totalTokens / 2 }),
       },
     },
   });

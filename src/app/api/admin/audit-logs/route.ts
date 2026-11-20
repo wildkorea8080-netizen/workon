@@ -162,11 +162,19 @@ export async function GET(request: NextRequest) {
 
     // 관리 범위 안의 직원만 대상으로 한다
     // 직원이 1,000명을 넘는 기관에서도 이름이 빠지지 않게 쪽마다 끝까지('(삭제된 계정)'으로 잘못 보이지 않게)
-    const { data: members } = await pagedRows<any>((a, b, w) => supabaseAdmin
+    const { data: members, error: membersError } = await pagedRows<any>((a, b, w) => supabaseAdmin
       .from('users')
       .select('id, full_name, email, department_id, departments(name)', w ? { count: 'exact' } : undefined)
       .in('department_id', managedDeptIds)
       .order('id').range(a, b));
+    // 못 읽으면 내지 않는다(2026-11-20 — 예전엔 모든 줄이 '(삭제된 계정)'으로 보이고 감사 CSV에도 그렇게 나갔으며,
+    // 직원을 골라 조회하면 '관리 권한이 없는 직원'(403)이라 답했다)
+    if (membersError) {
+      return NextResponse.json(
+        { ok: false, error: { message: '직원 목록을 지금 읽지 못했습니다. 잠시 뒤 다시 조회해 주세요.' } },
+        { status: 503 }
+      );
+    }
 
     // 명시적 제네릭이 없으면 [키, 값] 배열이 유니온으로 추론돼 Map 값 타입이 {}가 된다
     interface MemberInfo { name: string; email: string; dept: string }

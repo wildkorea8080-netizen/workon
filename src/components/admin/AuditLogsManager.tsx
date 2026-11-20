@@ -90,15 +90,32 @@ export default function AuditLogsManager() {
       .catch(() => {});
   }, []);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const params = new URLSearchParams({ kind, from, to, format: 'csv' });
     if (userId) params.set('userId', userId);
     if (reveal) {
       params.set('reveal', 'true');
       params.set('reason', revealReason);
     }
-    // 브라우저가 Content-Disposition을 처리하도록 그대로 이동시킨다
-    window.location.href = `/api/admin/audit-logs?${params}`;
+    // 받아 본 뒤 저장한다(2026-11-20 — 예전엔 주소로 바로 이동해, 서버가 거절하면 오류 JSON 화면으로 넘어갔다)
+    try {
+      const res = await fetch(`/api/admin/audit-logs?${params}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error?.message ?? '내보내기에 실패했습니다. 잠시 뒤 다시 시도해 주세요.');
+        return;
+      }
+      const name = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get('Content-Disposition') ?? '')?.[1];
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name ? decodeURIComponent(name) : '사용내역.csv';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setError(null);
+    } catch {
+      setError('내보내기에 실패했습니다. 잠시 뒤 다시 시도해 주세요.');
+    }
   };
 
   const totalPages = meta ? Math.max(1, Math.ceil(meta.total / meta.pageSize)) : 1;

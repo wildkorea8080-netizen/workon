@@ -215,9 +215,10 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
         <h3 className="text-sm font-bold text-white mb-4">이번달 기관이 비어 있는 사용 기록</h3>
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: '활성 기관',                 value: `${stats.systemKeyOrgCount ?? 0}개` },
-            { label: '기관이 비어 있는 기록의 토큰', value: fmt(stats.totalTokensThisMonth ?? 0) },
-            { label: '그 예상 비용 (Claude)',      value: `$${stats.estimatedCostUsd ?? 0}` },
+            // 서버가 못 읽은 수(null)는 0으로 보이지 않게(2026-11-20)
+            { label: '활성 기관',                 value: stats.systemKeyOrgCount === null ? '읽지 못함' : `${stats.systemKeyOrgCount ?? 0}개` },
+            { label: '기관이 비어 있는 기록의 토큰', value: stats.totalTokensThisMonth === null ? '읽지 못함' : fmt(stats.totalTokensThisMonth ?? 0) },
+            { label: '그 예상 비용 (Claude)',      value: stats.estimatedCostUsd === null ? '읽지 못함' : `$${stats.estimatedCostUsd ?? 0}` },
           ].map(s => (
             <div key={s.label} className="p-4 bg-[#0F172A] rounded-xl">
               <p className="text-lg font-bold text-white">{s.value}</p>

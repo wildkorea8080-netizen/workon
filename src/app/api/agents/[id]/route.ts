@@ -128,7 +128,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       if (error) return jsonError('비서 설정 변경 중 오류가 발생했습니다.', 500);
     }
 
-    const { data: agentRow } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    // 저장 뒤 다시 읽기를 못 하면 '성공·빈 값'이 아니라 그렇다고 알린다(2026-11-20 — 예전엔 화면이 빈 값으로 비서를 바꿔 목록이 깨졌다)
+    const { data: agentRow, error: savedRowError } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
+    if (savedRowError || !agentRow) return jsonError('저장했지만 바뀐 설정을 지금 다시 읽지 못했습니다. 화면을 새로 고쳐 확인해 주세요.', 503);
     return NextResponse.json({ ok: true, data: agentRow });
   } catch (error) {
     console.error('[agents PATCH]', error);

@@ -35,6 +35,30 @@ export function sumByOrg(rows: Array<{ organization_id: string | null; details: 
   return m;
 }
 
+/** 활성 기관의 월 토큰 한도 경고(80% 이상·100% 미만)·초과(100% 이상) 수 — 한도 0·없음은 무제한이라 세지 않는다 */
+export function tokenLimitCounts(orgs: Array<{ id: string; monthly_token_limit: unknown }>, usage: Map<string, number>): { warnings: number; exceeded: number } {
+  let warnings = 0;
+  let exceeded = 0;
+  for (const o of orgs) {
+    const limit = Number(o.monthly_token_limit);
+    if (!Number.isFinite(limit) || limit <= 0) continue;
+    const used = usage.get(o.id) ?? 0;
+    if (used >= limit) exceeded++;
+    else if (used / limit >= 0.8) warnings++;
+  }
+  return { warnings, exceeded };
+}
+
+/** 이번 달 토큰 Top N — 기관 행이 없으면(지운 기관) 이름 '—', 한도 0·없음은 0% */
+export function topTokenOrgs(ids: string[], usage: Map<string, number>, orgs: Array<{ id: string; name: string | null; monthly_token_limit: unknown }>) {
+  return ids.map((id) => {
+    const org = orgs.find((o) => o.id === id);
+    const tokens = usage.get(id) ?? 0;
+    const limit = Number(org?.monthly_token_limit);
+    return { id, name: org?.name ?? '—', tokens, usagePct: Number.isFinite(limit) && limit > 0 ? Math.round(tokens / limit * 100) : 0 };
+  });
+}
+
 /** 기관 몇 곳의 토큰을 DB 함수로(목록 한 쪽 — 100곳까지) — 못 읽은 기관은 값 없음 */
 export async function orgChatTokens(orgIds: string[], fromIso: string): Promise<Map<string, number>> {
   const out = new Map<string, number>();

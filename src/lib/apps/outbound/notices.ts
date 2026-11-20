@@ -30,12 +30,17 @@ export interface OutboundNoticeDeps {
   failingEndpoints(nowIso: string, lookbackIso: string): Promise<Array<FailureEndpoint & { count: number; lastError: string | null; since: string }>>;
   /** 알린 때를 조건부로 바꿈(그 사이 다른 호출이 알렸으면 false) */
   claimFailureNotice(endpoint: FailureEndpoint, nowIso: string): Promise<boolean>;
+  /** 차지를 되돌림(받는 사람을 못 읽었을 때 — 다음 차례에 다시 알리게) */
+  releaseFailureNotice(endpoint: FailureEndpoint, nowIso: string): Promise<void>;
+  /** 기관 전체 관리자 주소 — 못 읽으면 던진다 */
   orgAdminEmails(organizationId: string): Promise<string[]>;
   /** 확인 기다림·기한 안·아직 알리지 않음·10분 지남 */
   waitingDeliveries(beforeIso: string, notBeforeIso: string, limit: number): Promise<WaitingDelivery[]>;
   /** 알린 때를 조건부로 찍고 실제로 찍은 id */
   claimApprovalNotices(ids: string[], nowIso: string): Promise<string[]>;
-  /** 직원 주소 — 그 기관의 활성 직원일 때만 */
+  /** 찍은 때를 되돌림(받는 사람을 못 읽었을 때 — 다음 차례에 다시 알리게) */
+  releaseApprovalNotices(ids: string[], nowIso: string): Promise<void>;
+  /** 직원 주소 — 그 기관의 활성 직원일 때만(아니면 null), 못 읽으면 던진다 */
   userEmail(userId: string, organizationId: string): Promise<string | null>;
   appNames(agentIds: string[]): Promise<Map<string, string>>;
   send(to: string, mail: { subject: string; html: string }): Promise<{ sent: boolean }>;
@@ -56,7 +61,13 @@ export async function runOutboundNotices(deps: OutboundNoticeDeps = outboundNoti
     for (const ep of failing) {
       if (ep.failure_notified_at && Date.parse(ep.failure_notified_at) > now - FAILURE_NOTICE_INTERVAL_MS) continue;
       if (!(await deps.claimFailureNotice(ep, iso(now)).catch(() => false))) continue;
-      const emails = await deps.orgAdminEmails(ep.organization_id).catch(() => [] as string[]);
+      // 받는 사람을 못 읽으면 차지를 되돌린다(2026-11-20 — 예전엔 빈 목록으로 보아 그 알림이 6시간 동안 사라졌다)
+      const emails = await deps.orgAdminEmails(ep.organization_id).catch(() => null);
+      if (emails === null) {
+        await deps.releaseFailureNotice(ep, iso(now)).catch(() => {});
+        await deps.log('앱 결과 보내기 그만둠 알림의 받는 사람을 읽지 못해 다음 차례로 미뤘습니다', { endpoint_id: ep.id }, ep.organization_id).catch(() => {});
+        continue;
+      }
       const mail = outboundFailureMail({ endpointName: ep.name, count: ep.count, lastError: ep.lastError, since: new Date(ep.since), url: `${APP_URL}/admin/app-automations` });
       let delivered = 0;
       for (const to of emails) if ((await deps.send(to, mail).catch(() => ({ sent: false }))).sent) delivered++;
@@ -76,7 +87,13 @@ export async function runOutboundNotices(deps: OutboundNoticeDeps = outboundNoti
     if (byUser.size) {
       const names = await deps.appNames([...new Set([...claimed].map((id) => waiting.find((w) => w.id === id)!.agent_id))]).catch(() => new Map<string, string>());
       for (const [userId, rows] of byUser) {
-        const to = await deps.userEmail(userId, rows[0].organization_id).catch(() => null);
+        // 주소를 못 읽으면 찍은 때를 되돌린다(2026-11-20 — 예전엔 '주소 없음'으로 보아 알림이 기록 없이 영영 사라졌다)
+        const to = await deps.userEmail(userId, rows[0].organization_id).catch(() => undefined);
+        if (to === undefined) {
+          await deps.releaseApprovalNotices(rows.map((r) => r.id), iso(now)).catch(() => {});
+          await deps.log('보내기 전 확인 알림의 받는 사람을 읽지 못해 다음 차례로 미뤘습니다', { user_id: userId, count: rows.length }, rows[0].organization_id).catch(() => {});
+          continue;
+        }
         if (!to) continue;
         const perApp = new Map<string, number>();
         for (const r of rows) perApp.set(r.agent_id, (perApp.get(r.agent_id) ?? 0) + 1);
@@ -118,6 +135,11 @@ export function outboundNoticeDeps(): OutboundNoticeDeps {
       const { data, error } = await q.select('id');
       return !error && Boolean(data?.length);
     },
+    async releaseFailureNotice(ep, nowIso) {
+      const { error } = await supabaseAdmin.from('app_outbound_endpoints').update({ failure_notified_at: ep.failure_notified_at })
+        .eq('id', ep.id).eq('failure_notified_at', nowIso);
+      if (error) throw new Error(error.message);
+    },
     async orgAdminEmails(organizationId) {
       const { data: roots, error } = await supabaseAdmin.from('departments').select('id').eq('organization_id', organizationId).is('parent_id', null);
       if (error) throw new Error(error.message);
@@ -140,8 +162,14 @@ export function outboundNoticeDeps(): OutboundNoticeDeps {
       if (error) throw new Error(error.message);
       return (data ?? []).map((r: { id: string }) => r.id);
     },
+    async releaseApprovalNotices(ids, nowIso) {
+      const { error } = await supabaseAdmin.from('app_outbound_deliveries').update({ approval_notified_at: null })
+        .in('id', ids).eq('approval_notified_at', nowIso);
+      if (error) throw new Error(error.message);
+    },
     async userEmail(userId, organizationId) {
-      const { data } = await supabaseAdmin.from('users').select('email, is_active, deleted_at, department:departments!inner(organization_id)').eq('id', userId).maybeSingle();
+      const { data, error } = await supabaseAdmin.from('users').select('email, is_active, deleted_at, department:departments!inner(organization_id)').eq('id', userId).maybeSingle();
+      if (error) throw new Error(error.message);
       const row = data as { email: string | null; is_active: boolean | null; deleted_at: string | null; department: { organization_id: string } | { organization_id: string }[] | null } | null;
       const dept = Array.isArray(row?.department) ? row?.department[0] : row?.department;
       if (!row || row.is_active !== true || row.deleted_at || dept?.organization_id !== organizationId) return null;

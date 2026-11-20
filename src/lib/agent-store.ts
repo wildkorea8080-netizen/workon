@@ -233,12 +233,14 @@ export async function getAgentHistory(agentId: string, limit = 100): Promise<Age
   );
 }
 
+/** 판 사본 — 없으면 null, 못 읽으면 `AgentReadError`(2026-11-20 — 예전엔 읽기 실패도 null이라 되돌리기가 '그 판을 찾을 수 없습니다'(404)) */
 export async function getVersionSnapshot(agentId: string, version: number): Promise<Record<string, unknown> | null> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('agent_history')
     .select('snapshot')
     .eq('agent_id', agentId)
     .eq('version', version)
     .maybeSingle();
+  if (error) throw new AgentReadError(error.code ?? null);
   return (data?.snapshot as Record<string, unknown> | undefined) ?? null;
 }

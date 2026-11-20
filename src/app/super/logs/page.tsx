@@ -250,8 +250,9 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
       {/* 에러 요약 카드 */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: '오늘 ERROR/CRITICAL', value: summary.todayErrors ?? 0, icon: '🔴' },
-          { label: '이번주 ERROR/CRITICAL', value: summary.weekErrors ?? 0, icon: '⚠️' },
+          // 서버가 못 읽은 수(null)는 0으로 보이지 않게(2026-11-20)
+          { label: '오늘 ERROR/CRITICAL', value: summary.todayErrors === null ? '읽지 못함' : summary.todayErrors ?? '—', icon: '🔴' },
+          { label: '이번주 ERROR/CRITICAL', value: summary.weekErrors === null ? '읽지 못함' : summary.weekErrors ?? '—', icon: '⚠️' },
           { label: '전주 대비', value: summary.weekTrend !== null && summary.weekTrend !== undefined ? `${summary.weekTrend > 0 ? '▲' : '▼'}${Math.abs(summary.weekTrend)}%` : '—', icon: '📊' },
         ].map(c => (
           <div key={c.label} className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-4">

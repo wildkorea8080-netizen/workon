@@ -18,8 +18,8 @@ function deps(over: Partial<OutboundNoticeDeps> = {}) {
   const logs: string[] = [];
   const d: OutboundNoticeDeps = {
     now: () => NOW, mailConfigured: () => true,
-    failingEndpoints: async () => [], claimFailureNotice: async () => true, orgAdminEmails: async () => ['admin@org.go.kr'],
-    waitingDeliveries: async () => [], claimApprovalNotices: async (ids) => ids, userEmail: async (u) => `${u}@org.go.kr`,
+    failingEndpoints: async () => [], claimFailureNotice: async () => true, releaseFailureNotice: async () => {}, orgAdminEmails: async () => ['admin@org.go.kr'],
+    waitingDeliveries: async () => [], claimApprovalNotices: async (ids) => ids, releaseApprovalNotices: async () => {}, userEmail: async (u) => `${u}@org.go.kr`,
     appNames: async () => new Map([['a1', '민원 답변 앱'], ['a2', '주간 보고 앱']]),
     send: async (to, mail) => { sent.push({ to, ...mail }); return { sent: true }; },
     log: async (m) => { logs.push(m); }, ...over,

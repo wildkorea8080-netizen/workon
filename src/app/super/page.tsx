@@ -14,6 +14,10 @@ const fmt = (n: number) =>
 
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('ko-KR');
 
+/** 서버가 못 읽은 숫자(null)는 0으로 보이지 않게 '읽지 못함'(2026-11-20) */
+const UNREAD = '읽지 못함';
+const shown = (v: number | null | undefined, f: (n: number) => string) => (v == null ? UNREAD : f(v));
+
 const PLAN_COLORS: Record<string, string> = {
   trial:      '#6B7280',
   basic:      '#3B82F6',
@@ -25,13 +29,21 @@ const PLAN_COLORS: Record<string, string> = {
 export default function SuperDashboard() {
   const [data, setData]     = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
+  // 못 불러오면 알린다(2026-11-20 — 예전엔 모든 카드가 0으로, 연결이 끊기면 도는 표시가 멈추지 않았다)
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/super/dashboard');
-    const d   = await res.json();
-    if (d.ok) setData(d.data);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/super/dashboard');
+      const d   = await res.json().catch(() => null);
+      if (d?.ok) { setData(d.data); setLoadError(null); }
+      else setLoadError(typeof d?.error === 'string' ? d.error : '대시보드를 지금 불러오지 못했습니다.');
+    } catch {
+      setLoadError('대시보드를 지금 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -49,15 +61,15 @@ export default function SuperDashboard() {
   const al = data?.alerts ?? {};
 
   const CARDS_ROW1 = [
-    { icon: '🏢', label: '전체 기관',   value: `${o.total ?? 0}개`,  sub: `활성 ${o.active ?? 0}개` },
-    { icon: '✅', label: '활성 기관',   value: `${o.active ?? 0}개`, sub: `정지·종료 ${o.suspended ?? 0}개` },
-    { icon: '👥', label: '전체 사용자', value: `${u.total ?? 0}명`,  sub: `오늘 활성 ${u.activeToday ?? 0}명` },
-    { icon: '🆕', label: '이번달 신규', value: `${u.newThisMonth ?? 0}명`, sub: '신규 가입' },
+    { icon: '🏢', label: '전체 기관',   value: shown(o.total, (n) => `${n}개`),  sub: `활성 ${shown(o.active, (n) => `${n}개`)}` },
+    { icon: '✅', label: '활성 기관',   value: shown(o.active, (n) => `${n}개`), sub: `정지·종료 ${shown(o.suspended, (n) => `${n}개`)}` },
+    { icon: '👥', label: '전체 사용자', value: shown(u.total, (n) => `${n}명`),  sub: `오늘 활성 ${shown(u.activeToday, (n) => `${n}명`)}` },
+    { icon: '🆕', label: '이번달 신규', value: shown(u.newThisMonth, (n) => `${n}명`), sub: '신규 가입' },
   ];
   const CARDS_ROW2 = [
-    { icon: '💬', label: '오늘 대화',   value: `${us.todayConversations ?? 0}건` },
-    { icon: '🔤', label: '이번달 토큰', value: fmt(us.monthTokens ?? 0) },
-    { icon: '💰', label: '이번달 매출', value: `${(r.thisMonth ?? 0).toLocaleString()}원` },
+    { icon: '💬', label: '오늘 대화',   value: shown(us.todayConversations, (n) => `${n}건`) },
+    { icon: '🔤', label: '이번달 토큰', value: shown(us.monthTokens, fmt) },
+    { icon: '💰', label: '이번달 매출', value: shown(r.thisMonth, (n) => `${n.toLocaleString()}원`) },
     {
       icon: '📈', label: '전월 대비',
       value: r.growthPercent !== null && r.growthPercent !== undefined
@@ -82,6 +94,12 @@ export default function SuperDashboard() {
           새로고침
         </button>
       </div>
+
+      {loadError && (
+        <div className="p-4 bg-red-950/30 border border-red-700/40 rounded-2xl text-sm text-red-300">
+          {loadError} 아래 숫자는 {data ? '지난번에 불러온 값입니다' : '보이지 않습니다'} — 새로고침해 주세요.
+        </div>
+      )}
 
       {/* 심각한 운영 기록(2026-11-17) — 사용 기록·감사 기록·계약 맞추기 실패 등 critical, 최근 24시간 */}
       {al.critical24h === null && (
@@ -139,6 +157,20 @@ export default function SuperDashboard() {
         </div>
       )}
 
+      {/* 토큰 한도 판정을 못 읽음(2026-11-19) — 0으로 보이면 '한도 넘은 기관 없음'으로 읽힌다 */}
+      {data && al.tokenExceeded === null && (
+        <div className="p-3 bg-amber-950/30 border border-amber-700/40 rounded-2xl text-xs text-amber-300">
+          기관 토큰 한도 사용률을 지금 확인하지 못했습니다 — 한도를 넘은 기관이 있어도 여기에 보이지 않습니다. 잠시 뒤 새로 고침해 주세요.
+        </div>
+      )}
+
+      {/* 만료 임박 계약 수를 못 읽음(2026-11-20) — 0으로 보이면 띠가 사라져 '만료 임박 없음'으로 읽힌다 */}
+      {data && al.expiringContracts === null && (
+        <div className="p-3 bg-amber-950/30 border border-amber-700/40 rounded-2xl text-xs text-amber-300">
+          만료가 30일 안으로 다가온 계약 수를 지금 확인하지 못했습니다 — <Link href="/super/contracts?tab=expiring" className="underline">계약 화면</Link>에서 직접 확인해 주세요.
+        </div>
+      )}
+
       {/* 알림 배너 */}
       {(al.tokenExceeded > 0 || al.expiringContracts > 0 || al.overdueContracts > 0) && (
         <div className="flex items-center gap-4 p-4 bg-red-950/30 border border-red-700/40 rounded-2xl">
@@ -189,6 +221,9 @@ export default function SuperDashboard() {
         {/* 일별 대화수 (60%) */}
         <div className="col-span-3 bg-[#1E293B] border border-slate-700/50 rounded-2xl p-6">
           <h3 className="text-sm font-bold text-white mb-4">최근 30일 일별 대화수</h3>
+          {data && data.dailyChart === null ? (
+            <div className="h-44 flex items-center justify-center text-amber-400 text-sm">지금 읽지 못했습니다</div>
+          ) : (
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={data?.dailyChart ?? []} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -201,12 +236,15 @@ export default function SuperDashboard() {
               <Line type="monotone" dataKey="count" stroke="#7C3AED" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
 
         {/* 플랜별 기관 분포 도넛 (40%) */}
         <div className="col-span-2 bg-[#1E293B] border border-slate-700/50 rounded-2xl p-6">
           <h3 className="text-sm font-bold text-white mb-4">플랜별 기관 분포</h3>
-          {(data?.planChart?.length ?? 0) === 0 ? (
+          {data && data.planChart === null ? (
+            <div className="h-44 flex items-center justify-center text-amber-400 text-sm">지금 읽지 못했습니다</div>
+          ) : (data?.planChart?.length ?? 0) === 0 ? (
             <div className="h-44 flex items-center justify-center text-slate-500 text-sm">데이터 없음</div>
           ) : (
             <ResponsiveContainer width="100%" height={180}>
@@ -234,7 +272,9 @@ export default function SuperDashboard() {
             <Link href="/super/organizations" className="text-xs text-[#A78BFA] hover:text-violet-300">전체 보기 →</Link>
           </div>
           <ul className="divide-y divide-slate-700/30">
-            {(data?.recentOrgs ?? []).length === 0 ? (
+            {data && data.recentOrgs === null ? (
+              <li className="px-5 py-6 text-center text-amber-400 text-sm">지금 읽지 못했습니다</li>
+            ) : (data?.recentOrgs ?? []).length === 0 ? (
               <li className="px-5 py-6 text-center text-slate-500 text-sm">없음</li>
             ) : (data.recentOrgs ?? []).map((o: any) => (
               <li key={o.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-700/20 transition-colors">
@@ -260,7 +300,9 @@ export default function SuperDashboard() {
             <Link href="/super/usage" className="text-xs text-[#A78BFA] hover:text-violet-300">자세히 →</Link>
           </div>
           <ul className="divide-y divide-slate-700/30">
-            {(data?.topUsageOrgs ?? []).length === 0 ? (
+            {data && data.topUsageOrgs === null ? (
+              <li className="px-5 py-6 text-center text-amber-400 text-sm">지금 읽지 못했습니다</li>
+            ) : (data?.topUsageOrgs ?? []).length === 0 ? (
               <li className="px-5 py-6 text-center text-slate-500 text-sm">데이터 없음</li>
             ) : (data.topUsageOrgs ?? []).map((o: any, i: number) => (
               <li key={o.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-700/20 transition-colors">
@@ -290,7 +332,9 @@ export default function SuperDashboard() {
             <Link href="/super/logs?tab=system" className="text-xs text-[#A78BFA] hover:text-violet-300">전체 보기 →</Link>
           </div>
           <ul className="divide-y divide-slate-700/30">
-            {(data?.recentSystemLogs ?? []).length === 0 ? (
+            {data && data.recentSystemLogs === null ? (
+              <li className="px-5 py-6 text-center text-amber-400 text-sm">지금 읽지 못했습니다</li>
+            ) : (data?.recentSystemLogs ?? []).length === 0 ? (
               <li className="px-5 py-6 text-center text-slate-500 text-sm">로그 없음</li>
             ) : (data.recentSystemLogs ?? []).map((l: any, i: number) => (
               <li key={i} className="px-5 py-3">

@@ -85,6 +85,6 @@ describe('원본 확인 — 화면', () => {
   });
   it('대시보드 — 정지·종료를 함께 센다', () => {
     expect(src('src/app/api/super/dashboard/route.ts')).toContain(".in('status', [...STOPPED_ORG_STATUSES])");
-    expect(src('src/app/super/page.tsx')).toContain('정지·종료 ${o.suspended ?? 0}개');
+    expect(src('src/app/super/page.tsx')).toContain('정지·종료 ${shown(o.suspended, (n) => `${n}개`)}');
   });
 });

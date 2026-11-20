@@ -49,10 +49,11 @@ export async function GET(request: NextRequest) {
         .lt('created_at', weekStart),
     ]);
 
-    const todayErrors   = todayCount.count  ?? 0;
-    const weekErrors    = weekCount.count   ?? 0;
-    const prevWeekErrors = prevWeekCount.count ?? 0;
-    const weekTrend = prevWeekErrors === 0 ? null
+    // 못 읽으면 null(2026-11-20 — 예전엔 0건이라 '오늘 오류 없음'으로 읽혔다)
+    const todayErrors   = todayCount.error ? null : todayCount.count ?? 0;
+    const weekErrors    = weekCount.error ? null : weekCount.count ?? 0;
+    const prevWeekErrors = prevWeekCount.error ? null : prevWeekCount.count ?? 0;
+    const weekTrend = weekErrors === null || prevWeekErrors === null || prevWeekErrors === 0 ? null
       : Math.round(((weekErrors - prevWeekErrors) / prevWeekErrors) * 100);
 
     return NextResponse.json({

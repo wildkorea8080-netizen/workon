@@ -116,7 +116,7 @@ function IpLockPanel({ onToast }: { onToast: (m: string) => void }) {
 function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   const [users, setUsers]   = useState<any[]>([]);
   const [orgs, setOrgs]     = useState<any[]>([]);
-  const [meta, setMeta]     = useState({ total: 0, newThisMonth: 0 });
+  const [meta, setMeta]     = useState<{ total: number; newThisMonth: number | null }>({ total: 0, newThisMonth: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterOrg, setFilterOrg]   = useState('');
@@ -191,7 +191,8 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
 
   const STATS = [
     { label: '전체 사용자',   value: meta.total,       icon: '👥' },
-    { label: '이번달 신규',   value: meta.newThisMonth, icon: '✨' },
+    // 서버가 못 읽은 수(null)는 0으로 보이지 않게(2026-11-20)
+    { label: '이번달 신규',   value: meta.newThisMonth === null ? '읽지 못함' : meta.newThisMonth, icon: '✨' },
     { label: '활성 사용자',   value: activeCount,       icon: '🟢' },
     { label: '비활성 사용자', value: inactiveCount,     icon: '⚫' },
   ];

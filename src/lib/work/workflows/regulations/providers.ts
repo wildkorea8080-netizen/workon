@@ -141,7 +141,9 @@ async function lawTool(name: string, input: Record<string, unknown>) {
 async function laws(scope: { organizationId: string; organizationName: string | null }, plan: { lawQueries: string[]; keywords: string[] }): Promise<ProviderResult> {
   if (!lawConnector.isConfigured()) return { status: 'unavailable', reason: '국가법령정보 연결이 설정되지 않았습니다' };
   if (!plan.lawQueries.length) return { status: 'ok', items: [] };
-  const { data: org } = await supabaseAdmin.from('organizations').select('type').eq('id', scope.organizationId).maybeSingle();
+  // 기관 유형을 못 읽으면 던진다(실행을 다시 시도) — 예전엔 지방자치단체도 자치법규를 찾지 않고 근거가 빠진 채 판정했다(2026-11-20)
+  const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('type').eq('id', scope.organizationId).maybeSingle();
+  if (orgError) throw new Error('organization type unavailable');
   const isLocal = (org as { type?: unknown } | null)?.type === '지방자치단체';
   const items: RawEvidence[] = [];
   const seen = new Set<string>();

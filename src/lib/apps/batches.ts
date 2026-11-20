@@ -40,9 +40,11 @@ const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_a
 
 type AgentRow = AgentAccessInfo & { name: string; app_definition: unknown; agent_type: string | null };
 
-async function loadApp(agentId: string): Promise<AgentRow | null> {
+/** 없으면 null, 못 읽으면 'unread'(2026-11-20 — 예전엔 읽기 실패도 '앱을 찾을 수 없습니다'(404)라 외부 연동이 다시 시도하지 않았다) */
+async function loadApp(agentId: string): Promise<AgentRow | null | 'unread'> {
   if (!/^[0-9a-f-]{36}$/i.test(agentId)) return null;
-  const { data } = await supabaseAdmin.from('agents').select(`${AGENT_ACCESS_COLUMNS}, name, app_definition, agent_type`).eq('id', agentId).maybeSingle();
+  const { data, error } = await supabaseAdmin.from('agents').select(`${AGENT_ACCESS_COLUMNS}, name, app_definition, agent_type`).eq('id', agentId).maybeSingle();
+  if (error) return 'unread';
   return (data as AgentRow | null) ?? null;
 }
 
@@ -51,6 +53,7 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
   const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown; expects?: unknown };
   const agent = typeof b.agent_id === 'string' ? await loadApp(b.agent_id) : null;
+  if (agent === 'unread') return { ok: false, status: 503, message: '앱을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!agent || agent.agent_type === 'link' || !canUseAgent(agent, actor)) return { ok: false, status: 404, message: '앱을 찾을 수 없습니다.' };
   const definition = validateAppDefinition(agent.app_definition ?? null);
   if (!definition.ok || !definition.value) return { ok: false, status: 400, message: '입력형 앱만 일괄 실행할 수 있습니다.' };

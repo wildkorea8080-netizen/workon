@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { canEditAgent } from '@/lib/agent-permissions';
-import { loadAgentAccess, getVersionSnapshot, saveAgentSettings, saveFailureResponse } from '@/lib/agent-store';
+import { loadAgentAccess, getVersionSnapshot, isAgentReadError, saveAgentSettings, saveFailureResponse } from '@/lib/agent-store';
 import { SNAPSHOT_KEYS, type AgentSettingsPatch } from '@/lib/agent-patch';
 import { jsonError, validateModelForOrganization, checkCapabilityScope } from '@/lib/agent-route-helpers';
 import { normalizeCapabilities } from '@/lib/capabilities/settings';
@@ -35,7 +35,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
     if (body.version === agent.version) return jsonError('지금 판입니다.', 400);
 
-    const snapshot = await getVersionSnapshot(params.id, body.version);
+    const snapshot = await getVersionSnapshot(params.id, body.version).catch((err) => {
+      if (isAgentReadError(err)) return 'unread' as const;
+      throw err;
+    });
+    if (snapshot === 'unread') return jsonError('그 판을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     if (!snapshot) return jsonError('그 판을 찾을 수 없습니다.', 404);
 
     const patch: AgentSettingsPatch = {};

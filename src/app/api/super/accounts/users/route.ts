@@ -47,9 +47,18 @@ export async function GET(request: NextRequest) {
           .map((d: { id: string }) => d.id)
       : null;
 
+    // 이번 달 신규 — 못 읽으면 null(2026-11-20 — 예전엔 0명, 부서 없는 기관을 고르면 칸 자체가 빠졌다)
+    const { count: newCount, error: newError } = await supabaseAdmin
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_super_admin', false)
+      .is('deleted_at', null)
+      .gte('created_at', kstMonthStart(new Date(), 0).toISOString());
+    const newThisMonth = newError ? null : newCount ?? 0;
+
     // 해당 기관에 부서가 하나도 없으면 조회 결과도 비어 있다
     if (deptFilter && deptFilter.length === 0) {
-      return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit } });
+      return NextResponse.json({ ok: true, data: [], meta: { total: 0, page, limit, newThisMonth } });
     }
 
     // 3) 사용자 쿼리
@@ -82,20 +91,10 @@ export async function GET(request: NextRequest) {
       organization_name: deptMap[u.department_id]?.orgName ?? '—',
     }));
 
-    // 통계
-    const now = new Date();
-    const monthStart = kstMonthStart(now, 0).toISOString();
-    const { count: newThisMonth } = await supabaseAdmin
-      .from('users')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_super_admin', false)
-      .is('deleted_at', null)
-      .gte('created_at', monthStart);
-
     return NextResponse.json({
       ok: true,
       data: enriched,
-      meta: { total: count ?? 0, page, limit, newThisMonth: newThisMonth ?? 0 },
+      meta: { total: count ?? 0, page, limit, newThisMonth },
     });
   } catch (err: any) {
     console.error('[super/accounts/users GET]', err);

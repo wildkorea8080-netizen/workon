@@ -63,7 +63,7 @@ describe('쓰는 곳', () => {
   it('대시보드는 이번 달 기록을 한 번만 읽는다', () => {
     const s = readFileSync('src/app/api/super/dashboard/route.ts', 'utf8');
     expect(s.match(/loadChatTokensByOrg\(monthStart\)/g)?.length).toBe(1);
-    expect(s.match(/await monthTokensP/g)?.length).toBe(3);
+    expect(s.match(/await monthTokensP/g)?.length).toBe(2);
     expect(s).not.toMatch(/input_tokens \?\? 0\) \+ \(l\.details/);
   });
   it('사용량 경보도 같은 셈, 못 읽으면 503', () => {
