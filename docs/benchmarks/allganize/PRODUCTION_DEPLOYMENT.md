@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-20(낮): 읽기 실패를 '없음'으로 보이지 않기·멈춘 기관의 나머지 길(0187~0205) — 마이그레이션 없음
+
+- 코드 배포 `dpl_GdYysCAjynAb5YYrHxCq8UhNcUyY`(커밋 `77f47c0`, 2026-11-20 14:11 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `835418f`(밤 2 기록), `92dcab8` 열아홉 묶음 — API 키 검증 셋 판정·저장한 시스템 키를 서버가 풀어 확인(0187), 슈퍼관리자 예상 비용을 모든 활동의 원가로(0188), 기한 지난 활성 계약 표시(0189), 정지·종료한 기관에 가입 막기·도메인 가입은 소속 먼저(0190·0191), 비서·요청자 범위 읽기 실패 503 — `actorScopeOr503` 라우트 38곳(0192·0193·0199), 즐겨찾기 읽기 실패에 덮어쓰지 않음·행 잠그는 DB 함수(0194·0195), 쓰지 않던 `POST /api/conversations` 지움(0196), 공지 띠 기관 읽기 실패 503(0197), 브랜딩 읽기 실패를 기본값으로 꾸미지 않음(0198), 종료 기관 문서 올리기 안내·기관 통계 API 403(0200), 멈춘 기관의 예약은 넘김(0201)·연동 호출은 차지 전 403(0202)·직원 목록이 까닭을 가름(0203), 이용통계 이름 사전·문서 붙이기·지우기 읽기 실패 503(0204), 일괄 실행 결과 엑셀이 보낸 기록·앱을 못 읽으면 503(0205). `77f47c0` 문서. 가지 Preview(`workon-khc4rx60p`) Ready 뒤 `main`. 배포 전 전체 시험 359파일 4,527개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_5wWJuXLMqTCdoVDp5CVK6ekg6mcP`(f54b260)로 promote.
+- 배포 전 운영 확인(읽기만): 새 칸·표 없음. 새 코드가 쓰는 함수 `set_user_app_favorite`(0042)·`organization_chat_tokens`·`user_spend_krw`·`department_spend_krw`와 칸 `organizations.status`·`allowed_ips`·`app_webhooks_disabled_at`·`app_schedules_disabled_at`·`app_outbound_deliveries.receipt_ref` 모두 있음. 운영 기관 2곳 모두 활성(이번 배포로 막히는 기관 없음), 기한 지난 활성 계약 0건.
+- 배포 뒤 확인: `/login`·`/super/login`·`/api/system/maintenance`·`/api/branding` 200, 인증 없는 앱 이력·예약·연동·일괄 실행 엑셀·기관 통계 API·슈퍼관리자 대시보드 401(관리자 이용통계 403·공지 빈 목록 — 원래 그렇다). 실행기 호출 14:12~14:16 KST 모두 200(heartbeat 14:15), 최근 24시간 critical 0건·20분 warning 이상 0건. 바꾼 화면은 브라우저로 눌러 보지 않았다(시험·원본 확인만).
+
 ## 2026-11-19(밤 2): 대리 접근은 최상위 부서의 관리자부터·읽기 실패 503 — 마이그레이션 없음
 
 - 코드 배포 `dpl_5wWJuXLMqTCdoVDp5CVK6ekg6mcP`(커밋 `f54b260`, 2026-11-19 21:14 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `71eaadc`(밤 기록), `637d6ed` 대리 접근이 가장 먼저 만든 관리자(5명 중)로 들어가 하위 부서 관리자면 그 부서 아래만 보이던 것 — `pickImpersonationTarget`(`src/lib/impersonation-target.ts`)이 최상위 부서의 관리자부터, 없으면 하위 부서 관리자로 들어가되 응답 `warning`·`data.wholeOrganization`(화면이 알림), 부서·관리자 읽기 실패는 '없습니다'(404) 대신 503(토큰 없음), 후보 200명까지. `f54b260` 문서. 가지 Preview(`workon-drg83btjb`) Ready 뒤 `main`. 배포 전 전체 시험 340파일 4,423개 통과·tsc 0.
