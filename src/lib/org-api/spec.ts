@@ -41,6 +41,8 @@ export const ORG_API_DAILY_LIMITED = `이 키의 오늘 호출 수(${ORG_API_DAI
 export const ORG_API_SCOPE_DENIED = '이 API 키로는 읽을 수 없는 자료입니다(키의 범위 밖).';
 export const ORG_API_CREATOR_UNAVAILABLE = '이 키를 만든 관리자가 더 이상 기관 전체 관리자가 아니어서 쓸 수 없습니다. 새 키를 만들어 주세요.';
 export const ORG_API_IP_DENIED = '기관의 접속 허용 IP 밖에서 호출했습니다.';
+/** 정지·종료한 기관(2026-11-19) — 대화·문서 올리기처럼 통계 API도 멈춘다 */
+export const ORG_API_ORG_STOPPED = '기관 이용이 정지되었거나 종료되어 통계 API를 쓸 수 없습니다.';
 export const ORG_API_WHOLE_ORG_ONLY = '기관 통계 API 키는 기관 전체 관리자(최상위 부서 소속 관리자)만 다룹니다.';
 
 /** `Authorization: Bearer wo_api_…`에서 키를 꺼낸다(꼴이 아니면 null) */

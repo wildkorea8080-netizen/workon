@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { ADMIN_LOCKED_MESSAGE } from '@/lib/apps/automation-admin-spec';
 import { checkScheduleRequest } from '@/lib/apps/schedule-request';
@@ -37,7 +37,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
   if (!UUID.test(params.id)) return fail('예약을 확인해 주세요.', 400);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('기관 소속을 확인할 수 없습니다.', 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || typeof body !== 'object') return fail('요청 본문을 확인해 주세요.', 400);

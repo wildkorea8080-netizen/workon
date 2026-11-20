@@ -18,7 +18,8 @@ export async function GET(_request: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ ok: true, data: [] });
 
   try {
-    const orgId = session.user.departmentId ? await getOrgIdFromDept(session.user.departmentId) : null;
+    // 기관을 못 읽으면 '전체 공지만'으로 보이지 않는다(2026-11-19 — 예전엔 내 기관 공지가 조용히 빠졌다). 세션에 부서가 없으면 사용자 행에서
+    const orgId = await getOrgIdOf(session.user.id, session.user.departmentId ?? null);
     const now = new Date().toISOString();
 
     let q = supabaseAdmin
@@ -51,8 +52,16 @@ export async function GET(_request: NextRequest) {
   }
 }
 
-async function getOrgIdFromDept(deptId: string): Promise<string | null> {
-  const { data } = await supabaseAdmin
+async function getOrgIdOf(userId: string, sessionDeptId: string | null): Promise<string | null> {
+  let deptId = sessionDeptId;
+  if (!deptId) {
+    const { data: user, error } = await supabaseAdmin.from('users').select('department_id').eq('id', userId).maybeSingle();
+    if (error) throw error;
+    deptId = (user as { department_id?: string | null } | null)?.department_id ?? null;
+  }
+  if (!deptId) return null;
+  const { data, error } = await supabaseAdmin
     .from('departments').select('organization_id').eq('id', deptId).maybeSingle();
+  if (error) throw error;
   return data?.organization_id ?? null;
 }

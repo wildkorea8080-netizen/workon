@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
-import { dbErrorText } from '@/lib/db-error-text';
+import { KEY_VERIFY_TIMEOUT_MS, anthropicKeyVerdict, parseVerifyRequest } from '@/lib/api-key-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,33 +8,32 @@ export async function POST(request: NextRequest, { params: _ }: { params: { id: 
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { keyType, key } = await request.json();
-  if (!keyType || !key) return NextResponse.json({ ok: false, error: 'keyType, key 필수' }, { status: 400 });
-
-  try {
-    if (keyType === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': key,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 5,
-          messages: [{ role: 'user', content: 'ping' }],
-        }),
-      });
-      // 401 = invalid key, 200/400 = valid key (400 may be model/param error but key is valid)
-      const valid = res.status !== 401 && res.status !== 403;
-      return NextResponse.json({ ok: true, valid, status: res.status });
-    }
-
-
-    // 옛 Voyage 키 확인은 지웠다 — 쓰지 않는 업체로 키를 보내지 않는다(api-key-providers.ts)
-    return NextResponse.json({ ok: false, error: '지원하지 않는 keyType' }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: dbErrorText(err) }, { status: 500 });
+  // 깨진 요청·가린 키는 400(2026-11-19 — 예전엔 깨진 몸이 500)
+  const parsed = parseVerifyRequest(await request.json().catch(() => null));
+  if (!parsed.ok || parsed.value.stored) {
+    return NextResponse.json({ ok: false, error: parsed.ok ? '확인할 키를 넣어 주세요.' : parsed.message }, { status: 400 });
   }
+
+  let status: number | null = null;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': parsed.value.key as string,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 5,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+      signal: AbortSignal.timeout(KEY_VERIFY_TIMEOUT_MS),
+    });
+    status = res.status;
+  } catch {
+    status = null; // 연결 실패·시간 초과 — 확인 못 함(예전엔 500)
+  }
+  const verdict = anthropicKeyVerdict(status);
+  return NextResponse.json({ ok: true, valid: verdict.valid, message: verdict.message, status });
 }

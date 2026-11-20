@@ -51,8 +51,10 @@ describe('브랜딩 기억', () => {
     expect(hook).toContain("r.ok ? { data: { ...FALLBACK, ...r.data }, real: true } : { data: FALLBACK, real: false }");
     expect(hook).toContain('if (snapshotUser && current?.real) writeBrandingSnapshot(snapshotUser, current.data);');
     expect(hook).toContain("const snapshotUser = !slug && status === 'authenticated' ? userId : null;");
-    expect(hook).toContain('snapshotUser && !current ? readBrandingSnapshot(snapshotUser) : null');
-    expect(hook).toContain('return current?.data ?? remembered ?? FALLBACK;');
+    // 서버가 못 읽었으면(real=false) 기억을 그대로(2026-11-19, batch-0198)
+    expect(hook).toContain('snapshotUser && !current?.real ? readBrandingSnapshot(snapshotUser) : null');
+    expect(hook).toContain('if (current?.real) return current.data;');
+    expect(hook).toContain('return remembered ?? current?.data ?? FALLBACK;');
   });
 });
 

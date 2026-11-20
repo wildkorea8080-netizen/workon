@@ -10,9 +10,10 @@ import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
 import { isIpAllowed } from '@/lib/ip-access';
+import { isStoppedOrgStatus } from '@/lib/org-status';
 import {
   ORG_API_CREATOR_UNAVAILABLE, ORG_API_DAILY_LIMIT, ORG_API_DAILY_LIMITED, ORG_API_ENDPOINTS, ORG_API_INVALID_TOKEN, ORG_API_IP_DENIED,
-  ORG_API_SCOPE_DENIED, ORG_API_SHOWN_PREFIX_CHARS, ORG_API_TOKEN_PREFIX, bearerOrgApiToken, type OrgApiEndpoint, type OrgApiScope,
+  ORG_API_ORG_STOPPED, ORG_API_SCOPE_DENIED, ORG_API_SHOWN_PREFIX_CHARS, ORG_API_TOKEN_PREFIX, bearerOrgApiToken, type OrgApiEndpoint, type OrgApiScope,
 } from './spec';
 
 export function hashOrgApiToken(token: string): string {
@@ -37,6 +38,8 @@ export interface OrgApiDeps {
   loadDepartment(departmentId: string): Promise<{ organization_id: string | null; parent_id: string | null } | null>;
   /** 기관 접속 허용 IP(0023) — 비었거나 NULL이면 제한 없음 */
   allowedIps(organizationId: string): Promise<string[] | null>;
+  /** 기관 상태(`organizations.status`) — 정지·종료면 막는다. 못 읽으면 던진다(닫힘) */
+  orgStatus(organizationId: string): Promise<string | null>;
   managedDepartmentIds(departmentId: string): Promise<string[]>;
   recordCall(keyId: string, organizationId: string, endpoint: OrgApiEndpoint, httpStatus: number): Promise<void>;
   now(): number;
@@ -80,6 +83,8 @@ export async function handleOrgApiCall(
     return res;
   };
 
+  // 정지·종료한 기관의 통계는 밖으로 내지 않는다(2026-11-19 — 예전엔 기관을 멈춰도 키가 그대로 읽혔다)
+  if (isStoppedOrgStatus(await deps.orgStatus(key.organization_id))) return respond(fail(403, ORG_API_ORG_STOPPED));
   const allowed = await deps.allowedIps(key.organization_id);
   // 허용 목록이 있는데 주소를 모르면 막는다 — 화면 세션의 판정(isIpAllowed는 주소를 모르면 통과)과 달리, 밖에서 부르는 API는 닫는 쪽으로
   if (allowed?.length && (!request.ip || !isIpAllowed(request.ip, allowed))) return respond(fail(403, ORG_API_IP_DENIED));
@@ -104,6 +109,16 @@ export async function handleOrgApiCall(
 }
 
 export function orgApiDeps(): OrgApiDeps {
+  // 상태와 접속 허용 IP는 기관 행 하나에서 — 한 호출에 한 번만 읽는다
+  let orgRow: Promise<{ allowed_ips: string[] | null; status: string | null } | null> | null = null;
+  const readOrg = (organizationId: string) => {
+    orgRow ??= (async () => {
+      const { data, error } = await supabaseAdmin.from('organizations').select('allowed_ips, status').eq('id', organizationId).maybeSingle();
+      if (error) throw new Error(error.message);
+      return (data as { allowed_ips: string[] | null; status: string | null } | null) ?? null;
+    })();
+    return orgRow;
+  };
   return {
     async claim(tokenHash, nowMs) {
       const { data, error } = await supabaseAdmin.rpc('org_api_key_claim', { p_token_hash: tokenHash, p_now: new Date(nowMs).toISOString(), p_daily_limit: ORG_API_DAILY_LIMIT });
@@ -121,10 +136,11 @@ export function orgApiDeps(): OrgApiDeps {
       return (data as { organization_id: string | null; parent_id: string | null } | null) ?? null;
     },
     async allowedIps(organizationId) {
-      const { data, error } = await supabaseAdmin.from('organizations').select('allowed_ips').eq('id', organizationId).maybeSingle();
       // 읽지 못하면 닫는다 — 제한이 있는 기관의 통계가 밖으로 열리면 안 된다
-      if (error) throw new Error(error.message);
-      return ((data as { allowed_ips: string[] | null } | null)?.allowed_ips) ?? null;
+      return (await readOrg(organizationId))?.allowed_ips ?? null;
+    },
+    async orgStatus(organizationId) {
+      return (await readOrg(organizationId))?.status ?? null;
     },
     managedDepartmentIds: (departmentId) => getManagedDepartmentIds(departmentId),
     async recordCall(keyId, organizationId, endpoint, httpStatus) {

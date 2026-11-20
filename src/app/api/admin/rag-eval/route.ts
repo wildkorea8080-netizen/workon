@@ -150,12 +150,14 @@ export async function PATCH(request: NextRequest) {
     const grade = body.grade === null ? null : body.grade as Parameters<typeof applyHumanLabel>[2];
 
     for (let attempt = 0; attempt < 3; attempt++) {
-      const { data: run } = await supabaseAdmin
+      const { data: run, error: runError } = await supabaseAdmin
         .from('rag_eval_runs')
         .select('id, agent_id, summary, results')
         .eq('id', body.id)
         .eq('organization_id', actor.organizationId)
         .maybeSingle();
+      // 못 읽으면 '찾을 수 없음'이 아니라 그렇다고(2026-11-19)
+      if (runError) return jsonError('평가 기록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
       // 기록의 비서도 지금 볼 수 있어야 한다(GET과 같은 판단)
       if (!run || !(await evaluableAgent(run.agent_id, actor))) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
       const results = (Array.isArray(run.results) ? run.results : []) as RagEvalResult[];
@@ -188,12 +190,13 @@ export async function GET(request: NextRequest) {
     const across = request.nextUrl.searchParams.get('across');
     if (across) {
       if (!UUID.test(across)) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
-      const { data: base } = await supabaseAdmin
+      const { data: base, error: baseError } = await supabaseAdmin
         .from('rag_eval_runs')
         .select('id, agent_id, agent_version, created_at, summary, results')
         .eq('id', across)
         .eq('organization_id', actor.organizationId)
         .maybeSingle();
+      if (baseError) return jsonError('평가 기록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
       if (!base || !(await evaluableAgent(base.agent_id, actor))) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
       const baseRow = base as AcrossRunRow;
       const key = baseRow.summary?.setKey ?? ragEvalSetKey(baseRow.results ?? []);
@@ -227,12 +230,13 @@ export async function GET(request: NextRequest) {
     const id = request.nextUrl.searchParams.get('id');
     if (id) {
       if (!UUID.test(id)) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
-      const { data: run } = await supabaseAdmin
+      const { data: run, error: runError } = await supabaseAdmin
         .from('rag_eval_runs')
         .select('id, agent_id, agent_version, created_at, question_count, status, summary, results')
         .eq('id', id)
         .eq('organization_id', actor.organizationId)
         .maybeSingle();
+      if (runError) return jsonError('평가 기록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
       // 기록의 비서도 지금 볼 수 있어야 한다(관리 범위가 바뀌었으면 보이지 않는다)
       if (!run || !(await evaluableAgent(run.agent_id, actor))) return jsonError('평가 기록을 찾을 수 없습니다.', 404);
       return NextResponse.json({ ok: true, data: run });

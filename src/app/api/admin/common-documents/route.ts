@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { ADMIN_COMMON_COLUMNS, adminCommonList, type CommonLibraryRow } from '@/lib/common-library-admin';
 import { isOrgType } from '@/lib/org-types';
@@ -18,7 +18,8 @@ function jsonError(message: string, status: number) {
 export async function GET() {
   const session = await getServerAuthSession();
   if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
-  const actor = await getActorScope(session!);
+  const actor = await actorScopeOr503(session!);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 찾을 수 없습니다.', 403);
 
   const org = await supabaseAdmin.from('organizations').select('type').eq('id', actor.organizationId).maybeSingle();

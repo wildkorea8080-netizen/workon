@@ -73,6 +73,7 @@ function deps(over: Partial<OrgApiDeps> = {}) {
     loadCreator: vi.fn(async () => ({ id: 'u1', role: 'ADMIN', is_active: true, deleted_at: null, department_id: 'top' })),
     loadDepartment: vi.fn(async () => ({ organization_id: ORG, parent_id: null })),
     allowedIps: vi.fn(async () => null),
+    orgStatus: vi.fn(async () => 'active'),
     managedDepartmentIds: vi.fn(async () => ['top', 'child']),
     recordCall,
     now: () => Date.parse('2026-11-09T01:00:00Z'),

@@ -43,12 +43,16 @@ export async function POST(request: NextRequest) {
     // 원본 문서 — 요청자 기관으로 한정한다. 예전에는 id만으로 찾아 타 기관 문서의
     // 본문·임베딩을 내 비서로 복사할 수 있었다. 기관이 다르거나 볼 수 없는 문서는
     // 존재를 알리지 않는다(404).
-    const { data: srcRow } = await supabaseAdmin
+    const { data: srcRow, error: srcError } = await supabaseAdmin
       .from('documents')
       .select(ASSIGN_SOURCE_COLUMNS)
       .eq('id', documentId)
       .eq('organization_id', actor.organizationId)
       .maybeSingle();
+    // 읽기 실패를 '없는 문서'(404)로 답하지 않는다(2026-11-19)
+    if (srcError) {
+      return NextResponse.json({ ok: false, error: { message: '원본 문서를 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
+    }
     const src = srcRow as AssignSourceDocument | null;
 
     if (!src || !canReadDocument(src, actor)) {

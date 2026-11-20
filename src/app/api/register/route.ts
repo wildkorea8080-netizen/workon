@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { claimInvitation, releaseInvitation } from '@/lib/invitation-claim';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
+import { SIGNUP_READ_FAILED_MESSAGE, departmentOrgRejection, departmentOrgState } from '@/lib/signup-org';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,9 +29,13 @@ export async function POST(request: NextRequest) {
       .from('invitations')
       .select('id, email, department_id, role, expires_at, accepted_at')
       .eq('token', token)
-      .single();
+      .maybeSingle();
 
-    if (inviteError || !invitation) {
+    // 못 읽으면 '유효하지 않은 초대 링크'가 아니라 그렇다고(2026-11-19)
+    if (inviteError) {
+      return NextResponse.json({ ok: false, error: { message: SIGNUP_READ_FAILED_MESSAGE } }, { status: 503 });
+    }
+    if (!invitation) {
       return NextResponse.json(
         { ok: false, error: { message: '유효하지 않은 초대 링크입니다.' } },
         { status: 400 }
@@ -52,11 +57,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 이메일 중복 최종 확인
-    const { data: existingUser } = await supabaseAdmin
+    const { data: existingUser, error: existingError } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('email', invitation.email)
-      .single();
+      .maybeSingle();
+    // 못 읽으면 '없음'으로 보지 않는다(2026-11-19)
+    if (existingError) {
+      return NextResponse.json({ ok: false, error: { message: SIGNUP_READ_FAILED_MESSAGE } }, { status: 503 });
+    }
 
     if (existingUser) {
       return NextResponse.json(
@@ -71,6 +80,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // 정지·종료한 기관·없어진 부서에는 가입하지 않는다(2026-11-19)
+    const rejected = departmentOrgRejection(await departmentOrgState(invitation.department_id));
+    if (rejected) return NextResponse.json({ ok: false, error: { message: rejected.message } }, { status: rejected.status });
 
     // 기관의 사용자 수 상한(2026-11-17) — 초대를 쓰기 전에 센다(상한이면 초대는 그대로 남는다)
     const seats = await checkUserSeats(invitation.department_id, 1);

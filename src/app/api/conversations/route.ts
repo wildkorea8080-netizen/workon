@@ -71,51 +71,5 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const session = await getServerAuthSession();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '인증이 필요합니다.' } },
-        { status: 401 }
-      );
-    }
-
-    const body = await request.json();
-    const { agent_id, title } = body;
-
-    if (!agent_id) {
-      return NextResponse.json(
-        { ok: false, error: { message: '에이전트 ID가 필요합니다.' } },
-        { status: 400 }
-      );
-    }
-
-    // 새 대화 생성
-    const { data: conversation, error } = await supabaseAdmin
-      .from('conversations')
-      .insert({
-        user_id: session.user.id,
-        agent_id,
-        title: title || '새 대화',
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('대화 생성 오류:', error);
-      return NextResponse.json(
-        { ok: false, error: { message: '대화를 생성할 수 없습니다.' } },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true, data: conversation });
-  } catch (error) {
-    console.error('대화 생성 중 오류:', error);
-    return NextResponse.json(
-      { ok: false, error: { message: '오류가 발생했습니다.' } },
-      { status: 500 }
-    );
-  }
-}
+// POST(새 대화 만들기)는 지웠다(2026-11-19). 어느 화면도 부르지 않았고, 비서를 쓸 수 있는지 보지 않았으며 부서(`department_id`,
+// NOT NULL)를 넣지 않아 늘 실패했다 — 새 대화는 대화 실행기(`/api/chat` → `prepareTurn`)가 권한을 본 뒤에만 만든다.

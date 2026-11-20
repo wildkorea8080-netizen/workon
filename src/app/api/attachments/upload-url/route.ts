@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { createUpload } from '@/lib/attachments/store';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
   // 소속을 모르면 거절한다 — 추측해서 배정하지 않는다(CLAUDE.md 구조적 위험 0)
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
 
   let body: { file_name?: unknown; size?: unknown };

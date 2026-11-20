@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { retryMyDelivery } from '@/lib/apps/outbound/deliver';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +12,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
   const body = (await request.json().catch(() => null)) as { action?: unknown } | null;
   if (body?.action !== 'retry') return fail('할 일은 retry입니다.', 400);
-  const actor = await getActorScope(session).catch(() => null);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('소속 기관을 확인할 수 없습니다.', 403);
   const out = await retryMyDelivery({ userId: session.user.id, organizationId: actor.organizationId, departmentId: actor.departmentId }, params.id);
   if (!out.ok) return fail(out.message, out.status);

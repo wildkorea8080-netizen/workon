@@ -48,6 +48,13 @@ vi.mock('@/lib/actor-scope', () => ({
 }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {
+    // 즐겨찾기 더하기·빼기는 행을 잠그는 DB 함수(0042)로(2026-11-19, batch-0195)
+    rpc: async (_name: string, args: { p_key: string; p_favorite: boolean }) => {
+      const next = state.favorites.filter((id) => id !== args.p_key);
+      if (args.p_favorite) next.push(args.p_key);
+      state.updated = next;
+      return { data: { agentIds: next, workflowKeys: [] }, error: null };
+    },
     from: (table: string) => {
       if (table === 'users') {
         return {
@@ -99,28 +106,28 @@ describe('비서 즐겨찾기 — 쓸 수 있는 비서만', () => {
   });
 
   it('POST 더하기는 쓸 수 없는 비서를 403으로 거절하고 저장하지 않는다', async () => {
-    state.agents = [agent('a-colleague', { tier: 'personal', owner_id: OTHER, visibility: 'department' })];
-    const res = await post('a-colleague');
+    state.agents = [agent('00000000-0000-4000-8000-00000000000c', { tier: 'personal', owner_id: OTHER, visibility: 'department' })];
+    const res = await post('00000000-0000-4000-8000-00000000000c');
     expect(res.status).toBe(403);
     expect(state.updated).toBeNull();
-    const missing = await post('a-nope');
+    const missing = await post('00000000-0000-4000-8000-00000000000e');
     expect(missing.status).toBe(403);
   });
 
   it('POST 더하기는 쓸 수 있는 비서면 저장, 빼기는 못 쓰게 된 비서도 된다', async () => {
-    state.agents = [agent('a-official'), agent('a-gone', { deleted_at: '2026-11-01T00:00:00Z' })];
-    const added = await (await post('a-official')).json();
-    expect(added.data).toEqual({ isFavorite: true, favoriteIds: ['a-official'] });
+    state.agents = [agent('00000000-0000-4000-8000-00000000000a'), agent('00000000-0000-4000-8000-00000000000b', { deleted_at: '2026-11-01T00:00:00Z' })];
+    const added = await (await post('00000000-0000-4000-8000-00000000000a')).json();
+    expect(added.data).toEqual({ isFavorite: true, favoriteIds: ['00000000-0000-4000-8000-00000000000a'] });
 
-    state.favorites = ['a-gone'];
-    const removed = await (await post('a-gone')).json();
+    state.favorites = ['00000000-0000-4000-8000-00000000000b'];
+    const removed = await (await post('00000000-0000-4000-8000-00000000000b')).json();
     expect(removed.data).toEqual({ isFavorite: false, favoriteIds: [] });
   });
 
   it('200개를 넘겨 더하지 않는다', async () => {
-    state.agents = [agent('a-official')];
+    state.agents = [agent('00000000-0000-4000-8000-00000000000a')];
     state.favorites = Array.from({ length: 200 }, (_, i) => `x-${i}`);
-    const res = await post('a-official');
+    const res = await post('00000000-0000-4000-8000-00000000000a');
     expect(res.status).toBe(400);
     expect(state.updated).toBeNull();
   });

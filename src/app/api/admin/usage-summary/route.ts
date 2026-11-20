@@ -92,15 +92,24 @@ export async function GET(request: NextRequest) {
   // ── 이름 사전 ──
   // 기록에는 id만 있다. 묶은 뒤 이름을 붙인다(직원이 1,000명을 넘는 기관도 잘리지 않게 쪽 읽기). 보는 축의 사전만 읽는다
   const names = new Map<string, { name: string; sub: string }>();
+  // 이름을 못 읽으면 모든 줄이 '(삭제됨)'으로 보이고 감사 CSV에도 그렇게 나간다 — 숫자만 맞고 누구인지 틀린 표를 내지 않는다(2026-11-19)
+  let namesError: unknown = null;
   if (axis === 'user') {
-    const { data: members } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('users').select('id, full_name, email', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    const { data: members, error: e } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('users').select('id, full_name, email', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    namesError = e;
     for (const m of members ?? []) names.set(m.id, { name: m.full_name ?? '(이름 없음)', sub: m.email ?? '' });
   } else if (axis === 'agent') {
-    const { data: agents } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('agents').select('id, name, icon', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    const { data: agents, error: e } = await pagedRows<any>((a, b, w) => supabaseAdmin.from('agents').select('id, name, icon', w ? { count: 'exact' } : undefined).in('department_id', managedDeptIds).order('id').range(a, b));
+    namesError = e;
     for (const a of agents ?? []) names.set(a.id, { name: a.name, sub: a.icon ?? '' });
   } else {
-    const { data: depts } = await supabaseAdmin.from('departments').select('id, name').in('id', managedDeptIds);
+    const { data: depts, error: e } = await supabaseAdmin.from('departments').select('id, name').in('id', managedDeptIds);
+    namesError = e;
     for (const d of (depts ?? []) as Array<{ id: string; name: string }>) names.set(d.id, { name: d.name, sub: '' });
+  }
+  if (namesError) {
+    console.error('[usage-summary] 이름 읽기 실패', (namesError as { code?: string }).code ?? '');
+    return NextResponse.json({ ok: false, error: { message: '이용통계의 이름을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
   }
 
   const rows = usageRowsFromGroups(parseUsageGroups(grouped), names);

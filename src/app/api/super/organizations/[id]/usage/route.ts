@@ -5,6 +5,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { sumCostUsd } from '@/lib/models';
 import { kstDay, kstDayList, kstMonthStart } from '@/lib/kst-time';
 import { dbErrorText } from '@/lib/db-error-text';
+import { isChatRow } from '@/lib/cost-rows';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,18 +29,18 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const start = getPeriodStart(period);
 
   try {
-    // usage_logs에서 기간 내 chat_message 로그 조회
-    const { data: logs, error } = await pagedRows<{ user_id: string | null; details: any; created_at: string }>((a, b, w) => supabaseAdmin
+    // 기간 안 모든 활동 — 원가는 모든 활동, 대화·토큰·사람은 chat_message만(2026-11-19, `cost-rows.ts`)
+    const { data: logs, error } = await pagedRows<{ action: string; user_id: string | null; details: any; created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs')
-      .select('user_id, details, created_at', w ? { count: 'exact' } : undefined)
+      .select('action, user_id, details, created_at', w ? { count: 'exact' } : undefined)
       .eq('organization_id', params.id)
-      .eq('action', 'chat_message')
       .gte('created_at', start.toISOString())
       .order('id').range(a, b));
 
     if (error) throw error;
 
-    const rows = logs ?? [];
+    const allRows = logs ?? [];
+    const rows = allRows.filter(isChatRow);
 
     // 일별 집계
     const dailyMap = new Map<string, { conversations: number; inputTokens: number; outputTokens: number }>();
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       });
     }
 
-    const costUsd = parseFloat(sumCostUsd(rows).toFixed(4));
+    const costUsd = parseFloat(sumCostUsd(allRows).toFixed(4));
 
     return NextResponse.json({
       ok: true,

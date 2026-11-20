@@ -6,7 +6,7 @@
  * 기관이 외부 연동을 꺼 두었으면(0068) 묻기도 403 — 연동을 끈 동안 바깥과 주고받지 않는다.
  */
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { WEBHOOK_ORG_DISABLED, bearerWebhookToken } from './webhook-spec';
+import { bearerWebhookToken, webhookOrgBlockMessage, type WebhookOrgBlock } from './webhook-spec';
 import { hashWebhookToken, WEBHOOK_INVALID_TOKEN, type WebhookResponse } from './webhooks';
 import { tokenOrgWebhooksDisabled } from './webhook-switch';
 
@@ -21,7 +21,7 @@ export type StatusDeliveryRow = { status: string; receipt_ref: string | null } |
 export interface WebhookStatusDeps {
   /** 쓸 수 있는 토큰(활성·안 만료)의 연동 id — 아니면 null */
   findWebhook(tokenHash: string, nowMs: number): Promise<{ id: string } | null>;
-  orgDisabled(tokenHash: string, nowMs: number): Promise<boolean>;
+  orgDisabled(tokenHash: string, nowMs: number): Promise<WebhookOrgBlock>;
   /** 그 연동이 넣은 묶음(`webhook_id`가 같을 때만)과 그 줄, 결과 보내기 기록 */
   loadBatch(batchId: string, webhookId: string): Promise<{ batch: StatusBatchRow; item: StatusItemRow; delivery: StatusDeliveryRow } | null>;
   now(): number;
@@ -56,7 +56,8 @@ export async function handleWebhookBatchStatus(deps: WebhookStatusDeps, request:
   const hash = hashWebhookToken(token);
   const webhook = await deps.findWebhook(hash, deps.now());
   if (!webhook) return fail(401, WEBHOOK_INVALID_TOKEN);
-  if (await deps.orgDisabled(hash, deps.now())) return fail(403, WEBHOOK_ORG_DISABLED);
+  const orgBlock = await deps.orgDisabled(hash, deps.now());
+  if (orgBlock) return fail(403, webhookOrgBlockMessage(orgBlock));
   if (!UUID.test(request.batchId)) return fail(404, WEBHOOK_BATCH_NOT_FOUND);
   const found = await deps.loadBatch(request.batchId.toLowerCase(), webhook.id);
   if (!found) return fail(404, WEBHOOK_BATCH_NOT_FOUND);

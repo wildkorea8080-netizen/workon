@@ -70,7 +70,8 @@ function load(key: string, slug?: string): Promise<Entry> {
     .then((r) => r.json())
     .then((r): Entry => {
       const entry: Entry = r.ok ? { data: { ...FALLBACK, ...r.data }, real: true } : { data: FALLBACK, real: false };
-      cache.set(key, entry);
+      // 실패는 기억하지 않는다 — 다음 화면에서 다시 받아 본다(2026-11-19)
+      if (entry.real) cache.set(key, entry);
       return entry;
     })
     .catch((): Entry => ({ data: FALLBACK, real: false }))
@@ -100,7 +101,8 @@ export function useBranding(slug?: string): Branding {
   // 로그인한 화면은 이 사람이 마지막으로 받은 브랜딩을 먼저 보인다(branding-snapshot — 새로 열 때 기본값이 잠깐 뜨지 않게).
   // 세션은 서버 렌더링·첫 그림에서 'loading'이라 그때는 기억을 읽지 않는다(그림이 어긋나지 않음). 로그인 전 기관 화면(slug)은 기억하지 않는다
   const snapshotUser = !slug && status === 'authenticated' ? userId : null;
-  const remembered = useMemo(() => (snapshotUser && !current ? readBrandingSnapshot(snapshotUser) : null), [snapshotUser, current]);
+  // 서버가 못 읽었으면(real=false) 기본값 대신 마지막으로 받은 브랜딩을 그대로(2026-11-19)
+  const remembered = useMemo(() => (snapshotUser && !current?.real ? readBrandingSnapshot(snapshotUser) : null), [snapshotUser, current]);
 
   useEffect(() => {
     if (!key) return;
@@ -117,5 +119,6 @@ export function useBranding(slug?: string): Branding {
     if (snapshotUser && current?.real) writeBrandingSnapshot(snapshotUser, current.data);
   }, [snapshotUser, current]);
 
-  return current?.data ?? remembered ?? FALLBACK;
+  if (current?.real) return current.data;
+  return remembered ?? current?.data ?? FALLBACK;
 }

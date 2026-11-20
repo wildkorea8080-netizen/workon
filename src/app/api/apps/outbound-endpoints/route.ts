@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { listUsableEndpoints } from '@/lib/apps/outbound/admin';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,8 @@ const fail = (message: string, status: number) => NextResponse.json({ ok: false,
 export async function GET() {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session).catch(() => null);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('소속 기관을 확인할 수 없습니다.', 403);
   const endpoints = await listUsableEndpoints(actor.organizationId);
   if (!endpoints) return fail('보낼 곳 목록을 불러오지 못했습니다.', 503);

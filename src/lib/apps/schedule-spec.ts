@@ -95,6 +95,8 @@ export function specColumns(spec: AppScheduleSpec) {
 
 /** 기관 전체 관리자가 예약 실행을 꺼 두었을 때(0070) — 직원 목록 안내와 새 예약 거절 */
 export const SCHEDULE_ORG_DISABLED = '기관 관리자가 앱 예약 실행을 꺼 두었습니다. 다시 켤 때까지 예약이 실행되지 않고 다음 차례로 넘어갑니다.';
+/** 기관이 정지·종료돼 넘길 때(2026-11-19) — 스위치 문구('관리자가 꺼 두었습니다')와 가른다 */
+export const SCHEDULE_ORG_STOPPED = '기관 이용이 정지되었거나 종료되어 예약이 실행되지 않고 다음 차례로 넘어갑니다.';
 export const SCHEDULE_ORG_DISABLED_CREATE = '기관 관리자가 앱 예약 실행을 꺼 두어 새 예약을 만들 수 없습니다.';
 
 /** 실행기가 차지한 동안(실행 중)에는 고치지 않는다 — 끝난 실행이 고친 시각·입력을 옛 값으로 덮는다 */
@@ -144,6 +146,8 @@ export type AppScheduleView = {
   notifyOnSuccess: boolean;
   /** 켜진 예약인데 기관이 예약 실행을 꺼 두어 돌지 않는다(0070) */
   heldByOrg: boolean;
+  /** 넘기는 까닭이 기관 정지·종료(2026-11-19) — 화면이 `SCHEDULE_ORG_STOPPED`를 보인다 */
+  orgStopped: boolean;
   /** 결과를 표준 보고서 한글 파일로도 만든다(0071) */
   exportHwpx: boolean;
   /** 예약에 저장한 올린 파일(0073) — 이름·크기만(저장소 경로는 내보내지 않는다) */
@@ -165,7 +169,7 @@ export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' 
   return parsed.value;
 }
 
-export function scheduleView(row: AppScheduleRowLike, appName: string | null, nowMs: number, orgDisabled = false): AppScheduleView {
+export function scheduleView(row: AppScheduleRowLike, appName: string | null, nowMs: number, orgDisabled: boolean | 'stopped' = false): AppScheduleView {
   const spec = specOfRow(row);
   const status = row.status === 'paused' ? 'paused' : 'active';
   return {
@@ -177,7 +181,7 @@ export function scheduleView(row: AppScheduleRowLike, appName: string | null, no
     lastError: row.last_error, lastConversationId: row.last_conversation_id,
     consecutiveFailures: row.consecutive_failures, runCount: row.run_count,
     overdue: status === 'active' && !orgDisabled && Date.parse(row.next_run_at) < nowMs - SCHEDULE_OVERDUE_MS,
-    createdAt: row.created_at, notifyOnSuccess: row.notify_on_success === true, heldByOrg: status === 'active' && orgDisabled, exportHwpx: row.export_hwpx === true,
+    createdAt: row.created_at, notifyOnSuccess: row.notify_on_success === true, heldByOrg: status === 'active' && Boolean(orgDisabled), orgStopped: status === 'active' && orgDisabled === 'stopped', exportHwpx: row.export_hwpx === true,
     files: fileViews(row.files),
   };
 }

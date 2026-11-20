@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if (!getSuperAdminFromRequest(request))
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const [{ data: orgs }, { data: allKeys }] = await Promise.all([
+  const [{ data: orgs, error: orgsError }, { data: allKeys, error: keysError }] = await Promise.all([
     supabaseAdmin.from('organizations').select('id, name, status').order('created_at'),
     supabaseAdmin.from('api_keys')
       .select('organization_id, provider, key_prefix, updated_at')
@@ -19,14 +19,23 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true),
   ]);
 
+  // 못 읽으면 '키 없음'·'호출 0'으로 보이지 않는다(2026-11-19)
+  if (orgsError || keysError) {
+    return NextResponse.json({ ok: false, error: '기관별 키 현황을 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+  }
+
   const monthStart = kstMonthStart().toISOString();
-  const { data: usageLogs } = await pagedRows<{ organization_id: string }>((a, b, w) => supabaseAdmin
+  const { data: usageLogs, error: usageError } = await pagedRows<{ organization_id: string }>((a, b, w) => supabaseAdmin
     .from('usage_logs')
     .select('organization_id', w ? { count: 'exact' } : undefined)
     .not('organization_id', 'is', null)
     .eq('action', 'chat_message')
     .gte('created_at', monthStart)
     .order('id').range(a, b));
+
+  if (usageError) {
+    return NextResponse.json({ ok: false, error: '이번 달 호출 수를 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }, { status: 503 });
+  }
 
   const usageCountMap = new Map<string, number>();
   for (const l of usageLogs ?? []) {

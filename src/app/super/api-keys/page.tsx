@@ -73,17 +73,18 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
   const handleSave = async (provider: string) => {
     if (!inputVal.trim()) return;
     setSaving(true);
-    // 저장 전 검증
+    // 저장 전 검증 — 틀린 키만 막는다. 확인하지 못했으면(Anthropic 장애) 그렇다고 알리고 저장(2026-11-19)
     const vr = await fetch('/api/super/api-keys/verify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keyType: provider, keyValue: inputVal }),
-    }).then(r => r.json());
+    }).then(r => r.json()).catch(() => null);
 
-    if (!vr.valid) {
-      onToast(`❌ 유효하지 않은 키: ${vr.error ?? '인증 실패'}`);
+    if (!vr?.ok || vr.valid === false) {
+      onToast(`❌ ${vr?.message ?? vr?.error ?? '키를 확인하지 못했습니다.'}`);
       setSaving(false);
       return;
     }
+    if (vr.valid === null) onToast(`⚠️ ${vr.message}`);
 
     const res = await fetch('/api/super/api-keys/system', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -97,12 +98,13 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 
   const handleVerify = async (provider: string) => {
     setVerifying(provider);
+    // 넣은 키가 없으면 저장한 키를 서버가 풀어 확인(2026-11-19 — 예전엔 가린 키를 보내 늘 '유효하지 않은 키')
     const res = await fetch('/api/super/api-keys/verify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyType: provider, keyValue: inputVal || data?.keys?.[provider]?.masked }),
-    });
-    const d = await res.json();
-    setVerifyResult(r => ({ ...r, [provider]: d }));
+      body: JSON.stringify(inputVal ? { keyType: provider, keyValue: inputVal } : { keyType: provider, stored: true }),
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => null) : null;
+    setVerifyResult(r => ({ ...r, [provider]: d?.ok ? d : { valid: false, message: d?.error ?? '키를 확인하지 못했습니다.' } }));
     setVerifying(null);
   };
 
@@ -156,8 +158,8 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 
               {/* 검증 결과 */}
               {vr && (
-                <div className={`px-3 py-2 rounded-xl text-xs font-medium ${vr.valid ? 'bg-emerald-900/30 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
-                  {vr.valid ? `✅ 유효한 키${vr.model ? ` (${vr.model})` : ''}` : `❌ ${vr.error ?? '유효하지 않은 키'}`}
+                <div className={`px-3 py-2 rounded-xl text-xs font-medium ${vr.valid === true ? 'bg-emerald-900/30 text-emerald-400' : vr.valid === null ? 'bg-amber-900/30 text-amber-400' : 'bg-red-900/30 text-red-400'}`}>
+                  {vr.valid === true ? `✅ 유효한 키${vr.model ? ` (${vr.model})` : ''}` : vr.valid === null ? `⚠️ ${vr.message}` : `❌ ${vr.message ?? '유효하지 않은 키'}`}
                 </div>
               )}
 
@@ -229,16 +231,22 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 }
 
 // ─── 기관별 키 현황 탭 ──────────────────────────────────────
-function OrgKeysTab({ onToast: _ }: { onToast: (m: string) => void }) {
+function OrgKeysTab({ onToast }: { onToast: (m: string) => void }) {
   const [rows, setRows]     = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
+    // 못 읽으면 빈 표가 아니라 그렇다고(2026-11-19)
     fetch('/api/super/api-keys/organizations')
-      .then(r => r.json())
-      .then(d => { if (d.ok) setRows(d.data); })
+      .then(async (r) => ({ r, d: await r.json().catch(() => null) }))
+      .then(({ r, d }) => {
+        if (r.ok && d?.ok) setRows(d.data);
+        else onToast(typeof d?.error === 'string' ? d.error : '기관별 키 현황을 불러오지 못했습니다.');
+      })
+      .catch(() => onToast('기관별 키 현황을 불러오지 못했습니다.'))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

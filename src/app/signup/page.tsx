@@ -20,13 +20,16 @@ function SignupForm() {
 
   useEffect(() => {
     if (!inviteToken) return;
-    fetch(`/api/signup/invite-info?token=${inviteToken}`)
-      .then(r => r.json())
+    fetch(`/api/signup/invite-info?token=${encodeURIComponent(inviteToken)}`)
+      .then(r => r.json().catch(() => null))
       .then(d => {
-        if (d.ok) {
+        if (d?.ok) {
           setInviteInfo(d.data);
           // 초대 이메일로 채우고 고치지 못하게 한다(초대받은 이메일로만 가입 — 서버가 맞춰 봄)
           if (d.data?.email) setEmail(d.data.email);
+        } else if (typeof d?.error === 'string') {
+          // 만료·사용됨·멈춘 기관·확인 실패를 가입 버튼을 누르기 전에(2026-11-19)
+          setError(d.error);
         }
       })
       .catch(() => {});

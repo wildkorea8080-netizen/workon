@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { indexPendingDocuments } from '@/lib/document-references';
 import { indexDeps } from '@/lib/document-references-db';
 
@@ -20,7 +20,8 @@ export async function POST() {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('로그인이 필요합니다.', 401);
   if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
   try {
     return NextResponse.json({ ok: true, data: await indexPendingDocuments(actor, indexDeps(actor)) });

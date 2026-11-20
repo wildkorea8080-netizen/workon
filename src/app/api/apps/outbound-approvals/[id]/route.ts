@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { decideApproval } from '@/lib/apps/outbound/approval';
 import { parseDecision } from '@/lib/apps/outbound/spec';
 
@@ -13,7 +13,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
   const decision = parseDecision(await request.json().catch(() => null));
   if (!decision) return fail("보낼지(approve) 보내지 않을지(reject) 정해 주세요.", 400);
-  const actor = await getActorScope(session).catch(() => null);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('소속 기관을 확인할 수 없습니다.', 403);
   const out = await decideApproval({ userId: session.user.id, organizationId: actor.organizationId, departmentId: actor.departmentId }, params.id, decision);
   if (!out.ok) return fail(out.message, out.status);

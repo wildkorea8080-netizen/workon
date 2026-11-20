@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { PLANS } from '@/lib/plans';
 import { kstDay } from '@/lib/kst-time';
+import { contractStatusLabel, expiryText } from '@/lib/contract-expiry';
 
 type Tab = 'list' | 'expiring' | 'revenue' | 'plans';
 
@@ -41,6 +42,11 @@ function statusBadge(status: string) {
 export default function ContractsPage() {
   const [tab, setTab]   = useState<Tab>('list');
   const [toast, setToast] = useState<string | null>(null);
+  // 대시보드의 '계약 확인'(?tab=expiring)으로 들어오면 그 탭부터(2026-11-19 — 예전엔 늘 '계약 현황')
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t === 'list' || t === 'expiring' || t === 'revenue' || t === 'plans') setTab(t);
+  }, []);
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000); };
 
   return (
@@ -189,7 +195,7 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusBadge(c.status)}`}>
-                      {c.status === 'active' ? '활성' : c.status === 'expired' ? '만료' : '해지'}
+                      {contractStatusLabel(c.status, c.endDate, Date.now())}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -470,12 +476,23 @@ function ExpiringTab({ onToast }: { onToast: (m: string) => void }) {
 
   useEffect(() => {
     setLoading(true);
-    fetch('/api/super/contracts/expiring').then(r => r.json())
-      .then(d => { if (d.ok) setList(d.data); }).finally(() => setLoading(false));
+    // 못 읽으면 '만료 예정 계약이 없습니다'가 아니라 그렇다고(2026-11-19)
+    fetch('/api/super/contracts/expiring')
+      .then(async (r) => ({ r, d: await r.json().catch(() => null) }))
+      .then(({ r, d }) => {
+        if (r.ok && d?.ok) setList(d.data);
+        else onToast(typeof d?.error === 'string' ? d.error : '만료 예정 계약을 불러오지 못했습니다.');
+      })
+      .catch(() => onToast('만료 예정 계약을 불러오지 못했습니다.'))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const copyRenewalText = (item: any) => {
-    const text = `안녕하세요, ${item.orgName} 담당자님.\n\nWORKON AI 서비스 계약이 ${fmtDate(item.endDate)}에 만료됩니다 (D-${item.daysLeft}).\n갱신을 원하시면 아래로 연락 주세요.\n이메일: contact@workon.ai\n\n감사합니다.`;
+    const when = item.overdue
+      ? `${fmtDate(item.endDate)}에 만료되었습니다`
+      : `${fmtDate(item.endDate)}에 만료됩니다 (D-${item.daysLeft})`;
+    const text = `안녕하세요, ${item.orgName} 담당자님.\n\nWORKON AI 서비스 계약이 ${when}.\n갱신을 원하시면 아래로 연락 주세요.\n이메일: contact@workon.ai\n\n감사합니다.`;
     navigator.clipboard.writeText(text);
     onToast('갱신 안내 문구가 복사됐습니다.');
   };
@@ -485,7 +502,7 @@ function ExpiringTab({ onToast }: { onToast: (m: string) => void }) {
       {list.length > 0 && (
         <div className="p-4 bg-amber-950/20 border border-amber-700/30 rounded-xl">
           <p className="text-sm text-amber-400">
-            ⚠️ 아래 기관의 계약이 30일 이내에 만료됩니다. 갱신 안내를 진행해 주세요.
+            ⚠️ 아래 기관의 계약이 30일 이내에 만료되거나 이미 기한이 지났습니다(기한이 지나도 상태는 '활성'으로 남습니다). 갱신하거나 해지해 주세요.
           </p>
         </div>
       )}
@@ -506,7 +523,7 @@ function ExpiringTab({ onToast }: { onToast: (m: string) => void }) {
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-lg">🏢</span>
                     <p className="font-bold text-white">{item.orgName}</p>
-                    <span className={`text-sm font-bold ${daysColor(item.daysLeft)}`}>D-{item.daysLeft}일 남음</span>
+                    <span className={`text-sm font-bold ${daysColor(item.daysLeft)}`}>{expiryText(item.daysLeft, item.overdue === true)}</span>
                   </div>
                   <p className="text-xs text-slate-400">
                     플랜: {item.plan?.toUpperCase()} | 월이용료: {item.monthlyFee.toLocaleString()}원

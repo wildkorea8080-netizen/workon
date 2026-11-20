@@ -29,7 +29,7 @@ import { currentEditionIds, type LibraryDocumentRow } from './library-documents'
 import { agentDocumentRows } from './app-document-choice';
 import {
   WEBHOOK_DAILY_LIMIT, WEBHOOK_MAX_BODY_BYTES, WEBHOOK_MAX_BODY_WITH_FILES_BYTES, WEBHOOK_MAX_FILES, WEBHOOK_MAX_FILE_TOTAL_BYTES, WEBHOOK_MIN_INTERVAL_SECONDS, WEBHOOK_SHOWN_PREFIX_CHARS, WEBHOOK_TITLE_PREFIX, WEBHOOK_TOKEN_PREFIX,
-  IDEMPOTENCY_HEADER, WEBHOOK_ORG_DISABLED, bearerWebhookToken, canonicalInputs, parseIdempotencyKey,
+  IDEMPOTENCY_HEADER, bearerWebhookToken, webhookOrgBlockMessage, type WebhookOrgBlock, canonicalInputs, parseIdempotencyKey,
   WEBHOOK_ASYNC_BUSY, WEBHOOK_ASYNC_NO_DOCUMENTS, WEBHOOK_ASYNC_NO_FILES, wantsAsync,
 } from './webhook-spec';
 import type { Session } from 'next-auth';
@@ -63,7 +63,7 @@ export interface WebhookDeps {
    * 이 토큰의 기관이 외부 연동을 꺼 두었는가(0068) — 차지 **전에** 본다(꺼진 동안의 호출이 간격·하루 상한·사용 횟수를 쓰지 않게).
    * 쓸 수 있는 토큰(활성·안 만료)만 보고, 그 밖은 거짓(차지가 401로 거절한다 — 무효 토큰에 기관 상태를 알리지 않는다). 읽지 못하면 던진다(닫힘)
    */
-  orgDisabled(tokenHash: string, nowMs: number): Promise<boolean>;
+  orgDisabled(tokenHash: string, nowMs: number): Promise<WebhookOrgBlock>;
   claim(tokenHash: string, nowMs: number, idempotency?: { key: string; requestHash: string }): Promise<ClaimResult>;
   /** 키 있는 호출의 결과를 남긴다(null이면 지워 같은 키로 다시 시도할 수 있게 — 서버 쪽 실패) */
   recordCall(callId: string, record: CallRecord | null): Promise<void>;
@@ -265,7 +265,8 @@ export async function handleWebhookCall(deps: WebhookDeps, request: { authorizat
   const isAsync = wantsAsync((parsed as { async?: unknown } | null)?.async, request.prefer);
   if (isAsync && files.length) return fail(400, WEBHOOK_ASYNC_NO_FILES);
 
-  if (await deps.orgDisabled(hashWebhookToken(token), deps.now())) return fail(403, WEBHOOK_ORG_DISABLED);
+  const orgBlock = await deps.orgDisabled(hashWebhookToken(token), deps.now());
+  if (orgBlock) return fail(403, webhookOrgBlockMessage(orgBlock));
   // 파일은 이름·SHA-256만 해시에 넣는다(파일이 없으면 예전과 같은 해시)
   const fileDigest = files.map((f) => `\n${f.name}:${createHash('sha256').update(f.bytes).digest('hex')}`).join('');
   // 비동기는 해시에 표시를 더한다 — 같은 키로 기다리는 호출과 비동기 호출을 섞으면 다른 요청(422)

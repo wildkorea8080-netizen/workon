@@ -128,12 +128,16 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ ok: false, error: { message: 'documentId가 필요합니다.' } }, { status: 400 });
     }
 
-    const { data: doc } = await supabaseAdmin
+    const { data: doc, error: docError } = await supabaseAdmin
       .from('documents')
       .select('id, storage_path, agent_id, department_id, file_name, noda_filename, noda_status')
       .eq('id', documentId)
       .maybeSingle();
 
+    // 읽기 실패를 '없는 문서'(404)로 답하지 않는다 — 화면은 404를 '이미 지워짐'으로 보고 목록에서 뺄 수 있다(2026-11-19)
+    if (docError) {
+      return NextResponse.json({ ok: false, error: { message: '문서를 지금 읽지 못했습니다. 잠시 뒤 다시 지워 주세요.' } }, { status: 503 });
+    }
     if (!doc) {
       return NextResponse.json({ ok: false, error: { message: '문서를 찾을 수 없습니다.' } }, { status: 404 });
     }

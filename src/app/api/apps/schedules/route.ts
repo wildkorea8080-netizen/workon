@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { checkScheduleRequest } from '@/lib/apps/schedule-request';
-import { readScheduleSwitch } from '@/lib/apps/webhook-switch';
+import { orgAutomationBlock, readScheduleSwitch } from '@/lib/apps/webhook-switch';
 import { copyAttachmentsForSchedule, removeScheduleFileObjects } from '@/lib/apps/schedule-files';
 import { APP_MAX_SCHEDULES_PER_USER, SCHEDULE_ORG_DISABLED_CREATE, nextRunAt, scheduleView, specColumns, type AppScheduleRowLike, SCHEDULE_COLUMNS } from '@/lib/apps/schedule-spec';
 
@@ -20,9 +20,10 @@ export async function GET() {
     .eq('user_id', session.user.id).order('next_run_at', { ascending: true });
   if (error) return fail('예약을 불러오지 못했습니다.', 503);
   const now = Date.now();
-  // 기관이 예약 실행을 꺼 두었는지(0070) — 안내일 뿐이라 읽지 못하면 켜진 것으로 보인다
-  const actor = await getActorScope(session).catch(() => null);
-  const orgDisabled = actor?.organizationId ? await readScheduleSwitch(actor.organizationId).then(s => s.disabled).catch(() => false) : false;
+  // 기관이 예약 실행을 꺼 두었거나 기관이 정지·종료인지 — 실행기와 같은 판정. 안내일 뿐이라 읽지 못하면 켜진 것으로 보인다
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
+  const orgDisabled = actor?.organizationId ? await orgAutomationBlock('schedules', actor.organizationId).catch(() => false as const) : false;
   return NextResponse.json({ ok: true, data: ((data ?? []) as ScheduleRow[]).map(row => scheduleView(row, agentName(row), now, orgDisabled)) });
 }
 
@@ -35,7 +36,8 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('기관 소속을 확인할 수 없습니다.', 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || typeof body !== 'object') return fail('요청 본문을 확인해 주세요.', 400);

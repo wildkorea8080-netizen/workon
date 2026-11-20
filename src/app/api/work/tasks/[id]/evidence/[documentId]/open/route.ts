@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { getActorScope, isActorScopeReadError, ACTOR_SCOPE_UNAVAILABLE_MESSAGE } from '@/lib/actor-scope';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { canReadDocument } from '@/lib/document-files';
@@ -18,7 +18,11 @@ export async function GET(_request: Request, { params }: { params: { id: string;
     const ctx = defaultWorkContext();
     const actor = await getWorkActor(session, ctx);
     if (!actor) return NO_ACTOR();
-    const scope = await getActorScope(session);
+    const scope = await getActorScope(session).catch((err) => {
+      // 소속을 못 읽은 것을 '소속 없음'(403)이나 500으로 보이지 않는다
+      if (isActorScopeReadError(err)) throw new WorkError('ACTOR_UNAVAILABLE', ACTOR_SCOPE_UNAVAILABLE_MESSAGE, 503);
+      throw err;
+    });
     if (!scope?.organizationId) return NO_ACTOR();
     const url = await openEvidenceOriginal(ctx, actor, params.id, params.documentId, async (id, agentId) => {
       const { data: doc, error } = await supabaseAdmin.from('documents').select('id, agent_id, organization_id, department_id, visibility, storage_path').eq('id', id).eq('organization_id', actor.organizationId).maybeSingle();

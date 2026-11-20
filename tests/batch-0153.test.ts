@@ -49,7 +49,7 @@ beforeEach(() => {
 
 describe('기관별 한도 사용률', () => {
   it("'오늘'을 골라도 이번 달 토큰으로 — 오늘 100이어도 이번 달 800이면 80%", async () => {
-    state.paged = [{ data: [{ organization_id: 'o1', user_id: 'u1', details: { input_tokens: 60, output_tokens: 40 }, created_at: now }], error: null }];
+    state.paged = [{ data: [{ action: 'chat_message', organization_id: 'o1', user_id: 'u1', details: { input_tokens: 60, output_tokens: 40 }, created_at: now }], error: null }];
     const res = await usageGET(req('period=today'));
     const body = await res.json();
     expect(body.ok).toBe(true);
@@ -57,7 +57,7 @@ describe('기관별 한도 사용률', () => {
     expect(state.monthCalls).toHaveLength(1);
   });
   it("'이번 달'·전체 기관이면 읽은 기록으로 바로 셈(한 번 더 읽지 않음)", async () => {
-    state.paged = [{ data: [{ organization_id: 'o1', user_id: 'u1', details: { input_tokens: 300, output_tokens: 200 }, created_at: now }], error: null }];
+    state.paged = [{ data: [{ action: 'chat_message', organization_id: 'o1', user_id: 'u1', details: { input_tokens: 300, output_tokens: 200 }, created_at: now }], error: null }];
     const body = await (await usageGET(req('period=month'))).json();
     expect(body.data.orgStats[0]).toMatchObject({ monthTokens: 500, usagePercent: 50 });
     expect(state.monthCalls).toHaveLength(0);

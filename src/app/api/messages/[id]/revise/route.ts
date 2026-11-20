@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS } from '@/lib/agent-permissions';
 import { prepareLikeChat, searchLikeChat } from '@/lib/capabilities/doc-search';
@@ -89,7 +89,8 @@ function reviseDeps(organizationId: string): ReviseDeps {
 export async function POST(_request: Request, { params }: { params: { id: string } }) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
   try {
     const result = await reviseAnswer(actor, params.id, reviseDeps(actor.organizationId));

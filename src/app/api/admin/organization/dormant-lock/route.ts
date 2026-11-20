@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { validDormantDays } from '@/lib/dormant-lock';
 import { logSecurityEvent } from '@/lib/security-log';
 
@@ -21,7 +21,8 @@ export async function PUT(request: NextRequest) {
   if (session.user.isImpersonating) {
     return NextResponse.json({ ok: false, error: { message: '대리 접근 중에는 바꿀 수 없습니다.' } }, { status: 403 });
   }
-  const scope = await getActorScope(session);
+  const scope = await actorScopeOr503(session);
+  if (scope instanceof Response) return scope;
   if (!scope?.managesWholeOrganization || !scope.organizationId) {
     return NextResponse.json({ ok: false, error: { message: '기관 전체 관리자(최상위 부서 소속)만 바꿀 수 있습니다.' } }, { status: 403 });
   }

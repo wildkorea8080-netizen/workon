@@ -140,20 +140,21 @@ export default function SuperDashboard() {
       )}
 
       {/* 알림 배너 */}
-      {(al.tokenExceeded > 0 || al.expiringContracts > 0) && (
+      {(al.tokenExceeded > 0 || al.expiringContracts > 0 || al.overdueContracts > 0) && (
         <div className="flex items-center gap-4 p-4 bg-red-950/30 border border-red-700/40 rounded-2xl">
           <span className="text-xl">🚨</span>
           <div className="flex-1 text-sm text-red-300">
             {al.tokenExceeded > 0 && <span className="font-semibold">토큰 한도 초과 기관 {al.tokenExceeded}개</span>}
             {al.tokenExceeded > 0 && al.expiringContracts > 0 && <span className="mx-2 text-red-600">|</span>}
             {al.expiringContracts > 0 && <span className="font-semibold">계약 만료 임박 {al.expiringContracts}개</span>}
+            {al.overdueContracts > 0 && <span className="ml-2 font-semibold">기한 지난 계약 {al.overdueContracts}개(아직 활성)</span>}
             {al.tokenWarnings > 0 && <span className="ml-2 text-amber-400">(경고: {al.tokenWarnings}개)</span>}
           </div>
           <div className="flex gap-2 flex-shrink-0">
             {al.tokenExceeded > 0 && (
               <Link href="/super/usage" className="px-3 py-1.5 bg-red-700/40 hover:bg-red-700/60 text-red-300 text-xs font-semibold rounded-lg transition-colors">사용량 확인</Link>
             )}
-            {al.expiringContracts > 0 && (
+            {(al.expiringContracts > 0 || al.overdueContracts > 0) && (
               <Link href="/super/contracts?tab=expiring" className="px-3 py-1.5 bg-amber-700/30 hover:bg-amber-700/50 text-amber-400 text-xs font-semibold rounded-lg transition-colors">계약 확인</Link>
             )}
           </div>

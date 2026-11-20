@@ -23,17 +23,19 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   if (!out) return fail('일괄 실행을 찾을 수 없습니다.', 404);
   const results = await loadBatchResults(session.user.id, params.id);
   if (!results) return fail('결과를 불러오지 못했습니다.', 503);
-  // 외부로 보낸 상태·접수 번호(0076·0080) — 못 읽어도 엑셀은 만든다(열 없이)
+  // 외부로 보낸 상태·접수 번호(0076·0080) — 보낸 줄이 있을 때만 열이 생기므로, 못 읽고 열 없이 만들면 '보내지 않음'으로 읽힌다(2026-11-19)
   const deliveries = await loadBatchDeliveries(session.user.id, params.id).catch(() => null);
-  // 열 이름은 지금 앱의 입력 항목 — 앱이 바뀌어 없는 항목은 키로
-  const { data: agent } = await supabaseAdmin.from('agents').select('app_definition').eq('id', out.batch.agentId).maybeSingle();
+  if (!deliveries) return fail('외부로 보낸 결과를 지금 읽지 못했습니다. 잠시 뒤 다시 내려받아 주세요.', 503);
+  // 열 이름은 지금 앱의 입력 항목 — 앱이 바뀌어 없는 항목은 키로(앱을 못 읽으면 열 이름을 키로 꾸미지 않는다)
+  const { data: agent, error: agentError } = await supabaseAdmin.from('agents').select('app_definition').eq('id', out.batch.agentId).maybeSingle();
+  if (agentError) return fail('앱 정보를 지금 읽지 못했습니다. 잠시 뒤 다시 내려받아 주세요.', 503);
   const def = validateAppDefinition((agent as { app_definition?: unknown } | null)?.app_definition ?? null);
   const labels = new Map((def.ok && def.value ? def.value.fields : []).map((f) => [f.key, f.label]));
   const keys = [...new Set(out.items.flatMap((it) => Object.keys(it.inputs)))];
   const buffer = await batchWorkbook({
     name: out.batch.name, origin: APP_URL.replace(/\/$/, ''),
     fields: keys.map((key) => ({ key, label: labels.get(key) ?? key })),
-    items: out.items.map((it) => ({ ...it, result: results.get(it.position) ?? null, delivery: deliveries?.get(it.position) ?? null })),
+    items: out.items.map((it) => ({ ...it, result: results.get(it.position) ?? null, delivery: deliveries.get(it.position) ?? null })),
   });
   const filename = `${out.batch.name.replace(/[\\/:*?"<>|]/g, ' ').slice(0, 60)} 결과.xlsx`;
   return new NextResponse(new Uint8Array(buffer), {

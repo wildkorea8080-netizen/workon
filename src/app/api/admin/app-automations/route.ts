@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { listAdminAutomations } from '@/lib/apps/automation-admin';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,8 @@ export async function GET() {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
   if (!isAdminSession(session)) return fail('관리자 권한이 필요합니다.', 403);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor) return fail('관리 범위를 확인할 수 없습니다.', 403);
   const result = await listAdminAutomations(actor, Date.now());
   if (!result.ok) return fail(result.message, result.status);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { confirmUpload, isConversationOwner, listConversationAttachments, toClientRow } from '@/lib/attachments/store';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,8 @@ export async function POST(request: NextRequest) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
 
   let body: { id?: unknown };

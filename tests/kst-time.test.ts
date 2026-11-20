@@ -61,7 +61,7 @@ describe('슈퍼관리자 사용량 — 고른 기간·시간별 표', () => {
   });
 
   it('오늘은 한국 날짜로 시작하고, 시간별 표는 한국 시로 센다', async () => {
-    state.rows = [{ user_id: 'u', organization_id: 'o', details: { input_tokens: 1, output_tokens: 1 }, created_at: '2026-11-05T23:10:00Z' }];
+    state.rows = [{ action: 'chat_message', user_id: 'u', organization_id: 'o', details: { input_tokens: 1, output_tokens: 1 }, created_at: '2026-11-05T23:10:00Z' }];
     const res = await superUsage(new NextRequest('http://localhost/api/super/usage?period=today'));
     expect(state.calls).toContainEqual(['usage_logs', 'gte', 'created_at', '2026-11-05T15:00:00.000Z']);
     const body = await res.json();

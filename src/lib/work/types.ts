@@ -228,6 +228,8 @@ export const WORK_ERROR_CODES = {
   PRIOR_MISMATCH: 'PRIOR_MISMATCH',
   // 현행화 — 작년 파일이 HWPX가 아니다(HWP 5.0·DOCX). 다시 시도해도 같으니 바로 실패
   PRIOR_UNSUPPORTED: 'PRIOR_UNSUPPORTED',
+  // 요청자의 소속을 지금 읽지 못함(2026-11-19) — '업무를 쓸 수 없음'(403)이 아니라 잠시 뒤 다시
+  ACTOR_UNAVAILABLE: 'ACTOR_UNAVAILABLE',
 } as const;
 export type WorkErrorCode = keyof typeof WORK_ERROR_CODES;
 

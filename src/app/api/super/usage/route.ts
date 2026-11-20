@@ -6,6 +6,7 @@ import { sumCostUsd } from '@/lib/models';
 import { addKstDays, kstDay, kstDayList, kstDayStart, kstHour, kstMonthStart } from '@/lib/kst-time';
 import { dbErrorText } from '@/lib/db-error-text';
 import { loadChatTokensByOrg, sumByOrg } from '@/lib/org-chat-tokens';
+import { isChatRow } from '@/lib/cost-rows';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -64,11 +65,11 @@ export async function GET(request: NextRequest) {
 
     // usage_logs 조회
     // 쪽마다 끝까지(1,000행 상한에서 덜 세지 않게) — 기관 거르기는 쪽마다 같은 조건으로
-    const { data: logs, error } = await pagedRows<{ organization_id: string | null; user_id: string | null; details: any; created_at: string }>((a, b, w) => {
+    // 모든 활동 — 원가는 모든 활동, 대화·토큰·사람은 chat_message만(2026-11-19, `cost-rows.ts`)
+    const { data: logs, error } = await pagedRows<{ action: string; organization_id: string | null; user_id: string | null; details: any; created_at: string }>((a, b, w) => {
       let query = supabaseAdmin
         .from('usage_logs')
-        .select('organization_id, user_id, details, created_at', w ? { count: 'exact' } : undefined)
-        .eq('action', 'chat_message')
+        .select('action, organization_id, user_id, details, created_at', w ? { count: 'exact' } : undefined)
         .gte('created_at', start.toISOString())
         .lte('created_at', end.toISOString());
       if (orgId !== 'all') query = query.eq('organization_id', orgId);
@@ -76,7 +77,8 @@ export async function GET(request: NextRequest) {
     });
     if (error) throw error;
 
-    const rows = logs ?? [];
+    const allRows = logs ?? [];
+    const rows = allRows.filter(isChatRow);
 
     // 한도 사용률은 고른 기간이 아니라 **이번 달**(한국 시간 1일부터 chat_message 토큰 — 한도 판정 `organization_chat_tokens`와 같은 셈)로(2026-11-18).
     // 예전엔 고른 기간의 토큰 ÷ 월 한도라 '오늘'·'이번 주'는 낮게, 두 달에 걸친 직접 고른 기간은 높게 보였다
@@ -98,18 +100,20 @@ export async function GET(request: NextRequest) {
     // 기관별 맵
     const orgUsageMap = new Map<string, { conversations: number; inputTokens: number; outputTokens: number; users: Set<string> }>();
 
-    for (const row of rows) {
-      // 숫자만(한도 판정과 같은 셈), 비용은 기록할 때 확정한 값 — 옛 기록만 기본 단가로 추정(2026-11-17, 예전엔 모두 기본 모델 단가)
-      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-      const inp = num(row.details?.input_tokens);
-      const out = num(row.details?.output_tokens);
+    for (const row of allRows) {
+      // 비용은 기록할 때 확정한 값 — 옛 기록만 기본 단가로 추정(2026-11-17, 예전엔 모두 기본 모델 단가), 모든 활동(2026-11-19)
       const cost = sumCostUsd([row]);
-      totalConversations++;
-      totalInput  += inp;
-      totalOutput += out;
       totalCostUsd += cost;
       const costKey = row.organization_id ?? '__unknown';
       orgCost.set(costKey, (orgCost.get(costKey) ?? 0) + cost);
+      if (!isChatRow(row)) continue;
+      // 숫자만(한도 판정과 같은 셈)
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      const inp = num(row.details?.input_tokens);
+      const out = num(row.details?.output_tokens);
+      totalConversations++;
+      totalInput  += inp;
+      totalOutput += out;
       if (row.user_id) activeUsers.add(row.user_id);
 
       // 시간 키

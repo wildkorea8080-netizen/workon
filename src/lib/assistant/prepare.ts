@@ -1,7 +1,7 @@
 // src/lib/assistant/prepare.ts
 import type { Session } from 'next-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getActorScope } from '@/lib/actor-scope';
+import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE, getActorScope, isActorScopeReadError } from '@/lib/actor-scope';
 import { canEditAgent, canUseAgent, AGENT_ACCESS_COLUMNS, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { readAppDraft, withDraftSettings } from '@/lib/apps/draft';
 import { getCapabilityScope } from '@/lib/connector-scope';
@@ -113,7 +113,14 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const attachedImages: ChatImage[] = Array.isArray(images) ? (images as ChatImage[]) : [];
 
   // 소속을 알 수 없으면 거부한다. 추측해서 배정하면 타 기관 자료에 닿는다.
-  const actor = await getActorScope(session);
+  // 못 읽으면 403(예약·일괄 실행은 '앱을 쓸 수 없음'으로 보고 멈춘다)이 아니라 503(2026-11-19)
+  let actor: Awaited<ReturnType<typeof getActorScope>>;
+  try {
+    actor = await getActorScope(session);
+  } catch (err) {
+    if (isActorScopeReadError(err)) return reject(ACTOR_SCOPE_UNAVAILABLE_MESSAGE, 503);
+    throw err;
+  }
   if (!actor || !actor.organizationId) {
     return reject('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
   }

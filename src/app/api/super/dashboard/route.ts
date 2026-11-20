@@ -11,6 +11,7 @@ import { dbErrorText } from '@/lib/db-error-text';
 import { chatTokensOf, loadChatTokensByOrg } from '@/lib/org-chat-tokens';
 import { revenueIn, type RevenueContract } from '@/lib/contract-revenue';
 import { STOPPED_ORG_STATUSES } from '@/lib/org-status';
+import { isChatRow } from '@/lib/cost-rows';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     // 기관별 이번 달 토큰(한도 판정과 같은 셈) — 경고·초과·Top 5가 함께 쓴다
     const monthTokensP = loadChatTokensByOrg(monthStart);
     const [
-      orgAll, orgActive, orgSuspended, orgExpiring,
+      orgAll, orgActive, orgSuspended, orgExpiring, orgOverdue,
       userAll, userNew,
       todayUsage, monthUsage,
       revenueContracts,
@@ -44,12 +45,16 @@ export async function GET(request: NextRequest) {
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }).in('status', [...STOPPED_ORG_STATUSES]),
       supabaseAdmin.from('contracts').select('id', { count: 'exact', head: true })
         .eq('status', 'active').not('expires_at', 'is', null).lte('expires_at', in30).gte('expires_at', now.toISOString()),
+      // 기한이 지났는데 아직 'active'인 계약(2026-11-19 — 계약을 만료로 바꾸는 일이 없어 예전엔 어디에도 안 보였다)
+      supabaseAdmin.from('contracts').select('id', { count: 'exact', head: true })
+        .eq('status', 'active').not('expires_at', 'is', null).lt('expires_at', now.toISOString()),
       // 사용자 수 — 탈퇴 처리한 계정은 빼고(2026-11-17, 0047)
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).is('deleted_at', null),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_super_admin', false).is('deleted_at', null).gte('created_at', monthStart),
       // 오늘 대화 기록 — 대화 수와 '오늘 활성 사용자'(서로 다른 사람 수)를 함께 낸다
       pagedRows<{ user_id: string | null }>((a, b, w) => supabaseAdmin.from('usage_logs').select('user_id', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', todayStart).order('id').range(a, b)),
-      pagedRows<{ details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('details', w ? { count: 'exact' } : undefined).eq('action', 'chat_message').gte('created_at', monthStart).order('id').range(a, b)),
+      // 이번 달 모든 활동 — 원가는 모든 활동, 대화 수·토큰은 chat_message만(2026-11-19, `cost-rows.ts`)
+      pagedRows<{ action: string; details: any }>((a, b, w) => supabaseAdmin.from('usage_logs').select('action, details', w ? { count: 'exact' } : undefined).gte('created_at', monthStart).order('id').range(a, b)),
       // 매출 — 그달에 유효했던 계약(2026-11-17, `contract-revenue.ts`). 예전엔 이번 달에 '시작한' 계약만 더해 이어지는 계약이 0원이었다
       supabaseAdmin.from('contracts').select('status, price_per_month, started_at, expires_at, updated_at').in('status', ['active', 'cancelled']).lt('started_at', nextMonthStart),
       // 80~100% 경고 기관 — 기관별 이번 달 토큰은 한 번만 읽는다(예전엔 경고·초과·Top 5가 같은 기록을 세 번 읽었다, 2026-11-17)
@@ -94,8 +99,9 @@ export async function GET(request: NextRequest) {
     const todayRows = todayUsage.data ?? [];
     const todayConversations = todayRows.length;
     const activeToday = new Set(todayRows.map((r: { user_id: string | null }) => r.user_id).filter(Boolean)).size;
-    const monthConversations = (monthUsage.data ?? []).length;
-    const monthTokens = (monthUsage.data ?? []).reduce((s: number, l: { details: unknown }) => s + chatTokensOf(l.details), 0);
+    const monthChat = (monthUsage.data ?? []).filter(isChatRow);
+    const monthConversations = monthChat.length;
+    const monthTokens = monthChat.reduce((s: number, l: { details: unknown }) => s + chatTokensOf(l.details), 0);
     const estimatedCostUsd = sumCostUsd(monthUsage.data ?? []);
 
     // ── 매출 집계 ──────────────────────────────────────
@@ -166,6 +172,8 @@ export async function GET(request: NextRequest) {
           tokenWarnings:     typeof tokenAlerts === 'number' ? tokenAlerts : 0,
           tokenExceeded:     typeof tokenExceeded === 'number' ? tokenExceeded : 0,
           expiringContracts: orgExpiring.count ?? 0,
+          // 못 읽으면 null
+          overdueContracts: orgOverdue.error ? null : orgOverdue.count ?? 0,
           // 못 읽으면 null(0으로 보이면 '문제 없음'으로 읽힌다)
           critical24h: criticalRecent.error ? null : { count: criticalRecent.count ?? 0, top: criticalSummary((criticalRecent.data ?? []) as Array<{ message: string | null }>) },
           // 못 읽으면 null(0으로 보이면 '막힌 곳 없음'으로 읽힌다)

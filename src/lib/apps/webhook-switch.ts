@@ -8,7 +8,8 @@
 import type { ActorScope } from '@/lib/agent-permissions';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { logSecurityEvent } from '@/lib/filter';
-import type { WebhookSwitchView } from './webhook-spec';
+import { isStoppedOrgStatus } from '@/lib/org-status';
+import type { WebhookOrgBlock, WebhookSwitchView } from './webhook-spec';
 
 export type WebhookSwitchState = { disabled: boolean; disabledAt: string | null; reason: string | null };
 /** 연동·예약 스위치는 같은 꼴이다 */
@@ -45,16 +46,41 @@ export const readWebhookSwitch = (organizationId: string) => readOrgSwitch('webh
 export const readScheduleSwitch = (organizationId: string) => readOrgSwitch('schedules', organizationId);
 
 /**
+ * 예약 실행기가 그 기관의 차례를 실행하지 않고 넘길 때인가(2026-11-19) — 기관 예약 스위치(0070)가 꺼졌거나 **기관이 정지·종료**.
+ * 예전엔 스위치만 보아, 정지한 기관의 예약도 실행해 대화 한도 판정의 429(기관 정지)를 실패로 세었다 — 세 번이면 예약이 멈추고
+ * 직원마다 실패 메일이 갔고, 기관을 다시 켜도 예약은 멈춘 채였다. 넘긴 차례는 실패로 세지 않는다(`heldPatch`). 읽지 못하면 던진다.
+ */
+export async function scheduleRunHeld(organizationId: string): Promise<boolean> {
+  return Boolean(await orgAutomationBlock('schedules', organizationId));
+}
+
+/**
+ * 기관의 예약·연동이 막혔는가와 그 까닭 — 정지·종료(`'stopped'`, 스위치보다 먼저)·스위치 꺼짐(`true`)·열림(`false`).
+ * 직원 목록의 안내가 까닭을 가르게 쓴다(2026-11-19). 읽지 못하면 던진다
+ */
+export async function orgAutomationBlock(kind: OrgSwitchKind, organizationId: string): Promise<WebhookOrgBlock> {
+  const at = KINDS[kind].at;
+  const { data, error } = await supabaseAdmin.from('organizations').select(`${at}, status`).eq('id', organizationId).maybeSingle();
+  if (error) throw new Error(`organizations ${kind} hold: ${error.message}`);
+  const row = data as Record<string, string | null> | null;
+  if (isStoppedOrgStatus(row?.status)) return 'stopped';
+  return Boolean(row?.[at]);
+}
+
+/**
  * 외부 호출 앞 검사 — 쓸 수 있는(활성·안 만료) 토큰만 기관을 본다. 그 밖은 거짓(뒤의 차지가 같은 401로 거절해, 무효 토큰에 기관 상태를 알리지 않는다).
  * 읽지 못하면 던진다(호출 라우트가 500 — 닫힘)
  */
-export async function tokenOrgWebhooksDisabled(tokenHash: string, nowMs: number): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.from('app_webhooks').select('organization:organizations(app_webhooks_disabled_at)')
+export async function tokenOrgWebhooksDisabled(tokenHash: string, nowMs: number): Promise<WebhookOrgBlock> {
+  const { data, error } = await supabaseAdmin.from('app_webhooks').select('organization:organizations(app_webhooks_disabled_at, status)')
     .eq('token_hash', tokenHash).eq('status', 'active').gt('expires_at', new Date(nowMs).toISOString()).maybeSingle();
   if (error) throw new Error(`app_webhooks org switch: ${error.message}`);
   if (!data) return false;
-  const org = (data as { organization: { app_webhooks_disabled_at: string | null } | { app_webhooks_disabled_at: string | null }[] | null }).organization;
+  type OrgRow = { app_webhooks_disabled_at: string | null; status?: string | null };
+  const org = (data as { organization: OrgRow | OrgRow[] | null }).organization;
   const row = Array.isArray(org) ? org[0] : org;
+  // 정지·종료한 기관(2026-11-19) — 예전엔 차지(간격·하루 상한·횟수)를 쓴 뒤 대화 준비의 429로 거절했고, 비동기 호출은 일괄 실행까지 만들었다
+  if (isStoppedOrgStatus(row?.status)) return 'stopped';
   return Boolean(row?.app_webhooks_disabled_at);
 }
 

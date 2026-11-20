@@ -43,7 +43,7 @@ describe('쓰는 곳', () => {
   });
   it('기관 상세 사용량 — 기록한 원가, 숫자만', () => {
     const s = readFileSync('src/app/api/super/organizations/[id]/usage/route.ts', 'utf8');
-    expect(s).toContain('sumCostUsd(rows)');
+    expect(s).toContain('sumCostUsd(allRows)'); // 원가는 모든 활동(2026-11-19, batch-0188)
     expect(s).not.toContain('estimateCostUsd(');
     expect(s).toContain('num(row.details?.input_tokens)');
   });

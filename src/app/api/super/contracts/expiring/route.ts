@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { dbErrorText } from '@/lib/db-error-text';
+import { contractDaysLeft, isContractOverdue } from '@/lib/contract-expiry';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,11 +15,11 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from('contracts')
-    .select('id, organization_id, plan, price_per_month, expires_at, organizations(name)')
+    .select('id, organization_id, plan, price_per_month, expires_at, status, organizations(name)')
     .eq('status', 'active')
     .not('expires_at', 'is', null)
     .lte('expires_at', in30.toISOString())
-    .gte('expires_at', now.toISOString())
+    // 기한이 이미 지난 'active' 계약도(2026-11-19 — 예전엔 앞으로 30일 안만 봐 지난 계약은 어떤 알림에도 없었다)
     .order('expires_at', { ascending: true });
 
   if (error) return NextResponse.json({ ok: false, error: dbErrorText(error) }, { status: 500 });
@@ -30,7 +31,8 @@ export async function GET(request: NextRequest) {
     plan: c.plan,
     monthlyFee: Number(c.price_per_month ?? 0),
     endDate: c.expires_at,
-    daysLeft: Math.ceil((new Date(c.expires_at).getTime() - now.getTime()) / 86400000),
+    daysLeft: contractDaysLeft(c.expires_at, now.getTime()),
+    overdue: isContractOverdue(c.status ?? 'active', c.expires_at, now.getTime()),
   }));
 
   return NextResponse.json({ ok: true, data: result });

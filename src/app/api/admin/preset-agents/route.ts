@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { installChosenPresets, presetStatus, updateChosenPresets } from '@/lib/preset-install-admin';
 import { logSecurityEvent } from '@/lib/security-log';
@@ -24,7 +24,8 @@ async function organizationType(organizationId: string): Promise<{ ok: true; typ
 export async function GET() {
   const session = await getServerAuthSession();
   if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
-  const actor = await getActorScope(session!);
+  const actor = await actorScopeOr503(session!);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 찾을 수 없습니다.', 403);
   const org = await organizationType(actor.organizationId);
   if (!org.ok) return jsonError('기본 세트를 지금 불러올 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
@@ -44,7 +45,8 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await getServerAuthSession();
   if (!isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
-  const actor = await getActorScope(session!);
+  const actor = await actorScopeOr503(session!);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 찾을 수 없습니다.', 403);
   if (!actor.managesWholeOrganization) return jsonError('기관 전체를 관리하는 관리자만 기본 세트를 설치할 수 있습니다.', 403);
 

@@ -14,6 +14,7 @@ import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/a
  * 빼기는 언제나 된다(이제 못 쓰는 비서를 지울 수 있게). 신식 `/api/apps/favorites`와 같은 규칙
  */
 const MAX_FAVORITES = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const jsonError = (message: string, status: number) =>
   NextResponse.json({ ok: false, error: { message } }, { status });
@@ -30,7 +31,9 @@ export async function GET(_request: NextRequest) {
       .select('favorite_agent_ids')
       .eq('id', session.user.id)
       .single();
-    if (userError || !user) return jsonError('사용자 정보를 찾을 수 없습니다.', 404);
+    // 못 읽으면 '사용자 없음'(404)이 아니라 그렇다고(2026-11-19) — 쓰기 전에 읽는 것이라 빈 목록으로 보면 즐겨찾기를 덮어쓴다
+    if (userError) return jsonError('즐겨찾기를 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    if (!user) return jsonError('사용자 정보를 찾을 수 없습니다.', 404);
 
     const favoriteIds: string[] = user.favorite_agent_ids ?? [];
     if (favoriteIds.length === 0) return NextResponse.json({ ok: true, data: [] });
@@ -56,13 +59,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
     const agentId = body?.agentId;
     if (!agentId || typeof agentId !== 'string') return jsonError('agentId가 필요합니다.', 400);
+    // 즐겨찾기 칸은 uuid 배열이다 — 다른 글은 DB가 거절해 500이 됐다
+    if (!UUID.test(agentId)) return jsonError('비서 형식이 올바르지 않습니다.', 400);
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('favorite_agent_ids')
       .eq('id', session.user.id)
       .single();
-    if (userError || !user) return jsonError('사용자 정보를 찾을 수 없습니다.', 404);
+    // 못 읽으면 '사용자 없음'(404)이 아니라 그렇다고(2026-11-19) — 쓰기 전에 읽는 것이라 빈 목록으로 보면 즐겨찾기를 덮어쓴다
+    if (userError) return jsonError('즐겨찾기를 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    if (!user) return jsonError('사용자 정보를 찾을 수 없습니다.', 404);
 
     const current: string[] = user.favorite_agent_ids ?? [];
     const isFavorite = current.includes(agentId);
@@ -77,11 +84,19 @@ export async function POST(request: NextRequest) {
       if (!agent || !canUseAgent(agent as unknown as AgentAccessInfo, actor)) return jsonError('사용할 수 없는 비서입니다.', 403);
     }
 
-    const updated = isFavorite ? current.filter((id: string) => id !== agentId) : [...current, agentId];
-    const { error } = await supabaseAdmin.from('users').update({ favorite_agent_ids: updated }).eq('id', session.user.id);
-    if (error) return jsonError('즐겨찾기 업데이트 중 오류가 발생했습니다.', 500);
+    // 행을 잠그는 DB 함수로 더하고 뺀다(0042, `/api/apps/favorites`와 같은 길 — 2026-11-19).
+    // 예전엔 읽은 목록을 고쳐 통째로 저장해, 거의 동시에 다른 비서 둘을 누르면 하나가 빠졌다
+    const { data: saved, error } = await supabaseAdmin.rpc('set_user_app_favorite', {
+      p_user_id: session.user.id, p_kind: 'agent', p_key: agentId, p_favorite: !isFavorite,
+    });
+    if (error) {
+      if (error.code === '22023') return jsonError(`즐겨찾기는 ${MAX_FAVORITES}개까지 등록할 수 있습니다.`, 400);
+      return jsonError('즐겨찾기를 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    }
+    const agentIds = (saved as { agentIds?: unknown } | null)?.agentIds;
+    const favoriteIds = Array.isArray(agentIds) ? agentIds.filter((v): v is string => typeof v === 'string') : [];
 
-    return NextResponse.json({ ok: true, data: { isFavorite: !isFavorite, favoriteIds: updated } });
+    return NextResponse.json({ ok: true, data: { isFavorite: !isFavorite, favoriteIds } });
   } catch (error) {
     console.error('[favorite POST]', error);
     return jsonError('서버 오류가 발생했습니다.', 500);

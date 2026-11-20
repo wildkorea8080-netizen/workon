@@ -6,7 +6,7 @@ import { enabledModels } from '@/lib/models';
 import { isValidIpPattern, parseIpList, clientIpFrom } from '@/lib/ip-access';
 import { getAllowedModelIds } from '@/lib/model-policy';
 import { DEFAULT_THEME_COLOR, normalizeHex, themeColorProblem } from '@/lib/theme-color';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { writeAuditRow } from '@/lib/audit-write';
 import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
 import { logSecurityEvent } from '@/lib/security-log';
@@ -135,7 +135,8 @@ export async function PATCH(request: NextRequest) {
 
   // 기관 전체 설정(기관명·로그인 경로·허용 모델·접속 허용 IP·테마)은 기관 전체 관리자만(2026-11-16).
   // 예전엔 하위 부서 관리자도 바꿀 수 있어, 과 단위 관리자가 기관 전체의 접속 허용 IP·모델을 바꿀 수 있었다
-  const scope = await getActorScope(ctx.session);
+  const scope = await actorScopeOr503(ctx.session);
+  if (scope instanceof Response) return scope;
   if (!scope?.managesWholeOrganization) {
     return NextResponse.json(
       { ok: false, error: { message: '기관 정보는 기관 전체 관리자(최상위 부서 소속)만 바꿀 수 있습니다.' } },

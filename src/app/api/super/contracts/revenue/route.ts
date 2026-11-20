@@ -5,6 +5,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { dbErrorText } from '@/lib/db-error-text';
 import { kstMonthRange, kstYearMonth, revenueIn, type RevenueContract } from '@/lib/contract-revenue';
+import { tokenNumber } from '@/lib/cost-rows';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,11 +29,10 @@ export async function GET(request: NextRequest) {
       .lt('started_at', new Date(yearEndExMs).toISOString());
     if (contractErr) throw contractErr;
 
-    // 해당 연도 usage_logs (API 비용 추정)
+    // 해당 연도 usage_logs (API 비용) — 모든 활동(2026-11-19 — 예전엔 chat_message만이라 업무 작업·평가 등의 원가가 빠졌다)
     const { data: usageLogs, error: usageErr } = await pagedRows<{ details: any; created_at: string }>((a, b, w) => supabaseAdmin
       .from('usage_logs')
       .select('details, created_at', w ? { count: 'exact' } : undefined)
-      .eq('action', 'chat_message')
       .gte('created_at', new Date(yearStartMs).toISOString())
       .lt('created_at', new Date(yearEndExMs).toISOString())
       .order('id').range(a, b));
@@ -55,8 +55,8 @@ export async function GET(request: NextRequest) {
         const d = Date.parse(l.created_at);
         return d >= mStartMs && d < mEndExMs;
       });
-      const inpTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + ((l.details?.input_tokens  as number) ?? 0), 0);
-      const outTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + ((l.details?.output_tokens as number) ?? 0), 0);
+      const inpTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + tokenNumber(l.details?.input_tokens), 0);
+      const outTokens = monthLogs.reduce((s: number, l: { details?: any }) => s + tokenNumber(l.details?.output_tokens), 0);
       // 로그에 cost_usd가 있으면 기록 시점 단가를, 없으면 기본 모델 단가로 추정
       const apiCostUsd = sumCostUsd(monthLogs);
       const apiCostKrw = usdToKrw(apiCostUsd);

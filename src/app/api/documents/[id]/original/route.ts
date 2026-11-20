@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { loadAgentAccess } from '@/lib/agent-store';
+import { isAgentReadError, loadAgentAccess } from '@/lib/agent-store';
 import { AGENT_ORIGINAL_COLUMNS, canOpenAgentOriginal, originalUrl, parsePage, signOriginal, type AgentOriginalDoc } from '@/lib/source-original';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +23,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
   if (!UUID.test(params.id)) return jsonError(NOT_FOUND, 404);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError(NOT_FOUND, 404);
 
   const { data, error } = await supabaseAdmin
@@ -34,7 +35,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .maybeSingle();
   if (error) return jsonError('원본을 지금 불러올 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
   const doc = (data ?? null) as AgentOriginalDoc | null;
-  const agent = doc?.agent_id ? await loadAgentAccess(doc.agent_id) : null;
+  let agent: Awaited<ReturnType<typeof loadAgentAccess>> = null;
+  try {
+    agent = doc?.agent_id ? await loadAgentAccess(doc.agent_id) : null;
+  } catch (err) {
+    // 비서를 못 읽으면 '없음'(404)이 아니라 그렇다고(2026-11-19)
+    if (isAgentReadError(err)) return jsonError('원본을 지금 불러올 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    throw err;
+  }
   if (!doc || !canOpenAgentOriginal(doc, agent, actor)) return jsonError(NOT_FOUND, 404);
 
   const signed = await signOriginal(doc.storage_path!);

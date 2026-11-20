@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { loadAgentAccess } from '@/lib/agent-store';
 import { findAgentOriginal, readOriginalText } from '@/lib/source-original';
 
@@ -22,7 +22,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
   if (!UUID.test(params.id)) return jsonError('원본을 찾을 수 없습니다.', 404);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('원본을 찾을 수 없습니다.', 404);
   const doc = await findAgentOriginal(params.id, actor, loadAgentAccess);
   if (doc === 'error') return jsonError('원본을 지금 불러올 수 없습니다. 잠시 뒤 다시 시도해 주세요.', 503);

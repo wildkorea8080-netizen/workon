@@ -16,13 +16,33 @@ import { removeAgentDocuments } from '@/lib/agent-documents';
  * 결과를 라우트가 쓰기 좋은 꼴로 바꾼다.
  */
 
+/**
+ * 비서를 못 읽었을 때(2026-11-19). 예전 `loadAgentAccess`는 읽기 실패도 null('없음')로 돌려, 비서를 쓰는 라우트 스무 곳이
+ * 잠깐의 DB 오류를 '비서를 찾을 수 없습니다'(404)·'권한이 없습니다'(403)로 답했다 — 직원은 비서가 지워진 줄 안다.
+ * 이제 던진다. 라우트의 catch가 500으로 답하고(아래 `isAgentReadError`로 503을 고를 수 있다), 없음만 null이다.
+ */
+export class AgentReadError extends Error {
+  readonly code: string | null;
+  constructor(code: string | null) {
+    super('비서를 지금 읽지 못했습니다.');
+    this.name = 'AgentReadError';
+    this.code = code;
+  }
+}
+
+export function isAgentReadError(err: unknown): err is AgentReadError {
+  return err instanceof AgentReadError;
+}
+
+/** 못 읽으면 `AgentReadError`를 던진다 — null은 정말 없을 때만 */
 export async function loadAgentAccess(agentId: string): Promise<AgentAccessInfo | null> {
   const { data, error } = await supabaseAdmin
     .from('agents')
     .select(AGENT_ACCESS_COLUMNS)
     .eq('id', agentId)
     .maybeSingle();
-  if (error || !data) return null;
+  if (error) throw new AgentReadError((error as { code?: string }).code ?? null);
+  if (!data) return null;
   return data as unknown as AgentAccessInfo;
 }
 

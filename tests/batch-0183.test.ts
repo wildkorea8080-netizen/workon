@@ -131,6 +131,6 @@ describe('GET /api/super/organizations/[id]', () => {
 describe('원본 확인', () => {
   it('예산 알림은 정지·종료한 기관을 빼고 문서 올리기는 같은 판정', () => {
     expect(readFileSync('src/lib/budget-alerts.ts', 'utf8')).toContain(".not('status', 'in', STOPPED_ORG_STATUS_LIST)");
-    expect(readFileSync('src/lib/document-upload.ts', 'utf8')).toContain('isStoppedOrgStatus(await lookup(organizationId))');
+    expect(readFileSync('src/lib/document-upload.ts', 'utf8')).toContain('if (!isStoppedOrgStatus(status)) return null;');
   });
 });

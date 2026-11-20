@@ -22,6 +22,13 @@ export const WEBHOOK_MAX_BODY_WITH_FILES_BYTES = 4_300_000;
 export const WEBHOOK_TITLE_PREFIX = '[연동] ';
 /** 기관 전체 외부 연동 스위치(0068)가 꺼져 있을 때 — 외부 호출 403·새 연동 거절·직원 목록 안내에 같은 문구 */
 export const WEBHOOK_ORG_DISABLED = '기관 관리자가 외부 연동(Webhook)을 꺼 두었습니다. 다시 켤 때까지 연동으로 앱을 실행할 수 없습니다.';
+/** 기관이 정지·종료됐을 때(2026-11-19) — 외부 호출·상태 묻기 403. 스위치 문구('관리자가 꺼 두었습니다')와 가른다 */
+export const WEBHOOK_ORG_STOPPED = '기관 이용이 정지되었거나 종료되어 연동으로 앱을 실행할 수 없습니다.';
+/** 외부 호출 앞 판정 — 스위치가 꺼짐(`true`)·기관이 정지·종료(`'stopped'`)·쓸 수 있음(`false`) */
+export type WebhookOrgBlock = boolean | 'stopped';
+export function webhookOrgBlockMessage(block: Exclude<WebhookOrgBlock, false>): string {
+  return block === 'stopped' ? WEBHOOK_ORG_STOPPED : WEBHOOK_ORG_DISABLED;
+}
 export const WEBHOOK_ORG_DISABLED_CREATE = '기관 관리자가 외부 연동(Webhook)을 꺼 두어 새 연동을 만들 수 없습니다.';
 /** 기관 전체 스위치 상태 — 관리자 화면. `canChange`는 기관 전체를 관리하는 관리자만 참 */
 export type WebhookSwitchView = { disabled: boolean; disabledAt: string | null; reason: string | null; canChange: boolean };
@@ -96,10 +103,12 @@ export type AppWebhookView = {
   lastStatus: 'completed' | 'failed' | null; lastError: string | null; lastConversationId: string | null; createdAt: string;
   /** 쓰는 중이지만 기관이 외부 연동을 꺼 두어 지금은 돌지 않는다(0068) — 토큰은 그대로, 다시 켜면 쓴다 */
   blockedByOrg: boolean;
+  /** 막힌 까닭이 기관 정지·종료(2026-11-19) — 화면이 `WEBHOOK_ORG_STOPPED`를 보인다 */
+  orgStopped: boolean;
 };
 
 /** DB 행 → 화면. 토큰 해시·사용자·부서는 내보내지 않는다 */
-export function webhookView(row: AppWebhookRowLike, appName: string | null, nowMs: number, orgDisabled = false): AppWebhookView {
+export function webhookView(row: AppWebhookRowLike, appName: string | null, nowMs: number, orgDisabled: WebhookOrgBlock = false): AppWebhookView {
   const state = row.status === 'revoked' ? 'revoked' : Date.parse(row.expires_at) <= nowMs ? 'expired' : 'active';
   return {
     id: row.id, agentId: row.agent_id, appName: appName ?? '삭제된 앱', appVersion: row.app_version, name: row.name, tokenPrefix: row.token_prefix,
@@ -107,7 +116,8 @@ export function webhookView(row: AppWebhookRowLike, appName: string | null, nowM
     state, expiresAt: row.expires_at, revokedAt: row.revoked_at, revokedReason: row.revoked_reason ?? null, lastUsedAt: row.last_used_at, useCount: row.use_count,
     lastStatus: row.last_status === 'completed' || row.last_status === 'failed' ? row.last_status : null,
     lastError: row.last_error, lastConversationId: row.last_conversation_id, createdAt: row.created_at,
-    blockedByOrg: orgDisabled && state === 'active',
+    blockedByOrg: Boolean(orgDisabled) && state === 'active',
+    orgStopped: orgDisabled === 'stopped' && state === 'active',
   };
 }
 

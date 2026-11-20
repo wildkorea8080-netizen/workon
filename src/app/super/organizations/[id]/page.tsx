@@ -599,9 +599,11 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
     const res = await fetch(`/api/super/organizations/${orgId}/verify-key`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keyType: provider, key: key ?? inputVal }),
-    });
-    const d = await res.json();
-    setVerifyResult(r => ({ ...r, [provider]: d.valid }));
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => null) : null;
+    // 맞음·틀림·확인 못 함(null) 셋(2026-11-19 — 예전엔 Anthropic 장애도 '유효한 키'·확인 못 함은 '유효하지 않은 키')
+    if (!d?.ok) onToast(typeof d?.error === 'string' ? d.error : '키를 확인하지 못했습니다.');
+    setVerifyResult(r => ({ ...r, [provider]: d?.ok ? d.valid : null }));
     setVerifying(null);
   };
 
@@ -653,8 +655,8 @@ function ApiKeysTab({ orgId, onToast }: { orgId: string; onToast: (m: string) =>
                         {verifying === provider ? '검증 중...' : '키 검증'}
                       </button>
                       {vr !== undefined && (
-                        <span className={`text-xs flex items-center gap-1 ${vr ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {vr ? '✅ 유효한 키' : '❌ 유효하지 않은 키'}
+                        <span className={`text-xs flex items-center gap-1 ${vr === true ? 'text-emerald-400' : vr === null ? 'text-amber-400' : 'text-red-400'}`}>
+                          {vr === true ? '✅ 유효한 키' : vr === null ? '⚠️ 확인하지 못함' : '❌ 유효하지 않은 키'}
                         </span>
                       )}
                       <button onClick={() => handleSave(provider)} disabled={saving || !inputVal}

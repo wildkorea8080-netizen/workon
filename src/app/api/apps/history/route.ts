@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { HISTORY_PAGE_SIZE, decodeHistoryCursor, encodeHistoryCursor, historySummary } from '@/lib/apps/history';
@@ -9,7 +9,8 @@ const fail = (message: string, status: number) => NextResponse.json({ ok: false,
 export async function GET(request: NextRequest) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('기관 소속을 확인할 수 없습니다.', 403);
   const cursorText = request.nextUrl.searchParams.get('cursor');
   const cursor = cursorText ? decodeHistoryCursor(cursorText) : null;

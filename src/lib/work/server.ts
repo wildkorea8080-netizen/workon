@@ -5,7 +5,7 @@ import { getVisibleDepartmentIds } from '@/lib/department-scope';
 // src/lib/work/server.ts
 import { NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE, getActorScope, isActorScopeReadError } from '@/lib/actor-scope';
 import { resolveModelForDepartment } from '@/lib/model-policy';
 import { checkTokenLimit, limitMessage } from '@/lib/usage-limit';
 import { logSystem } from '@/lib/logger';
@@ -65,7 +65,14 @@ export function defaultWorkContext(): WorkContext {
 export async function getWorkActor(session: Session | null, ctx: WorkContext): Promise<WorkActor | null> {
   if (!session?.user?.id) return null;
   if ((session.user as { isImpersonating?: boolean }).isImpersonating) return null;
-  const scope = await getActorScope(session);
+  let scope: Awaited<ReturnType<typeof getActorScope>>;
+  try {
+    scope = await getActorScope(session);
+  } catch (err) {
+    // 못 읽으면 '업무를 쓸 수 없음'(403)이 아니라 503(2026-11-19)
+    if (isActorScopeReadError(err)) throw new WorkError('ACTOR_UNAVAILABLE', ACTOR_SCOPE_UNAVAILABLE_MESSAGE, 503);
+    throw err;
+  }
   if (!scope?.organizationId) return null;
   if (!(await ctx.store.isUserActive(scope.userId))) return null;
   return {

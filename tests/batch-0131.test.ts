@@ -83,8 +83,8 @@ describe('계정을 만드는 네 길이 만들기 전에 센다(원본)', () =>
     before(src('src/app/api/register/route.ts'), 'checkUserSeats(invitation.department_id, 1)', 'await claimInvitation(invitation.id)');
     const s = src('src/app/api/signup/route.ts');
     before(s, 'checkUserSeats(inv.department_id, 1)', 'await claimInvitation(inv.id)');
-    // 도메인 가입 — 기관을 찾은 뒤, users 행을 만들기 전에(넘으면 만든 Auth 계정을 지운다)
-    before(s, 'const seats = await checkUserSeats(departmentId, 1);', 'await createUserRecord(');
+    // 도메인 가입 — 기관을 찾은 뒤, Auth 계정을 만들기 전에(2026-11-19, batch-0191 — 예전엔 users 행 전에·Auth 계정 뒤)
+    before(s, 'const seats = await checkUserSeats(resolved, 1);', 'await supabase.auth.signUp(');
   });
   it('기관 관리자의 다시 사용 — 꺼진 계정을 켤 때만', () => {
     const s = src('src/app/api/users/[id]/active/route.ts');

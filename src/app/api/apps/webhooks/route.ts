@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS, canUseAgent, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { validateAppDefinition } from '@/lib/apps/definition';
 import { appDocumentChoice, CHOSEN_DOCUMENTS_UNAVAILABLE, verifyChosenDocuments } from '@/lib/apps/app-document-choice';
 import { generateWebhookToken } from '@/lib/apps/webhooks';
 import { APP_MAX_WEBHOOKS_PER_USER, parseWebhookCreate, webhookView, type AppWebhookRowLike, WEBHOOK_COLUMNS, WEBHOOK_ORG_DISABLED_CREATE } from '@/lib/apps/webhook-spec';
-import { readWebhookSwitch } from '@/lib/apps/webhook-switch';
+import { orgAutomationBlock, readWebhookSwitch } from '@/lib/apps/webhook-switch';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
@@ -24,8 +24,9 @@ export async function GET() {
   if (error) return fail('연동을 불러오지 못했습니다.', 503);
   const now = Date.now();
   // 기관 스위치는 안내용 — 읽지 못해도 목록은 보인다(실제 막기는 호출이 한다)
-  const actor = await getActorScope(session).catch(() => null);
-  const orgDisabled = actor?.organizationId ? await readWebhookSwitch(actor.organizationId).then(s => s.disabled, () => false) : false;
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
+  const orgDisabled = actor?.organizationId ? await orgAutomationBlock('webhooks', actor.organizationId).catch(() => false as const) : false;
   return NextResponse.json({ ok: true, data: ((data ?? []) as WebhookRow[]).map(row => webhookView(row, agentName(row), now, orgDisabled)) });
 }
 
@@ -37,7 +38,8 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('기관 소속을 확인할 수 없습니다.', 403);
   if (session.user.isImpersonating) return fail('대리 접근 중에는 연동 토큰을 만들 수 없습니다.', 403);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;

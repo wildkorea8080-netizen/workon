@@ -23,7 +23,7 @@ import { defaultRunAsIo, runAppAs, type RunAsIo } from './run-as';
 import { SCHEDULE_CLAIM_STALE_MS, describeSchedule, nextRunAt, specOfRow, type AppScheduleRowLike } from './schedule-spec';
 import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
 import { agentDocumentRows } from './app-document-choice';
-import { readScheduleSwitch } from './webhook-switch';
+import { scheduleRunHeld } from './webhook-switch';
 import { saveScheduledResultFile } from './schedule-result-file';
 import { attachScheduleFiles, discardAttachments, scheduleFilesOf, type ScheduleFileIo } from './schedule-files';
 import { hasResumableProgress } from './resume';
@@ -404,9 +404,8 @@ export function scheduleDeps(): ScheduleDeps {
       if (!sent.sent) throw new Error(sent.error ?? sent.reason ?? 'send_failed');
     },
     exportResult: (row, conversationId) => saveScheduledResultFile(row, conversationId),
-    async orgDisabled(organizationId) {
-      return (await readScheduleSwitch(organizationId)).disabled;
-    },
+    // 스위치를 껐거나 기관이 정지·종료면 넘긴다
+    orgDisabled: (organizationId) => scheduleRunHeld(organizationId),
     async notifySuccess(row, info) {
       if (!isMailConfigured()) return;
       const [{ data: user }, { data: agent }] = await Promise.all([

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { COMMON_ORIGINAL_COLUMNS, canOpenCommonOriginal, originalUrl, parsePage, signOriginal, type CommonOriginalDoc } from '@/lib/source-original';
 
@@ -21,7 +21,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const session = await getServerAuthSession();
   if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
   if (!UUID.test(params.id)) return jsonError(NOT_FOUND, 404);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError(NOT_FOUND, 404);
 
   const [org, doc] = await Promise.all([

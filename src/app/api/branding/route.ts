@@ -20,17 +20,21 @@ export const dynamic = 'force-dynamic';
  *   (없음)      로그인 후. 세션의 소속 기관을 쓴다
  */
 
+// 못 읽었을 때 — 기본 브랜딩(ok)으로 답하면 화면이 그 값을 '이 사람의 브랜딩'으로 기억해 기관명·로고·색이 기본값으로 바뀌었다(2026-11-19)
+const unavailable = () => NextResponse.json({ ok: false, error: { message: '기관 정보를 지금 불러오지 못했습니다.' } }, { status: 503 });
+
 export async function GET(request: NextRequest) {
   const slug = new URL(request.url).searchParams.get('slug');
 
   let organizationId: string | null = null;
 
   if (slug) {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('organizations')
       .select('id')
       .eq('slug', slug)
       .maybeSingle();
+    if (error) return unavailable();
     organizationId = data?.id ?? null;
 
     if (!organizationId) {
@@ -52,20 +56,22 @@ export async function GET(request: NextRequest) {
 
     let departmentId = session.user.departmentId;
     if (!departmentId) {
-      const { data } = await supabaseAdmin
+      const { data, error } = await supabaseAdmin
         .from('users')
         .select('department_id')
         .eq('id', session.user.id)
         .maybeSingle();
+      if (error) return unavailable();
       departmentId = data?.department_id ?? undefined;
     }
 
     if (departmentId) {
-      const { data } = await supabaseAdmin
+      const { data, error } = await supabaseAdmin
         .from('departments')
         .select('organization_id')
         .eq('id', departmentId)
         .maybeSingle();
+      if (error) return unavailable();
       organizationId = data?.organization_id ?? null;
     }
   }
@@ -85,11 +91,13 @@ export async function GET(request: NextRequest) {
     .eq('id', organizationId)
     .maybeSingle();
   if (orgError) {
-    ({ data: org } = await supabaseAdmin
+    let retryError: unknown = null;
+    ({ data: org, error: retryError } = await supabaseAdmin
       .from('organizations')
       .select('name, slug, logo_url, ai_notice')
       .eq('id', organizationId)
       .maybeSingle());
+    if (retryError) return unavailable();
   }
 
   return NextResponse.json({

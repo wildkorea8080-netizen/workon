@@ -6,8 +6,11 @@ import { claimInvitation, invitationEmailMatches, releaseInvitation } from '@/li
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { authErrorMessage } from '@/lib/auth-error-text';
 import { APP_URL } from '@/lib/config';
+import { isStoppedOrgStatus } from '@/lib/org-status';
+import { SIGNUP_READ_FAILED_MESSAGE, STOPPED_ORG_SIGNUP_MESSAGE, departmentOrgRejection, departmentOrgState } from '@/lib/signup-org';
 
 const MIN_PASSWORD_LENGTH = 8;
+const NO_ORG_SIGNUP_MESSAGE = '소속 기관을 확인할 수 없습니다. 관리자에게 받은 초대 링크로 가입해주세요.';
 
 /**
  * 초대 없이 가입할 때 소속 부서를 정한다.
@@ -19,25 +22,29 @@ const MIN_PASSWORD_LENGTH = 8;
  * 이제 이메일 도메인으로 기관을 찾고, 그 기관 안에서만 부서를 고른다.
  * 도메인이 등록된 기관이 없으면 소속을 알 수 없으므로 가입을 막는다.
  */
-async function resolveDepartmentByEmailDomain(email: string) {
+async function resolveDepartmentByEmailDomain(email: string): Promise<string | null | 'error' | 'stopped'> {
   const domain = email.split('@')[1]?.toLowerCase();
   if (!domain) return null;
 
-  const { data: org } = await supabaseAdmin
+  // 못 읽으면 '소속 기관을 확인할 수 없습니다'가 아니라 그렇다고, 멈춘 기관에는 가입하지 않는다(2026-11-19)
+  const { data: org, error: orgError } = await supabaseAdmin
     .from('organizations')
-    .select('id')
+    .select('id, status')
     .eq('domain', domain)
     .maybeSingle();
 
+  if (orgError) return 'error';
   if (!org) return null;
+  if (isStoppedOrgStatus(org.status)) return 'stopped';
 
   // 기관 내 최상위 부서를 우선, 없으면 가장 먼저 만들어진 부서
-  const { data: departments } = await supabaseAdmin
+  const { data: departments, error: deptError } = await supabaseAdmin
     .from('departments')
     .select('id, parent_id')
     .eq('organization_id', org.id)
     .order('created_at', { ascending: true });
 
+  if (deptError) return 'error';
   if (!departments?.length) return null;
 
   const root = departments.find((d: { parent_id: string | null }) => !d.parent_id);
@@ -102,12 +109,16 @@ export async function POST(request: Request) {
     let inviteClaimedAt: string | null = null;
 
     if (inviteToken) {
-      const { data: inv } = await supabaseAdmin
+      const { data: inv, error: invError } = await supabaseAdmin
         .from('invitations')
         .select('id, email, role, department_id, expires_at, accepted_at')
         .eq('token', inviteToken)
         .maybeSingle();
 
+      // 못 읽으면 '유효하지 않은 초대 링크'가 아니라 그렇다고(2026-11-19)
+      if (invError) {
+        return NextResponse.json<ApiResponse<null>>({ ok: false, error: { message: SIGNUP_READ_FAILED_MESSAGE } }, { status: 503 });
+      }
       if (!inv) {
         return NextResponse.json<ApiResponse<null>>(
           { ok: false, error: { message: '유효하지 않은 초대 링크입니다.' } },
@@ -144,6 +155,10 @@ export async function POST(request: Request) {
       inviteRole   = inv.role ?? 'USER';
       inviteId     = inv.id;
 
+      // 정지·종료한 기관·없어진 부서에는 가입하지 않는다(2026-11-19 — 예전엔 기관 상태를 보지 않았다)
+      const rejected = departmentOrgRejection(await departmentOrgState(inv.department_id));
+      if (rejected) return NextResponse.json<ApiResponse<null>>({ ok: false, error: { message: rejected.message } }, { status: rejected.status });
+
       // 기관의 사용자 수 상한(2026-11-17) — 초대를 쓰기 전에 센다(상한이면 초대는 그대로 남는다)
       const seats = await checkUserSeats(inv.department_id, 1);
       if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
@@ -156,6 +171,31 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+    }
+
+    // ── 1-2단계: 초대 없는 가입은 소속을 먼저 정한다 ───────────
+    // Auth 계정을 만들기 **전에**(2026-11-19 — 예전엔 `signUp`으로 계정을 만들고 확인 메일을 보낸 뒤에야 도메인으로 기관을 찾아,
+    // 소속이 없는 이메일·멈춘 기관·인원 상한이어도 확인 메일이 나갔고 그 Auth 계정을 지웠다)
+    let domainDeptId: string | null = null;
+    if (!inviteToken) {
+      const resolved = await resolveDepartmentByEmailDomain(email);
+      if (resolved === 'error' || resolved === 'stopped') {
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: resolved === 'stopped' ? STOPPED_ORG_SIGNUP_MESSAGE : SIGNUP_READ_FAILED_MESSAGE } },
+          { status: resolved === 'stopped' ? 403 : 503 },
+        );
+      }
+      if (!resolved) {
+        // 소속을 특정할 수 없으면 계정을 만들지 않는다 — 임의의 부서에 넣으면 타 기관 자료에 접근하게 된다
+        return NextResponse.json<ApiResponse<null>>(
+          { ok: false, error: { message: NO_ORG_SIGNUP_MESSAGE } },
+          { status: 403 },
+        );
+      }
+      // 도메인으로 찾은 기관도 사용자 수 상한을 본다(2026-11-17, 초대 길은 위에서 봤다)
+      const seats = await checkUserSeats(resolved, 1);
+      if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
+      domainDeptId = resolved;
     }
 
     // ── 2단계: Supabase Auth 사용자 생성 ─────────────────────
@@ -212,36 +252,17 @@ export async function POST(request: Request) {
       // 특정 이메일에 ADMIN을 자동 부여하던 하드코딩을 제거했다.
       // 그 주소로 가입하는 누구나 기관 관리자가 되는 권한 상승 경로였다.
       // 관리자 지정은 초대(invitations.role) 또는 슈퍼관리자를 통해서만 한다.
-      let departmentId: string | null = inviteDeptId;
+      // 소속은 위에서 정했다(초대의 부서 또는 Auth 계정을 만들기 전에 도메인으로 찾은 부서)
+      const departmentId: string | null = inviteDeptId ?? domainDeptId;
       const role = inviteToken ? inviteRole : 'USER';
 
       if (!departmentId) {
-        departmentId = await resolveDepartmentByEmailDomain(email);
-      }
-
-      if (!departmentId) {
-        // 소속을 특정할 수 없으면 계정을 만들지 않는다.
-        // 임의의 부서에 넣으면 타 기관 자료에 접근하게 된다.
+        // 여기 오면 안 된다 — 위 두 길 모두 소속이 없으면 계정을 만들기 전에 끝낸다
         await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
         return NextResponse.json<ApiResponse<null>>(
-          {
-            ok: false,
-            error: {
-              message:
-                '소속 기관을 확인할 수 없습니다. 관리자에게 받은 초대 링크로 가입해주세요.',
-            },
-          },
+          { ok: false, error: { message: NO_ORG_SIGNUP_MESSAGE } },
           { status: 403 }
         );
-      }
-
-      // 도메인으로 찾은 기관도 사용자 수 상한을 본다(2026-11-17, 초대 길은 위에서 봤다)
-      if (!inviteId) {
-        const seats = await checkUserSeats(departmentId, 1);
-        if (!seats.ok) {
-          await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
-          return NextResponse.json(seatErrorBody(seats), { status: seats.status });
-        }
       }
 
       // users 행을 못 만들면 Auth 계정을 지우고(소속 없는 계정은 로그인도 못 한다) 초대 차지를 푼다 — 다시 가입할 수 있게

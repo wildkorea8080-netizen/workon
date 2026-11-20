@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { listMyApprovals } from '@/lib/apps/outbound/approval';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,8 @@ const fail = (message: string, status: number) => NextResponse.json({ ok: false,
 export async function GET(request: Request) {
   const session = await getServerAuthSession();
   if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
-  const actor = await getActorScope(session).catch(() => null);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return fail('소속 기관을 확인할 수 없습니다.', 403);
   const agent = new URL(request.url).searchParams.get('agent');
   const out = await listMyApprovals({ userId: session.user.id, organizationId: actor.organizationId, departmentId: actor.departmentId }, agent || null);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { parseAdminReason } from '@/lib/apps/automation-admin';
 import { parseBatchLimit, setBatchLimit } from '@/lib/apps/batch-limit';
 
@@ -17,7 +17,8 @@ export async function PUT(request: NextRequest) {
   if (!value.ok) return fail(value.message, 400);
   const reason = parseAdminReason(body?.reason);
   if (!reason.ok) return fail(reason.message, 400);
-  const actor = await getActorScope(session);
+  const actor = await actorScopeOr503(session);
+  if (actor instanceof Response) return actor;
   if (!actor) return fail('관리 범위를 확인할 수 없습니다.', 403);
   const result = await setBatchLimit({ scope: actor, userId: session.user.id, impersonating: Boolean(session.user.isImpersonating) }, value.value, reason.reason);
   if (!result.ok) return fail(result.message, result.status);

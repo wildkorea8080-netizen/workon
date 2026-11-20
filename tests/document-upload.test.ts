@@ -267,9 +267,9 @@ describe('정지된 기관은 문서를 올리지 못한다 (판정 D)', () => {
     '%s는 기관 정지를 보고 403으로 거절한다 — 주소 발급·행 만들기 전에',
     (path) => {
       const route = readFileSync(path, 'utf8');
-      const at = route.indexOf('isOrganizationSuspended(actor.organizationId)');
+      const at = route.indexOf('organizationUploadBlock(actor.organizationId)');
       expect(at).toBeGreaterThan(-1);
-      expect(route).toMatch(/isOrganizationSuspended\(actor\.organizationId\)\)\s*\{?\s*return jsonError\(ORG_SUSPENDED_UPLOAD_MESSAGE, 403\)/);
+      expect(route).toContain('if (uploadBlock) return jsonError(uploadBlock, 403);');
       for (const later of ['createSignedUploadUrl(', ".from('documents').insert("]) {
         const i = route.indexOf(later);
         if (i > -1) expect(at).toBeLessThan(i);

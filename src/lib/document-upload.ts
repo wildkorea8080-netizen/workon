@@ -27,6 +27,8 @@ import { startReadingFields } from '@/lib/document-reading';
 export const DOCUMENT_CONFIRM_WINDOW_MS = 600_000;
 
 export const ORG_SUSPENDED_UPLOAD_MESSAGE = '기관 이용이 정지되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.';
+/** 종료한 기관(2026-11-19) — 예전엔 종료한 기관에도 '정지되어'라고 답했다 */
+export const ORG_TERMINATED_UPLOAD_MESSAGE = '기관 이용이 종료되어 문서를 올릴 수 없습니다. 기관 관리자에게 문의하세요.';
 
 async function organizationStatus(organizationId: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin
@@ -47,13 +49,24 @@ export async function isOrganizationSuspended(
   organizationId: string | null,
   lookup: (organizationId: string) => Promise<string | null> = organizationStatus,
 ): Promise<boolean> {
-  if (!organizationId) return false;
+  return (await organizationUploadBlock(organizationId, lookup)) !== null;
+}
+
+/** 올리기를 막을 까닭 — 막지 않으면 null, 정지·종료면 그 안내(주소 발급·확인 두 곳이 그대로 403으로 답한다) */
+export async function organizationUploadBlock(
+  organizationId: string | null,
+  lookup: (organizationId: string) => Promise<string | null> = organizationStatus,
+): Promise<string | null> {
+  if (!organizationId) return null;
+  let status: string | null;
   try {
-    return isStoppedOrgStatus(await lookup(organizationId));
+    status = await lookup(organizationId);
   } catch (error) {
     console.error('[document-upload] 기관 상태 조회 실패:', error instanceof Error ? error.message : error);
-    return false;
+    return null;
   }
+  if (!isStoppedOrgStatus(status)) return null;
+  return status === 'terminated' ? ORG_TERMINATED_UPLOAD_MESSAGE : ORG_SUSPENDED_UPLOAD_MESSAGE;
 }
 
 const DANGEROUS_FILENAME_PATTERNS = [

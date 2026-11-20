@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
 
     // departmentId가 세션에 없으면 DB에서 조회
     let departmentId = session.user.departmentId;
-    let favoriteIds: string[] = [];
+    // null = 못 읽음(2026-11-19 — 예전엔 빈 목록으로 보아 즐겨찾기 탭이 비었다)
+    let favoriteIds: string[] | null = [];
 
     if (!departmentId) {
       const { data: user, error: userError } = await supabaseAdmin
@@ -32,7 +33,14 @@ export async function GET(request: NextRequest) {
         .eq('id', session.user.id)
         .maybeSingle();
 
-      if (userError || !user?.department_id) {
+      // 못 읽으면 '부서 없음'(403)이 아니라 그렇다고(2026-11-19)
+      if (userError) {
+        return NextResponse.json(
+          { ok: false, error: { message: '사용자 정보를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+          { status: 503 }
+        );
+      }
+      if (!user?.department_id) {
         return NextResponse.json(
           { ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } },
           { status: 403 }
@@ -41,12 +49,12 @@ export async function GET(request: NextRequest) {
       departmentId = user.department_id;
       favoriteIds = user.favorite_agent_ids ?? [];
     } else {
-      const { data: user } = await supabaseAdmin
+      const { data: user, error: favError } = await supabaseAdmin
         .from('users')
         .select('favorite_agent_ids')
         .eq('id', session.user.id)
         .maybeSingle();
-      favoriteIds = user?.favorite_agent_ids ?? [];
+      favoriteIds = favError ? null : user?.favorite_agent_ids ?? [];
     }
 
     if (!departmentId) {
@@ -71,6 +79,12 @@ export async function GET(request: NextRequest) {
 
     // 즐겨찾기 탭: favoriteIds 기반으로 in() 쿼리
     if (favoritesOnly) {
+      if (favoriteIds === null) {
+        return NextResponse.json(
+          { ok: false, error: { message: '즐겨찾기를 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+          { status: 503 }
+        );
+      }
       if (favoriteIds.length === 0) {
         return NextResponse.json({ ok: true, data: [] });
       }
@@ -94,7 +108,7 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         );
       }
-      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: favoriteIds ? { favoriteIds } : {} });
     }
 
     // 내 비서 탭 — 나만의 비서. 부서를 옮겨도 내 것이므로 부서로 거르지 않는다.
@@ -113,7 +127,7 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         );
       }
-      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: favoriteIds ? { favoriteIds } : {} });
     }
 
     // 관리 화면 — 관리 범위의 공식·부서 비서. 꺼 둔 것도 보인다(다시 켜려면 보여야 한다).
@@ -137,7 +151,7 @@ export async function GET(request: NextRequest) {
         .order('display_order', { ascending: true })
         .order('name', { ascending: true });
       if (error) return jsonError('에이전트 조회 중 오류가 발생했습니다.', 500);
-      return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
+      return NextResponse.json({ ok: true, data: listRows(agents), meta: favoriteIds ? { favoriteIds } : {} });
     }
 
     // 카테고리 / 전체 비서 — 공식 비서 + 내 부서 계통의 부서 비서.
@@ -173,7 +187,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, data: listRows(agents), meta: { favoriteIds } });
+    return NextResponse.json({ ok: true, data: listRows(agents), meta: favoriteIds ? { favoriteIds } : {} });
   } catch (error) {
     console.error('에이전트 목록 조회 오류:', error);
     return NextResponse.json(
