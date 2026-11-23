@@ -74,8 +74,10 @@ export function defaultRunAsIo(): RunAsIo {
     prepare: prepareTurn,
     stream: (turn, send, options) => streamTurn(turn, send, options?.deadlineAt !== undefined ? { deadlineAt: options.deadlineAt } : {}),
     async retitle(conversationId, prefix) {
-      const { data } = await supabaseAdmin.from('conversations').select('title').eq('id', conversationId).maybeSingle();
-      const title: string = data?.title ?? '';
+      // 못 읽었으면 그대로 둔다 — 예전엔 빈 제목으로 보아 '[예약] 앱 실행'으로 덮어썼다(2026-11-22)
+      const { data, error } = await supabaseAdmin.from('conversations').select('title').eq('id', conversationId).maybeSingle();
+      if (error || !data) return;
+      const title: string = data.title ?? '';
       if (title.startsWith(prefix)) return;
       await supabaseAdmin.from('conversations').update({ title: `${prefix}${title || '앱 실행'}`.slice(0, 200) }).eq('id', conversationId);
     },

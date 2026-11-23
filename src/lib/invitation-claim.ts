@@ -20,7 +20,22 @@ export function invitationEmailMatches(invitationEmail: unknown, email: unknown)
   return a !== '' && a === normalizeInviteEmail(email);
 }
 
-/** 초대를 쓴 것으로 차지한다 — 아직 안 썼고 만료 전일 때만. 차지했으면 그 시각, 아니면 null */
+/**
+ * 초대를 차지하다 DB가 실패한 것(2026-11-20). 예전엔 이것도 null('이미 썼거나 만료')이라 가입 화면이
+ * '이미 사용됐거나 만료된 초대 링크입니다'로 답했다 — 멀쩡한 초대가 죽은 줄 알고 관리자에게 새 초대를 요청하게 된다.
+ */
+export class InvitationClaimError extends Error {
+  constructor(readonly code: string | null) {
+    super('invitation claim unavailable');
+    this.name = 'InvitationClaimError';
+  }
+}
+export function isInvitationClaimError(error: unknown): error is InvitationClaimError {
+  return error instanceof InvitationClaimError;
+}
+export const INVITATION_CLAIM_UNAVAILABLE = '초대를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
+
+/** 초대를 쓴 것으로 차지한다 — 아직 안 썼고 만료 전일 때만. 차지했으면 그 시각, 이미 썼거나 만료면 null, 못 읽으면 `InvitationClaimError` */
 export async function claimInvitation(id: string, nowMs = Date.now()): Promise<string | null> {
   const at = new Date(nowMs).toISOString();
   const { data, error } = await supabaseAdmin
@@ -31,7 +46,8 @@ export async function claimInvitation(id: string, nowMs = Date.now()): Promise<s
     .gt('expires_at', at)
     .select('id')
     .maybeSingle();
-  if (error || !data) return null;
+  if (error) throw new InvitationClaimError((error as { code?: string }).code ?? null);
+  if (!data) return null;
   return at;
 }
 

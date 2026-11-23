@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +31,8 @@ export async function DELETE(
       );
     }
 
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
 
     const { data: removed, error } = await supabaseAdmin
       .from('invitations')

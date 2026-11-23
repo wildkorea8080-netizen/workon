@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import type { Agent } from '@/lib/db';
 import { requestJson } from '@/lib/request-json';
 
@@ -225,7 +226,7 @@ function RequestApprovalModal({
       if (!result.ok) throw new Error(result.error?.message);
       onRequested();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '신청에 실패했습니다.');
+      setError(actionErrorText(err, '신청에 실패했습니다.'));
     } finally {
       setSubmitting(false);
     }

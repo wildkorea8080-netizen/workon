@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShell';
@@ -131,7 +132,7 @@ function Runner() {
       // 처리 시간에 멈췄으면 끝난 단계부터 자동으로 이어 간다(두 번까지, 진행이 늘 때만) — 아니면 오류와 '이어서 실행' 단추
       const decision = autoResumeDecision({ code: failure instanceof AppStreamError ? failure.code : undefined, source, definition, values, filesAdded, draft: Boolean(draftSavedAt), attempt: auto?.attempt ?? 0, previousProgress: auto?.progress ?? -1 });
       if (decision.resume) { next = decision; setStatus(autoResumeStatus(decision.attempt)); }
-      else { setError(failure instanceof Error ? failure.message : '응답을 받지 못했습니다.'); setStatus(''); }
+      else { setError(actionErrorText(failure, '응답을 받지 못했습니다.')); setStatus(''); }
     }
     finally { pending.current = false; setRunning(false); }
     if (next) void run(undefined, next.messageId, { attempt: next.attempt, progress: next.progress });

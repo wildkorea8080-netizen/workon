@@ -1,3 +1,4 @@
+import { isAuthUnavailable } from '@/lib/auth-unavailable';
 import bcrypt from 'bcryptjs';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -24,7 +25,8 @@ export interface PasswordChangeDeps {
   throttle: ThrottleDeps;
   readUser(id: string): Promise<{ email: string | null; password_hash: string | null; is_active?: boolean | null; deleted_at?: string | null } | null | 'error'>;
   /** Supabase Auth로 그 이메일·비밀번호가 맞으면 그 계정 id */
-  verifyAuth(email: string, password: string): Promise<string | null>;
+  /** Auth로 확인 — 맞으면 그 사용자 id, 틀리면 null, 지금 확인하지 못했으면 'unavailable'(2026-11-20) */
+  verifyAuth(email: string, password: string): Promise<string | null | 'unavailable'>;
   compareHash(password: string, hash: string): Promise<boolean>;
   updateAuthPassword(id: string, password: string): Promise<'ok' | 'not_found' | 'error'>;
   hash(password: string): Promise<string>;
@@ -58,9 +60,11 @@ export async function changeOwnPassword(
   if (next === current) return { ok: false, code: 'same', message: '지금 비밀번호와 다른 비밀번호를 입력해 주세요.' };
 
   // 지금 비밀번호 확인 — 로그인과 같은 두 길
-  const authId = await deps.verifyAuth(email, current).catch(() => null);
+  const authId = await deps.verifyAuth(email, current).catch(() => 'unavailable' as const);
   const viaAuth = authId === userId;
   const viaHash = !viaAuth && Boolean(row.password_hash) && (await deps.compareHash(current, row.password_hash!).catch(() => false));
+  // Auth가 지금 확인하지 못했으면 틀린 비밀번호가 아니다 — 실패로 세지 않는다(2026-11-20, 로그인과 같은 규칙)
+  if (!viaAuth && !viaHash && authId === 'unavailable') return { ok: false, code: 'error' };
   if (!viaAuth && !viaHash) {
     await noteSignInFailure(deps.throttle, scope, email, ip);
     return { ok: false, code: 'wrong', message: '지금 비밀번호가 맞지 않습니다.' };
@@ -92,6 +96,7 @@ export function passwordChangeDeps(throttle: ThrottleDeps): PasswordChangeDeps {
     },
     async verifyAuth(email, password) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error && isAuthUnavailable(error)) return 'unavailable';
       if (error || !data?.user) return null;
       // 로그인(`nextAuthOptions.ts`)과 같은 공개 키 클라이언트(세션을 저장하지 않음)로 확인만 한다
       return data.user.id;

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { API_KEY_PROVIDERS, STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
+import { API_KEY_PROVIDERS, STORED_KEYS_NOT_USED_NOTICE, SYSTEM_KEYS_UNREAD } from '@/lib/api-key-providers';
+import { emptyListText, requestJson, serverErrorText } from '@/lib/ok-json';
 
 type Tab = 'system' | 'organizations';
 const fmtDate = (s?: string | null) => s ? new Date(s).toLocaleDateString('ko-KR') : '—';
@@ -61,9 +62,9 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
     try {
       const res = await fetch('/api/super/api-keys/system');
       const d   = await res.json().catch(() => null);
-      if (res.ok && d?.ok) setData(d.data);
-      else onToast(typeof d?.error === 'string' ? d.error : 'API 키 상태를 불러오지 못했습니다.');
-    } catch { onToast('API 키 상태를 불러오지 못했습니다.'); }
+      if (res.ok && d?.ok && d.data) setData(d.data);
+      else { setData(null); onToast(typeof d?.error === 'string' ? d.error : 'API 키 상태를 불러오지 못했습니다.'); }
+    } catch { setData(null); onToast('API 키 상태를 불러오지 못했습니다.'); }
     finally { setLoading(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -86,14 +87,14 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
     }
     if (vr.valid === null) onToast(`⚠️ ${vr.message}`);
 
-    const res = await fetch('/api/super/api-keys/system', {
+    // 던지지 않는다 — 예전엔 응답을 못 읽거나 연결이 끊기면 '저장 중'이 멈췄다(2026-11-22)
+    const r = await requestJson('/api/super/api-keys/system', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, keyValue: inputVal }),
     });
-    const d = await res.json();
-    if (d.ok) { onToast('✅ 키가 저장됐습니다.'); setEditing(null); setInputVal(''); load(); }
-    else onToast(d.error);
     setSaving(false);
+    if (r.ok) { onToast('✅ 키가 저장됐습니다.'); setEditing(null); setInputVal(''); load(); }
+    else onToast(`❌ ${serverErrorText(r.body, '키를 저장하지 못했습니다. 목록을 새로 고쳐 저장됐는지 확인하세요.')}`);
   };
 
   const handleVerify = async (provider: string) => {
@@ -114,7 +115,8 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
     </div>
   );
 
-  const stats = data?.stats ?? {};
+  // 못 읽었으면(data 없음) 숫자를 0이 아니라 '읽지 못함'으로
+  const stats = data ? (data.stats ?? {}) : { systemKeyOrgCount: null, totalTokensThisMonth: null, estimatedCostUsd: null };
 
   return (
     <div className="space-y-6">
@@ -126,6 +128,7 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
           <p>{STORED_KEYS_NOT_USED_NOTICE}</p>
         </div>
       </div>
+      {!data && <p role="alert" className="rounded-xl border border-red-700/40 bg-red-950/30 p-3 text-sm text-red-300">{SYSTEM_KEYS_UNREAD}</p>}
 
       {/* 키 카드 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -150,7 +153,7 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
               {/* 현재 키 표시 */}
               <div className="p-3 bg-[#0F172A] rounded-xl">
                 <p className="text-xs text-slate-500 mb-1">현재 키</p>
-                <code className="text-sm text-slate-300 font-mono">{keyInfo.masked ?? '(미설정)'}</code>
+                <code className="text-sm text-slate-300 font-mono">{data ? (keyInfo.masked ?? '(미설정)') : '(읽지 못함)'}</code>
                 {keyInfo.updatedAt && (
                   <p className="text-xs text-slate-600 mt-1">마지막 업데이트: {fmtDate(keyInfo.updatedAt)}</p>
                 )}
@@ -235,6 +238,8 @@ function SystemKeysTab({ onToast }: { onToast: (m: string) => void }) {
 function OrgKeysTab({ onToast }: { onToast: (m: string) => void }) {
   const [rows, setRows]     = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // 못 읽음 — 알림은 잠깐 뜨고 사라지므로 표에 남긴다
+  const [unread, setUnread] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -242,10 +247,10 @@ function OrgKeysTab({ onToast }: { onToast: (m: string) => void }) {
     fetch('/api/super/api-keys/organizations')
       .then(async (r) => ({ r, d: await r.json().catch(() => null) }))
       .then(({ r, d }) => {
-        if (r.ok && d?.ok) setRows(d.data);
-        else onToast(typeof d?.error === 'string' ? d.error : '기관별 키 현황을 불러오지 못했습니다.');
+        if (r.ok && d?.ok && Array.isArray(d.data)) { setRows(d.data); setUnread(false); }
+        else { setRows([]); setUnread(true); onToast(typeof d?.error === 'string' ? d.error : '기관별 키 현황을 불러오지 못했습니다.'); }
       })
-      .catch(() => onToast('기관별 키 현황을 불러오지 못했습니다.'))
+      .catch(() => { setRows([]); setUnread(true); onToast('기관별 키 현황을 불러오지 못했습니다.'); })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -256,7 +261,7 @@ function OrgKeysTab({ onToast }: { onToast: (m: string) => void }) {
         <p className="text-xs text-slate-500">
           ✅ 기관 키 보관 중 &nbsp; 🔄 보관한 키 없음 — 어느 쪽이든 호출은 서버 환경 변수 키로 갑니다
         </p>
-        <p className="text-xs text-slate-500">총 {rows.length}개 기관</p>
+        <p className="text-xs text-slate-500">{unread ? '총 —개 기관' : `총 ${rows.length}개 기관`}</p>
       </div>
 
       <div className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
@@ -276,7 +281,7 @@ function OrgKeysTab({ onToast }: { onToast: (m: string) => void }) {
                 ))}</tr>
               ))
             ) : rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-500">기관이 없습니다.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-500">{emptyListText(unread, '기관이 없습니다.', '기관별 키 현황을')}</td></tr>
             ) : (
               rows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-700/20 transition-colors">

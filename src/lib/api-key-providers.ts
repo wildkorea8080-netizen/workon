@@ -21,3 +21,6 @@ export const UNSUPPORTED_PROVIDER_MESSAGE = '지원하지 않는 키 종류입�
  */
 export const STORED_KEYS_NOT_USED_NOTICE =
   '여기 저장한 키는 보관만 합니다. 지금 모든 대화·업무의 모델 호출은 서버 환경 변수(ANTHROPIC_API_KEY)의 키 하나로 가고, 비용은 운영사(WORKON)가 부담합니다. 기관별 키로 호출하는 기능은 아직 없습니다.';
+
+/** 시스템 키 상태를 못 읽었을 때(2026-11-22) — 예전엔 알림이 잠깐 뜬 뒤 '(미설정)'·'0개'·'$0'으로 남아 키가 없는 것처럼 보였다 */
+export const SYSTEM_KEYS_UNREAD = '시스템 API 키 상태를 지금 불러오지 못했습니다. 아래 키·숫자는 확인하지 못한 것입니다 — 화면을 새로 고쳐 주세요.';

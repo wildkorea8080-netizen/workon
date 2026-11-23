@@ -1,5 +1,6 @@
 'use client';
 
+import { confirmedPost, IMPERSONATION_END_FAILED } from '@/lib/confirmed-post';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -11,15 +12,18 @@ export default function ImpersonateBanner({ orgName }: ImpersonateBannerProps) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleReturn = async () => {
     setLoading(true);
-    try {
-      await fetch('/api/super/impersonate/end', { method: 'POST' });
-      // 슈퍼관리자 포털로 이동
+    setError(null);
+    // 서버가 실제로 끝냈을 때만 슈퍼관리자 포털로 — 실패했는데 이동하면 이 기관 관리자 로그인이 남은 채 끝난 줄 안다(2026-11-20)
+    if (await confirmedPost('/api/super/impersonate/end')) {
       window.location.href = '/super/organizations';
-    } catch {
-      setLoading(false);
+      return;
     }
+    setError(IMPERSONATION_END_FAILED);
+    setLoading(false);
   };
 
   return (
@@ -32,6 +36,7 @@ export default function ImpersonateBanner({ orgName }: ImpersonateBannerProps) {
             <span className="mx-2 text-[#B45309]">|</span>
             <span className="text-sm font-semibold text-[#92400E]">{orgName}</span>
             <p className="text-xs text-[#B45309] leading-tight">실제 데이터에 영향을 줄 수 있습니다. 업무 확인 후 반드시 복귀하세요.</p>
+            {error && <p role="alert" className="text-xs font-bold text-red-700 leading-tight mt-0.5">{error}</p>}
           </div>
         </div>
         <button

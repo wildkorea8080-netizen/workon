@@ -144,7 +144,8 @@ describe('원본 확인 — 화면', () => {
     expect(h).toContain('res?.ok && d?.ok');
   });
   it('초대 링크 목록 실패를 알린다', () => {
-    expect(src).toContain('초대 링크 목록을 불러오지 못했습니다');
+    // 0267부터 알림이 아니라 목록 자리에 남는다
+    expect(src).toContain("invitationsUnread ? emptyListText(true, '', '초대 링크 목록을')");
   });
   it('시스템 키 화면도 실패를 알린다', () => {
     expect(readFileSync('src/app/super/api-keys/page.tsx', 'utf8')).toContain('API 키 상태를 불러오지 못했습니다');

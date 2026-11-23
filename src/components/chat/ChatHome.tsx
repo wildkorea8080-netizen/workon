@@ -14,7 +14,8 @@ import NoticesBanner from '@/components/NoticesBanner';
 import { chatLaunchTarget, loadChatLaunchAgent } from '@/lib/apps/chat-launch';
 import WorkShell from '@/components/work/WorkShell';
 import { announceConversationsChanged, CHAT_NEW_EVENT, conversationHref } from '@/lib/chat-events';
-import { pickDefaultAgent } from '@/lib/chat-default-agent';
+import { chooseDefaultAgent, DEFAULT_AGENT_UNREAD } from '@/lib/chat-default-agent';
+import { fetchOkJson } from '@/lib/ok-json';
 import { takeQuestion } from '@/lib/chat-handoff';
 import { isImeComposing } from '@/lib/ime';
 
@@ -45,6 +46,8 @@ function ConvLoader({ onLoad, onAgent, onError }: { onLoad: (id: string) => void
  * `workspace`면 업무 화면 틀(WorkShell — 헤더·공지·왼쪽 업무 메뉴·밝은 바탕) 안에 대화를 그린다(`/chat`, 2026-11-06).
  * 업무 홈을 끈 기관의 `/`는 예전처럼 틀 없이 그린다
  */
+const CONVERSATION_OPEN_FAILED = '대화를 지금 열지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+
 export default function ChatHome({ workspace = false }: { workspace?: boolean } = {}) {
   const router = useRouter();
   const { data: session, status } = useSession();
@@ -53,13 +56,19 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('welcome');
   const [quickInput, setQuickInput] = useState('');
+  // 비서를 고를 때 적어 둔 질문을 읽는다(고르기 함수를 글자마다 새로 만들지 않게)
+  const quickInputRef = useRef(quickInput);
+  quickInputRef.current = quickInput;
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   // 비서를 고르지 않고 첫 화면에서 바로 물을 때 답할 비서(마지막으로 쓴 비서 → 첫 공식 비서), 그리고 그 질문
   const [defaultAgent, setDefaultAgent] = useState<Agent | null>(null);
   const [initialMessage, setInitialMessage] = useState<string | null>(null);
   // 답할 비서 고르기가 끝났는지(비서가 없어도 참) — 홈에서 넘겨받은 질문을 이때 보낸다
   const [defaultReady, setDefaultReady] = useState(false);
+  // 답할 비서를 정할 목록을 못 읽었는지 — 그때는 고르지 않고 직원이 고르게 한다(2026-11-21)
+  const [defaultUnread, setDefaultUnread] = useState(false);
   // 업무 홈 '바로 묻기'가 넘긴 질문(chat-handoff — 주소가 아니라 이 탭의 저장소)
   const pendingQuestionRef = useRef<string | null>(null);
 
@@ -73,17 +82,24 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
     setSelectedAgent(agent);
     lastAgentRef.current = agent;
     conversationIdRef.current = null;
-    setInitialMessage(null);
+    // 첫 화면에 적어 둔 질문은 고른 비서에게 보낸다(2026-11-21) — 안내가 '다른 비서에게 물으려면 아래에서 고르세요'인데 예전엔 고르면 적은 글이 버려졌다
+    setInitialMessage(quickInputRef.current.trim() || null);
+    setQuickInput('');
     setConversationId(null);
     setViewMode('chat');
   }, [router]);
 
   const handleConversationSelect = useCallback(async (id: string) => {
     if (conversationIdRef.current === id) return;
+    // 열지 못하면 알린다(2026-11-20) — 예전엔 조용히 끝나 대화를 눌러도 아무 일이 없었다
+    setOpenError(null);
     try {
       const res = await fetch(`/api/conversations/${id}`);
-      const result = await res.json();
-      if (!result.ok) return;
+      const result = await res.json().catch(() => null);
+      if (!result?.ok) {
+        setOpenError(res.status === 404 ? '대화를 찾을 수 없습니다.' : CONVERSATION_OPEN_FAILED);
+        return;
+      }
       const conv = result.data;
 
       // Supabase join이 객체 또는 배열로 올 수 있으므로 정규화
@@ -100,7 +116,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
       setConversationId(id);
       setViewMode('chat');
     } catch {
-      // silent
+      setOpenError(CONVERSATION_OPEN_FAILED);
     }
   }, []);
 
@@ -151,12 +167,13 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
-    const read = (url: string) => fetch(url).then((r) => r.json()).then((b) => (b?.ok && Array.isArray(b.data) ? b.data : [])).catch(() => []);
+    // 못 읽은 목록은 null — 빈 목록으로 보면 마지막으로 쓴 비서 대신 다른 비서가 골라진다(2026-11-21)
+    const read = (url: string) => fetchOkJson<{ data: unknown }>(url).then((b) => (b && Array.isArray(b.data) ? b.data : null));
     Promise.all([read('/api/agents'), read('/api/agents?personal=true'), read('/api/conversations?limit=1')]).then(([shared, personal, recent]) => {
       if (!alive) return;
-      const last = recent[0]?.agent;
-      const lastId = (Array.isArray(last) ? last[0]?.id : last?.id) ?? null;
-      setDefaultAgent(pickDefaultAgent([...shared, ...personal] as Agent[], lastId));
+      const chosen = chooseDefaultAgent(shared as Agent[] | null, personal as Agent[] | null, recent as Array<{ agent?: unknown }> | null);
+      setDefaultAgent(chosen.agent);
+      setDefaultUnread(chosen.unread);
       setDefaultReady(true);
     });
     return () => { alive = false; };
@@ -245,7 +262,10 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
 
   const userName = session.user.name || session.user.email?.split('@')[0] || '사용자';
 
-  const launchNote = launchError && <p role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">{launchError} <Link href="/apps" className="underline">업무 앱 보기</Link></p>;
+  const launchNote = (<>
+    {launchError && <p role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">{launchError} <Link href="/apps" className="underline">업무 앱 보기</Link></p>}
+    {openError && <p role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">{openError}</p>}
+  </>);
   const body = (
     <div className="flex flex-1 overflow-hidden">
       {/* 대화 목록 — 업무 틀에서는 틀의 사이드바 '최근 대화'가 맡는다(2026-11-06) */}
@@ -274,6 +294,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
             onQuickSend={handleQuickSend}
             onAgentSelect={handleAgentSelect}
             answeringAgentName={(lastAgentRef.current ?? defaultAgent)?.name ?? null}
+            defaultUnread={defaultUnread && !lastAgentRef.current}
           />
         )}
       </section>
@@ -336,6 +357,8 @@ interface WelcomeViewProps {
   onAgentSelect: (agent: Agent) => void;
   /** 바로 물으면 답할 비서 이름 — 없으면 비서를 먼저 골라야 한다 */
   answeringAgentName: string | null;
+  /** 답할 비서를 정할 목록을 못 읽었음 — '비서를 먼저 고르세요' 대신 그 까닭을 */
+  defaultUnread?: boolean;
 }
 
 function WelcomeView({
@@ -345,6 +368,7 @@ function WelcomeView({
   onQuickSend,
   onAgentSelect,
   answeringAgentName,
+  defaultUnread = false,
 }: WelcomeViewProps) {
   const hasLastAgent = Boolean(answeringAgentName);
   return (
@@ -399,7 +423,7 @@ function WelcomeView({
             답할 비서: <span className="font-semibold text-ws-accent-text">{answeringAgentName}</span> · 다른 비서에게 물으려면 아래에서 고르세요
           </p>
         ) : (
-          <p className="mt-2 text-xs text-slate-400">아래에서 비서를 먼저 고르면 바로 대화를 시작할 수 있어요.</p>
+          <p className={`mt-2 text-xs ${defaultUnread ? 'text-amber-700' : 'text-slate-400'}`}>{defaultUnread ? DEFAULT_AGENT_UNREAD : '아래에서 비서를 먼저 고르면 바로 대화를 시작할 수 있어요.'}</p>
         )}
       </div>
 

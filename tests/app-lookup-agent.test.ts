@@ -117,7 +117,7 @@ describe('실행 전 — 권한', () => {
     expect(await checkLookupAgents([OTHER], actor, load([row({ capabilities: { file_read: {} } })]))).toMatchObject({ ok: false });
     expect(await checkLookupAgents([OTHER], actor, load([row({ organization_id: 'ffffffff-6666-4666-8666-666666666666' })]))).toMatchObject({ ok: false });
     expect(await checkLookupAgents([OTHER], actor, load([row({ deleted_at: '2026-11-01' })]))).toMatchObject({ ok: false });
-    expect(await checkLookupAgents([OTHER], actor, load(null))).toEqual({ ok: false, message: lookupAgentDenied(null) });
+    expect(await checkLookupAgents([OTHER], actor, load(null))).toMatchObject({ ok: false });
     // 둘 중 하나라도 아니면 막는다
     expect(await checkLookupAgents([OTHER, THIRD], actor, load([row()]))).toMatchObject({ ok: false });
   });

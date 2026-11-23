@@ -3,6 +3,10 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { requestJson, serverErrorText } from '@/lib/ok-json';
+
+// 초대 정보를 확인하는 요청이 끊겼을 때(2026-11-22) — 예전엔 실패를 삼켜 기관 안내도 이메일 고정도 없이 빈 가입 화면이었다
+const INVITE_INFO_UNREAD = '초대 정보를 지금 확인하지 못했습니다. 화면을 새로 고쳐 주세요 — 가입할 때 서버가 초대를 다시 확인합니다.';
 
 function SignupForm() {
   const router       = useRouter();
@@ -30,26 +34,27 @@ function SignupForm() {
         } else if (typeof d?.error === 'string') {
           // 만료·사용됨·멈춘 기관·확인 실패를 가입 버튼을 누르기 전에(2026-11-19)
           setError(d.error);
+        } else {
+          setError(INVITE_INFO_UNREAD);
         }
       })
-      .catch(() => {});
+      .catch(() => setError(INVITE_INFO_UNREAD));
   }, [inviteToken]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(''); setMessage(''); setLoading(true);
 
-    const response = await fetch('/api/signup', {
+    // 던지지 않는다 — 예전엔 응답을 못 읽거나 연결이 끊기면 '처리 중'이 멈추고 가입됐는지 알 수 없었다(2026-11-22)
+    const r = await requestJson('/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, fullName, password, confirmPassword, inviteToken }),
     });
-
-    const result = await response.json();
     setLoading(false);
 
-    if (!result.ok) { setError(result.error?.message || '회원가입 중 오류가 발생했습니다.'); return; }
-    setMessage(result.data?.message || '회원가입이 완료됐습니다.');
+    if (!r.ok) { setError(serverErrorText(r.body, '회원가입을 마치지 못했습니다. 잠시 뒤 로그인해 보고, 안 되면 다시 가입해 주세요.')); return; }
+    setMessage(r.body.data?.message || '회원가입이 완료됐습니다.');
     setTimeout(() => { router.push('/login?message=signup-success'); }, 2000);
   }
 

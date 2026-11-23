@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { actionErrorText, emptyListText } from '@/lib/ok-json';
 import {
   LineChart,
   Line,
@@ -113,20 +114,32 @@ export default function MyStatsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 더 새 요청이 나갔으면 늦게 온 앞 기간의 응답은 버린다
+  const requestSeq = useRef(0);
+
   const fetchStats = useCallback(async (p: Period) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/my/stats?period=${p}`);
-      const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message);
+      const result = await res.json().catch(() => null);
+      if (seq !== requestSeq.current) return;
+      if (!result?.ok) throw new Error(result?.error?.message ?? '사용현황을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
       setData(result.data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '오류가 발생했습니다.');
+      if (seq !== requestSeq.current) return;
+      // 못 읽었으면 앞 기간의 숫자를 남기지 않는다(2026-11-20 — 예전엔 기간을 바꾼 뒤 실패하면 앞 기간 숫자가 새 기간 아래 그대로,
+      // 처음부터 실패하면 오류 띠 옆에 0건·0·'없음'·'대화 기록이 없습니다'가 함께 보였다)
+      setData(null);
+      setError(actionErrorText(e, '오류가 발생했습니다.'));
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, []);
+  /** 읽기를 마쳤는데 값이 없다 = 못 읽음 */
+  const unread = !loading && !data;
+  const shown = (text: string) => (loading ? '—' : unread ? '읽지 못함' : text);
 
   useEffect(() => { fetchStats(period); }, [period, fetchStats]);
 
@@ -181,22 +194,20 @@ export default function MyStatsPage() {
           <SummaryCard
             emoji="💬"
             label="이번달 대화 수"
-            value={loading ? '—' : `${data?.summary.monthlyConvCount ?? 0}건`}
+            value={shown(`${data?.summary.monthlyConvCount ?? 0}건`)}
           />
           <SummaryCard
             emoji="🔤"
             label="이번달 사용 토큰"
-            value={loading ? '—' : formatTokens(data?.summary.monthlyTokens ?? 0)}
+            value={shown(formatTokens(data?.summary.monthlyTokens ?? 0))}
           />
           <SummaryCard
             emoji="⭐"
             label="가장 많이 쓴 비서"
             value={
-              loading
-                ? '—'
-                : data?.summary.topAgent
+              shown(data?.summary.topAgent
                 ? `${data.summary.topAgent.icon ?? ''} ${data.summary.topAgent.name}`.trim()
-                : '없음'
+                : '없음')
             }
             sub={
               data?.summary.topAgent
@@ -207,7 +218,7 @@ export default function MyStatsPage() {
           <SummaryCard
             emoji="📅"
             label="연속 사용일"
-            value={loading ? '—' : `${data?.summary.streakDays ?? 0}일`}
+            value={shown(`${data?.summary.streakDays ?? 0}일`)}
             sub="오늘 포함"
           />
         </div>
@@ -237,7 +248,7 @@ export default function MyStatsPage() {
             </div>
           ) : (data?.dailyChart?.length ?? 0) === 0 ? (
             <div className="h-48 flex items-center justify-center text-slate-400 text-sm">
-              이 기간에 대화 기록이 없습니다.
+              {emptyListText(unread, '이 기간에 대화 기록이 없습니다.', '대화 횟수를')}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={200}>
@@ -286,7 +297,7 @@ export default function MyStatsPage() {
             {loading ? (
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : (data?.agentStats?.length ?? 0) === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-8">이 기간에 사용한 비서가 없습니다.</p>
+              <p className="text-sm text-slate-400 text-center py-8">{emptyListText(unread, '이 기간에 사용한 비서가 없습니다.', '비서별 통계를')}</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -322,7 +333,7 @@ export default function MyStatsPage() {
             {loading ? (
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : (data?.recentConversations?.length ?? 0) === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-8">이 기간에 대화 기록이 없습니다.</p>
+              <p className="text-sm text-slate-400 text-center py-8">{emptyListText(unread, '이 기간에 대화 기록이 없습니다.', '최근 대화를')}</p>
             ) : (
               <ul className="space-y-1">
                 {data!.recentConversations.map((c) => (

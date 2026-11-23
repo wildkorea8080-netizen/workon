@@ -2,22 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import { SIGN_IN_ACTION_LABEL, recentFailures, type MySignIn } from '@/lib/my-sign-ins-spec';
+import { requestJson } from '@/lib/ok-json';
 
 /** 내 최근 로그인 기록(2026-11-16) — 내가 하지 않은 로그인·실패가 보이면 비밀번호를 바꾸게 */
 export default function MySignIns() {
   const [list, setList] = useState<MySignIn[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // 대리 접근 중(403)에만 숨긴다 — 예전엔 어떤 실패든 칸이 통째로 사라졌다(2026-11-22)
+  const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    fetch('/api/my/sign-ins')
-      .then((r) => r.json())
-      .then((d) => { if (alive) { if (d?.ok) setList(d.data); else setFailed(true); } })
-      .catch(() => { if (alive) setFailed(true); });
+    void requestJson('/api/my/sign-ins').then((r) => {
+      if (!alive) return;
+      if (r.ok && Array.isArray(r.body.data)) setList(r.body.data);
+      else if (r.status === 403) setHidden(true);
+      else setFailed(true);
+    });
     return () => { alive = false; };
   }, []);
 
-  if (failed) return null;
+  if (hidden) return null;
 
   const fails = list ? recentFailures(list) : 0;
   const fmt = (iso: string) => new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -29,7 +34,9 @@ export default function MySignIns() {
       {fails > 0 && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">최근 30일에 비밀번호가 틀린 로그인 시도가 {fails}번 있었습니다.</p>
       )}
-      {list === null ? (
+      {failed ? (
+        <p role="alert" className="mt-3 text-xs text-red-600">로그인 기록을 지금 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.</p>
+      ) : list === null ? (
         <p className="mt-3 text-xs text-slate-400">불러오는 중…</p>
       ) : list.length === 0 ? (
         <p className="mt-3 text-xs text-slate-400">아직 기록이 없습니다(2026-11-16부터 남깁니다).</p>

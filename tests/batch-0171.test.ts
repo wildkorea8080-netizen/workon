@@ -189,15 +189,20 @@ describe('공개 조회 — 로그인 없이', () => {
     expect((await view()).status).toBe(404);
     state.owner = { data: null, error: null };
     expect((await view()).status).toBe(404);
+    // 주인을 못 읽으면 열지 않되 '없음'(404)이 아니라 '지금 못 엶'(503) — 2026-11-20(batch-0238)
     state.owner = { data: null, error: ERR };
-    expect((await view()).status).toBe(404);
+    const unread = await view();
+    expect(unread.status).toBe(503);
+    expect(unread.body.ok).toBe(false);
+    expect(unread.body.data).toBeUndefined();
     state.conversation = shared({ user_id: null });
     state.owner = { data: { is_active: true, deleted_at: null }, error: null };
     expect((await view()).status).toBe(404);
   });
 
   it('토큰이 맞지 않으면 404', async () => {
-    state.conversation = { data: null, error: { code: 'PGRST116' } };
+    // 행 없음(maybeSingle — 2026-11-20부터 `.single()`의 PGRST116 대신 data null)
+    state.conversation = { data: null, error: null };
     expect((await view()).status).toBe(404);
     expect(state.calls.some((c) => c.table === 'users')).toBe(false);
   });

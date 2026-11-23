@@ -3,6 +3,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
+import { isAccessScopeReadError } from '@/lib/access-scope-error';
 import { getActorScope } from '@/lib/actor-scope';
 import { canDeleteAgent } from '@/lib/agent-permissions';
 import { loadAgentAccess, recordAgentEvent } from '@/lib/agent-store';
@@ -46,7 +47,14 @@ export async function GET(request: NextRequest) {
     await replayNodaEvents();
 
     // 기관 전체 공개 문서 + 내 부서 계통에 걸린 부서 제한 문서
-    const scope = await getAccessScope(departmentId);
+    // 공개 범위를 못 읽으면 줄어든 목록 대신 503(2026-11-20)
+    const scope = await getAccessScope(departmentId).catch((err) => {
+      if (isAccessScopeReadError(err)) return null;
+      throw err;
+    });
+    if (!scope) {
+      return NextResponse.json({ ok: false, error: { message: '문서 목록을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
+    }
     const visibleFilter = visibilityFilter(scope);
 
     // 문서가 1,000개를 넘는 기관에서도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)

@@ -49,7 +49,7 @@ describe('연결(원본)', () => {
     const page = readFileSync('src/app/my/password/page.tsx', 'utf8');
     expect(page).toContain('{!required && <MySignIns />}');
     const comp = readFileSync('src/components/my/MySignIns.tsx', 'utf8');
-    expect(comp).toContain("fetch('/api/my/sign-ins')");
+    expect(comp).toContain("requestJson('/api/my/sign-ins')"); // 0267부터 던지지 않는 requestJson
     expect(comp).toContain("from '@/lib/my-sign-ins-spec'");
     expect(readFileSync('src/lib/my-sign-ins-spec.ts', 'utf8')).not.toMatch(/^import /m);
     expect(readFileSync('src/components/layout/UserMenu.tsx', 'utf8')).toContain('>비밀번호·로그인 기록</Link>');

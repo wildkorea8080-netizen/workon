@@ -8,6 +8,7 @@ import type { ArtifactDto } from '@/components/work/types';
 import type { MyGeneratedFile } from '@/lib/my-generated-files';
 import { fileBadge } from '@/lib/file-badge';
 import { matchesFileQuery, normalizeFileQuery, MY_FILES_QUERY_MAX } from '@/lib/file-search';
+import { emptyListText } from '@/lib/ok-json';
 
 /** 결과물 모음 — 볼 수 있는 작업의 파일만, 판별로. 내려받기는 그때마다 권한을 다시 본다 */
 export default function FilesPage() {
@@ -22,6 +23,8 @@ export default function FilesPage() {
   }, []);
   // 업무 결과물은 한 번에 다 받으므로 화면에서 거른다(파일 이름·작업 이름)
   const files = allFiles ? allFiles.filter((f) => matchesFileQuery(query, f.file_name, f.taskTitle)) : null;
+  // 못 읽었으면 머리만 있는 빈 표 대신 그렇다고 보인다(2026-11-21)
+  const workUnread = Boolean(error) && !allFiles;
   return (
     <WorkShell>
       <div className="mx-auto max-w-6xl px-4 py-8 md:px-8">
@@ -36,8 +39,8 @@ export default function FilesPage() {
         <p className="mb-3 text-[13px] text-slate-500">업무 작업에서 만든 파일입니다. 대화를 지워도 남습니다.</p>
         <ErrorNote message={error} />
         <Card className="p-0 overflow-x-auto">
-          {files && files.length === 0 ? (
-            <div className="p-6 text-[15px] text-slate-600">{query ? `'${query}'이(가) 이름에 든 업무 결과물이 없습니다.` : '아직 만든 파일이 없습니다.'}</div>
+          {workUnread || (files && files.length === 0) ? (
+            <div className="p-6 text-[15px] text-slate-600">{workUnread ? emptyListText(true, '', '업무 결과물을') : query ? `'${query}'이(가) 이름에 든 업무 결과물이 없습니다.` : '아직 만든 파일이 없습니다.'}</div>
           ) : (
             <table className="w-full min-w-[720px] text-left text-[15px]">
               <thead className="border-b border-[#DCE3EC] text-[13px] text-slate-500">
@@ -107,6 +110,9 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // 첫 쪽(찾기 글이 바뀐 뒤 포함)을 못 읽었는지 — 2026-11-21: 예전엔 앞 목록을 그대로 두어, 새 찾기가 실패하면
+  // 앞 찾기(또는 전체)의 파일이 새 찾기 결과처럼 보였다
+  const [unread, setUnread] = useState(false);
   const latest = useRef(0);
   const load = async (cursor: string | null) => {
     const seq = ++latest.current;
@@ -117,8 +123,13 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
     const r = await api<{ files: MyGeneratedFile[]; next: string | null }>(`${endpoint}${params.toString() ? `?${params.toString()}` : ''}`);
     if (seq !== latest.current) return; // 늦게 온 옛 응답은 버린다
     setLoading(false);
-    if (!r.ok) { setError(r.error.message); return; }
+    if (!r.ok) {
+      setError(r.error.message);
+      if (!cursor) { setFiles(null); setNext(null); setUnread(true); } // '더 보기' 실패는 읽은 쪽을 그대로 둔다
+      return;
+    }
     setError(null);
+    setUnread(false);
     setFiles((prev) => (cursor ? [...(prev ?? []), ...r.data.files] : r.data.files));
     setNext(r.data.next);
   };
@@ -130,8 +141,8 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
       <p className="mt-1 mb-3 text-[13px] text-slate-500">{description}</p>
       <ErrorNote message={error} />
       <Card className="p-0 overflow-x-auto">
-        {files && files.length === 0 ? (
-          <div className="p-6 text-[15px] text-slate-600">{query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : emptyText}</div>
+        {(unread && !files) || (files && files.length === 0) ? (
+          <div className="p-6 text-[15px] text-slate-600">{unread && !files ? emptyListText(true, emptyText, '파일 목록을') : query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : emptyText}</div>
         ) : (
           <table className="w-full min-w-[720px] text-left text-[15px]">
             <thead className="border-b border-[#DCE3EC] text-[13px] text-slate-500">

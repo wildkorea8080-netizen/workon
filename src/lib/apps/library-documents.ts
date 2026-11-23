@@ -68,7 +68,8 @@ export function parseLibraryIds(raw: unknown): string[] | null {
 export interface LibraryDeps {
   /** 이 비서의 문서 행(요청자 기관으로 한정해 읽는다) */
   documentsOf(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>;
-  download(path: string): Promise<Uint8Array | null>;
+  /** 원본 바이트 — 저장소에 없으면 null, 지금 못 받았으면 'unavailable' */
+  download(path: string): Promise<Uint8Array | null | 'unavailable'>;
   read?: typeof readAttachment;
 }
 
@@ -93,7 +94,10 @@ export async function loadLibraryDocuments(ids: string[], agentId: string, actor
   for (const row of chosen as LibraryDocumentRow[]) {
     const name = row.title?.trim() || row.file_name;
     const bytes = await deps.download(row.storage_path!);
-    if (!bytes) return { ok: false, status: 404, message: `${name}: 원본 파일을 찾을 수 없습니다.` };
+    // 지금 못 받은 것은 503, 원본이 없는 것은 422(2026-11-20). 예전엔 둘 다 404였고, 예약 실행기·일괄 실행은 404를
+    // '앱을 쓸 수 없음'으로 읽는다 — 잠깐의 저장소 장애에 예약이 바로 멈추고 직원에게 메일이 갔다(일괄 실행은 묶음 전체가 멈춤).
+    if (bytes === 'unavailable') return { ok: false, status: 503, message: `${name}: 원본 파일을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.` };
+    if (!bytes) return { ok: false, status: 422, message: `${name}: 원본 파일을 찾을 수 없습니다.` };
     if (bytes.byteLength > MAX_UPLOAD_BYTES) return { ok: false, status: 413, message: `${name}: 원본 파일이 너무 커서 읽을 수 없습니다.` };
     try {
       files.push({ name, extract: await read(Buffer.from(bytes), row.file_name) });

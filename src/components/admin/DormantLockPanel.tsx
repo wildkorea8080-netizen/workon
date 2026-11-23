@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 
 const CHOICES = [30, 60, 90, 180, 365];
 
@@ -10,22 +11,34 @@ export default function DormantLockPanel() {
   const [since, setSince] = useState<string | null>(null);
   const [choice, setChoice] = useState<string>('off');
   const [loaded, setLoaded] = useState(false);
+  // 지금 설정을 못 읽은 것(2026-11-20) — 예전엔 칸이 통째로 사라져 이 설정이 있는지조차 알 수 없었다.
+  // 못 읽은 채로는 고르게 두지 않는다(지금 값을 모르고 저장하면 켜 둔 잠금을 끌 수 있다)
+  const [unread, setUnread] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/organization')
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d?.ok) return;
+      .then(async (r) => ({ status: r.status, d: await r.json().catch(() => null) }))
+      .then(({ status, d }) => {
+        // 권한이 없어 거절된 것(401·403)은 예전처럼 칸을 보이지 않는다 — 못 읽은 것만 알린다
+        if (!d?.ok) { if (status !== 401 && status !== 403) setUnread(true); return; }
         setDays(d.data.dormant_lock_days ?? null);
         setSince(d.data.dormant_lock_since ?? null);
         setChoice(d.data.dormant_lock_days ? String(d.data.dormant_lock_days) : 'off');
         setLoaded(true);
       })
-      .catch(() => undefined);
+      .catch(() => setUnread(true));
   }, []);
 
+  if (unread) {
+    return (
+      <section className="mt-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <h2 className="text-base font-semibold text-slate-900">장기 미접속 계정 잠금</h2>
+        <p role="alert" className="mt-2 text-sm text-amber-700">지금 설정을 불러오지 못했습니다. 화면을 새로 고쳐 주세요.</p>
+      </section>
+    );
+  }
   if (!loaded) return null;
 
   const save = async () => {
@@ -45,7 +58,7 @@ export default function DormantLockPanel() {
       setSince(d.data.dormant_lock_since ?? null);
       setMsg({ ok: true, text: '저장했습니다.' });
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : '저장하지 못했습니다.' });
+      setMsg({ ok: false, text: actionErrorText(e, '저장하지 못했습니다.') });
     } finally {
       setSaving(false);
     }

@@ -25,6 +25,16 @@ export const POLICY_FALLBACK_MODEL_ID = DEFAULT_MODEL_ID;
  *          그 기관은 아무 대화도 못 하게 잠긴다
  */
 export async function getAllowedModelIds(organizationId: string | null | undefined): Promise<string[]> {
+  // 조회 실패가 범위를 넓히면 안 된다. 가장 좁은 쪽으로 닫는다.
+  return (await readAllowedModelIds(organizationId)) ?? [POLICY_FALLBACK_MODEL_ID];
+}
+
+/**
+ * 허용 모델 — 정책을 못 읽으면 null(2026-11-20). 판정(대화·저장)은 `getAllowedModelIds`로 닫고,
+ * **화면에 목록을 보일 때는 이것을 쓴다** — 닫은 값(기본 모델 하나)을 목록으로 보이면 비서 편집 창이
+ * 허용된 모델을 '허용되지 않음 — 바꿔야 저장됩니다'로 잘못 알린다.
+ */
+export async function readAllowedModelIds(organizationId: string | null | undefined): Promise<string[] | null> {
   const usable = new Set(enabledModels().map((m) => m.id));
 
   if (!organizationId) return [POLICY_FALLBACK_MODEL_ID];
@@ -35,10 +45,9 @@ export async function getAllowedModelIds(organizationId: string | null | undefin
     .eq('id', organizationId)
     .maybeSingle();
 
-  // 조회 실패가 범위를 넓히면 안 된다. 가장 좁은 쪽으로 닫는다.
   if (error) {
     console.warn('[model-policy] 허용 모델 조회 실패:', error.message);
-    return [POLICY_FALLBACK_MODEL_ID];
+    return null;
   }
 
   const configured = data?.allowed_models;

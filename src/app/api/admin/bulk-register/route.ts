@@ -9,7 +9,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import crypto from 'crypto';
 import { sendTempPasswordEmail, isMailConfigured } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
@@ -128,7 +128,9 @@ export async function POST(request: NextRequest) {
     // **관리 범위**(2026-11-18) — 예전에는 기관 안의 아무 부서나 이름으로 찾아 넣었다. 하위 부서 관리자가 CSV에 기관 직속 부서 이름과
     // 권한 ADMIN을 적으면 기관 전체 관리자 계정이 만들어졌고(임시 비밀번호는 응답으로 받는다), 상위 없는 새 부서도 만들 수 있었다
     // (부서 화면은 기관 직속 관리자만 최상위 부서를 만든다). 이제 있는 부서는 관리 범위 안일 때만, 새 부서는 관리 범위 안의 부서 아래에만 만든다.
-    const managedIds = new Set(await getManagedDepartmentIds(adminDeptId));
+    const managedScope = await managedDepartmentIdsOr503(adminDeptId);
+    if (managedScope instanceof Response) return managedScope;
+    const managedIds = new Set(managedScope);
     const isRootAdmin = adminDept?.parent_id == null;
 
     // 부서 캐시 (같은 이름 중복 조회 방지)

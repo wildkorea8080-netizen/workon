@@ -35,12 +35,12 @@ function RegisterForm() {
     }
 
     fetch(`/api/register/validate-token?token=${encodeURIComponent(token)}`)
-      .then(r => r.json())
+      .then(r => r.json().catch(() => null))
       .then(result => {
-        if (result.ok) {
+        if (result?.ok) {
           setTokenInfo(result.data);
         } else {
-          setTokenError(result.error?.message || '유효하지 않거나 만료된 초대 링크입니다.');
+          setTokenError(result?.error?.message || '초대 링크를 지금 확인하지 못했습니다. 잠시 뒤 다시 열어 주세요.');
         }
       })
       .catch(() => setTokenError('토큰 확인 중 오류가 발생했습니다.'))

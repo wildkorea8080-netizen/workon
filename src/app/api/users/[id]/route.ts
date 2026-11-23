@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +39,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       );
     }
 
-    const managedDeptIds = await getManagedDepartmentIds(adminDeptId);
+    const managedDeptIds = await managedDepartmentIdsOr503(adminDeptId);
+    if (managedDeptIds instanceof Response) return managedDeptIds;
 
     // 대상 직원이 관리 범위 안인지
     const { data: target, error: targetError } = await supabaseAdmin

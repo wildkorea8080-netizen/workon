@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { LEGACY_PRICING_MODEL_ID } from '@/lib/models';
 import { pagedRows } from '@/lib/paged-select';
 import { parseUsageGroups, usageRowsFromGroups, type UsageAxis } from '@/lib/usage-summary';
@@ -43,7 +43,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const managedDeptIds = await getManagedDepartmentIds(adminDeptId);
+  const managedDeptIds = await managedDepartmentIdsOr503(adminDeptId);
+  if (managedDeptIds instanceof Response) return managedDeptIds;
 
   const { searchParams } = new URL(request.url);
   const axis = (searchParams.get('by') ?? 'agent') as Axis;

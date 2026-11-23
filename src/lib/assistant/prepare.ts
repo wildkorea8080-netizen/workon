@@ -1,6 +1,7 @@
 // src/lib/assistant/prepare.ts
 import type { Session } from 'next-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { isStorageNotFound } from '@/lib/storage-error';
 import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE, getActorScope, isActorScopeReadError } from '@/lib/actor-scope';
 import { canEditAgent, canUseAgent, AGENT_ACCESS_COLUMNS, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { readAppDraft, withDraftSettings } from '@/lib/apps/draft';
@@ -214,7 +215,8 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const appLookupAgents = appStepInputs ? appLookupAgentIds(definition.value?.steps, agent_id) : [];
   if (appLookupAgents.length) {
     const checked = await checkLookupAgents(appLookupAgents, actor);
-    if (!checked.ok) return reject(checked.message, 403);
+    // 못 읽은 것은 503 — 403은 실행기가 '앱을 쓸 수 없음'으로 읽어 예약을 멈춘다(2026-11-20)
+    if (!checked.ok) return reject(checked.message, checked.unread ? 503 : 403);
   }
 
   // 사람 id를 넘겨야 걸린 것이 보안 로그에 남는다 — 예전에는 넘기지 않아 대화에서 금지어·개인정보가 걸려도 **한 번도 남지 않았다**(2026-11-18)
@@ -243,6 +245,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       },
       async download(path) {
         const { data: blob, error } = await supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET).download(path);
+        if (error && !isStorageNotFound(error)) return 'unavailable';
         if (error || !blob) return null;
         return new Uint8Array(await blob.arrayBuffer());
       },

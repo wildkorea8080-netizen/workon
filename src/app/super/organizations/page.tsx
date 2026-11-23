@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ORG_TYPES } from '@/lib/org-types';
 import { kstDay } from '@/lib/kst-time';
+import { actionErrorText } from '@/lib/ok-json';
 import { isImeComposing } from '@/lib/ime';
 import { ORG_SLUG_PATTERN } from '@/lib/org-slug';
 import { orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
@@ -339,7 +340,7 @@ function NewOrgPanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) { setError(typeof data?.error === 'string' ? data.error : '기관을 등록하지 못했습니다.'); return; }
       setResult({ inviteUrl: data.data.inviteUrl ?? null, warning: data.warning });
-    } catch (err: any) { setError(err.message); }
+    } catch (err) { setError(actionErrorText(err, '기관을 등록하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')); }
     finally { setSubmitting(false); }
   };
 

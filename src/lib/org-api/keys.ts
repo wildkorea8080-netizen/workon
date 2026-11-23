@@ -9,6 +9,9 @@
 import { createHash, randomBytes } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { isDepartmentScopeReadError } from '@/lib/access-scope-error';
+
+export const ORG_API_SCOPE_UNAVAILABLE = '관리 범위를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 import { isIpAllowed } from '@/lib/ip-access';
 import { isStoppedOrgStatus } from '@/lib/org-status';
 import {
@@ -95,7 +98,14 @@ export async function handleOrgApiCall(
   const wholeOrgAdmin = Boolean(creator && creator.is_active !== false && !creator.deleted_at && creator.role === 'ADMIN'
     && dept && dept.organization_id === key.organization_id && dept.parent_id == null);
   if (!wholeOrgAdmin) return respond(fail(403, ORG_API_CREATOR_UNAVAILABLE));
-  const departmentIds = await deps.managedDepartmentIds(creator!.department_id!);
+  // 관리 범위를 못 읽으면 503(2026-11-20) — 예전엔 '자기 부서만'으로 좁혀 하위 부서가 빠진 숫자를 정상으로 답했다
+  let departmentIds: string[];
+  try {
+    departmentIds = await deps.managedDepartmentIds(creator!.department_id!);
+  } catch (error) {
+    if (isDepartmentScopeReadError(error)) return respond(fail(503, ORG_API_SCOPE_UNAVAILABLE));
+    throw error;
+  }
   if (!departmentIds.length) return respond(fail(403, ORG_API_CREATOR_UNAVAILABLE));
 
   try {

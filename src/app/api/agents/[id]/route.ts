@@ -28,8 +28,10 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
     if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
     if (!canEditAgent(agent, actor)) return jsonError('이 비서를 볼 권한이 없습니다.', 403);
 
-    const { data, error } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).single();
-    if (error || !data) return jsonError('비서를 찾을 수 없습니다.', 404);
+    // 위에서 있는 비서임을 확인했다 — 여기서 못 읽은 것은 '없음'이 아니다(2026-11-20, 예전엔 404 '비서를 찾을 수 없습니다')
+    const { data, error } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).maybeSingle();
+    if (error) return jsonError('비서 설정을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    if (!data) return jsonError('비서를 찾을 수 없습니다.', 404);
     return NextResponse.json({ ok: true, data });
   } catch (error) {
     console.error('[agents GET]', error);

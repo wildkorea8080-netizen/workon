@@ -28,6 +28,8 @@ export default function HistoryPage({ params }: { params: { id: string } }) {
     if (v.ok) setRows(v.data);
     else setError(v.error.message);
     if (t.ok) setCanEdit(t.data.task.access.edit);
+    // 권한을 못 읽었으면 단추가 까닭 없이 사라지지 않게(2026-11-22)
+    else if (v.ok) setError('이 작업을 고칠 수 있는지 지금 확인하지 못해 되돌리기 단추를 숨겼습니다. 화면을 새로 고쳐 주세요.');
   }, [params.id]);
   useEffect(() => {
     void load();

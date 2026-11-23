@@ -164,7 +164,9 @@ describe('원본 확인', () => {
   it('추가 창은 응답을 보고 저장 중 표시를 늘 푼다', () => {
     const src = readFileSync('src/app/super/accounts/page.tsx', 'utf8');
     const h = src.slice(src.indexOf('function AddSuperAdminModal'), src.indexOf('return (', src.indexOf('function AddSuperAdminModal')));
-    expect(h).toContain('res.ok && data?.ok');
-    expect(h).toContain('finally');
+    // 0264부터 requestJson(2xx이고 몸이 ok일 때만 ok, 던지지 않음) — 저장 중 표시는 언제나 푼다
+    expect(h).toContain('const r = await requestJson(');
+    expect(h).toContain('setSaving(false);');
+    expect(h).toContain('if (r.ok) onCreated(r.body.data);');
   });
 });

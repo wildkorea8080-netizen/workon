@@ -1,10 +1,16 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { fetchOkJson, ORG_FILTER_UNREAD } from '@/lib/ok-json';
 import { isImeComposing } from '@/lib/ime';
 import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState, type LogTab } from '@/lib/super-log-links';
 import { ADMIN_LOG_ACTIONS, type AdminLogRow } from '@/lib/super-admin-log-spec';
 import { csvLine, CSV_BOM } from '@/lib/csv-cell';
+
+/** 기록 목록 읽기 — 연결 실패·JSON이 아닌 응답도 던지지 않고 `{ ok: false }`로(2026-11-21) */
+async function readLogJson(url: string): Promise<any> {
+  try { return await (await fetch(url)).json(); } catch { return { ok: false }; }
+}
 
 type Tab = LogTab;
 
@@ -87,6 +93,7 @@ function AccessLogsTab() {
   const [rows, setRows]         = useState<any[]>([]);
   const [suspicious, setSuspicious] = useState<any[]>([]);
   const [orgs, setOrgs]         = useState<any[]>([]);
+  const [orgsUnread, setOrgsUnread] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [meta, setMeta]         = useState({ total: 0 });
@@ -97,7 +104,11 @@ function AccessLogsTab() {
   const [page, setPage]         = useState(1);
   const LIMIT = 50;
 
-  useEffect(() => { fetch('/api/super/organizations?limit=100').then(r => r.json()).then(d => { if (d.ok) setOrgs(d.data); }); }, []);
+  useEffect(() => {
+    void fetchOkJson<{ data: unknown }>('/api/super/organizations?limit=100').then(d => {
+      if (d && Array.isArray(d.data)) setOrgs(d.data); else setOrgsUnread(true);
+    });
+  }, []);
 
   const load = useCallback(async (p = 1) => {
     setLoading(true);
@@ -105,10 +116,10 @@ function AccessLogsTab() {
     if (filterOrg)            params.set('orgId', filterOrg);
     if (filterAction !== 'all') params.set('action', filterAction);
     if (search)               params.set('search', search);
-    const res  = await fetch(`/api/super/logs/access?${params}`);
-    const data = await res.json();
+    // 응답을 못 읽어도 던지지 않는다(도는 표시가 멈추지 않던 것). 실패면 앞 조회의 '총 N건'·의심 IP를 남기지 않는다(2026-11-21)
+    const data = await readLogJson(`/api/super/logs/access?${params}`);
     if (data.ok) { setRows(data.data); setMeta(data.meta); setSuspicious(data.suspiciousIps ?? []); setLoadError(null); }
-    else { setRows([]); setLoadError(data.error?.message ?? '접속 기록을 불러오지 못했습니다.'); }
+    else { setRows([]); setMeta({ total: 0 }); setSuspicious([]); setLoadError(data.error?.message ?? '접속 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, [period, filterOrg, filterAction, search]);
 
@@ -141,6 +152,7 @@ function AccessLogsTab() {
         <select value={filterOrg} onChange={e => setFilterOrg(e.target.value)}
           className="px-3 py-2 bg-[#1E293B] border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="">기관 전체</option>
+          {orgsUnread && <option value="__unread" disabled>{ORG_FILTER_UNREAD}</option>}
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         <select value={filterAction} onChange={e => setFilterAction(e.target.value)}
@@ -180,7 +192,7 @@ function AccessLogsTab() {
                 <td key={j} className="px-4 py-3"><div className="h-3 bg-slate-700/50 rounded animate-pulse"/></td>
               ))}</tr>)
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">로그가 없습니다.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">{loadError ? '—' : '로그가 없습니다.'}</td></tr>
             ) : rows.map(r => (
               <tr key={r.id} className="hover:bg-slate-700/20 transition-colors">
                 <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtDt(r.created_at)}</td>
@@ -236,10 +248,10 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
   const load = useCallback(async (p = 1) => {
     setLoading(true);
     const params = new URLSearchParams({ period, level: filterLevel, category: filterCategory, page: String(p), limit: String(LIMIT) });
-    const res  = await fetch(`/api/super/logs/system?${params}`);
-    const data = await res.json();
+    const data = await readLogJson(`/api/super/logs/system?${params}`);
     if (data.ok) { setRows(data.data); setSummary(data.summary ?? {}); setLoadError(null); }
-    else { setRows([]); setLoadError(data.error?.message ?? '시스템 기록을 불러오지 못했습니다.'); }
+    // 앞 조회의 '오늘·이번주 ERROR' 수를 남기지 않는다(빈 값이면 '—')
+    else { setRows([]); setSummary({}); setLoadError(data.error?.message ?? '시스템 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, [period, filterLevel, filterCategory]);
 
@@ -302,7 +314,7 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
                 <td key={j} className="px-4 py-3"><div className="h-3 bg-slate-700/50 rounded animate-pulse"/></td>
               ))}</tr>)
             ) : rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">로그가 없습니다.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">{loadError ? '—' : '로그가 없습니다.'}</td></tr>
             ) : rows.map(r => (
               <tr key={r.id} className="hover:bg-slate-700/20 transition-colors">
                 <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtDt(r.created_at)}</td>
@@ -359,10 +371,9 @@ function ImpersonationLogsTab() {
 
   const load = useCallback(async (p = 1) => {
     setLoading(true);
-    const res  = await fetch(`/api/super/logs/impersonation?page=${p}&limit=${LIMIT}`);
-    const data = await res.json();
+    const data = await readLogJson(`/api/super/logs/impersonation?page=${p}&limit=${LIMIT}`);
     if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
-    else { setRows([]); setLoadError(data.error?.message ?? '대리 접근 기록을 불러오지 못했습니다.'); }
+    else { setRows([]); setMeta({ total: 0 }); setLoadError(data.error?.message ?? '대리 접근 기록을 불러오지 못했습니다.'); }
     setLoading(false);
   }, []);
 
@@ -397,7 +408,7 @@ function ImpersonationLogsTab() {
                 <td key={j} className="px-4 py-3"><div className="h-3 bg-slate-700/50 rounded animate-pulse"/></td>
               ))}</tr>)
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">대리 접근 이력이 없습니다.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">{loadError ? '—' : '대리 접근 이력이 없습니다.'}</td></tr>
             ) : rows.map(r => (
               <tr key={r.id} className="hover:bg-slate-700/20 transition-colors">
                 <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtDt(r.accessedAt)}</td>
@@ -457,9 +468,9 @@ function AdminLogsTab() {
       const res  = await fetch(`/api/super/logs/admin?${qs}`);
       const data = await res.json();
       if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
-      else { setRows([]); setLoadError(data.error?.message ?? '조작 기록을 불러오지 못했습니다.'); }
+      else { setRows([]); setMeta({ total: 0 }); setLoadError(data.error?.message ?? '조작 기록을 불러오지 못했습니다.'); }
     } catch {
-      setRows([]); setLoadError('조작 기록을 불러오지 못했습니다.');
+      setRows([]); setMeta({ total: 0 }); setLoadError('조작 기록을 불러오지 못했습니다.');
     }
     setLoading(false);
   }, []);

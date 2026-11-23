@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
+import { isAccessScopeReadError } from '@/lib/access-scope-error';
 import { splitAgentBody } from '@/lib/agent-patch';
 import { getActorScope } from '@/lib/actor-scope';
 import { jsonError, knownIds, validateModelForOrganization } from '@/lib/agent-route-helpers';
@@ -74,7 +75,14 @@ export async function GET(request: NextRequest) {
     // 기관 전체 공개 비서 + 내 부서 계통에 걸린 부서 제한 비서.
     // 대부분의 규정·매뉴얼은 전 직원 공통이므로 기관 전체가 기본이고,
     // 인사·감사처럼 제한이 필요한 것만 부서로 좁힌다.
-    const scope = await getAccessScope(departmentId);
+    // 공개 범위를 못 읽으면 줄어든 목록 대신 503(2026-11-20)
+    const scope = await getAccessScope(departmentId).catch((err) => {
+      if (isAccessScopeReadError(err)) return null;
+      throw err;
+    });
+    if (!scope) {
+      return NextResponse.json({ ok: false, error: { message: '비서 목록을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } }, { status: 503 });
+    }
     const visibleFilter = visibilityFilter(scope);
 
     // 즐겨찾기 탭: favoriteIds 기반으로 in() 쿼리

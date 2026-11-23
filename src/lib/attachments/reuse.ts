@@ -5,6 +5,7 @@
 // 길은 직접 올리기와 같다: 발급(createUpload — 보내지 않은 첨부 상한·정리·경로) → 서버가 바이트를 그 경로에 올림 →
 // 확인(confirmUpload — 크기·읽기·사용 기록). 그래서 형식·크기·읽기·스캔 PDF·묘비 규칙이 따로 갈라지지 않는다.
 // 격리: 원본은 **요청자의 것**만(`user_id = 요청자`) — 관리자도 남의 첨부·만든 파일을 가져오지 못한다.
+import { isStorageNotFound } from '@/lib/storage-error';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { attachmentExtension, MAX_ATTACHMENT_BYTES } from './limits';
@@ -96,11 +97,14 @@ export async function reuseFile(actor: Actor, kind: unknown, id: unknown): Promi
 
 /**
  * 저장소에 있는 파일 하나를 새 첨부로 올린다 — 지난 파일 다시 붙이기와 앱 예약의 올린 파일(0073)이 함께 쓴다.
- * 발급(형식·크기·보내지 않은 첨부 상한) → 서버가 바이트를 올림 → 확인(읽기·사용 기록). 원본을 못 받으면 404
+ * 발급(형식·크기·보내지 않은 첨부 상한) → 서버가 바이트를 올림 → 확인(읽기·사용 기록).
+ * 원본이 저장소에 없으면 404, **지금 못 받은 것이면 503**(2026-11-20 — 예전엔 내려받기 실패가 모두 404 '더 남아 있지 않습니다'라,
+ * 잠깐의 저장소 장애에 일괄 실행의 파일 줄이 다시 해 보지도 않고 실패했다)
  */
 export async function attachStoredObject(actor: Actor, source: { storage_path: string; file_name: string }): Promise<{ ok: true; attachment: AttachmentRow } | Failure> {
   const bucket = supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET);
   const { data: blob, error: downloadError } = await bucket.download(source.storage_path);
+  if (downloadError && !isStorageNotFound(downloadError)) return { ok: false, status: 503, message: '원본 파일을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (downloadError || !blob) return { ok: false, status: 404, message: '원본 파일이 더 남아 있지 않습니다.' };
   return attachBytes(actor, source.file_name, Buffer.from(await blob.arrayBuffer()), blob.type);
 }

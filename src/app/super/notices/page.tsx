@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { kstDay } from '@/lib/kst-time';
+import { emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 const IMPORTANCE_META: Record<string, { label: string; badge: string; icon: string }> = {
   normal:    { label: '일반', badge: 'bg-slate-700 text-slate-300', icon: '📌' },
@@ -23,14 +24,18 @@ export default function NoticesPage() {
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000); };
 
+  // 목록을 못 읽은 것 — '공지사항이 없습니다'와 가른다(2026-11-20). 못 읽으면 앞 거르기의 줄을 남기지 않는다
+  const [unread, setUnread] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     const [nr, or] = await Promise.all([
-      fetch(`/api/super/notices?status=${filterStatus}`).then(r => r.json()),
-      fetch('/api/super/organizations?limit=100').then(r => r.json()),
+      fetchOkJson<{ data: any[] }>(`/api/super/notices?status=${filterStatus}`),
+      fetchOkJson<{ data: any[] }>('/api/super/organizations?limit=100'),
     ]);
-    if (nr.ok) setNotices(nr.data);
-    if (or.ok) setOrgs(or.data);
+    setUnread(!nr);
+    setNotices(nr ? nr.data : []);
+    if (or) setOrgs(or.data);
     setLoading(false);
   }, [filterStatus]);
 
@@ -109,7 +114,7 @@ export default function NoticesPage() {
                 ))}</tr>
               ))
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">공지사항이 없습니다.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">{emptyListText(unread, '공지사항이 없습니다.', '공지 목록을')}</td></tr>
             ) : (
               filtered.map(n => {
                 const meta = IMPORTANCE_META[n.importance ?? 'normal'] ?? IMPORTANCE_META.normal;

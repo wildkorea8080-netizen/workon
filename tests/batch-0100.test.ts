@@ -48,10 +48,10 @@ describe('초대 차지', () => {
     expect(state.ops).toContainEqual(['is', ['accepted_at', null]]);
     expect(state.ops).toContainEqual(['gt', ['expires_at', '2026-11-12T10:00:00.000Z']]);
   });
-  it('이미 썼거나(행이 안 바뀜) 오류면 차지하지 못한다', async () => {
+  it('이미 썼으면(행이 안 바뀜) 차지하지 못한다, DB 오류는 던진다(2026-11-20 — 이미 사용됨으로 답하지 않게)', async () => {
     expect(await claimInvitation('i1', now)).toBeNull();
     state.result = { data: null, error: { message: 'x' } };
-    expect(await claimInvitation('i1', now)).toBeNull();
+    await expect(claimInvitation('i1', now)).rejects.toThrow('invitation claim unavailable');
   });
   it('푸는 것은 그 차지(같은 시각)일 때만', async () => {
     await releaseInvitation('i1', '2026-11-12T10:00:00.000Z');

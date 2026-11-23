@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { emptyListText } from '@/lib/ok-json';
 
 /**
  * 기관 관리자 — 업무 관리. 업무 비서 켜고 끄기 · 기관 업무 양식(등록·시험 생성·한글 확인 기록·사용 중지) · 업무 현황(숫자만).
@@ -33,6 +34,9 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ ok: true; dat
   }
 }
 
+/** 양식 목록을 못 읽었을 때 — 바꿀 수 있는 사람인지도 몰라 단추를 막은 까닭까지 */
+export const WORK_TEMPLATES_UNREAD = '기관 업무 양식 목록을 지금 불러오지 못했습니다. 바꿀 수 있는지도 확인하지 못해 등록·사용 설정 단추를 막아 두었습니다. 화면을 새로 고쳐 주세요.';
+
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export default function WorkAdmin() {
@@ -42,6 +46,8 @@ export default function WorkAdmin() {
   const [overview, setOverview] = useState<Overview[]>([]);
   // 기관 업무 설정(켜고 끄기·기관 양식)을 바꿀 수 있는 사람인가 — 기관 전체 관리자만. 서버가 다시 본다
   const [canManage, setCanManage] = useState(true);
+  // 못 읽은 부분은 따로 기억한다 — 못 읽은 양식·현황을 '없습니다'로 보이지 않게
+  const [unread, setUnread] = useState({ installs: false, templates: false, overview: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,14 +58,22 @@ export default function WorkAdmin() {
 
   const load = useCallback(async () => {
     const [i, t, o] = await Promise.all([call<Installation[]>('/api/admin/work-installations'), call<{ templates: AdminTemplate[]; chatTemplates: ChatTemplate[]; canManage?: boolean }>('/api/admin/work-templates'), call<Overview[]>('/api/admin/work-overview')]);
-    if (!i.ok) return setError(i.message);
-    setInstalls(i.data);
+    // 하나를 못 읽어도 나머지는 그린다(예전엔 업무 목록을 못 읽으면 양식·현황까지 그리지 않았다)
+    setUnread({ installs: !i.ok, templates: !t.ok, overview: !o.ok });
+    setInstalls(i.ok ? i.data : null);
     if (t.ok) {
       setTemplates(t.data.templates);
       setChat(t.data.chatTemplates);
       setCanManage(t.data.canManage !== false);
+    } else {
+      // 양식 목록을 못 읽으면 바꿀 수 있는 사람인지도 모른다 — 단추를 열어 두지 않는다(서버가 다시 본다)
+      setTemplates([]);
+      setChat([]);
+      setCanManage(false);
     }
-    if (o.ok) setOverview(o.data);
+    setOverview(o.ok ? o.data : []);
+    const failed = [i, t, o].find((r) => !r.ok);
+    if (failed && !failed.ok) setError(failed.message);
   }, []);
   useEffect(() => {
     void load();
@@ -95,7 +109,7 @@ export default function WorkAdmin() {
       </div>
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
       {notice && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</p>}
-      {!canManage && (
+      {!canManage && !unread.templates && (
         <p role="note" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           업무 켜고 끄기와 기관 양식은 기관 전체를 관리하는 관리자(최상위 부서 소속)만 바꿀 수 있습니다. 목록은 볼 수 있고, 업무 현황은 관리 범위(내 부서와 하위 부서)의 작업만 셉니다.
         </p>
@@ -104,6 +118,7 @@ export default function WorkAdmin() {
       <section className="rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-lg font-semibold">업무 비서 사용</h2>
         <p className="mt-1 text-sm text-gray-600">끄면 직원이 그 업무로 새 작업을 시작할 수 없습니다. 이미 만든 작업과 파일은 그대로 열립니다.</p>
+        {unread.installs && <p className="mt-3 text-sm text-gray-500">{emptyListText(true, '', '업무 목록을')}</p>}
         <ul className="mt-3 divide-y divide-gray-100">
           {installs?.map((w) => (
             <li key={w.key} className="flex items-center justify-between py-2 text-sm">
@@ -153,7 +168,7 @@ export default function WorkAdmin() {
           </div>
         )}
         <ul className="mt-4 space-y-3">
-          {templates.length === 0 && <li className="text-sm text-gray-500">등록한 기관 업무 양식이 없습니다. 표준 양식은 그대로 쓸 수 있습니다.</li>}
+          {templates.length === 0 && <li className="text-sm text-gray-500">{unread.templates ? WORK_TEMPLATES_UNREAD : '등록한 기관 업무 양식이 없습니다. 표준 양식은 그대로 쓸 수 있습니다.'}</li>}
           {templates.map((t) => (
             <li key={t.id} className={`rounded-lg border px-3 py-2 text-sm ${t.status === 'retired' ? 'border-gray-100 bg-gray-50 text-gray-500' : 'border-gray-200'}`}>
               <div className="flex flex-wrap items-center gap-2">
@@ -190,7 +205,7 @@ export default function WorkAdmin() {
         <h2 className="text-lg font-semibold">업무 현황</h2>
         <p className="mt-1 text-sm text-gray-600">업무별 건수와 최근 30일 실패한 실행입니다(내용·파일 없음).</p>
         {overview.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-500">아직 업무 작업이 없습니다.</p>
+          <p className="mt-2 text-sm text-gray-500">{emptyListText(unread.overview, '아직 업무 작업이 없습니다.', '업무 현황을')}</p>
         ) : (
           <table className="mt-3 w-full text-sm">
             <thead>

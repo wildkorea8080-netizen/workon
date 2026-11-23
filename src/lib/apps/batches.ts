@@ -509,19 +509,23 @@ function batchNoticeIo(): BatchNoticeIo {
       if (error) throw new Error(error.message);
       if (!batch) return null;
       const b = batch as { user_id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; finished_at: string | null; source?: string | null };
-      const [{ data: items, error: itemError }, { data: user }, { data: agent }] = await Promise.all([
+      // 받는 사람·확인 기다림 수를 못 읽으면 던진다(실행기가 '마침 메일을 보내지 못했습니다'로 기록) — 2026-11-20, 예전엔 주소 읽기 실패를
+      // '주소 없음'으로 보아 메일 없이 조용히 끝났고, 확인 기다림 수 읽기 실패는 메일에 0건으로 적혔다(보내기 전 확인할 결과가 있어도)
+      const [{ data: items, error: itemError }, { data: user, error: userError }, { data: agent }] = await Promise.all([
         supabaseAdmin.from('app_batch_items').select('status, message_id').eq('batch_id', batchId),
         supabaseAdmin.from('users').select('email').eq('id', b.user_id).maybeSingle(),
         supabaseAdmin.from('agents').select('name').eq('id', b.agent_id).maybeSingle(),
       ]);
       if (itemError) throw new Error(itemError.message);
+      if (userError) throw new Error(`users: ${userError.message}`);
       const rows = (items ?? []) as Array<{ status: string; message_id: string | null }>;
       const messageIds = rows.map((r) => r.message_id).filter((v): v is string => typeof v === 'string');
       let awaitingApproval = 0;
       if (messageIds.length) {
         // 이 묶음의 답변 중 보내기 전 확인(0078)을 기다리는 것 — 그 직원의 기록만
-        const { count } = await supabaseAdmin.from('app_outbound_deliveries').select('id', { count: 'exact', head: true })
+        const { count, error: countError } = await supabaseAdmin.from('app_outbound_deliveries').select('id', { count: 'exact', head: true })
           .eq('user_id', b.user_id).eq('status', 'awaiting_approval').in('message_id', messageIds);
+        if (countError) throw new Error(`app_outbound_deliveries: ${countError.message}`);
         awaitingApproval = count ?? 0;
       }
       return {

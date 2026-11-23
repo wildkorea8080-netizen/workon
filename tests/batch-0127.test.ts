@@ -78,7 +78,7 @@ describe('라우트·화면(원본)', () => {
   it('슈퍼관리자 계정 관리 화면에 IP 잠금 확인·풀기', () => {
     const page = readFileSync('src/app/super/accounts/page.tsx', 'utf8');
     expect(page).toContain('<IpLockPanel onToast={showToast} />');
-    expect(page).toContain("fetch('/api/super/sign-in-ip-lock', { method: 'DELETE'");
+    expect(page).toContain("requestJson('/api/super/sign-in-ip-lock', { method: 'DELETE'"); // 0264부터 던지지 않는 requestJson
     expect(page).toContain('isImeComposing(e)) check()');
   });
 });

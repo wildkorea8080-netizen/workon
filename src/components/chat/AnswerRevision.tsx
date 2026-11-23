@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import MessageBubble from './MessageBubble';
 import type { RetrievedChunk } from '@/lib/db';
 import { REVISE_BUTTON_HINT, REVISE_BUTTON_LABEL, REVISION_LABEL, readRevision, type RevisionView } from '@/lib/assistant/answer-revise-spec';
@@ -43,7 +44,7 @@ export default function AnswerRevision({
       onRevised?.(next);
       setUnsaved(body?.data?.saved === false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '고쳐 쓰지 못했습니다.');
+      setError(actionErrorText(e, '고쳐 쓰지 못했습니다.'));
     } finally {
       setBusy(false);
     }

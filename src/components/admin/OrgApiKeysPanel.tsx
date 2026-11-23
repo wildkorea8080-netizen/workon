@@ -5,6 +5,7 @@ import {
   ORG_API_DAILY_LIMIT, ORG_API_ENDPOINTS, ORG_API_EXPIRY_DAYS, ORG_API_MAX_ACTIVE_KEYS, ORG_API_NAME_MAX, ORG_API_SCOPES, ORG_API_SCOPE_LABELS,
   type OrgApiCallView, type OrgApiKeyView, type OrgApiScope,
 } from '@/lib/org-api/spec';
+import { emptyListText } from '@/lib/ok-json';
 
 const STATUS_LABEL: Record<OrgApiKeyView['status'], string> = { active: '쓰는 중', revoked: '회수됨', expired: '만료됨' };
 
@@ -24,6 +25,8 @@ export default function OrgApiKeysPanel() {
   const [calls, setCalls] = useState<OrgApiCallView[]>([]);
   const [denied, setDenied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽음 — 만들기·회수의 오류와 따로 기억한다(다시 읽기가 회수 실패 글을 지우지 않게)
+  const [unread, setUnread] = useState(false);
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<OrgApiScope[]>(['adoption']);
   const [days, setDays] = useState<number>(90);
@@ -35,10 +38,10 @@ export default function OrgApiKeysPanel() {
       const res = await fetch('/api/admin/api-keys');
       const body = await res.json().catch(() => null);
       if (res.status === 403) { setDenied(body?.error?.message ?? '기관 전체 관리자만 볼 수 있습니다.'); return; }
-      if (!res.ok || !body?.ok) { setError(body?.error?.message ?? 'API 키 목록을 불러오지 못했습니다.'); return; }
-      setError(null); setKeys(body.data.keys); setCalls(body.data.calls);
+      if (!res.ok || !body?.ok || !Array.isArray(body.data?.keys)) { setKeys([]); setCalls([]); setUnread(true); return; }
+      setUnread(false); setKeys(body.data.keys); setCalls(Array.isArray(body.data.calls) ? body.data.calls : []);
     } catch {
-      setError('API 키 목록을 불러오지 못했습니다.');
+      setKeys([]); setCalls([]); setUnread(true);
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -94,7 +97,7 @@ export default function OrgApiKeysPanel() {
                 </select>
               </label>
             </div>
-            <button type="button" disabled={busy || !name.trim() || !scopes.length || active >= ORG_API_MAX_ACTIVE_KEYS} onClick={() => void create()}
+            <button type="button" disabled={busy || unread || !name.trim() || !scopes.length || active >= ORG_API_MAX_ACTIVE_KEYS} onClick={() => void create()}
               className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '키 만들기'}</button>
           </div>
           {created && (
@@ -115,7 +118,7 @@ export default function OrgApiKeysPanel() {
           <table className="w-full text-left text-xs">
             <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">앞부분</th><th className="pr-2">범위</th><th className="pr-2">상태</th><th className="pr-2">만료</th><th className="pr-2">마지막 호출</th><th className="pr-2">호출 수</th><th className="pr-2">만든 사람</th><th /></tr></thead>
             <tbody>
-              {keys.length === 0 && <tr><td colSpan={9} className="py-2 text-slate-500">아직 만든 키가 없습니다.</td></tr>}
+              {keys.length === 0 && <tr><td colSpan={9} className="py-2 text-slate-500">{emptyListText(unread, '아직 만든 키가 없습니다.', 'API 키 목록을')}</td></tr>}
               {keys.map((k) => (
                 <tr key={k.id} className="border-t border-slate-100">
                   <td className="py-1 pr-2 font-medium text-slate-800">{k.name}</td>

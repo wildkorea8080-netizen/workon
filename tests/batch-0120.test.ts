@@ -75,7 +75,9 @@ describe('연결(원본)', () => {
   it('화면이 경고를 보인다', () => {
     const contracts = readFileSync('src/app/super/contracts/page.tsx', 'utf8');
     expect(contracts).toContain("onToast(d.warning ?? '계약이 해지됐습니다.')");
-    expect(contracts.match(/if \(d\.warning\) alert\(d\.warning\)/g)).toHaveLength(2);
+    // 계약 등록 창은 0265부터 requestJson — 경고를 그대로 알린다
+    expect(contracts.match(/if \(d\.warning\) alert\(d\.warning\)/g)).toHaveLength(1);
+    expect(contracts).toContain("if (typeof r.body.warning === 'string') alert(r.body.warning);");
     // 상태 바꾸기의 경고는 `orgStatusChangeNotice`가 알림 글로(2026-11-19, batch-0185)
     expect(readFileSync('src/app/super/organizations/[id]/page.tsx', 'utf8')).toContain('showToast(notice.message)');
     expect(readFileSync('src/lib/org-status.ts', 'utf8')).toContain("if (typeof b.warning === 'string' && b.warning) return { ok: true, message: b.warning };");

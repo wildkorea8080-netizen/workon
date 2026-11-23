@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import { FEEDBACK_REASONS, FEEDBACK_SAVED_MINUTE_CHOICES, type FeedbackReason, type MessageFeedback } from '@/lib/message-feedback-spec';
 
 /**
@@ -27,7 +28,7 @@ export default function AnswerFeedback({ messageId, initial }: { messageId: stri
       if (!res.ok || !body?.ok) throw new Error(body?.error?.message ?? '평가를 저장하지 못했습니다.');
     } catch (e) {
       setFeedback(before);
-      setError(e instanceof Error ? e.message : '평가를 저장하지 못했습니다.');
+      setError(actionErrorText(e, '평가를 저장하지 못했습니다.'));
     } finally {
       setSaving(false);
     }

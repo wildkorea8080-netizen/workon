@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import { FEEDBACK_REASONS, type FeedbackReason, type FeedbackSummary as Summary } from '@/lib/message-feedback-spec';
 
 type Data = Summary & { from: string; to: string };
@@ -74,7 +75,9 @@ export default function FeedbackSummary() {
       setFrom(body.data.from);
       setTo(body.data.to);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '답변 평가를 불러오지 못했습니다.');
+      // 못 읽었으면 앞 기간의 표를 남기지 않는다(2026-11-20 — 예전엔 새 기간 조회가 실패해도 앞 기간 표가 새 날짜 아래 그대로 보였다)
+      setData(null);
+      setError(actionErrorText(e, '답변 평가를 불러오지 못했습니다.'));
     } finally {
       setLoading(false);
     }

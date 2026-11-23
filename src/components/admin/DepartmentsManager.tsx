@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 interface DepartmentNode {
   id: string;
@@ -27,6 +28,8 @@ function subtreeIds(node: DepartmentNode): string[] {
   return [node.id, ...node.children.flatMap(subtreeIds)];
 }
 
+export const DEPARTMENTS_STALE = '부서 목록을 지금 다시 불러오지 못했습니다 — 보이는 목록은 최신이 아닐 수 있습니다. 화면을 새로 고쳐 주세요.';
+
 export default function DepartmentsManager() {
   const [tree, setTree] = useState<DepartmentNode[]>([]);
   const [myDepartmentId, setMyDepartmentId] = useState<string | null>(null);
@@ -46,16 +49,16 @@ export default function DepartmentsManager() {
   const [editName, setEditName] = useState('');
   const [editParentId, setEditParentId] = useState('');
 
+  // 목록을 못 읽었는지 — 조작 오류(error)와 따로 둔다(조작마다 error를 지우므로). 던지지 않는다(2026-11-21 — 예전엔 연결이 끊기면
+  // 던져, 부서를 만든 뒤 목록 다시 읽기가 실패하면 '부서 생성에 실패했습니다'로 보였다)
+  const [unread, setUnread] = useState(false);
   const load = useCallback(async () => {
-    const res = await fetch('/api/departments');
-    const result = await res.json();
-    if (result.ok) {
-      setTree(result.data ?? []);
-      setMyDepartmentId(result.meta?.myDepartmentId ?? null);
-      setCanCreateRoot(Boolean(result.meta?.canCreateRoot));
-    } else {
-      setError(result.error?.message ?? '부서 목록을 불러오지 못했습니다.');
-    }
+    const result = await fetchOkJson<{ data?: DepartmentNode[]; meta?: { myDepartmentId?: string | null; canCreateRoot?: boolean } }>('/api/departments');
+    if (!result) { setUnread(true); return; }
+    setTree(result.data ?? []);
+    setMyDepartmentId(result.meta?.myDepartmentId ?? null);
+    setCanCreateRoot(Boolean(result.meta?.canCreateRoot));
+    setUnread(false);
   }, []);
 
   useEffect(() => {
@@ -91,7 +94,7 @@ export default function DepartmentsManager() {
       setNewParentId(canCreateRoot ? '' : (myDepartmentId ?? ''));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '부서 생성에 실패했습니다.');
+      setError(actionErrorText(err, '부서 생성에 실패했습니다.'));
     } finally {
       setBusy(false);
     }
@@ -117,7 +120,7 @@ export default function DepartmentsManager() {
       setEditingId(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '부서 수정에 실패했습니다.');
+      setError(actionErrorText(err, '부서 수정에 실패했습니다.'));
     } finally {
       setBusy(false);
     }
@@ -133,7 +136,7 @@ export default function DepartmentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '부서 삭제에 실패했습니다.');
+      setError(actionErrorText(err, '부서 삭제에 실패했습니다.'));
     } finally {
       setBusy(false);
     }
@@ -275,6 +278,9 @@ export default function DepartmentsManager() {
         </p>
       </div>
 
+      {unread && tree.length > 0 && (
+        <p role="alert" className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{DEPARTMENTS_STALE}</p>
+      )}
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">{error}</div>
       )}
@@ -312,7 +318,7 @@ export default function DepartmentsManager() {
         {loading ? (
           <div className="p-8 text-center text-sm text-slate-400">불러오는 중...</div>
         ) : tree.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-400">등록된 부서가 없습니다.</div>
+          <div className="p-8 text-center text-sm text-slate-400">{emptyListText(unread, '등록된 부서가 없습니다.', '부서 목록을')}</div>
         ) : (
           tree.map((node) => renderNode(node, 0))
         )}

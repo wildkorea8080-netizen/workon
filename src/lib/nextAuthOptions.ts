@@ -10,6 +10,8 @@ import { ACCOUNT_LOCKED, IP_LOCKED, noteSignInFailure, noteSignInSuccess, reques
 import { recordSignIn, signInRecordDeps, type SignInOutcome } from '@/lib/sign-in-record';
 import { dormantDeps, lockIfDormant } from '@/lib/dormant-lock';
 import { ACCOUNT_DORMANT } from '@/lib/sign-in-lock-spec';
+import { AUTH_UNAVAILABLE, isAuthUnavailable } from '@/lib/auth-unavailable';
+import { logSystem } from '@/lib/logger';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -48,6 +50,11 @@ export const authOptions: AuthOptions = {
         // ⚠️ 구 SHA-256 해시로 저장된 계정은 로그인 불가 — 비밀번호 재설정 필요
         if (authError || !authData?.user) {
           const local = await authorizeWithPasswordHash(credentials.email, credentials.password);
+          if (local === 'unavailable') {
+            // 저장해 둔 비밀번호(users)를 못 읽은 것도 틀린 비밀번호가 아니다(2026-11-20) — 관리자가 등록한 계정은 이 길로만 들어온다
+            await logSystem({ level: 'warning', category: 'auth', message: '로그인 확인을 하지 못했습니다(사용자 정보를 읽지 못함) — 실패로 세지 않음', details: {} }).catch(() => {});
+            throw new Error(AUTH_UNAVAILABLE);
+          }
           if (local) {
             await noteSignInSuccess(throttle, 'user', credentials.email);
             // 장기 미접속 잠금(0095, 기관이 켰을 때) — 비밀번호가 맞아도 사용 중지로 돌리고 막는다
@@ -56,6 +63,10 @@ export const authOptions: AuthOptions = {
               throw new Error(ACCOUNT_DORMANT);
             }
             await record('login', { id: local.id, departmentId: local.departmentId ?? null });
+          } else if (authError && isAuthUnavailable(authError)) {
+            // Auth가 지금 확인하지 못한 것은 틀린 비밀번호가 아니다(2026-11-20) — 실패로 세지 않는다(세면 계정·사무실 IP가 잠긴다)
+            await logSystem({ level: 'warning', category: 'auth', message: '로그인 확인을 하지 못했습니다(Auth 응답 없음) — 실패로 세지 않음', details: { status: (authError as { status?: unknown }).status ?? null } }).catch(() => {});
+            throw new Error(AUTH_UNAVAILABLE);
           } else {
             await noteSignInFailure(throttle, 'user', credentials.email, ip);
             await record('login_failed');
@@ -139,6 +150,7 @@ export const authOptions: AuthOptions = {
 };
 
 // 관리자 초대로 생성된 사용자(Supabase Auth 미등록)의 로컬 password_hash 검증
+/** 저장해 둔 비밀번호로 확인 — 맞으면 사용자, 아니면 null, 사용자를 못 읽었으면 'unavailable'(실패로 세지 않게, 2026-11-20) */
 async function authorizeWithPasswordHash(email: string, password: string) {
   const { data: user, error } = await supabaseAdmin
     .from('users')
@@ -146,7 +158,8 @@ async function authorizeWithPasswordHash(email: string, password: string) {
     .eq('email', email)
     .maybeSingle();
 
-  if (error || !user?.password_hash || !canSignIn(user)) return null;
+  if (error) return 'unavailable' as const;
+  if (!user?.password_hash || !canSignIn(user)) return null;
 
   const isValid = await bcrypt.compare(password, user.password_hash);
   if (!isValid) return null;

@@ -71,6 +71,8 @@ export default function RagEvalPanel() {
   const [history, setHistory] = useState<RunRow[]>([]);
   // 이름 붙인 세트(0059) — 기관 단위라 비서를 바꿔도 같은 세트를 쓴다
   const [sets, setSets] = useState<SetRow[]>([]);
+  // 비서 목록·저장한 세트를 못 읽은 것 — 예전엔 빈 고르기라 비서·세트가 없는 것처럼 보였다(2026-11-22)
+  const [listUnread, setListUnread] = useState({ agents: false, sets: false });
   const [setId, setSetId] = useState('');
   const [setName, setSetName] = useState('');
   const [setNotice, setSetNotice] = useState<string | null>(null);
@@ -83,10 +85,10 @@ export default function RagEvalPanel() {
   const [withTools, setWithTools] = useState(false);
 
   useEffect(() => {
-    void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { if (r.ok) setSets(r.data); });
+    void call<SetRow[]>('/api/admin/rag-eval/sets').then((r) => { setListUnread((u) => ({ ...u, sets: !r.ok })); if (r.ok) setSets(r.data); });
   }, []);
   useEffect(() => {
-    void call<Agent[]>('/api/agents?manage=true').then((r) => { if (r.ok) setAgents(r.data.filter((a) => a.agent_type !== 'link' && !a.deleted_at)); });
+    void call<Agent[]>('/api/agents?manage=true').then((r) => { setListUnread((u) => ({ ...u, agents: !r.ok })); if (r.ok) setAgents(r.data.filter((a) => a.agent_type !== 'link' && !a.deleted_at)); });
   }, []);
   useEffect(() => {
     setRun(null); setCompare(null); setHistory([]);
@@ -188,12 +190,14 @@ export default function RagEvalPanel() {
       </div>
       <select aria-label="평가할 비서" value={agentId} onChange={(e) => setAgentId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
         <option value="">비서를 고르세요</option>
+        {listUnread.agents && <option value="" disabled>(비서 목록을 불러오지 못함 — 화면을 새로 고쳐 주세요)</option>}
         {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
       <textarea aria-label="평가 세트" value={set} onChange={(e) => setSet(e.target.value)} rows={7} placeholder={EXAMPLE} className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs" />
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <select aria-label="저장한 세트" value={setId} onChange={(e) => void loadSet(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5">
           <option value="">저장한 세트 불러오기{sets.length ? ` (${sets.length})` : ''}</option>
+          {listUnread.sets && <option value="" disabled>(저장한 세트 목록을 불러오지 못함 — 화면을 새로 고쳐 주세요)</option>}
           {sets.map((s) => <option key={s.id} value={s.id}>{s.name} · 질문 {s.question_count}</option>)}
         </select>
         {setId && <button type="button" onClick={() => void deleteSet()} className="text-slate-500 underline">이 세트 지우기</button>}

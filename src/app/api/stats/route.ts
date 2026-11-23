@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { chatTokensOf } from '@/lib/org-chat-tokens';
 import { kstMonthStart } from '@/lib/kst-time';
 
@@ -57,7 +57,8 @@ export async function GET(_request: NextRequest) {
     }
 
     // 다른 관리자 화면(사용량 추이·이용통계·감사)과 같은 범위 — 못 읽으면 자기 부서만(좁히는 쪽)
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
     const head = { count: 'exact' as const, head: true };
 
     const [totalDocuments, totalAgents, totalConversations, totalMessages, totalUsers] = await Promise.all([

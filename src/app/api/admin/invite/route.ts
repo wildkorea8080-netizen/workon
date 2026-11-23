@@ -3,7 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { sendInvitationEmail } from '@/lib/mailer';
 import { APP_URL } from '@/lib/config';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { logSecurityEvent } from '@/lib/security-log';
 import { checkUserSeats, SEAT_LIMIT_CODE } from '@/lib/user-seats';
 
@@ -156,7 +156,8 @@ export async function GET(_request: NextRequest) {
     if (!departmentId) return fail('부서 정보를 찾을 수 없습니다.', 403);
 
     // 하위 부서 관리자가 만든 초대도 상위 관리자가 본다 — 못 읽으면 자기 부서만(좁히는 쪽)
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
 
     const { data: invitations, error } = await supabaseAdmin
       .from('invitations')

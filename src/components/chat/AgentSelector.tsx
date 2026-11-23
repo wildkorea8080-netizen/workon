@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import type { Agent } from '@/lib/db';
 import AgentCard from './AgentCard';
@@ -25,17 +25,30 @@ interface AgentSelectorProps {
   onAgentSelect: (agent: Agent | null) => void;
 }
 
+const FAVORITE_FAILED = '즐겨찾기를 바꾸지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+
+/**
+ * 비서 목록을 못 읽었을 때의 글(2026-11-21). 예전엔 서버 안내가 비면 오류가 빈 글이 되어 **앞 탭의 비서가 새 탭의 목록처럼** 남았고,
+ * 몸이 JSON이 아니면 영어 구문 오류 글이 보였다. 늦게 온 앞 탭 응답이 새 탭 목록을 덮기도 했다(탭을 빨리 바꾸면).
+ */
+export const AGENT_LIST_UNREAD = '비서 목록을 지금 불러오지 못했습니다. 잠시 뒤 다시 눌러 주세요.';
+
 export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSelectorProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 즐겨찾기를 바꾸지 못한 것(2026-11-20) — 예전엔 ★을 눌러도 아무 일이 없고 까닭도 없었다
+  const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const { data: session } = useSession();
+  // 마지막으로 건 목록 읽기 — 늦게 온 앞 탭의 응답은 버린다
+  const requestSeq = useRef(0);
 
   const fetchAgents = useCallback(async (tab: TabKey) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -46,14 +59,21 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
       else if (tab !== 'all') url = `/api/agents?category=${encodeURIComponent(tab)}`;
 
       const res = await fetch(url);
-      const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message);
-      setAgents(result.data ?? []);
+      const result = await res.json().catch(() => null);
+      if (seq !== requestSeq.current) return;
+      if (!res.ok || !result?.ok || !Array.isArray(result.data)) {
+        setAgents([]);
+        setError((typeof result?.error?.message === 'string' && result.error.message) || AGENT_LIST_UNREAD);
+        return;
+      }
+      setAgents(result.data);
       if (result.meta?.favoriteIds) setFavoriteIds(result.meta.favoriteIds);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '오류가 발생했습니다.');
+    } catch {
+      if (seq !== requestSeq.current) return;
+      setAgents([]);
+      setError(AGENT_LIST_UNREAD);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, []);
 
@@ -70,15 +90,16 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId }),
       });
-      const result = await res.json();
-      if (!result.ok) return;
+      const result = await res.json().catch(() => null);
+      if (!result?.ok) { setFavoriteError(result?.error?.message ?? FAVORITE_FAILED); return; }
+      setFavoriteError(null);
       setFavoriteIds(result.data.favoriteIds);
       // 즐겨찾기 탭에서 토글하면 목록에서 제거
       if (activeTab === 'fav' && !result.data.isFavorite) {
         setAgents(prev => prev.filter(a => a.id !== agentId));
       }
     } catch {
-      // ignore
+      setFavoriteError(FAVORITE_FAILED);
     }
   };
 
@@ -118,6 +139,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
 
       {/* 컨텐츠 */}
       <div className="p-4">
+        {favoriteError && <p role="alert" className="mb-3 text-center text-xs text-red-500">{favoriteError}</p>}
         {loading ? (
           <div className="text-center py-6 text-sm text-slate-400">
             <div className="inline-block w-5 h-5 border-2 border-ws-accent-text border-t-transparent rounded-full animate-spin mb-2" />

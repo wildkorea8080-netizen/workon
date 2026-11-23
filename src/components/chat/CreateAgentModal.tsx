@@ -8,7 +8,8 @@ import {
   MAX_UPLOAD_SIZE_LABEL,
   MAX_AGENT_DOCUMENTS,
 } from '@/lib/file-types';
-import { createCapabilities } from '@/lib/agent-form';
+import { createCapabilities, CREATE_MODEL_LIST_UNREAD, CREATE_CONNECTOR_LIST_UNREAD } from '@/lib/agent-form';
+import { actionErrorText, fetchOkJson } from '@/lib/ok-json';
 import { uploadReferenceDocument, startReading } from '@/lib/document-upload-client';
 
 const EMOJI_ICONS = [
@@ -34,6 +35,8 @@ interface CreateAgentModalProps {
   onCreated: (tier: 'personal' | 'department') => void;
 }
 
+const ENHANCE_FAILED = '지시문을 다듬지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
+
 export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModalProps) {
   const [icon, setIcon] = useState('🤖');
   const [name, setName] = useState('');
@@ -53,15 +56,19 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
   const [modelId, setModelId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 모델·실시간 조회 목록을 못 읽었는지 — 칸이 까닭 없이 사라지지 않게(2026-11-21)
+  const [modelsUnread, setModelsUnread] = useState(false);
+  const [connectorsUnread, setConnectorsUnread] = useState(false);
 
   useEffect(() => {
-    fetch('/api/connectors')
-      .then(r => r.json())
-      .then(r => {
-        if (r.ok) setConnectors((r.data ?? []).filter((c: ConnectorOption) => c.allowedForPersonal));
-      })
-      .catch(() => {});
-    fetch('/api/models').then(r => r.json()).then(r => { if (r.ok) setModels(r.data ?? []); }).catch(() => {});
+    void fetchOkJson<{ data: ConnectorOption[] }>('/api/connectors').then(b => {
+      if (b) setConnectors((Array.isArray(b.data) ? b.data : []).filter((c: ConnectorOption) => c.allowedForPersonal));
+      setConnectorsUnread(!b);
+    });
+    void fetchOkJson<{ data: { id: string; label: string }[] }>('/api/models').then(b => {
+      if (b) setModels(Array.isArray(b.data) ? b.data : []);
+      setModelsUnread(!b);
+    });
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // 비서를 만든 뒤 파일 올리기가 일부 실패하면 창이 남는다 — 다시 누를 때 비서를 또 만들지 않도록 기억한다
@@ -76,16 +83,19 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
   const handleEnhance = async () => {
     if (!systemPrompt.trim() || enhancing) return;
     setEnhancing(true);
+    setError(null);
+    // 실패를 알린다(2026-11-20) — 예전엔 조용히 끝나, 한도에 걸렸거나 지금 안 되는 것을 알 수 없었다(단추만 돌다 멈춤)
     try {
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: systemPrompt, type: 'agent' }),
       });
-      const result = await res.json();
-      if (result.ok) setSystemPrompt(result.data.enhancedPrompt);
+      const result = await res.json().catch(() => null);
+      if (result?.ok) setSystemPrompt(result.data.enhancedPrompt);
+      else setError(result?.error?.message ?? ENHANCE_FAILED);
     } catch {
-      // silent
+      setError(ENHANCE_FAILED);
     } finally {
       setEnhancing(false);
     }
@@ -156,7 +166,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
       onCreated(tier);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '비서 생성에 실패했습니다.');
+      setError(actionErrorText(err, '비서 생성에 실패했습니다.'));
     } finally {
       setSubmitting(false);
     }
@@ -259,6 +269,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
                 </select>
               </div>
             )}
+            {modelsUnread && <p role="status" className="mt-4 text-xs text-amber-600">{CREATE_MODEL_LIST_UNREAD}</p>}
           </section>
 
           {/* 섹션 2: 역할 설정 */}
@@ -387,6 +398,7 @@ export default function CreateAgentModal({ onClose, onCreated }: CreateAgentModa
               {/* 실시간 검색 — 기관이 켜 둔 커넥터만 노출된다.
                   커넥터를 쓸지는 관리자가 정한다는 설계를 개인 비서에서도 지킨다.
                   목록이 비면 기관이 아직 아무 도구도 쓰지 않는다는 뜻이다. */}
+              {connectorsUnread && <p role="status" className="text-xs text-amber-600">{CREATE_CONNECTOR_LIST_UNREAD}</p>}
               {connectors.length > 0 && (
                 <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center gap-3">

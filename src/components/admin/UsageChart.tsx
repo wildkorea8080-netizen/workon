@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import {
   LineChart,
   Line,
@@ -41,7 +42,14 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
     loadUsageData();
   }, [selectedPeriod]);
 
+  // 더 새 요청이 나갔으면 늦게 온 앞 기간의 응답은 버린다
+  const requestSeq = useRef(0);
+
   const loadUsageData = async () => {
+    const seq = ++requestSeq.current;
+    // 다시 읽을 때 앞 오류를 지운다(2026-11-20 — 예전엔 한 번 실패하면 오류가 남고 기간 단추까지 사라져, 새로 고치기 전에는 다시 조회할 수 없었다)
+    setLoading(true);
+    setError(null);
     try {
       // Calculate date range
       const endDate = new Date();
@@ -64,21 +72,23 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
       );
 
 
-      const result = await response.json();
+      const result = await response.json().catch(() => null);
+      if (seq !== requestSeq.current) return;
 
-      if (!result.ok) {
-        throw new Error(result.error?.message || '사용량 데이터 로드 실패');
+      if (!result?.ok) {
+        throw new Error(result?.error?.message || '사용량 추이를 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
       }
 
       setUsageData(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '사용량 데이터 로드 중 오류가 발생했습니다.');
+      if (seq !== requestSeq.current) return;
+      setError(actionErrorText(err, '사용량 데이터 로드 중 오류가 발생했습니다.'));
       // 가짜 데이터로 채우지 않는다. 이 화면을 보고 집행률을 보고하는데,
       // 무작위 숫자를 '사용량 추이'라는 이름으로 띄우면 아무것도 안 보여주는
       // 것보다 나쁘다. 실패했으면 실패했다고 두고 빈 차트를 보여준다.
       setUsageData([]);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   };
 
@@ -109,14 +119,6 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
     ].filter(item => item.value > 0);
   };
 
-  if (loading) {
-    return <div className="text-center py-8">차트 로딩 중...</div>;
-  }
-
-  if (error && usageData.length === 0) {
-    return <div className="p-4 text-red-700 bg-red-100 rounded-lg">{error}</div>;
-  }
-
   return (
     <div className="space-y-6">
       {/* Period selector */}
@@ -140,6 +142,13 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
         ))}
       </div>
 
+      {/* 기간 단추는 늘 보인다 — 읽는 중·실패에도 다른 기간으로 다시 조회할 수 있게 */}
+      {loading ? (
+        <div className="text-center py-8">차트 로딩 중...</div>
+      ) : error ? (
+        <div role="alert" className="p-4 text-red-700 bg-red-100 rounded-lg">{error}</div>
+      ) : (
+      <>
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Object.entries(getTotalStats()).map(([key, value], index) => {
@@ -270,11 +279,7 @@ export default function UsageChart({ period = '30d' }: UsageChartProps) {
           </ResponsiveContainer>
         </div>
       </div>
-
-      {error && (
-        <div className="p-4 text-amber-700 bg-amber-100 rounded-lg">
-          <p className="text-sm">해당 기간에 사용 내역이 없습니다.</p>
-        </div>
+      </>
       )}
     </div>
   );

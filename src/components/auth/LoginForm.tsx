@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
 import { ACCOUNT_DORMANT, ACCOUNT_LOCKED, DORMANT_MESSAGE, IP_LOCKED, IP_LOCKED_MESSAGE, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
+import { AUTH_UNAVAILABLE, AUTH_UNAVAILABLE_MESSAGE } from '@/lib/auth-unavailable';
 
 /**
  * 로그인 폼.
@@ -44,7 +45,7 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
     if (res?.error) {
       // 로그인 실패 잠금(2026-11-13) — 서버가 ACCOUNT_LOCKED를 던지면 잠김 안내
       // IP 잠금(2026-11-17)은 계정 잠금과 안내가 다르다 — 기관 관리자가 아니라 서비스 운영자가 푼다
-      setMessage(res.error === ACCOUNT_LOCKED ? LOCKED_MESSAGE : res.error === IP_LOCKED ? IP_LOCKED_MESSAGE : res.error === ACCOUNT_DORMANT ? DORMANT_MESSAGE : '이메일 또는 비밀번호가 올바르지 않습니다.');
+      setMessage(res.error === ACCOUNT_LOCKED ? LOCKED_MESSAGE : res.error === IP_LOCKED ? IP_LOCKED_MESSAGE : res.error === ACCOUNT_DORMANT ? DORMANT_MESSAGE : res.error === AUTH_UNAVAILABLE ? AUTH_UNAVAILABLE_MESSAGE : '이메일 또는 비밀번호가 올바르지 않습니다.');
       return;
     }
     router.push(isAdminLogin ? '/admin' : '/');

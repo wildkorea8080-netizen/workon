@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { isImeComposing } from '@/lib/ime';
 import { MAX_CONVERSATION_TITLE } from '@/lib/conversation-title';
+import { emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 interface Conversation {
   id: string;
@@ -57,6 +58,8 @@ export default function Sidebar({
   const { data: session } = useSession();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  // 목록을 못 읽은 것 — '대화가 없습니다'와 가른다(2026-11-20). 앞서 읽은 목록은 그대로 둔다
+  const [unread, setUnread] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -68,15 +71,10 @@ export default function Sidebar({
   }, []);
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch('/api/conversations?limit=80');
-      const result = await res.json();
-      if (result.ok) setConversations(result.data ?? []);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
+    const result = await fetchOkJson<{ data?: Conversation[] }>('/api/conversations?limit=80');
+    setUnread(!result);
+    if (result) setConversations(result.data ?? []);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load, refreshTrigger]);
@@ -225,7 +223,7 @@ export default function Sidebar({
         {loading ? (
           <p className="text-slate-400 text-xs text-center py-6">불러오는 중...</p>
         ) : filtered.length === 0 ? (
-          <p className="text-slate-400 text-xs text-center py-6">대화가 없습니다.</p>
+          <p className="text-slate-400 text-xs text-center py-6">{emptyListText(unread, '대화가 없습니다.', '대화 목록을')}</p>
         ) : (
           GROUP_ORDER.map(group =>
             grouped[group].length > 0 ? (

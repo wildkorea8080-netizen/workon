@@ -6,6 +6,7 @@ import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMATS_LABEL, MAX_UPLOAD_SIZE_LABEL } 
 import { uploadCommonDocument, startCommonReading, type CommonUploadStage } from '@/lib/common-upload-client';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
 import { citedOrgSummary, type CitedOrgCounts } from '@/lib/common-citations';
+import { actionErrorText, emptyListText } from '@/lib/ok-json';
 
 /** 목록 행(`GET /api/super/common-documents`). 저장소 경로·NODA 파일 이름은 서버가 떼고 보낸다 */
 interface CommonRow {
@@ -100,6 +101,9 @@ export default function CommonLibraryPage() {
   const [stage, setStage] = useState<CommonUploadStage | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  // 이 탭의 목록을 못 읽었는지(2026-11-21) — 조작마다 지워지는 errorMessage와 따로 둔다. 예전엔 못 읽으면
+  // '올린 문서가 없습니다 (0)'이었고, 다른 탭을 읽어도 앞 탭의 실패 글이 남았다
+  const [listUnread, setListUnread] = useState<string | null>(null);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -124,6 +128,7 @@ export default function CommonLibraryPage() {
       if (seq !== listSeqRef.current) return;
       if (result.ok) {
         applyRows(result.data);
+        setListUnread(null);
         setLoading(false); // 처음 불러오기를 대신한 응답이면 '불러오는 중'을 끝낸다
       }
     } catch {
@@ -136,15 +141,17 @@ export default function CommonLibraryPage() {
     const seq = ++listSeqRef.current;
     setLoading(true);
     setRows([]);
+    setListUnread(null);
     setForm((f) => ({ ...f, replacesId: '' }));
     (async () => {
       try {
-        const result = await (await fetch(`${BASE}?org_type=${encodeURIComponent(orgType)}`)).json();
+        const res = await fetch(`${BASE}?org_type=${encodeURIComponent(orgType)}`);
+        const result = await res.json().catch(() => null);
         if (seq !== listSeqRef.current) return;
-        if (result.ok) applyRows(result.data);
-        else setErrorMessage(result.error?.message || '문서 목록을 불러오지 못했습니다.');
+        if (res.ok && result?.ok && Array.isArray(result.data)) applyRows(result.data);
+        else setListUnread((typeof result?.error?.message === 'string' && result.error.message) || '문서 목록을 불러오지 못했습니다.');
       } catch {
-        if (seq === listSeqRef.current) setErrorMessage('문서 목록을 불러오지 못했습니다.');
+        if (seq === listSeqRef.current) setListUnread('문서 목록을 불러오지 못했습니다.');
       } finally {
         if (seq === listSeqRef.current) setLoading(false);
       }
@@ -193,7 +200,7 @@ export default function CommonLibraryPage() {
       listSeqRef.current++; // 지우기 전에 나간 목록 응답이 지운 행을 되살리지 않게
       setRows((prev) => prev.filter((r) => r.id !== row.id));
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
+      setErrorMessage(actionErrorText(err, '삭제 중 오류가 발생했습니다.'));
       // 보관소에서 못 지운 경우(502) 행이 '지우는 중'으로 바뀌었다 — 목록을 다시 불러 보인다
       refreshDocuments();
     }
@@ -236,7 +243,7 @@ export default function CommonLibraryPage() {
       setFileKey((k) => k + 1);
       await refreshDocuments();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
+      setErrorMessage(actionErrorText(err, '업로드 중 오류가 발생했습니다.'));
     } finally {
       setUploading(false);
       setStage(null);
@@ -273,6 +280,11 @@ export default function CommonLibraryPage() {
       {errorMessage && (
         <div className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-800/50 text-sm text-red-300">{errorMessage}</div>
       )}
+      {listUnread && (
+        <div role="alert" className="px-4 py-3 rounded-lg bg-red-900/30 border border-red-800/50 text-sm text-red-300">
+          {listUnread} — 이 유형에 이미 올린 문서가 있을 수 있습니다. 새 판을 올리기 전에 화면을 새로 고쳐 확인하세요.
+        </div>
+      )}
       {statusMessage && (
         <div className="px-4 py-3 rounded-lg bg-emerald-900/30 border border-emerald-800/50 text-sm text-emerald-300">
           {statusMessage}
@@ -282,12 +294,12 @@ export default function CommonLibraryPage() {
       {/* 현재 판 */}
       <section className="bg-[#1E293B] border border-slate-700/50 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-700/50 text-sm font-semibold text-white">
-          {orgType} — 현재 판 <span className="text-slate-500 font-normal">({current.length})</span>
+          {orgType} — 현재 판 <span className="text-slate-500 font-normal">({listUnread ? '읽지 못함' : current.length})</span>
         </div>
         {loading ? (
           <p className="px-5 py-8 text-sm text-slate-500">불러오는 중...</p>
         ) : current.length === 0 ? (
-          <p className="px-5 py-8 text-sm text-slate-500">올린 문서가 없습니다.</p>
+          <p className="px-5 py-8 text-sm text-slate-500">{emptyListText(Boolean(listUnread), '올린 문서가 없습니다.', '문서 목록을')}</p>
         ) : (
           <table className="w-full text-sm">
             <thead>

@@ -121,7 +121,7 @@ export function lookupAgentChoices(agents: Array<{ id: string; name: string; tie
     .map(a => ({ id: a.id.toLowerCase(), name: a.name, tier: a.tier ?? null }));
 }
 
-export default function AppStepEditor({ definition, onChange, lookupTools = [], lookupAgents = [] }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[]; lookupAgents?: LookupAgentChoice[] }) {
+export default function AppStepEditor({ definition, onChange, lookupTools = [], lookupAgents = [], lookupUnread = {} }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[]; lookupAgents?: LookupAgentChoice[]; /** 선택지를 못 읽은 것 — 고른 값을 '쓸 수 없음'으로 알리지 않는다(2026-11-20) */ lookupUnread?: { tools?: boolean; agents?: boolean } }) {
   const fields = definition.fields;
   function changeStep(index: number, patch: Partial<AppStep>) { onChange(d => ({ ...d, steps: d.steps?.map((step, i) => i === index ? { ...step, ...patch } : step) })); }
   function changeRules(index: number, rules: AppRule[], mode: AppConditionMode) { changeStep(index, { when: rules.length ? makeCondition(mode, rules) : undefined }); }
@@ -143,7 +143,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
         <input className={input} aria-label={`단계 ${index + 1} 이름`} maxLength={40} value={step.name} onChange={e => changeStep(index, { name: e.target.value })} />
         <label className="block text-xs text-slate-600">처리 방식<select aria-label={`단계 ${index + 1} 처리 방식`} className={`${input} mt-2`} value={step.lookup?.tool ?? ''} onChange={e => { const kind = e.target.value; if (kind === '' || isLookupTool(kind)) onChange(d => ({ ...d, steps: d.steps?.map((s, i) => i === index ? switchStepKind(s, kind, d.fields) : s) })); }}>
           <option value="">AI 처리</option>
-          {(Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).map(tool => <option key={tool} value={tool} disabled={last || !lookupTools.includes(tool)}>{APP_LOOKUP_TOOLS[tool].capability === 'doc_search' ? APP_LOOKUP_TOOLS[tool].label : `공공 데이터 조회 — ${APP_LOOKUP_TOOLS[tool].label}`}{lookupTools.includes(tool) ? '' : ' (기관에서 쓰지 않음)'}</option>)}
+          {(Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).map(tool => <option key={tool} value={tool} disabled={last || !lookupTools.includes(tool)}>{APP_LOOKUP_TOOLS[tool].capability === 'doc_search' ? APP_LOOKUP_TOOLS[tool].label : `공공 데이터 조회 — ${APP_LOOKUP_TOOLS[tool].label}`}{lookupTools.includes(tool) ? '' : lookupUnread.tools ? ' (확인하지 못함)' : ' (기관에서 쓰지 않음)'}</option>)}
         </select></label>
         {step.lookup ? <div className="space-y-2 rounded-lg border border-teal-100 bg-white p-3">
           <input className={input} aria-label={`단계 ${index + 1} 조회어`} maxLength={APP_LOOKUP_QUERY_MAX} value={step.lookup.query} placeholder="조회어 — 입력 항목을 넣으려면 아래 단추를 누르세요" onChange={e => changeStep(index, { lookup: { ...step.lookup!, query: e.target.value } })} />
@@ -176,16 +176,20 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
             <label className="block text-xs text-slate-600">찾을 문서함<select aria-label={`단계 ${index + 1} 찾을 문서함`} className={`${input} mt-1`} value={step.lookup.agent ?? ''} onChange={e => { const { agent: _agent, ...rest } = step.lookup!; changeStep(index, { lookup: e.target.value ? { ...rest, agent: e.target.value } : rest }); }}>
               <option value="">이 앱 비서의 문서함</option>
               {lookupAgents.map(a => <option key={a.id} value={a.id}>{a.name}{a.tier === 'personal' ? ' (나만의 비서 — 나만 실행 가능)' : ''}</option>)}
-              {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <option value={step.lookup.agent}>(지금 쓸 수 없는 비서)</option>}
+              {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <option value={step.lookup.agent}>{lookupUnread.agents ? '(고른 비서 — 그대로 둠)' : '(지금 쓸 수 없는 비서)'}</option>}
             </select></label>
             {/* 태그로 좁히기(2026-11-09) — 찾은 근거 중 이 태그가 붙은 문서의 것만(쉼표로 구분, 5개까지) */}
             <label className="block text-xs text-slate-600">이 태그 문서만(선택)<input key={`tags-${index}-${(step.lookup.tags ?? []).join('|')}`} aria-label={`단계 ${index + 1} 태그로 좁히기`} className={`${input} mt-1`} maxLength={120} defaultValue={(step.lookup.tags ?? []).join(', ')} placeholder="예: 여비, 복무 — 비우면 문서함 전체" onBlur={e => { const tags = [...new Set(e.target.value.split(',').map(t => t.replace(/^#+/, '').replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, APP_LOOKUP_TAGS_MAX); const { tags: _tags, ...rest } = step.lookup!; changeStep(index, { lookup: tags.length ? { ...rest, tags } : rest }); }} /></label>
             {Boolean(step.lookup.tags?.length) && <p className="text-xs leading-5 text-slate-500">찾은 근거 중 태그({step.lookup.tags!.join(', ')}) 하나라도 붙은 이 기관 문서의 것만 다음 단계로 넘깁니다 — 공통 기준 문서는 태그가 없어 빠집니다. 문서 보관소가 태그로 미리 거르지 못해 찾은 뒤 거르므로 근거가 적게 남을 수 있습니다(남는 것이 없으면 정보 공백). 태그는 관리자 문서 화면에서 붙입니다.</p>}
             {step.lookup.agent && <p className="text-xs leading-5 text-slate-500">고른 비서의 문서함(그 비서의 문서 + 기관 유형의 공통 기준)을 찾습니다. 앱을 실행하는 사람이 그 비서를 쓸 수 없거나 그 비서의 문서 찾기가 꺼지면 실행 전에 막힙니다 — 부서·기관에 내놓을 앱이면 공식·부서 비서를 고르세요.</p>}
-            {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && <p role="alert" className="text-xs text-red-700">고른 비서를 지금 쓸 수 없거나 문서 찾기가 꺼져 있습니다. 다른 문서함을 고르세요.</p>}
+            {step.lookup.agent && !lookupAgents.some(a => a.id === step.lookup!.agent) && (lookupUnread.agents
+              ? <p role="alert" className="text-xs text-amber-700">비서 목록을 지금 불러오지 못해 고른 비서를 쓸 수 있는지 확인하지 못했습니다 — 고른 비서는 그대로 둡니다(화면을 새로 고치면 다시 읽습니다).</p>
+              : <p role="alert" className="text-xs text-red-700">고른 비서를 지금 쓸 수 없거나 문서 찾기가 꺼져 있습니다. 다른 문서함을 고르세요.</p>)}
           </div>}
           {APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' ? <p className="text-xs leading-5 text-slate-500">찾을 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'} — AI를 부르지 않고 {step.lookup.agent ? '고른 비서' : '이 앱 비서'}에 올린 문서(기관 유형의 공통 기준 포함)를 대화와 같은 규칙으로 찾습니다. 찾은 근거(문서 이름·쪽)는 다음 단계의 자료가 되고, <strong>근거가 없으면 멈추지 않고 ‘정보 공백’으로 넘겨</strong> 결과에 확인 필요로 밝히게 합니다. 조회어를 다르게 한 문서 찾기 단계를 여럿 두면 주제마다 따로 찾습니다. {step.lookup.agent ? '' : '저장하면 앱의 문서 찾기가 켜집니다 — 앱 비서에 문서를 올려 두세요.'}</p> : <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 자료를 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>}
-          {!lookupTools.includes(step.lookup.tool) && <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>}
+          {!lookupTools.includes(step.lookup.tool) && (lookupUnread.tools
+            ? <p role="alert" className="text-xs text-amber-700">공공 데이터 연결 목록을 지금 불러오지 못해 이 조회를 쓸 수 있는지 확인하지 못했습니다 — 고른 조회는 그대로 둡니다(화면을 새로 고치면 다시 읽습니다).</p>
+            : <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>)}
           {last && <p role="alert" className="text-xs text-red-700">마지막 결과 작성 단계는 AI 처리여야 합니다. 조회 단계를 위로 옮겨 주세요.</p>}
         </div>
         : <textarea className={input} aria-label={`단계 ${index + 1} 처리 지시`} maxLength={2000} rows={3} placeholder={step.classify ? '분류 기준 — 예: 요청이 처리해 달라는 것이면 민원, 묻는 것이면 질의' : undefined} value={step.instruction} onChange={e => changeStep(index, { instruction: e.target.value })} />}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { SECURITY_EVENT_LABELS, SECURITY_SEVERITY_LABELS, securityDetailParts } from '@/lib/security-event-text';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +54,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 감사 화면과 같은 범위 — 못 읽으면 자기 부서만(좁히는 쪽)
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
 
     const { searchParams } = new URL(request.url);
     const limit = intParam(searchParams.get('limit'), 50, 1, 200);

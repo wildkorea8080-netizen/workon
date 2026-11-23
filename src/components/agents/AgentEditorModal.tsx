@@ -10,10 +10,13 @@ import {
   isConnectorOutOfScope,
   isSettingsDirty,
   TIER_LABELS,
+  MODEL_LIST_UNREAD,
+  connectorListUnread,
   type AgentSettingsValue,
   type ConnectorChoice,
 } from '@/lib/agent-form';
 import { requestJson } from '@/lib/request-json';
+import { fetchOkJson } from '@/lib/ok-json';
 import TemplatesPanel from './TemplatesPanel';
 import DocumentsPanel from './DocumentsPanel';
 import HistoryPanel from './HistoryPanel';
@@ -47,6 +50,8 @@ export default function AgentEditorModal({
   const [value, setValue] = useState<AgentSettingsValue | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [connectors, setConnectors] = useState<ConnectorChoice[]>([]);
+  // 선택지 목록을 못 읽었는지 — 빈 목록과 가른다(2026-11-21)
+  const [optionsUnread, setOptionsUnread] = useState({ models: false, connectors: false });
   const [tab, setTab] = useState<Tab>('settings');
   const [saving, setSaving] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
@@ -94,14 +99,14 @@ export default function AgentEditorModal({
 
   useEffect(() => {
     load();
-    fetch('/api/models')
-      .then((r) => r.json())
-      .then((r) => r.ok && setModels(r.data ?? []))
-      .catch(() => {});
-    fetch('/api/connectors')
-      .then((r) => r.json())
-      .then((r) => r.ok && setConnectors(r.data ?? []))
-      .catch(() => {});
+    void fetchOkJson<{ data: ModelOption[] }>('/api/models').then((b) => {
+      if (b) setModels(Array.isArray(b.data) ? b.data : []);
+      setOptionsUnread((u) => ({ ...u, models: !b }));
+    });
+    void fetchOkJson<{ data: ConnectorChoice[] }>('/api/connectors').then((b) => {
+      if (b) setConnectors(Array.isArray(b.data) ? b.data : []);
+      setOptionsUnread((u) => ({ ...u, connectors: !b }));
+    });
   }, [load]);
 
   /** 되돌린 뒤 다시 읽고, 관리 목록·직원 카드도 새 행으로 갱신한다 */
@@ -177,6 +182,8 @@ export default function AgentEditorModal({
   const staleIds = value && connectors.length > 0 ? value.connectors.filter((id) => !catalogIds.has(id)) : [];
   /** 허용 목록을 읽었는데 비서의 모델이 거기 없다 — 서버가 저장을 400으로 거절한다 */
   const modelNotAllowed = !!value && !!value.model_id && models.length > 0 && !models.some((m) => m.id === value.model_id);
+  /** 목록을 못 읽었는데 비서에 모델이 정해져 있다 — '기관 기본 모델'로 보이지 않게 그 모델을 그대로 보인다 */
+  const modelUnlisted = optionsUnread.models && !!value && !!value.model_id && !models.some((m) => m.id === value.model_id);
   const toggleConnector = (id: string, on: boolean) =>
     setValue((v) =>
       v ? { ...v, connectors: on ? [...v.connectors, id] : v.connectors.filter((x) => x !== id) } : v
@@ -335,6 +342,7 @@ export default function AgentEditorModal({
                       {modelNotAllowed && (
                         <option value={value.model_id}>{`${value.model_id} (허용되지 않음 — 바꿔 주세요)`}</option>
                       )}
+                      {modelUnlisted && <option value={value.model_id}>{`${value.model_id} (지금 쓰는 모델)`}</option>}
                       {models.map((m) => (
                         <option key={m.id} value={m.id} title={m.note}>
                           {m.label}
@@ -346,6 +354,7 @@ export default function AgentEditorModal({
                         기관 허용 목록에 없는 모델입니다. 다른 모델을 고르거나 &lsquo;기관 기본 모델&rsquo;로 바꿔야 저장됩니다.
                       </p>
                     )}
+                    {optionsUnread.models && <p role="status" className="mt-1 text-[11px] text-amber-600">{MODEL_LIST_UNREAD}</p>}
                   </div>
 
                   <div className="border border-slate-200 rounded-xl p-3 space-y-2">
@@ -372,9 +381,12 @@ export default function AgentEditorModal({
                         </span>
                       </label>
                     ))}
-                    {(choices.length > 0 || staleIds.length > 0) && (
+                    {(choices.length > 0 || staleIds.length > 0 || optionsUnread.connectors) && (
                       <div className="pt-2 border-t border-slate-100">
                         <p className="text-xs font-medium text-slate-800 mb-1">공공데이터 조회</p>
+                        {optionsUnread.connectors && (
+                          <p role="status" className="text-[11px] text-amber-600">{connectorListUnread(value.connectors.length)}</p>
+                        )}
                         {choices.map((c) => (
                           <label key={c.id} className="flex items-center gap-2.5 cursor-pointer py-0.5">
                             <input

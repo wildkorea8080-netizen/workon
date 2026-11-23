@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { emptyListText, fetchOkJson, ORG_FILTER_UNREAD, requestJson, serverErrorText } from '@/lib/ok-json';
 import { isImeComposing } from '@/lib/ime';
 import { lockUntilLabel, normalizeIp } from '@/lib/sign-in-lock-spec';
 import { passwordPolicyError } from '@/lib/password-policy';
@@ -65,22 +66,18 @@ function IpLockPanel({ onToast }: { onToast: (m: string) => void }) {
   const check = async () => {
     if (!valid) { onToast('IP 주소 꼴이 아닙니다(예: 203.0.113.5).'); return; }
     setBusy(true);
-    try {
-      const res = await fetch(`/api/super/sign-in-ip-lock?ip=${encodeURIComponent(ip.trim())}`);
-      const data = await res.json();
-      if (data.ok) setStatus(data.data); else onToast(data.error?.message ?? '확인 실패');
-    } finally { setBusy(false); }
+    const r = await requestJson(`/api/super/sign-in-ip-lock?ip=${encodeURIComponent(ip.trim())}`);
+    setBusy(false);
+    if (r.ok) setStatus(r.body.data); else onToast(serverErrorText(r.body, 'IP 잠금을 지금 확인하지 못했습니다.'));
   };
   const unlock = async () => {
     if (!confirm(`${ip.trim()}의 로그인 실패 기록을 지워 잠금을 풀까요?
 그 IP로 들어오는 모든 계정의 실패 수도 함께 지워집니다.`)) return;
     setBusy(true);
-    try {
-      const res = await fetch('/api/super/sign-in-ip-lock', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip.trim() }) });
-      const data = await res.json();
-      if (data.ok) { onToast(`IP 잠금을 풀었습니다(실패 기록 ${data.data.cleared}건 지움).`); setStatus(null); }
-      else onToast(data.error?.message ?? '잠금 풀기 실패');
-    } finally { setBusy(false); }
+    const r = await requestJson('/api/super/sign-in-ip-lock', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: ip.trim() }) });
+    setBusy(false);
+    if (r.ok) { onToast(`IP 잠금을 풀었습니다(실패 기록 ${r.body.data?.cleared ?? 0}건 지움).`); setStatus(null); }
+    else onToast(serverErrorText(r.body, 'IP 잠금을 풀지 못했습니다.'));
   };
 
   return (
@@ -116,6 +113,7 @@ function IpLockPanel({ onToast }: { onToast: (m: string) => void }) {
 function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   const [users, setUsers]   = useState<any[]>([]);
   const [orgs, setOrgs]     = useState<any[]>([]);
+  const [orgsUnread, setOrgsUnread] = useState(false);
   const [meta, setMeta]     = useState<{ total: number; newThisMonth: number | null }>({ total: 0, newThisMonth: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -125,20 +123,24 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   const LIMIT = 30;
 
   const fetchOrgs = useCallback(async () => {
-    const res  = await fetch('/api/super/organizations?limit=100');
-    const data = await res.json();
-    if (data.ok) setOrgs(data.data);
+    const data = await fetchOkJson<{ data: unknown }>('/api/super/organizations?limit=100');
+    if (data && Array.isArray(data.data)) { setOrgs(data.data); setOrgsUnread(false); } else setOrgsUnread(true);
   }, []);
 
+  // 못 읽었는지 — 앞 검색 결과를 새 검색의 결과처럼 남기지 않는다(2026-11-21). 늦게 온 앞 검색의 응답은 버린다
+  const [unread, setUnread] = useState(false);
+  const requestSeq = useRef(0);
   const fetchUsers = useCallback(async (p = 1) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     const params = new URLSearchParams({ page: String(p), limit: String(LIMIT) });
     if (search)           params.set('search', search);
     if (filterOrg)        params.set('orgId', filterOrg);
     if (filterRole !== 'all') params.set('role', filterRole);
-    const res  = await fetch(`/api/super/accounts/users?${params}`);
-    const data = await res.json();
-    if (data.ok) { setUsers(data.data); setMeta({ total: data.meta.total, newThisMonth: data.meta.newThisMonth }); }
+    const data = await fetchOkJson<{ data: any[]; meta: { total: number; newThisMonth: number | null } }>(`/api/super/accounts/users?${params}`);
+    if (seq !== requestSeq.current) return;
+    if (data) { setUsers(data.data ?? []); setMeta({ total: data.meta?.total ?? 0, newThisMonth: data.meta?.newThisMonth ?? null }); setUnread(false); }
+    else { setUsers([]); setMeta({ total: 0, newThisMonth: null }); setUnread(true); }
     setLoading(false);
   }, [search, filterOrg, filterRole]);
 
@@ -149,40 +151,37 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   const [deleting, setDeleting] = useState(false);
 
   const handlePatch = async (id: string, body: object) => {
-    const res  = await fetch(`/api/super/accounts/users/${id}`, {
+    const r = await requestJson(`/api/super/accounts/users/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
-    else onToast(typeof data?.error === 'string' ? data.error : '바꾸지 못했습니다.');
+    if (r.ok) { fetchUsers(page); onToast('변경됐습니다.'); }
+    else onToast(serverErrorText(r.body, '바꾸지 못했습니다.'));
   };
 
   const handleUnlock = async (id: string) => {
-    const res  = await fetch(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.ok) { fetchUsers(page); onToast('로그인 잠금을 풀었습니다.'); }
-    else onToast(data.error?.message ?? '잠금 풀기 실패');
+    const r = await requestJson(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
+    if (r.ok) { fetchUsers(page); onToast('로그인 잠금을 풀었습니다.'); }
+    else onToast(serverErrorText(r.body, '로그인 잠금을 풀지 못했습니다.'));
   };
 
   // 임시 비밀번호 재발급 — 새 비밀번호는 이 화면에 한 번만 보인다(저장하지 않음)
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword: string; emailSent: boolean } | null>(null);
   const handleResetPassword = async (id: string, email: string) => {
     if (!confirm(`${email}의 임시 비밀번호를 다시 발급할까요?\n지금 비밀번호와 열려 있는 로그인은 모두 쓸 수 없게 되고, 다음 로그인에 비밀번호부터 바꿔야 합니다.`)) return;
-    const res  = await fetch(`/api/super/accounts/users/${id}/password-reset`, { method: 'POST' });
-    const data = await res.json();
-    if (data.ok) { setResetInfo({ email, tempPassword: data.data.tempPassword, emailSent: Boolean(data.data.emailSent) }); fetchUsers(page); }
-    else onToast(data.error?.message ?? '재발급 실패');
+    const r = await requestJson(`/api/super/accounts/users/${id}/password-reset`, { method: 'POST' });
+    if (r.ok && r.body.data?.tempPassword) { setResetInfo({ email, tempPassword: r.body.data.tempPassword, emailSent: Boolean(r.body.data.emailSent) }); fetchUsers(page); }
+    else onToast(serverErrorText(r.body, '임시 비밀번호를 재발급하지 못했습니다(이미 바뀌었을 수 있으니 목록을 새로 고쳐 확인하세요).'));
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
-    const res  = await fetch(`/api/super/accounts/users/${deleteTarget.id}`, { method: 'DELETE' });
-    const data = await res.json();
+    const r = await requestJson(`/api/super/accounts/users/${deleteTarget.id}`, { method: 'DELETE' });
     setDeleting(false);
     setDeleteTarget(null);
-    if (data.ok) { fetchUsers(page); onToast('계정이 삭제됐습니다.'); }
-    else onToast(data.error?.message ?? '삭제 실패');
+    fetchUsers(page);
+    if (r.ok) onToast('계정이 삭제됐습니다.');
+    else onToast(serverErrorText(r.body, '계정을 삭제하지 못했습니다(일부가 처리됐을 수 있으니 목록을 확인하세요).'));
   };
 
   const activeCount   = users.filter(u => u.is_active !== false).length;
@@ -190,11 +189,11 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
   const totalPages    = Math.ceil(meta.total / LIMIT);
 
   const STATS = [
-    { label: '전체 사용자',   value: meta.total,       icon: '👥' },
+    { label: '전체 사용자',   value: unread ? '읽지 못함' : meta.total,       icon: '👥' },
     // 서버가 못 읽은 수(null)는 0으로 보이지 않게(2026-11-20)
     { label: '이번달 신규',   value: meta.newThisMonth === null ? '읽지 못함' : meta.newThisMonth, icon: '✨' },
-    { label: '활성 사용자',   value: activeCount,       icon: '🟢' },
-    { label: '비활성 사용자', value: inactiveCount,     icon: '⚫' },
+    { label: '활성 사용자',   value: unread ? '읽지 못함' : activeCount,       icon: '🟢' },
+    { label: '비활성 사용자', value: unread ? '읽지 못함' : inactiveCount,     icon: '⚫' },
   ];
 
   return (
@@ -237,6 +236,7 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
         <select value={filterOrg} onChange={e => setFilterOrg(e.target.value)}
           className="px-3 py-2.5 bg-[#1E293B] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="">기관 전체</option>
+          {orgsUnread && <option value="__unread" disabled>{ORG_FILTER_UNREAD}</option>}
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         <select value={filterRole} onChange={e => setFilterRole(e.target.value)}
@@ -266,7 +266,7 @@ function UsersTab({ onToast }: { onToast: (m: string) => void }) {
                 ))}</tr>
               ))
             ) : users.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">사용자가 없습니다.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">{emptyListText(unread, '사용자가 없습니다.', '사용자 목록을')}</td></tr>
             ) : (
               users.map(u => (
                 <tr key={u.id} className={`hover:bg-slate-700/20 transition-colors ${u.is_active === false ? 'opacity-50' : ''}`}>
@@ -387,30 +387,31 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSaving, setPwSaving] = useState(false);
 
+  // 못 읽었는지 — 빈 표(머리만)로 두지 않는다. 응답을 못 읽어도 도는 표시가 멈추게 던지지 않는다(2026-11-21)
+  const [unread, setUnread] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
-    const res  = await fetch('/api/super/accounts/super-admins');
-    const data = await res.json();
-    if (data.ok) setList(data.data);
+    const data = await fetchOkJson<{ data: any[] }>('/api/super/accounts/super-admins');
+    if (data) { setList(data.data ?? []); setUnread(false); }
+    else { setList([]); setUnread(true); }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const handleDeactivate = async (id: string, isActive: boolean) => {
-    const res  = await fetch(`/api/super/accounts/super-admins/${id}`, {
+    const r = await requestJson(`/api/super/accounts/super-admins/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive }),
     });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.ok) { load(); onToast(isActive ? '활성화됐습니다.' : '비활성화됐습니다.'); }
-    else { load(); onToast(typeof data?.error === 'string' ? data.error : '바꾸지 못했습니다.'); }
+    load();
+    if (r.ok) onToast(isActive ? '활성화됐습니다.' : '비활성화됐습니다.');
+    else onToast(serverErrorText(r.body, '바꾸지 못했습니다.'));
   };
 
   const handleUnlockSuper = async (id: string) => {
-    const res  = await fetch(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.ok) { load(); onToast('로그인 잠금을 풀었습니다.'); }
-    else onToast(data.error?.message ?? '잠금 풀기 실패');
+    const r = await requestJson(`/api/super/accounts/users/${id}/sign-in-lock`, { method: 'DELETE' });
+    if (r.ok) { load(); onToast('로그인 잠금을 풀었습니다.'); }
+    else onToast(serverErrorText(r.body, '로그인 잠금을 풀지 못했습니다.'));
   };
 
   const handleChangePw = async (e: React.FormEvent) => {
@@ -420,18 +421,17 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
     const policy = passwordPolicyError(pwForm.next);
     if (policy) { setPwError(policy); return; }
     setPwSaving(true); setPwError(null);
-    const res  = await fetch('/api/super/accounts/me/password', {
+    const r = await requestJson('/api/super/accounts/me/password', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }),
     });
-    const data = await res.json();
-    if (data.ok) {
+    if (r.ok) {
       setPwForm({ current: '', next: '', confirm: '' });
       // 모든 슈퍼관리자 로그인이 끝났다 — 새 비밀번호로 다시 로그인
-      if (data.data?.signedOut) { window.location.href = '/super/login'; return; }
+      if (r.body.data?.signedOut) { window.location.href = '/super/login'; return; }
       onToast('비밀번호가 변경됐습니다.');
     }
-    else setPwError(typeof data.error === 'string' ? data.error : data.error?.message ?? '비밀번호를 바꾸지 못했습니다.');
+    else setPwError(serverErrorText(r.body, '비밀번호를 바꾸지 못했습니다.'));
     setPwSaving(false);
   };
 
@@ -460,6 +460,8 @@ function SuperAdminsTab({ onToast }: { onToast: (m: string) => void }) {
             <tbody className="divide-y divide-slate-700/30">
               {loading ? (
                 <tr><td colSpan={6} className="px-5 py-8 text-center"><div className="w-5 h-5 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin mx-auto"/></td></tr>
+              ) : list.length === 0 ? (
+                <tr><td colSpan={6} className="px-5 py-8 text-center text-slate-500">{emptyListText(unread, '슈퍼관리자가 없습니다.', '슈퍼관리자 목록을')}</td></tr>
               ) : list.map(sa => (
                 <tr key={sa.id} className={`hover:bg-slate-700/20 transition-colors ${sa.is_active === false ? 'opacity-50' : ''}`}>
                   <td className="px-5 py-3.5 font-medium text-white">{sa.full_name || '—'}</td>
@@ -540,19 +542,13 @@ function AddSuperAdminModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true); setError(null);
-    try {
-      const res  = await fetch('/api/super/accounts/super-admins', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.ok) onCreated(data.data);
-      else setError(typeof data?.error === 'string' ? data.error : '슈퍼관리자를 추가하지 못했습니다.');
-    } catch {
-      setError('슈퍼관리자를 추가하지 못했습니다.');
-    } finally {
-      setSaving(false);
-    }
+    const r = await requestJson('/api/super/accounts/super-admins', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email }),
+    });
+    setSaving(false);
+    if (r.ok) onCreated(r.body.data);
+    else setError(serverErrorText(r.body, '슈퍼관리자를 추가하지 못했습니다.'));
   };
 
   return (

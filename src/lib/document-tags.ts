@@ -158,3 +158,6 @@ export function tagsOutsideVocabulary(docs: FilterableDocument[], vocabulary: st
   const known = new Set(vocabulary.map((v) => v.toLocaleLowerCase('ko')));
   return tagCounts(docs).filter((t) => !known.has(t.tag.toLocaleLowerCase('ko')));
 }
+
+/** 기관 태그 분류표를 못 읽었을 때(2026-11-22) — 예전엔 분류표 칸이 조용히 사라져 분류표가 없는 기관처럼 보였다 */
+export const TAG_VOCABULARY_UNREAD = '기관 태그 분류표를 지금 불러오지 못했습니다. 분류표를 확인하지 못하는 동안 태그 저장이 거절될 수 있습니다 — 화면을 새로 고쳐 주세요.';

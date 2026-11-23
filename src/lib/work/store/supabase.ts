@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { reportUsageLogFailure } from '@/lib/usage-log-failure';
 import { mapDbError } from './errors';
+import { WorkError } from '../types';
+import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE } from '@/lib/actor-scope';
 import type { WorkStore, TemplateVersionRow, RunStepRow, ProposalRow, WorkflowInstallationRow, LegacyFileRow, WorkStatsRow } from './types';
 import type {
   WorkArtifactRow,
@@ -30,17 +32,22 @@ export function createSupabaseWorkStore(db = supabaseAdmin): WorkStore {
       if (error) fail(error);
       return { homeEnabled: data?.home_enabled ?? false, newTasksEnabled: data?.new_tasks_enabled ?? false };
     },
+    // 이름·활성 여부를 못 읽으면 던진다(2026-11-20 — 예전엔 '없음'으로 보아 공문·보고서의 기관명·부서명 칸이 빈 채로 만들어지고,
+    // 활성 여부 읽기 실패는 '업무를 쓸 수 없음'(403)이었다). pg 저장소는 원래 던진다.
     async getOrganizationName(organizationId) {
-      const { data } = await db.from('organizations').select('name').eq('id', organizationId).maybeSingle();
+      const { data, error } = await db.from('organizations').select('name').eq('id', organizationId).maybeSingle();
+      if (error) fail(error);
       return data?.name ?? null;
     },
     async getDepartmentName(departmentId, organizationId) {
-      const { data } = await db.from('departments').select('name').eq('id', departmentId).eq('organization_id', organizationId).maybeSingle();
+      const { data, error } = await db.from('departments').select('name').eq('id', departmentId).eq('organization_id', organizationId).maybeSingle();
+      if (error) fail(error);
       return data?.name ?? null;
     },
     async isUserActive(userId) {
       const { data, error } = await db.from('users').select('is_active').eq('id', userId).maybeSingle();
-      if (error || !data) return false;
+      if (error) throw new WorkError('ACTOR_UNAVAILABLE', ACTOR_SCOPE_UNAVAILABLE_MESSAGE, 503);
+      if (!data) return false;
       return data.is_active !== false;
     },
 

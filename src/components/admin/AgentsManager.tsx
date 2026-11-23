@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Agent } from '@/lib/db';
 import AgentEditorModal from '@/components/agents/AgentEditorModal';
-import { TIER_LABELS, connectorIdsOf } from '@/lib/agent-form';
+import { TIER_LABELS, connectorIdsOf, CREATE_CONNECTOR_LIST_UNREAD } from '@/lib/agent-form';
 import { isImeComposing } from '@/lib/ime';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 type Tab = 'official' | 'pending' | 'rejected';
 
@@ -197,12 +198,15 @@ function CatalogFields({
   form,
   categories,
   connectors,
+  connectorsUnread = false,
   idPrefix,
   onChange,
 }: {
   form: AgentFormData;
   categories: CategoryInfo[];
   connectors: ConnectorInfo[];
+  /** 연결 목록을 못 읽었으면 칸을 조용히 숨기지 않고 알린다(2026-11-22) */
+  connectorsUnread?: boolean;
   idPrefix: string;
   onChange: (patch: Partial<AgentFormData>) => void;
 }) {
@@ -279,6 +283,7 @@ function CatalogFields({
             </p>
           </div>
 
+          {connectorsUnread && <p role="status" className="text-[11px] text-amber-600">{CREATE_CONNECTOR_LIST_UNREAD}</p>}
           {connectors.length > 0 && (
             <div className="border border-slate-200 rounded-xl p-3 space-y-2">
               <div>
@@ -325,6 +330,8 @@ export default function AgentsManager() {
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽은 것 — 빈 목록('없습니다')과 가른다(2026-11-20)
+  const [unread, setUnread] = useState({ official: false, pending: false, rejected: false, connectors: false, categories: false });
 
   // 공식 비서 탭 상태
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -354,40 +361,44 @@ export default function AgentsManager() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const loadConnectors = useCallback(async () => {
-    const res = await fetch('/api/connectors');
-    const result = await res.json();
-    if (result.ok) setConnectors(result.data ?? []);
+    // 던지지 않는다 — 예전엔 몸을 못 읽으면 화면 전체가 '데이터를 불러오지 못했습니다'였고, 못 읽은 목록은 칸을 숨겼다
+    const result = await fetchOkJson<{ data?: ConnectorInfo[] }>('/api/connectors');
+    setUnread((u) => ({ ...u, connectors: !result }));
+    if (result) setConnectors(result.data ?? []);
   }, []);
 
   const loadOfficialAgents = useCallback(async () => {
     // manage=true라야 '노출 대기중'까지 내려온다. 직원 화면은 이걸 안 붙인다.
-    const res = await fetch('/api/agents?manage=true');
-    const result = await res.json();
-    if (result.ok) setAgents(result.data ?? []);
+    const result = await fetchOkJson<{ data?: Agent[] }>('/api/agents?manage=true');
+    setUnread((u) => ({ ...u, official: !result }));
+    if (result) setAgents(result.data ?? []);
   }, []);
 
   const loadCategories = useCallback(async () => {
-    const res = await fetch('/api/admin/agent-categories');
-    const result = await res.json();
-    if (result.ok) {
+    // 던지지 않는다 — 예전엔 못 읽으면 '카테고리가 없습니다'와 '권한 없음' 안내가 함께 보였다(2026-11-22)
+    const result = await fetchOkJson<{ data?: CategoryInfo[]; canEdit?: boolean }>('/api/admin/agent-categories');
+    setUnread((u) => ({ ...u, categories: !result }));
+    if (result) {
       setCategories(result.data ?? []);
       setCanEditCategories(result.canEdit === true);
+    } else {
+      setCanEditCategories(false);
     }
   }, []);
 
   const loadPendingAgents = useCallback(async () => {
-    const res = await fetch('/api/admin/agents/approvals?status=pending');
-    const result = await res.json();
-    if (result.ok) {
+    const result = await fetchOkJson<{ data?: AgentWithOwner[] }>('/api/admin/agents/approvals?status=pending');
+    setUnread((u) => ({ ...u, pending: !result }));
+    if (result) {
       setPendingAgents(result.data ?? []);
       setPendingCount(result.data?.length ?? 0);
     }
   }, []);
 
   const loadRejectedAgents = useCallback(async () => {
-    const res = await fetch('/api/admin/agents/approvals?status=rejected');
-    const result = await res.json();
-    if (result.ok) setRejectedAgents(result.data ?? []);
+    const result = await fetchOkJson<{ data?: AgentWithOwner[] }>('/api/admin/agents/approvals?status=rejected');
+    setUnread((u) => ({ ...u, rejected: !result }));
+    if (result) setRejectedAgents(result.data ?? []);
   }, []);
 
   useEffect(() => {
@@ -421,7 +432,7 @@ export default function AgentsManager() {
       loadCategories();
       setShowCreateForm(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '알 수 없는 오류');
+      setError(actionErrorText(err, '비서를 만들지 못했습니다.'));
     } finally {
       setSubmitting(false);
     }
@@ -448,7 +459,7 @@ export default function AgentsManager() {
       setAgents(prev => prev.map(a => a.id === editingAgent.id ? result.data : a));
       setEditingAgent(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '알 수 없는 오류');
+      setError(actionErrorText(err, '비서 설정을 저장하지 못했습니다.'));
     } finally {
       setSubmitting(false);
     }
@@ -463,7 +474,7 @@ export default function AgentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => prev.filter(a => a.id !== agent.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '삭제 실패');
+      setError(actionErrorText(err, '비서를 삭제하지 못했습니다.'));
     } finally {
       setDeletingId(null);
     }
@@ -487,7 +498,7 @@ export default function AgentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setAgents(prev => prev.map(a => a.id === agent.id ? result.data : a));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '노출 상태 변경 실패');
+      setError(actionErrorText(err, '노출 상태를 바꾸지 못했습니다.'));
     } finally {
       setPublishingId(null);
     }
@@ -508,7 +519,7 @@ export default function AgentsManager() {
       setCategories(prev => [...prev, result.data]);
       setNewCategoryName('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '카테고리 추가 실패');
+      setError(actionErrorText(err, '카테고리를 추가하지 못했습니다.'));
     }
   };
 
@@ -525,7 +536,7 @@ export default function AgentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       await Promise.all([loadCategories(), loadOfficialAgents()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '이름 변경 실패');
+      setError(actionErrorText(err, '카테고리 이름을 바꾸지 못했습니다.'));
       // 실패해도 서버 상태가 바뀌었을 수 있다 — 목록을 다시 읽는다
       loadCategories();
     }
@@ -544,7 +555,7 @@ export default function AgentsManager() {
       if (!result.ok) throw new Error(result.error?.message);
       await Promise.all([loadCategories(), loadOfficialAgents()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '카테고리 삭제 실패');
+      setError(actionErrorText(err, '카테고리를 삭제하지 못했습니다.'));
       // 비서만 미분류로 가고 카테고리는 남았을 수 있다 — 목록을 다시 읽는다
       Promise.all([loadCategories(), loadOfficialAgents()]);
     }
@@ -566,19 +577,25 @@ export default function AgentsManager() {
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '순서 저장 실패');
+      setError(actionErrorText(err, '카테고리 순서를 저장하지 못했습니다.'));
       loadCategories();
     }
   };
 
   const handleToggleActive = async (agent: Agent) => {
-    const res = await fetch(`/api/agents/${agent.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !agent.is_active }),
-    });
-    const result = await res.json();
-    if (result.ok) setAgents(prev => prev.map(a => a.id === agent.id ? result.data : a));
+    // 실패를 알린다 — 예전엔 아무것도 하지 않아 바뀐 줄 알았다(몸을 못 읽으면 처리되지 않은 오류)
+    try {
+      const res = await fetch(`/api/agents/${agent.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !agent.is_active }),
+      });
+      const result = await res.json();
+      if (!result.ok || !result.data) throw new Error(result.error?.message);
+      setAgents(prev => prev.map(a => a.id === agent.id ? result.data : a));
+    } catch (err) {
+      setError(actionErrorText(err, '비서 사용 상태(활성/비활성)를 바꾸지 못했습니다.'));
+    }
   };
 
   // ── 승인/반려 ────────────────────────────────────────────────
@@ -599,7 +616,7 @@ export default function AgentsManager() {
       await loadOfficialAgents();
       setApproveModal(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '승인 처리 실패');
+      alert(actionErrorText(err, '승인하지 못했습니다.'));
     } finally {
       setActionSubmitting(false);
     }
@@ -621,7 +638,7 @@ export default function AgentsManager() {
       setRejectModal(null);
       setRejectNote('');
     } catch (err) {
-      alert(err instanceof Error ? err.message : '반려 처리 실패');
+      alert(actionErrorText(err, '반려하지 못했습니다.'));
     } finally {
       setActionSubmitting(false);
     }
@@ -715,7 +732,7 @@ export default function AgentsManager() {
                 </p>
               </div>
 
-              {!canEditCategories && (
+              {!canEditCategories && !unread.categories && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                   카테고리는 기관 전체를 관리하는 관리자(최상위 부서 소속)만 바꿀 수 있습니다. 목록은 볼 수 있습니다.
                 </p>
@@ -740,7 +757,7 @@ export default function AgentsManager() {
               )}
 
               {categories.length === 0 ? (
-                <p className="text-xs text-slate-400 py-2">카테고리가 없습니다. 모든 비서가 한 목록에 나옵니다.</p>
+                <p className={`text-xs py-2 ${unread.categories ? 'text-red-600' : 'text-slate-400'}`}>{emptyListText(unread.categories, '카테고리가 없습니다. 모든 비서가 한 목록에 나옵니다.', '카테고리 목록을')}</p>
               ) : (
                 <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden">
                   {categories.map((category, index) => (
@@ -793,7 +810,7 @@ export default function AgentsManager() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
                 )}
 
-                <CatalogFields form={formData} categories={categories} connectors={connectors}
+                <CatalogFields form={formData} categories={categories} connectors={connectors} connectorsUnread={unread.connectors}
                   idPrefix="new"
                   onChange={patch => setFormData(p => ({ ...p, ...patch }))} />
 
@@ -914,7 +931,7 @@ export default function AgentsManager() {
               </div>
             ))}
             {agents.length === 0 && (
-              <div className="text-center py-10 text-slate-400 text-sm">등록된 공식 비서가 없습니다.</div>
+              <div className="text-center py-10 text-slate-400 text-sm">{emptyListText(unread.official, '등록된 공식 비서가 없습니다.', '공식 비서 목록을')}</div>
             )}
           </div>
         </div>
@@ -924,7 +941,7 @@ export default function AgentsManager() {
       {activeTab === 'pending' && (
         <div className="space-y-3">
           {pendingAgents.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 text-sm">승인 대기 중인 비서가 없습니다.</div>
+            <div className="text-center py-10 text-slate-400 text-sm">{emptyListText(unread.pending, '승인 대기 중인 비서가 없습니다.', '승인 대기 목록을')}</div>
           ) : (
             pendingAgents.map(agent => (
               <ApprovalCard
@@ -944,7 +961,7 @@ export default function AgentsManager() {
       {activeTab === 'rejected' && (
         <div className="space-y-3">
           {rejectedAgents.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 text-sm">반려된 비서가 없습니다.</div>
+            <div className="text-center py-10 text-slate-400 text-sm">{emptyListText(unread.rejected, '반려된 비서가 없습니다.', '반려된 비서 목록을')}</div>
           ) : (
             rejectedAgents.map(agent => (
               <ApprovalCard

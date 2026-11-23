@@ -3,6 +3,19 @@ import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { logSecurityEvent } from '@/lib/security-log';
+import { logSystem } from '@/lib/logger';
+
+/**
+ * 소속·허용 IP를 못 읽어 차단 기록을 남기지 못했을 때(2026-11-20) — 예전엔 '기록할 것 없음'(ok, logged: false)으로 끝나
+ * 차단된 접속이 감사 기록에서 빠진 것을 알 길이 없었다. 운영 기록에 단계·오류 코드만 남기고 503으로 답한다.
+ */
+async function unread(stage: 'user' | 'department' | 'organization', code: string | undefined, userId: string) {
+  await logSystem({
+    level: 'error', category: 'security', message: '접속 차단 기록을 남기지 못했습니다(소속·허용 IP를 읽지 못함)',
+    details: { stage, code: code ?? 'error', user_id: userId },
+  }).catch(() => {});
+  return NextResponse.json({ ok: false, error: { message: '접속 차단 기록을 지금 남기지 못했습니다.' } }, { status: 503 });
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -31,32 +44,35 @@ export async function POST(request: NextRequest) {
 
     let departmentId = session.user.departmentId ?? null;
     if (!departmentId) {
-      const { data } = await supabaseAdmin
+      const { data, error } = await supabaseAdmin
         .from('users')
         .select('department_id')
         .eq('id', session.user.id)
         .maybeSingle();
+      if (error) return unread('user', error.code, session.user.id);
       departmentId = data?.department_id ?? null;
     }
     if (!departmentId) {
       return NextResponse.json({ ok: true, data: { logged: false } });
     }
 
-    const { data: dept } = await supabaseAdmin
+    const { data: dept, error: deptError } = await supabaseAdmin
       .from('departments')
       .select('organization_id')
       .eq('id', departmentId)
       .maybeSingle();
+    if (deptError) return unread('department', deptError.code, session.user.id);
 
     if (!dept?.organization_id) {
       return NextResponse.json({ ok: true, data: { logged: false } });
     }
 
-    const { data: org } = await supabaseAdmin
+    const { data: org, error: orgError } = await supabaseAdmin
       .from('organizations')
       .select('allowed_ips')
       .eq('id', dept.organization_id)
       .maybeSingle();
+    if (orgError) return unread('organization', orgError.code, session.user.id);
 
     const allowed: string[] = org?.allowed_ips ?? [];
     const ip = clientIpFrom(request.headers, request.ip);

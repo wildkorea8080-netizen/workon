@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import UsageChart from './UsageChart';
 
 interface Stats {
@@ -39,7 +40,7 @@ export default function StatsDashboard() {
 
       setStats(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '통계 로드 중 오류가 발생했습니다.');
+      setError(actionErrorText(err, '통계 로드 중 오류가 발생했습니다.'));
     } finally {
       setLoading(false);
     }

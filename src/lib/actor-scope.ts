@@ -1,4 +1,5 @@
 // src/lib/actor-scope.ts
+import { isDepartmentScopeReadError } from '@/lib/access-scope-error';
 import type { Session } from 'next-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { isAdminSession } from '@/lib/auth';
@@ -30,6 +31,12 @@ export function isActorScopeReadError(err: unknown): err is ActorScopeReadError 
 
 export const ACTOR_SCOPE_UNAVAILABLE_MESSAGE = '요청자 정보를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 
+/** 부서 계통(상위·하위)을 못 읽은 것도 요청자 범위를 못 읽은 것이다(2026-11-20 — 예전엔 '자기 부서만'으로 좁혀 상위 부서의 금지어·하위 부서의 감사 기록이 빠졌다) */
+function scopeUnread(err: unknown): never {
+  if (isDepartmentScopeReadError(err)) throw new ActorScopeReadError('department', err.code);
+  throw err;
+}
+
 export async function getActorScope(session: Session | null): Promise<ActorScope | null> {
   const userId = session?.user?.id;
   if (!userId) return null;
@@ -53,8 +60,8 @@ export async function getActorScope(session: Session | null): Promise<ActorScope
       .select('organization_id, parent_id')
       .eq('id', departmentId)
       .maybeSingle(),
-    getVisibleDepartmentIds(departmentId),
-    isAdmin ? getManagedDepartmentIds(departmentId) : Promise.resolve([] as string[]),
+    getVisibleDepartmentIds(departmentId).catch(scopeUnread),
+    isAdmin ? getManagedDepartmentIds(departmentId).catch(scopeUnread) : Promise.resolve([] as string[]),
   ]);
 
   // 부서를 못 읽으면 '기관 없음'으로 보지 않는다

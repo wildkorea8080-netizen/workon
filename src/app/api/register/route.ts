@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { claimInvitation, releaseInvitation } from '@/lib/invitation-claim';
+import { claimInvitation, isInvitationClaimError, releaseInvitation, INVITATION_CLAIM_UNAVAILABLE } from '@/lib/invitation-claim';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { SIGNUP_READ_FAILED_MESSAGE, departmentOrgRejection, departmentOrgState } from '@/lib/signup-org';
 
@@ -90,7 +90,16 @@ export async function POST(request: NextRequest) {
     if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
 
     // 계정을 만들기 전에 초대를 차지한다(2026-11-12) — 같은 링크로 거의 동시에 둘이 가입하지 못하게
-    const claimedAt = await claimInvitation(invitation.id);
+    let claimedAt: string | null;
+    try {
+      claimedAt = await claimInvitation(invitation.id);
+    } catch (claimError) {
+      // DB가 실패한 것은 '이미 사용됨'이 아니다(2026-11-20)
+      if (isInvitationClaimError(claimError)) {
+        return NextResponse.json({ ok: false, error: { message: INVITATION_CLAIM_UNAVAILABLE } }, { status: 503 });
+      }
+      throw claimError;
+    }
     if (!claimedAt) {
       return NextResponse.json(
         { ok: false, error: { message: '이미 사용됐거나 만료된 초대 링크입니다.' } },

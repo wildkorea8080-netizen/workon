@@ -59,6 +59,12 @@ type BatchUpload = { key: string; name: string; state: 'uploading' | 'ready' | '
  * 입력형 앱 일괄 실행(0077) — 엑셀에서 복사한 표(첫 줄 = 입력 항목 이름)나 CSV를 붙이면 줄마다 이 앱을 실행하고 결과를 엑셀로 받는다.
  * 실행은 서버가 5분마다 몇 줄씩(손 실행·예약과 같은 권한·한도·사용 기록). 파일이 꼭 필요한 앱은 일괄 실행할 수 없다
  */
+export const BATCH_LIST_UNREAD = '일괄 실행 목록을 지금 불러오지 못했습니다 — 만든 일괄 실행은 그대로 돌고 있습니다. 다시 만들지 말고 잠시 뒤 화면을 새로 고쳐 주세요.';
+/** 만든 직후의 알림 — 목록을 못 읽어도 만들어졌다는 것을 알 수 있게 */
+export function batchCreatedNotice(lines: number): string {
+  return `일괄 실행을 만들었습니다(${lines}줄). 약 5분 안에 차례로 실행됩니다 — 같은 내용으로 다시 만들지 마세요.`;
+}
+
 export default function AppBatchPanel({ agentId, agentName, definition, disabled }: { agentId: string; agentName: string; definition: AppDefinition; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
@@ -67,6 +73,10 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [batches, setBatches] = useState<BatchView[]>([]);
+  // 방금 만든 것·목록을 못 읽은 것(2026-11-20) — 예전엔 만든 뒤 목록 읽기에 실패하면 입력만 지워지고 아무것도 보이지 않아,
+  // 실패한 줄 알고 다시 만들면 같은 일괄 실행이 두 번 돌았다(사용량도 두 번). 만든 것은 목록과 따로 알린다
+  const [created, setCreated] = useState<string | null>(null);
+  const [listUnread, setListUnread] = useState(false);
   const acceptsFiles = Boolean(definition.attachments);
   const filesOnly = Boolean(definition.attachments?.required);
   const [mode, setMode] = useState<'table' | 'files'>(filesOnly ? 'files' : 'table');
@@ -82,8 +92,9 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
     try {
       const res = await fetch(`/api/apps/batches?agent=${encodeURIComponent(agentId)}`);
       const body = await res.json().catch(() => null);
-      if (res.ok && body?.ok) setBatches(body.data);
-    } catch { /* 목록은 표시일 뿐 */ }
+      if (res.ok && body?.ok) { setBatches(body.data); setListUnread(false); }
+      else setListUnread(true);
+    } catch { setListUnread(true); }
   }, [agentId]);
   useEffect(() => { if (open) void load(); }, [open, load]);
   // 실행 중인 일괄 실행이 있으면 30초마다 다시 읽는다
@@ -95,14 +106,18 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
 
   async function submit() {
     if (busy || !preview?.ok) return;
-    setBusy(true); setError(null); setErrors([]);
+    setBusy(true); setError(null); setErrors([]); setCreated(null);
     try {
       // 기대 핵심어 칸이 있을 때만 싣는다(0088 — 줄마다 결과에 핵심어가 모두 있는지 실행기가 잰다)
       const payload = { agent_id: agentId, name: name.trim() || undefined, rows: preview.rows, ...(preview.expects.some(Boolean) ? { expects: preview.expects } : {}), ...(mode === 'files' ? { attachment_ids: readyIds } : {}) };
       const res = await fetch('/api/apps/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) { setError(body?.error?.message ?? '일괄 실행을 만들지 못했습니다.'); setErrors(body?.error?.details?.errors ?? []); }
-      else { setText(''); setName(''); setUploads([]); await load(); }
+      else {
+        const lines = mode === 'files' ? readyIds.length : preview.rows.length;
+        setCreated(batchCreatedNotice(lines));
+        setText(''); setName(''); setUploads([]); await load();
+      }
     } finally { setBusy(false); }
   }
   async function addFiles(list: FileList) {
@@ -192,6 +207,8 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
             : <ul role="alert" className="space-y-0.5 text-xs text-red-700">{preview.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
           <button type="button" disabled={disabled || busy || uploading || !preview?.ok} onClick={() => void submit()} className="rounded-xl bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '일괄 실행 시작'}</button>
           {error && <div role="alert" className="text-xs text-red-700"><p>{error}</p>{errors.length > 1 && <ul>{errors.slice(1).map((e) => <li key={e}>{e}</li>)}</ul>}</div>}
+          {created && <p role="status" className="text-xs text-emerald-700">{created}</p>}
+          {listUnread && <p role="alert" className="text-xs text-amber-700">{BATCH_LIST_UNREAD}{batches.length > 0 ? ' 아래는 앞서 읽은 목록입니다.' : ''}</p>}
           {batches.length > 0 && (
             <ul className="space-y-2 text-xs">
               {batches.map((b) => (

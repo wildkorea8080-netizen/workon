@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import Papa from 'papaparse';
 import type { RegisterResult } from '@/app/api/admin/bulk-register/route';
 import { csvLine, CSV_BOM } from '@/lib/csv-cell';
@@ -103,7 +104,7 @@ export default function CsvRegisterTab() {
       setResults(result.data.results);
       setSummary(result.data.summary);
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : '처리 중 오류가 발생했습니다.');
+      setApiError(actionErrorText(err, '처리 중 오류가 발생했습니다.'));
     } finally {
       setSubmitting(false);
     }

@@ -174,7 +174,7 @@ describe('원본 확인', () => {
     const patch = src.slice(src.indexOf('const handlePatch'), src.indexOf('};', src.indexOf('const handlePatch')));
     const deact = src.slice(src.indexOf('const handleDeactivate'), src.indexOf('};', src.indexOf('const handleDeactivate')));
     for (const h of [patch, deact]) {
-      expect(h).toContain('res.ok && data?.ok');
+      expect(h).toContain('const r = await requestJson('); // 0264부터 — 2xx이고 몸이 ok일 때만 ok
       expect(h).toContain("'바꾸지 못했습니다.'");
     }
   });

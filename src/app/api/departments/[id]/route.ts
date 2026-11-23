@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { departmentDescendantsStrict, getManagedDepartmentIds } from '@/lib/department-scope';
+import { departmentDescendantsStrict } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { checkDepartmentDelete, departmentDeleteMessage } from '@/lib/department-delete';
 import { departmentChanges, departmentNameOf } from '@/lib/department-audit';
 import { logSecurityEvent } from '@/lib/security-log';
@@ -75,7 +76,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
-  const managedIds = await getManagedDepartmentIds(ctx.departmentId);
+  const managedIds = await managedDepartmentIdsOr503(ctx.departmentId);
+  if (managedIds instanceof Response) return managedIds;
   const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
   if (target === 'failed') return NextResponse.json(READ_FAILED, { status: 503 });
   if (!target) {
@@ -220,7 +222,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: { id: 
   const ctx = await requireAdminOrg();
   if ('error' in ctx) return ctx.error;
 
-  const managedIds = await getManagedDepartmentIds(ctx.departmentId);
+  const managedIds = await managedDepartmentIdsOr503(ctx.departmentId);
+  if (managedIds instanceof Response) return managedIds;
   const target = await loadDepartment(params.id, ctx.organizationId, managedIds);
   if (target === 'failed') return NextResponse.json(READ_FAILED, { status: 503 });
   if (!target) {

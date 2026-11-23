@@ -91,7 +91,7 @@ describe('고른 문서 읽기', () => {
   });
 
   it('원본이 없거나 크거나 읽지 못하면 문서 이름과 함께 거절한다', async () => {
-    expect(await loadLibraryDocuments([D3], AGENT, actor, deps([row({ id: D3 })]))).toEqual({ ok: false, status: 404, message: '여비 규정: 원본 파일을 찾을 수 없습니다.' });
+    expect(await loadLibraryDocuments([D3], AGENT, actor, deps([row({ id: D3 })]))).toEqual({ ok: false, status: 422, message: '여비 규정: 원본 파일을 찾을 수 없습니다.' });
     const big = deps([row({ id: D1 })], { download: vi.fn(async () => new Uint8Array(MAX_UPLOAD_BYTES + 1)) });
     expect(await loadLibraryDocuments([D1], AGENT, actor, big)).toMatchObject({ ok: false, status: 413 });
     const broken = deps([row({ id: D1 })], { read: vi.fn(async () => { throw new AttachmentReadError('파일에서 읽을 글이 없습니다.'); }) });

@@ -39,7 +39,7 @@ describe('첫 화면 질문이 버려지지 않는다', () => {
   });
   it('답할 비서를 보인다 — 몰래 고르지 않는다', () => {
     expect(home).toContain('답할 비서: <span');
-    expect(home).toContain("pickDefaultAgent([...shared, ...personal] as Agent[], lastId)");
+    expect(home).toContain('const chosen = chooseDefaultAgent(');
   });
   it('대화 목록 미리보기가 비서 id를 준다(마지막 대화의 비서)', () => {
     expect(readFileSync('src/app/api/conversations/route.ts', 'utf8')).toContain('agent:agents(id, name)');

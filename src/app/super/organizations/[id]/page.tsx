@@ -12,6 +12,7 @@ import { STORED_KEYS_NOT_USED_NOTICE } from '@/lib/api-key-providers';
 import { orgSignInPath } from '@/lib/org-slug';
 import { PLANS } from '@/lib/plans';
 import { orgStatusLabel, orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
+import { emptyListText, fetchOkJson, requestJson, serverErrorText } from '@/lib/ok-json';
 
 type Tab = 'overview' | 'users' | 'usage' | 'apikeys' | 'contracts';
 
@@ -68,11 +69,15 @@ export default function OrgDetailPage() {
     }
   };
 
+  // 못 읽은 것 — '기관을 찾을 수 없습니다'와 가른다(2026-11-20, 응답 상태 404만 없음). 다시 읽기에 실패하면 앞서 읽은 기관은 그대로 둔다
+  const [orgUnread, setOrgUnread] = useState(false);
+
   const fetchOrg = useCallback(async () => {
     setLoading(true);
-    const res  = await fetch(`/api/super/organizations/${id}`);
-    const data = await res.json();
-    if (data.ok) setOrg(data.data);
+    const res = await fetch(`/api/super/organizations/${id}`).catch(() => null);
+    const data = res ? await res.json().catch(() => null) : null;
+    if (data?.ok) setOrg(data.data);
+    setOrgUnread(!data?.ok && res?.status !== 404);
     setLoading(false);
   }, [id]);
 
@@ -91,7 +96,7 @@ export default function OrgDetailPage() {
       <div className="w-8 h-8 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin" />
     </div>
   );
-  if (!org) return <div className="text-slate-400">기관을 찾을 수 없습니다.</div>;
+  if (!org) return <div className="text-slate-400">{orgUnread ? '기관 정보를 지금 불러오지 못했습니다. 화면을 새로 고쳐 주세요.' : '기관을 찾을 수 없습니다.'}</div>;
 
   return (
     <div className="space-y-6">
@@ -171,30 +176,33 @@ function OverviewTab({ org, onRefresh, onToast, onSuspend }: { org: any; onRefre
   const [showNewInvite, setShowNewInvite]     = useState(false);
   const [inviteEmail, setInviteEmail]         = useState('');
   const [inviting, setInviting]               = useState(false);
+  // 못 읽은 것을 '아직 초대 링크가 없습니다'로 보이지 않게(2026-11-22 — 예전엔 잠깐의 알림뿐)
+  const [invitationsUnread, setInvitationsUnread] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/super/organizations/${org.id}/invitations`)
-      .then(r => r.json()).then(d => { if (d?.ok) setInvitations(d.data); else onToast('초대 링크 목록을 불러오지 못했습니다.'); })
-      .catch(() => onToast('초대 링크 목록을 불러오지 못했습니다.'));
+    void fetchOkJson<{ data?: any[] }>(`/api/super/organizations/${org.id}/invitations`).then(d => {
+      if (d && Array.isArray(d.data)) { setInvitations(d.data); setInvitationsUnread(false); }
+      else { setInvitations([]); setInvitationsUnread(true); }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [org.id]);
 
   const handleNewInvite = async () => {
     if (!inviteEmail.trim()) return;
     setInviting(true);
-    const res  = await fetch(`/api/super/organizations/${org.id}/invitations`, {
+    // 던지지 않는다 — 예전엔 응답을 못 읽거나 연결이 끊기면 '만드는 중'이 멈췄다(2026-11-22)
+    const r = await requestJson(`/api/super/organizations/${org.id}/invitations`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: inviteEmail, role: 'ADMIN' }),
     });
-    const data = await res.json();
-    if (data.ok) {
-      setInvitations(prev => [data.data, ...prev]);
+    setInviting(false);
+    if (r.ok && r.body.data) {
+      setInvitations(prev => [r.body.data, ...prev]);
       setInviteEmail(''); setShowNewInvite(false);
       onToast('초대 링크가 생성됐습니다.');
     } else {
-      onToast(data.error ?? '오류가 발생했습니다.');
+      onToast(serverErrorText(r.body, '초대 링크를 만들지 못했습니다.'));
     }
-    setInviting(false);
   };
 
   const progressColor = (pct: number) =>
@@ -291,7 +299,7 @@ function OverviewTab({ org, onRefresh, onToast, onSuspend }: { org: any; onRefre
 
         {/* 초대 링크 목록 */}
         {invitations.length === 0 ? (
-          <p className="text-xs text-slate-500">아직 초대 링크가 없습니다. [새 초대 링크 생성]을 눌러 관리자를 초대하세요.</p>
+          <p className={`text-xs ${invitationsUnread ? 'text-red-400' : 'text-slate-500'}`}>{invitationsUnread ? emptyListText(true, '', '초대 링크 목록을') : '아직 초대 링크가 없습니다. [새 초대 링크 생성]을 눌러 관리자를 초대하세요.'}</p>
         ) : (
           <div className="space-y-2">
             {invitations.map(inv => (
@@ -463,14 +471,24 @@ function UsageTab({ orgId }: { orgId: string }) {
   const [period, setPeriod] = useState('month');
   const [data, setData]     = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // 못 읽은 것 — 0과 가른다(2026-11-20). 기간을 바꾸면 앞 기간의 숫자를 남기지 않는다(예전엔 읽기에 실패하면 앞 기간 숫자가 새 기간 아래 그대로 보였다)
+  const [unread, setUnread] = useState(false);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    fetch(`/api/super/organizations/${orgId}/usage?period=${period}`)
-      .then(r => r.json()).then(d => { if (d.ok) setData(d.data); }).finally(() => setLoading(false));
+    setData(null);
+    fetchOkJson<{ data: any }>(`/api/super/organizations/${orgId}/usage?period=${period}`).then(d => {
+      if (!active) return;
+      setUnread(!d);
+      setData(d ? d.data : null);
+      setLoading(false);
+    });
+    return () => { active = false; };
   }, [orgId, period]);
 
   const s = data?.summary ?? {};
+  const shown = (text: string) => (loading ? '—' : unread ? '읽지 못함' : text);
 
   return (
     <div className="space-y-6">
@@ -486,10 +504,10 @@ function UsageTab({ orgId }: { orgId: string }) {
       {/* 요약 카드 */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: '총 대화', value: loading ? '—' : s.conversations?.toLocaleString() ?? '0', icon: '💬' },
-          { label: '총 토큰', value: loading ? '—' : fmt(s.totalTokens ?? 0), icon: '🔤' },
-          { label: '활성 사용자', value: loading ? '—' : `${s.activeUsers ?? 0}명`, icon: '👤' },
-          { label: '예상 비용', value: loading ? '—' : `$${s.costUsd ?? 0}`, icon: '💰' },
+          { label: '총 대화', value: shown(s.conversations?.toLocaleString() ?? '0'), icon: '💬' },
+          { label: '총 토큰', value: shown(fmt(s.totalTokens ?? 0)), icon: '🔤' },
+          { label: '활성 사용자', value: shown(`${s.activeUsers ?? 0}명`), icon: '👤' },
+          { label: '예상 비용', value: shown(`$${s.costUsd ?? 0}`), icon: '💰' },
         ].map(c => (
           <div key={c.label} className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-5">
             <div className="text-2xl mb-3">{c.icon}</div>
@@ -504,6 +522,8 @@ function UsageTab({ orgId }: { orgId: string }) {
         <h3 className="text-sm font-bold text-white mb-4">일별 대화 수</h3>
         {loading ? (
           <div className="h-48 flex items-center justify-center"><div className="w-6 h-6 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin" /></div>
+        ) : unread ? (
+          <div className="h-48 flex items-center justify-center text-sm text-slate-500">사용량을 지금 불러오지 못했습니다. 화면을 새로 고쳐 주세요.</div>
         ) : (
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={data?.dailyChart ?? []} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
@@ -697,11 +717,14 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
   const [form, setForm]           = useState({ plan: 'basic', startDate: kstDay(), endDate: '', fee: PLANS.basic.monthlyFee as number, notes: '' });
   const [saving, setSaving]       = useState(false);
 
+  // 못 읽은 것 — '계약 이력이 없습니다'와 가른다(2026-11-20)
+  const [unread, setUnread] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/super/organizations/${orgId}`);
-    const d   = await res.json();
-    if (d.ok) setContracts(d.data.contracts ?? []);
+    const d = await fetchOkJson<{ data: { contracts?: any[] } }>(`/api/super/organizations/${orgId}`);
+    setUnread(!d);
+    if (d) setContracts(d.data.contracts ?? []);
     setLoading(false);
   }, [orgId]);
 
@@ -783,7 +806,7 @@ function ContractsTab({ orgId, onToast }: { orgId: string; onToast: (m: string) 
             {loading ? (
               <tr><td colSpan={5} className="px-5 py-8 text-center"><div className="w-5 h-5 border-2 border-[#7C3AED]/30 border-t-[#7C3AED] rounded-full animate-spin mx-auto" /></td></tr>
             ) : contracts.length === 0 ? (
-              <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500">계약 이력이 없습니다.</td></tr>
+              <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500">{emptyListText(unread, '계약 이력이 없습니다.', '계약 이력을')}</td></tr>
             ) : (
               contracts.map((c, i) => (
                 <tr key={i} className="hover:bg-slate-700/20 transition-colors">

@@ -3,6 +3,13 @@
 import { useState, useEffect } from 'react';
 import { UPLOAD_FORMATS_LABEL } from '@/lib/file-types';
 import type { ForbiddenWord } from '@/lib/db';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
+
+/**
+ * 금지어 목록을 못 읽었을 때 늘 보이는 안내(2026-11-21). 예전엔 못 읽으면 '등록된 금지어가 없습니다'였고, 그 오류 띠는
+ * 금지어를 하나 더하면(조작마다 오류를 지움) 사라져 목록에 새 금지어 하나만 남았다 — 이미 걸어 둔 금지어가 없는 줄 알게 된다.
+ */
+export const FORBIDDEN_WORDS_UNREAD = '금지어 목록을 지금 불러오지 못했습니다 — 이미 등록된 금지어가 이 목록에서 빠져 있을 수 있습니다(필터에는 그대로 걸립니다).';
 
 interface SecurityLog {
   id: string;
@@ -32,6 +39,8 @@ export default function SettingsManager() {
   const [newContext, setNewContext] = useState('');
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽었는지 — 조작마다 지워지는 `error`와 따로 둔다
+  const [wordsUnread, setWordsUnread] = useState(false);
 
   useEffect(() => {
     loadForbiddenWords();
@@ -39,20 +48,14 @@ export default function SettingsManager() {
   }, []);
 
   const loadForbiddenWords = async () => {
-    try {
-      const response = await fetch('/api/forbidden-words');
-      const result = await response.json();
-
-      if (!result.ok) {
-        throw new Error(result.error?.message || '금지어 목록 로드 실패');
-      }
-
-      setForbiddenWords(result.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '금지어 목록 로드 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
+    const body = await fetchOkJson<{ data: unknown }>('/api/forbidden-words');
+    if (body && Array.isArray(body.data)) {
+      setForbiddenWords(body.data as (ForbiddenWord & { department_name?: string | null })[]);
+      setWordsUnread(false);
+    } else {
+      setWordsUnread(true);
     }
+    setLoading(false);
   };
 
   const loadSecurityLogs = async () => {
@@ -71,7 +74,7 @@ export default function SettingsManager() {
       console.error('보안 로그 로드 오류:', err);
       // 실패를 '보안 이벤트가 없습니다'로 보이지 않는다
       setSecurityLogs([]);
-      setLogsError(err instanceof Error ? err.message : '보안 로그를 불러오지 못했습니다.');
+      setLogsError(actionErrorText(err, '보안 로그를 불러오지 못했습니다.'));
     } finally {
       setLogsLoading(false);
     }
@@ -104,7 +107,7 @@ export default function SettingsManager() {
       setNewWord('');
       setNewContext('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '금지어 추가 중 오류가 발생했습니다.');
+      setError(actionErrorText(err, '금지어 추가 중 오류가 발생했습니다.'));
     } finally {
       setAdding(false);
     }
@@ -131,7 +134,7 @@ export default function SettingsManager() {
         )
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : '금지어 상태 변경 중 오류가 발생했습니다.');
+      setError(actionErrorText(err, '금지어 상태 변경 중 오류가 발생했습니다.'));
     }
   };
 
@@ -151,7 +154,7 @@ export default function SettingsManager() {
 
       setForbiddenWords(prev => prev.filter(word => word.id !== wordId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '금지어 삭제 중 오류가 발생했습니다.');
+      setError(actionErrorText(err, '금지어 삭제 중 오류가 발생했습니다.'));
     }
   };
 
@@ -168,6 +171,12 @@ export default function SettingsManager() {
 
       {error && (
         <div className="p-4 text-red-700 bg-red-100 rounded-lg">{error}</div>
+      )}
+      {wordsUnread && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 p-4 text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
+          <span>{FORBIDDEN_WORDS_UNREAD}</span>
+          <button type="button" onClick={() => void loadForbiddenWords()} className="rounded-md border border-amber-300 bg-white px-3 py-1 text-sm">다시 불러오기</button>
+        </div>
       )}
 
       {/* Add new forbidden word */}
@@ -209,7 +218,7 @@ export default function SettingsManager() {
 
       {/* Forbidden words list */}
       <div>
-        <h3 className="text-lg font-medium mb-1">금지어 목록 ({forbiddenWords.length}개)</h3>
+        <h3 className="text-lg font-medium mb-1">금지어 목록 ({wordsUnread ? '읽지 못함' : `${forbiddenWords.length}개`})</h3>
         <p className="text-xs text-slate-500 mb-4">관리하는 부서의 금지어만 보입니다. 금지어는 그 부서와 하위 부서 직원의 질문에 걸립니다.</p>
         <div className="space-y-4">
           {forbiddenWords.map((word) => (
@@ -251,7 +260,7 @@ export default function SettingsManager() {
 
           {forbiddenWords.length === 0 && (
             <div className="text-center py-8 text-slate-500 border rounded-lg bg-white">
-              등록된 금지어가 없습니다.
+              {emptyListText(wordsUnread, '등록된 금지어가 없습니다.', '금지어 목록을')}
             </div>
           )}
         </div>

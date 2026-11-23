@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { kstDay } from '@/lib/kst-time';
+import { actionErrorText, emptyListText, fetchOkJson, MEMBER_FILTER_UNREAD } from '@/lib/ok-json';
 
 interface AuditRow {
   일시: string;
@@ -49,11 +50,18 @@ export default function AuditLogsManager() {
 
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [membersUnread, setMembersUnread] = useState(false);
   const [meta, setMeta] = useState<{ total: number; pageSize: number; totalCostKrw: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 못 읽었는지 — 빈 표를 '내역이 없습니다'로 보이지 않고, 앞 조회의 합계를 남기지 않는다(2026-11-21)
+  const [unread, setUnread] = useState(false);
+  // 늦게 온 앞 조회의 응답은 버린다(기간·조건을 바꾸며 연달아 조회할 때)
+  const requestSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -66,14 +74,20 @@ export default function AuditLogsManager() {
 
       const res = await fetch(`/api/admin/audit-logs?${params}`);
       const result = await res.json();
+      if (seq !== requestSeq.current) return;
       if (!result.ok) throw new Error(result.error?.message);
       setRows(result.data ?? []);
       setMeta(result.meta ?? null);
+      setUnread(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '조회에 실패했습니다.');
+      if (seq !== requestSeq.current) return;
+      setError(actionErrorText(err, '조회에 실패했습니다.'));
       setRows([]);
+      // 앞 조회의 '총 N건·사용액'을 새 조건 위에 남기지 않는다
+      setMeta(null);
+      setUnread(true);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [kind, from, to, userId, page, reveal, revealReason]);
 
@@ -82,12 +96,11 @@ export default function AuditLogsManager() {
   }, [load]);
 
   useEffect(() => {
-    fetch('/api/users')
-      .then((r) => r.json())
-      .then((r) => {
-        if (r.ok) setMembers(r.data ?? []);
-      })
-      .catch(() => {});
+    // 못 읽으면 '전체'만 남아 직원이 없는 것처럼 보이지 않게 알린다(2026-11-22)
+    void fetchOkJson<{ data?: Member[] }>('/api/users').then((r) => {
+      if (r && Array.isArray(r.data)) setMembers(r.data);
+      else setMembersUnread(true);
+    });
   }, []);
 
   const handleExport = async () => {
@@ -161,6 +174,7 @@ export default function AuditLogsManager() {
             className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white max-w-[200px]"
           >
             <option value="">전체</option>
+            {membersUnread && <option value="__unread" disabled>{MEMBER_FILTER_UNREAD}</option>}
             {members.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.full_name || m.email}
@@ -257,7 +271,7 @@ export default function AuditLogsManager() {
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">불러오는 중...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">해당 기간에 내역이 없습니다.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{emptyListText(unread, '해당 기간에 내역이 없습니다.', '내역을')}</td></tr>
               ) : (
                 rows.map((row, i) => (
                   <tr key={i} className="hover:bg-slate-50">

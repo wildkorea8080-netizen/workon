@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { actionErrorText, emptyListText } from '@/lib/ok-json';
 
 /**
  * 관리 범위 직원이 **공개 링크로 공유 중인 대화**(2026-11-18).
@@ -24,21 +25,24 @@ export default function SharedLinksPanel() {
   const [rows, setRows] = useState<SharedRow[] | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽은 것은 조작 오류(error)와 따로 — 읽기가 '공유 중단' 실패 글을 지우거나 덮지 않게(2026-11-22)
+  const [unread, setUnread] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/shared-conversations');
-      const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message || '공유 중인 대화를 불러오지 못했습니다.');
-      setRows(result.data ?? []);
+      const result = await res.json().catch(() => null);
+      if (!res.ok || !result?.ok || !Array.isArray(result.data)) throw new Error('unread');
+      setRows(result.data);
       setTruncated(result.truncated === true);
-      setError(null);
-    } catch (err) {
-      // 실패를 '공유 중인 대화 없음'으로 보이지 않는다
+      setUnread(false);
+    } catch {
+      // 실패를 '공유 중인 대화 없음'으로 보이지 않고, 앞 목록(이미 멈춘 링크가 남았을 수 있음)도 버린다
       setRows(null);
-      setError(err instanceof Error ? err.message : '공유 중인 대화를 불러오지 못했습니다.');
+      setTruncated(false);
+      setUnread(true);
     }
   }, []);
 
@@ -64,7 +68,7 @@ export default function SharedLinksPanel() {
       if (!result.ok) throw new Error(result.error?.message || '공유를 중단하지 못했습니다.');
       setNotice('공개 링크를 중단했습니다.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '공유를 중단하지 못했습니다.');
+      setError(actionErrorText(err, '공유를 중단하지 못했습니다.'));
     } finally {
       setBusyId(null);
       await load();
@@ -85,7 +89,8 @@ export default function SharedLinksPanel() {
       {notice && <div className="p-4 text-emerald-800 bg-emerald-50 rounded-lg">{notice}</div>}
 
       <div className="p-6 border rounded-lg bg-white">
-        {rows === null && !error && <p className="text-sm text-slate-500">불러오는 중...</p>}
+        {rows === null && !unread && <p className="text-sm text-slate-500">불러오는 중...</p>}
+        {unread && <p role="alert" className="text-sm text-red-700">{emptyListText(true, '', '공유 중인 대화를')}</p>}
         {rows !== null && rows.length === 0 && <p className="text-sm text-slate-500">공유 중인 대화가 없습니다.</p>}
         {rows !== null && rows.length > 0 && (
           <ul className="divide-y divide-slate-100">

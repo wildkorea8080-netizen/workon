@@ -100,7 +100,7 @@ export async function installPresetAgents(
       continue;
     }
 
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from('agents')
       .select('id, updated_by, version, capabilities')
       .eq('organization_id', organizationId)
@@ -109,6 +109,12 @@ export async function installPresetAgents(
       .is('deleted_at', null)
       .maybeSingle();
 
+    // 못 읽은 것을 '없음'으로 말없이 건너뛰지 않는다(2026-11-22)
+    if (existingError) {
+      console.warn('[install-presets] 이미 있는 비서를 읽지 못해 갱신을 건너뜀', preset.name, existingError.code);
+      skipped += 1;
+      continue;
+    }
     if (!existing) {
       skipped += 1;
       continue;

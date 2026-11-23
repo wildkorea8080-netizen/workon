@@ -8,6 +8,7 @@ import {
 import { PLANS } from '@/lib/plans';
 import { kstDay } from '@/lib/kst-time';
 import { contractStatusLabel, expiryText } from '@/lib/contract-expiry';
+import { emptyListText, fetchOkJson, requestJson, serverErrorText } from '@/lib/ok-json';
 
 type Tab = 'list' | 'expiring' | 'revenue' | 'plans';
 
@@ -90,15 +91,19 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
   const [panelOpen, setPanelOpen]       = useState(false);
   const [renewModal, setRenewModal]     = useState<any>(null);
 
+  // 목록을 못 읽은 것 — '계약이 없습니다'와 가른다(2026-11-20). 못 읽으면 앞 거르기의 줄을 남기지 않는다
+  const [unread, setUnread] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     const p = new URLSearchParams({ status: filterStatus, limit: '50' });
     const [cr, or] = await Promise.all([
-      fetch(`/api/super/contracts?${p}`).then(r => r.json()),
-      fetch('/api/super/organizations?limit=100').then(r => r.json()),
+      fetchOkJson<{ data: any[]; summary: any }>(`/api/super/contracts?${p}`),
+      fetchOkJson<{ data: any[] }>('/api/super/organizations?limit=100'),
     ]);
-    if (cr.ok) { setContracts(cr.data); setSummary(cr.summary); }
-    if (or.ok) setOrgs(or.data);
+    setUnread(!cr);
+    if (cr) { setContracts(cr.data); setSummary(cr.summary); } else setContracts([]);
+    if (or) setOrgs(or.data);
     setLoading(false);
   }, [filterStatus]);
 
@@ -177,7 +182,7 @@ function ContractListTab({ onToast }: { onToast: (m: string) => void }) {
                 ))}</tr>
               ))
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">계약이 없습니다.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-500">{emptyListText(unread, '계약이 없습니다.', '계약 목록을')}</td></tr>
             ) : (
               filtered.map(c => (
                 <tr key={c.id} className="hover:bg-slate-700/20 transition-colors">
@@ -266,7 +271,8 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
     e.preventDefault();
     if (!form.orgId) { setError('기관을 선택하세요.'); return; }
     setSaving(true); setError(null);
-    const res = await fetch('/api/super/contracts', {
+    // 던지지 않는다 — 예전엔 응답을 못 읽거나 연결이 끊기면 '저장 중'이 멈춰 계약이 만들어졌는지 알 수 없었다(2026-11-22)
+    const r = await requestJson('/api/super/contracts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         orgId: form.orgId, planType: form.plan, monthlyFee: form.monthlyFee,
@@ -276,10 +282,10 @@ function NewContractPanel({ orgs, onClose, onCreated }: { orgs: any[]; onClose: 
         budgetAlertPercent: form.budgetAlertPercent,
       }),
     });
-    const d = await res.json();
-    // 계약은 만들었지만 기관 한도를 맞추지 못했으면 알린다(2026-11-17)
-    if (d.ok) { if (d.warning) alert(d.warning); onCreated(); } else setError(d.error);
     setSaving(false);
+    // 계약은 만들었지만 기관 한도를 맞추지 못했으면 알린다(2026-11-17)
+    if (r.ok) { if (typeof r.body.warning === 'string') alert(r.body.warning); onCreated(); }
+    else setError(serverErrorText(r.body, '계약을 등록하지 못했습니다. 계약 목록을 새로 고쳐 만들어졌는지 확인한 뒤 다시 시도하세요.'));
   };
 
   return (
@@ -558,12 +564,22 @@ function RevenueTab() {
   const [year, setYear]   = useState(new Date().getFullYear());
   const [data, setData]   = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // 못 읽은 것 — 0원과 가른다(2026-11-20). 연도를 바꾸면 앞 연도의 숫자를 남기지 않는다(예전엔 읽기에 실패하면 앞 연도 숫자가 새 연도 아래 그대로 보였다)
+  const [unread, setUnread] = useState(false);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    fetch(`/api/super/contracts/revenue?year=${year}`).then(r => r.json())
-      .then(d => { if (d.ok) setData(d.data); }).finally(() => setLoading(false));
+    setData(null);
+    fetchOkJson<{ data: any }>(`/api/super/contracts/revenue?year=${year}`).then(d => {
+      if (!active) return;
+      setUnread(!d);
+      setData(d ? d.data : null);
+      setLoading(false);
+    });
+    return () => { active = false; };
   }, [year]);
+  const shown = (text: string) => (loading ? '…' : unread ? '읽지 못함' : text);
 
   const annual = data?.annual ?? {};
   const chartData = (data?.monthly ?? []).map((m: any) => ({
@@ -586,9 +602,9 @@ function RevenueTab() {
       {/* 연간 요약 */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: '연간 총 매출',   value: fmtMoney(annual.totalRevenue ?? 0), icon: '💰' },
-          { label: '연간 API 비용',  value: `$${(annual.totalCostUsd ?? 0).toFixed(2)} (${fmtMoney(annual.totalCostKrw ?? 0)})`, icon: '💸' },
-          { label: '연간 순이익',    value: fmtMoney(annual.totalProfit ?? 0), icon: '📈', pos: (annual.totalProfit ?? 0) >= 0 },
+          { label: '연간 총 매출',   value: shown(fmtMoney(annual.totalRevenue ?? 0)), icon: '💰' },
+          { label: '연간 API 비용',  value: shown(`$${(annual.totalCostUsd ?? 0).toFixed(2)} (${fmtMoney(annual.totalCostKrw ?? 0)})`), icon: '💸' },
+          { label: '연간 순이익',    value: shown(fmtMoney(annual.totalProfit ?? 0)), icon: '📈', pos: (annual.totalProfit ?? 0) >= 0 },
         ].map(c => (
           <div key={c.label} className="bg-[#1E293B] border border-slate-700/50 rounded-2xl p-5">
             <span className="text-2xl">{c.icon}</span>
@@ -633,6 +649,9 @@ function RevenueTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/30">
+            {!loading && unread && (
+              <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-500">매출 현황을 지금 불러오지 못했습니다. 화면을 새로 고쳐 주세요.</td></tr>
+            )}
             {(data?.monthly ?? []).map((m: any) => (
               <tr key={m.month} className="hover:bg-slate-700/20 transition-colors">
                 <td className="px-5 py-3 font-medium text-white">{MONTHS[m.month-1]}</td>

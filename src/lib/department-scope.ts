@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { AccessScopeReadError, DepartmentScopeReadError, isDepartmentScopeReadError } from '@/lib/access-scope-error';
 
 /**
  * 부서 계층 기반 접근 범위.
@@ -30,14 +31,21 @@ export interface AccessScope {
 export async function getAccessScope(departmentId: string): Promise<AccessScope> {
   if (!departmentId) return { organizationId: null, visibleDepartmentIds: [] };
 
-  const [{ data: dept }, visibleDepartmentIds] = await Promise.all([
+  const [{ data: dept, error }, visibleDepartmentIds] = await Promise.all([
     supabaseAdmin
       .from('departments')
       .select('organization_id')
       .eq('id', departmentId)
       .maybeSingle(),
-    getVisibleDepartmentIds(departmentId),
+    // 상위 부서를 못 읽은 것도 공개 범위를 못 읽은 것이다
+    getVisibleDepartmentIds(departmentId).catch((err) => {
+      if (isDepartmentScopeReadError(err)) throw new AccessScopeReadError(err.code);
+      throw err;
+    }),
   ]);
+  // 부서를 못 읽으면 던진다(2026-11-20) — '기관 없음'으로 넘기면 기관 전체 공개 자료가 목록에서 오류 없이 빠진다.
+  // 부서 행이 정말 없으면(오류 없음) 예전처럼 좁힌다
+  if (error) throw new AccessScopeReadError(error.code ?? null);
 
   return {
     organizationId: dept?.organization_id ?? null,
@@ -91,12 +99,9 @@ export async function getVisibleDepartmentIds(departmentId: string): Promise<str
     p_department_id: departmentId,
   });
 
-  if (error || !Array.isArray(data) || data.length === 0) {
-    if (error) {
-      console.warn('[department-scope] department_ancestors 실패, 자기 부서만 사용:', error.message);
-    }
-    return [departmentId];
-  }
+  // 못 읽으면 던진다(2026-11-20) — '자기 부서만'으로 좁히면 상위 부서의 금지어·부서 제한 자료가 오류 없이 빠진다
+  if (error) throw new DepartmentScopeReadError('ancestors', (error as { code?: string }).code ?? null);
+  if (!Array.isArray(data) || data.length === 0) return [departmentId];
 
   const ids = data
     .map((row: { id: string }) => row.id)
@@ -133,11 +138,10 @@ export async function getManagedDepartmentIds(departmentId: string): Promise<str
     .eq('id', departmentId)
     .maybeSingle();
 
-  // 조회 실패가 권한을 넓히면 안 되므로 가장 좁은 범위로 닫습니다.
-  if (error || !own) {
-    if (error) console.warn('[department-scope] 부서 조회 실패:', error.message);
-    return [departmentId];
-  }
+  // 못 읽으면 던진다(2026-11-20) — '자기 부서만'으로 좁히면 감사 기록·이용통계·사용자 목록에서 하위 부서가 오류 없이 빠진다.
+  // 라우트는 `managedDepartmentIdsOr503`으로 받는다. 부서 행이 정말 없으면 자기 부서만
+  if (error) throw new DepartmentScopeReadError('department', (error as { code?: string }).code ?? null);
+  if (!own) return [departmentId];
 
   // 하위 부서를 가진 과 단위 관리자 — 자기 아래만.
   if (own.parent_id) return getSharedDepartmentIds(departmentId);
@@ -150,10 +154,8 @@ export async function getManagedDepartmentIds(departmentId: string): Promise<str
     .select('id')
     .eq('organization_id', own.organization_id);
 
-  if (allError || !Array.isArray(all) || all.length === 0) {
-    if (allError) console.warn('[department-scope] 기관 부서 조회 실패:', allError.message);
-    return getSharedDepartmentIds(departmentId);
-  }
+  if (allError) throw new DepartmentScopeReadError('organization', (allError as { code?: string }).code ?? null);
+  if (!Array.isArray(all) || all.length === 0) return getSharedDepartmentIds(departmentId);
 
   const ids = all.map((row: { id: string }) => row.id);
   return ids.includes(departmentId) ? ids : [departmentId, ...ids];
@@ -187,12 +189,8 @@ export async function getSharedDepartmentIds(departmentId: string): Promise<stri
     p_department_id: departmentId,
   });
 
-  if (error || !Array.isArray(data) || data.length === 0) {
-    if (error) {
-      console.warn('[department-scope] department_descendants 실패:', error.message);
-    }
-    return [departmentId];
-  }
+  if (error) throw new DepartmentScopeReadError('descendants', (error as { code?: string }).code ?? null);
+  if (!Array.isArray(data) || data.length === 0) return [departmentId];
 
   return data.map((row: { id: string }) => row.id).filter((id: string) => typeof id === 'string');
 }

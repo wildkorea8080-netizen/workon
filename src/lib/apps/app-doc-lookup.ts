@@ -81,20 +81,23 @@ export function appDocSearchRunner(
 }
 
 export interface LookupAgentRow extends AgentAccessInfo { name?: string | null; capabilities?: Record<string, unknown> | null; agent_type?: string | null }
+export const LOOKUP_AGENT_UNREAD = '이 앱의 문서 찾기 단계가 찾을 비서를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 export const lookupAgentDenied = (name: string | null | undefined) => `이 앱의 문서 찾기 단계가 찾을 비서${name ? ` '${String(name).slice(0, 40)}'` : ''}를 쓸 수 없습니다. 앱을 만든 사람에게 찾을 비서를 바꿔 달라고 하세요.`;
 
 /**
  * 실행 전 — 문서 찾기 단계가 찾을 다른 비서마다 **실행하는 사람이 그 비서를 쓸 수 있고**(`canUseAgent` — 같은 기관·지우지 않음·켜짐·단계별 공개 범위),
- * 그 비서에 문서 찾기가 켜져 있는지 본다. 하나라도 아니면 실행하지 않는다(대화를 만들기 전에 거절). 비서를 읽지 못하면 닫는다
+ * 그 비서에 문서 찾기가 켜져 있는지 본다. 하나라도 아니면 실행하지 않는다(대화를 만들기 전에 거절).
+ * 비서를 읽지 못해도 실행하지 않지만 **'쓸 수 없음'이 아니라 `unread`**(2026-11-20 — 대화 준비가 503으로 답한다). 예전엔 읽기 실패도
+ * '쓸 수 없습니다'(403)였고, 예약 실행기·일괄 실행은 거절 403을 '앱을 쓸 수 없음'으로 읽어 잠깐의 DB 오류에 예약이 바로 멈췄다
  */
 export async function checkLookupAgents(
   ids: readonly string[],
   actor: ActorScope,
   load: (ids: readonly string[]) => Promise<LookupAgentRow[] | null> = loadLookupAgents,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true } | { ok: false; message: string; unread?: true }> {
   if (!ids.length) return { ok: true };
   const rows = await load(ids);
-  if (!rows) return { ok: false, message: lookupAgentDenied(null) };
+  if (!rows) return { ok: false, unread: true, message: LOOKUP_AGENT_UNREAD };
   for (const id of ids) {
     const row = rows.find((r) => r.id === id);
     if (!row || row.agent_type === 'link' || !canUseAgent(row, actor) || !row.capabilities || typeof row.capabilities !== 'object' || !('doc_search' in row.capabilities)) {

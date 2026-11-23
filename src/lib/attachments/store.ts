@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { gunzipSync, gzipSync } from 'zlib';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
+import { isStorageNotFound } from '@/lib/storage-error';
 import { logSystem } from '@/lib/logger';
 import { writeUsageLog } from '@/lib/assistant/persist';
 import {
@@ -328,6 +329,11 @@ export async function confirmUpload(
   }
 
   const { data: blob, error: downloadError } = await bucket().download(row.storage_path);
+  // 저장소가 지금 못 준 것은 '올라가지 않음'이 아니다(2026-11-20) — 예전엔 내려받기 실패가 모두 '다시 올려 주세요'(400)라,
+  // 잠깐의 저장소 장애에 직원이 같은 파일을 다시 올렸다(올린 것은 pending으로 남아 보내지 않은 첨부 상한을 채운다)
+  if (downloadError && !isStorageNotFound(downloadError)) {
+    return { ok: false, status: 503, message: '올린 파일을 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+  }
   if (downloadError || !blob) {
     // 아직 올라가지 않았을 수 있다. pending으로 두면 24시간 뒤 정리된다
     return { ok: false, status: 400, message: '올린 파일을 찾지 못했습니다. 다시 올려 주세요.' };

@@ -5,6 +5,7 @@ import {
   OUTBOUND_APPROVAL_DAYS, OUTBOUND_MAX_ACTIONS, OUTBOUND_MAX_ATTEMPTS, OUTBOUND_MAX_ENDPOINTS, OUTBOUND_NAME_MAX, OUTBOUND_REVOKE_REASON_MIN, OUTBOUND_STATUS_LABELS, OUTBOUND_URL_MAX, OUTBOUND_VERIFY_HINT,
   type OutboundDeliveryView, type OutboundEndpointView,
 } from '@/lib/apps/outbound/spec';
+import { emptyListText } from '@/lib/ok-json';
 
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short' }) : '—');
 
@@ -17,6 +18,8 @@ export default function OutboundEndpointsPanel() {
   const [deliveries, setDeliveries] = useState<OutboundDeliveryView[]>([]);
   const [denied, setDenied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽음 — 만들기·바꾸기·회수의 오류와 따로 기억한다
+  const [unread, setUnread] = useState(false);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [requireApproval, setRequireApproval] = useState(true);
@@ -29,10 +32,10 @@ export default function OutboundEndpointsPanel() {
       const res = await fetch('/api/admin/outbound-endpoints');
       const body = await res.json().catch(() => null);
       if (res.status === 403) { setDenied(body?.error?.message ?? '기관 전체 관리자만 볼 수 있습니다.'); return; }
-      if (!res.ok || !body?.ok) { setError(body?.error?.message ?? '보낼 곳 목록을 불러오지 못했습니다.'); return; }
-      setError(null); setEndpoints(body.data.endpoints); setDeliveries(body.data.deliveries);
+      if (!res.ok || !body?.ok || !Array.isArray(body.data?.endpoints)) { setEndpoints([]); setDeliveries([]); setUnread(true); return; }
+      setUnread(false); setEndpoints(body.data.endpoints); setDeliveries(Array.isArray(body.data.deliveries) ? body.data.deliveries : []);
     } catch {
-      setError('보낼 곳 목록을 불러오지 못했습니다.');
+      setEndpoints([]); setDeliveries([]); setUnread(true);
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -100,7 +103,7 @@ export default function OutboundEndpointsPanel() {
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto]">
         <input aria-label="보낼 곳 이름" value={name} maxLength={OUTBOUND_NAME_MAX} onChange={(e) => setName(e.target.value)} placeholder="이름 — 예: 전자결재 연계" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         <input aria-label="보낼 주소" value={url} maxLength={OUTBOUND_URL_MAX} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.go.kr/workon/receive" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-        <button type="button" disabled={busy || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
+        <button type="button" disabled={busy || unread || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
       </div>
       <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />보내기 전 실행한 직원이 결과를 확인(권장 — 끄면 실행을 마친 결과가 사람 확인 없이 곧바로 나갑니다)</label>
       <label className="block text-sm text-slate-700">받는 쪽 동작(선택 — 한 줄에 하나 <code>키=이름</code>, {OUTBOUND_MAX_ACTIONS}개까지. 예: <code>draft=기안 임시 저장</code>)
@@ -128,7 +131,7 @@ export default function OutboundEndpointsPanel() {
             <td className="pr-2">{e.revokedAt ? <span className="text-slate-500">회수됨({kst(e.revokedAt)}) — {e.revokedReason}</span> : <span className="text-emerald-700">쓰는 중</span>}</td>
             <td>{!e.revokedAt && <button type="button" onClick={() => void revoke(e)} className="text-red-600 underline">회수</button>}</td>
           </tr>))}
-          {!endpoints.length && <tr><td colSpan={8} className="py-2 text-slate-500">아직 보낼 곳이 없습니다.</td></tr>}
+          {!endpoints.length && <tr><td colSpan={8} className="py-2 text-slate-500">{emptyListText(unread, '아직 보낼 곳이 없습니다.', '보낼 곳 목록을')}</td></tr>}
         </tbody>
       </table>
       <div>
@@ -144,7 +147,7 @@ export default function OutboundEndpointsPanel() {
               <td className="pr-2">{d.attempts}</td>
               <td>{d.lastStatus ?? '—'}{d.lastError ? ` · ${d.lastError}` : ''}{d.receiptRef ? ` · 접수 ${d.receiptRef}` : ''}</td>
             </tr>))}
-            {!deliveries.length && <tr><td colSpan={6} className="py-2 text-slate-500">보낸 기록이 없습니다.</td></tr>}
+            {!deliveries.length && <tr><td colSpan={6} className="py-2 text-slate-500">{emptyListText(unread, '보낸 기록이 없습니다.', '보낸 기록을')}</td></tr>}
           </tbody>
         </table>
       </div>

@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import type { PresetStatusItem } from '@/lib/preset-install-admin';
 
 /** 아직 없는 것만 설치할 수 있다 */
@@ -51,7 +52,7 @@ export default function PresetSetPanel() {
       setItems(body.data.items);
       setCanInstall(Boolean(body.data.canInstall));
     } catch (e) {
-      setError(e instanceof Error ? e.message : '기본 세트를 불러오지 못했습니다.');
+      setError(actionErrorText(e, '기본 세트를 불러오지 못했습니다.'));
     }
   }, []);
 
@@ -78,7 +79,7 @@ export default function PresetSetPanel() {
       setChosen((prev) => ({ ...prev, [mode]: new Set() }));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '처리하지 못했습니다.');
+      setError(actionErrorText(e, '처리하지 못했습니다.'));
     } finally {
       setBusy(false);
     }

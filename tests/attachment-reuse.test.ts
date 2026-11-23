@@ -31,7 +31,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
     },
     storage: {
       from: () => ({
-        download: async () => (state.download.ok ? { data: new Blob([state.download.bytes], { type: state.download.type }), error: null } : { data: null, error: { message: 'missing' } }),
+        download: async () => (state.download.ok ? { data: new Blob([state.download.bytes], { type: state.download.type }), error: null } : { data: null, error: { message: 'Object not found', status: 400, statusCode: '404' } }),
         upload: async (...args: unknown[]) => { state.uploads.push(args); return { error: state.uploadError }; },
       }),
     },

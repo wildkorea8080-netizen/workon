@@ -102,7 +102,9 @@ export async function GET(
       .eq('user_id', session.user.id)
       .maybeSingle();
 
-    if (error || !data) return fail('대화를 찾을 수 없습니다.', 404);
+    // 못 읽은 것은 '없음'이 아니다(2026-11-20) — 공유 시작(POST)과 같은 갈래
+    if (error) return fail('대화를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    if (!data) return fail('대화를 찾을 수 없습니다.', 404);
 
     const sharedAt = (data.metadata as { shared_at?: unknown } | null)?.shared_at;
     return NextResponse.json({

@@ -3,7 +3,7 @@ import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
 import { SECURITY_EVENT_LABELS, SECURITY_SEVERITY_LABELS, securityDetailParts } from '@/lib/security-event-text';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { sumCostUsd, usdToKrw } from '@/lib/models';
 import { logSecurityEvent } from '@/lib/filter';
 import { csvCell } from '@/lib/csv-cell';
@@ -127,7 +127,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const managedDeptIds = await getManagedDepartmentIds(adminDeptId);
+    const managedDeptIds = await managedDepartmentIdsOr503(adminDeptId);
+    if (managedDeptIds instanceof Response) return managedDeptIds;
 
     const { searchParams } = new URL(request.url);
     const kindParam = searchParams.get('kind') ?? 'usage';

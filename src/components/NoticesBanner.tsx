@@ -1,5 +1,6 @@
 'use client';
 
+import { confirmedPost } from '@/lib/confirmed-post';
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -46,8 +47,8 @@ export default function NoticesBanner() {
   const handleRead = async (n: Notice) => {
     setModal(n);
     if (!n.isRead) {
-      await fetch(`/api/notices/${n.id}/read`, { method: 'POST' }).catch(() => {});
-      setNotice(prev => prev ? { ...prev, isRead: true } : null);
+      // 서버가 읽음을 저장했을 때만 읽음으로 — 실패하면 그대로 두어 다음에 다시 저장한다(2026-11-20)
+      if (await confirmedPost(`/api/notices/${n.id}/read`)) setNotice(prev => prev ? { ...prev, isRead: true } : null);
     }
   };
 

@@ -179,6 +179,18 @@ export function connectorChoices(
  * 남겨 둔 연결이 여기에 걸린다. 이 연결이 켜져 있으면 서버가 저장을 403으로
  * 거절하므로, 화면이 끄라고 알려야 한다.
  */
+/**
+ * 모델·공공데이터 조회 목록을 못 읽었을 때의 안내(2026-11-21). 예전엔 못 읽은 목록을 빈 목록으로 보아
+ * 편집 창은 비서의 모델을 '기관 기본 모델'로 보이고 켜 둔 공공데이터 조회 칸을 통째로 숨겼다(저장은 그대로 — 화면만 틀림),
+ * 만들기 창은 모델 고르기·실시간 조회 칸이 까닭 없이 사라졌다.
+ */
+export const MODEL_LIST_UNREAD = '모델 목록을 지금 불러오지 못했습니다 — 고른 모델은 그대로 둡니다. 바꾸려면 창을 다시 열어 주세요.';
+export function connectorListUnread(enabled: number): string {
+  return `공공데이터 조회 목록을 지금 불러오지 못했습니다 — ${enabled > 0 ? `켜 둔 연결 ${enabled}개는 그대로 둡니다. ` : ''}켜거나 끄려면 창을 다시 열어 주세요.`;
+}
+export const CREATE_MODEL_LIST_UNREAD = '모델 목록을 지금 불러오지 못했습니다 — 이대로 만들면 기관 기본 모델로 만들고, 만든 뒤 편집 창에서 바꿀 수 있습니다.';
+export const CREATE_CONNECTOR_LIST_UNREAD = '실시간 조회(공공 데이터) 목록을 지금 불러오지 못했습니다 — 만든 뒤 편집 창에서 켤 수 있습니다.';
+
 export function isConnectorOutOfScope(
   choice: ConnectorChoice,
   tier: 'personal' | 'department' | 'official'

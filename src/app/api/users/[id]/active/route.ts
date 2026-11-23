@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { logSecurityEvent } from '@/lib/security-log';
 
 export const dynamic = 'force-dynamic';
@@ -43,7 +43,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!adminDeptId) {
       return NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
     }
-    const managedDeptIds = await getManagedDepartmentIds(adminDeptId);
+    const managedDeptIds = await managedDepartmentIdsOr503(adminDeptId);
+    if (managedDeptIds instanceof Response) return managedDeptIds;
     const { data: target, error } = await supabaseAdmin
       .from('users')
       .select('id, department_id, is_active')

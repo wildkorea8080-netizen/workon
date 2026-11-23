@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { listSharedConversations } from '@/lib/shared-conversations-admin';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,8 @@ export async function GET() {
     const departmentId = session.user.departmentId;
     if (!departmentId) return fail('부서 정보를 찾을 수 없습니다.', 403);
 
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
     const listed = await listSharedConversations(managed);
     // 못 읽은 것을 '공유 중인 대화 없음'으로 보이지 않는다
     if ('error' in listed) return fail('공유 중인 대화를 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);

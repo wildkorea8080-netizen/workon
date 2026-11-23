@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { describeHistoryItem, canRevertTo } from '@/lib/agent-form';
 import { requestJson } from '@/lib/request-json';
+import { emptyListText } from '@/lib/ok-json';
 
 type HistoryItem = {
   id: string;
@@ -29,11 +30,23 @@ export default function HistoryPanel({
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 못 읽음은 되돌리기 오류와 따로 기억한다(되돌리기가 오류를 지워도 '기록이 없습니다'로 보이지 않게)
+  const [unread, setUnread] = useState(false);
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     const { r } = await requestJson(`/api/agents/${agentId}/history`);
-    if (r.ok) setItems(r.data.items);
-    else setError(r.error?.message ?? '변경 기록을 불러오지 못했습니다.');
+    if (seq !== requestSeq.current) return;
+    if (r.ok && Array.isArray(r.data?.items)) {
+      setItems(r.data.items);
+      setUnread(false);
+    } else {
+      // 판이 바뀐 뒤 못 읽었으면 앞 판의 기록을 지금 기록처럼 남기지 않는다
+      setItems([]);
+      setUnread(true);
+      setError(r.error?.message ?? '변경 기록을 불러오지 못했습니다.');
+    }
   }, [agentId]);
 
   useEffect(() => {
@@ -94,7 +107,7 @@ export default function HistoryPanel({
           )}
         </div>
       ))}
-      {items.length === 0 && <p className="text-xs text-slate-400 py-4 text-center">기록이 없습니다.</p>}
+      {items.length === 0 && <p className="text-xs text-slate-400 py-4 text-center">{emptyListText(unread, '기록이 없습니다.', '변경 기록을')}</p>}
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );

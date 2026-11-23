@@ -1,3 +1,4 @@
+import { isStorageNotFound } from '@/lib/storage-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
@@ -58,6 +59,8 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
     if (!limit.allowed) return jsonError(limitMessage(limit), 429);
 
     const { data: blob, error: downloadError } = await supabaseAdmin.storage.from(SUPABASE_DOCUMENTS_BUCKET).download(doc!.storage_path);
+    // 지금 못 받은 것은 '없음'이 아니다(2026-11-20)
+    if (downloadError && !isStorageNotFound(downloadError)) return jsonError('원본 파일을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     if (downloadError || !blob) return jsonError('원본 파일을 찾을 수 없습니다.', 404);
     const bytes = Buffer.from(await blob.arrayBuffer());
     if (bytes.byteLength > MAX_UPLOAD_BYTES) return jsonError('원본 파일이 너무 커서 초안을 만들 수 없습니다.', 413);

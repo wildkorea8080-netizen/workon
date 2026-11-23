@@ -1,3 +1,4 @@
+import { isDepartmentScopeReadError } from '@/lib/access-scope-error';
 import { captureAppSnapshot, type WorkAppAgent } from './app-binding';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AGENT_ACCESS_COLUMNS } from '@/lib/agent-permissions';
@@ -41,7 +42,11 @@ export function defaultWorkContext(): WorkContext {
     async loadAppSnapshot(actor, agentId) {
       const [{ data, error }, visibleDepartmentIds, department] = await Promise.all([
         supabaseAdmin.from('agents').select(`${AGENT_ACCESS_COLUMNS}, name, system_prompt, model_id, agent_type, capabilities`).eq('id', agentId).eq('organization_id', actor.organizationId).maybeSingle(),
-        getVisibleDepartmentIds(actor.departmentId),
+        // 상위 부서를 못 읽은 것도 비서 설정을 확인하지 못한 것이다(2026-11-20)
+        getVisibleDepartmentIds(actor.departmentId).catch((err) => {
+          if (isDepartmentScopeReadError(err)) throw new WorkError('SOURCE_UNAVAILABLE', '비서 설정을 확인하지 못했습니다. 다시 시도해 주세요.', 503);
+          throw err;
+        }),
         supabaseAdmin.from('departments').select('parent_id').eq('id', actor.departmentId).eq('organization_id', actor.organizationId).maybeSingle(),
       ]);
       if (error || department.error || !department.data) throw new WorkError('SOURCE_UNAVAILABLE', '비서 설정을 확인하지 못했습니다. 다시 시도해 주세요.', 503);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 
 /** 신청 메모 상한 — 관리자 승인 화면에 그대로 보인다 */
 export const APPROVAL_NOTE_MAX = 500;
@@ -43,7 +44,7 @@ export default function AppApprovalPanel({ agent, hasDraft, onRequested }: {
       setNote('');
       onRequested(agent.version);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '신청하지 못했습니다.');
+      setError(actionErrorText(e, '신청하지 못했습니다.'));
     } finally {
       setBusy(false);
     }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api, TASK_STATUS_LABEL, formatDateTime } from '@/lib/work/client';
+import { emptyListText } from '@/lib/ok-json';
 import { Card, ErrorNote, PageTitle, StatusBadge, statusTone } from './WorkShell';
 import HomeAsk from './HomeAsk';
 import WorkflowCard from './WorkflowCard';
@@ -18,6 +19,8 @@ export default function WorkHome() {
   const [tasks, setTasks] = useState<TaskDto[] | null>(null);
   const [files, setFiles] = useState<ArtifactDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 못 읽은 것은 따로 기억한다 — 못 읽은 작업 수를 '…'(읽는 중)로, 최근 작업을 빈 표로 보이지 않게
+  const [unread, setUnread] = useState({ workflows: false, tasks: false, files: false });
 
   useEffect(() => {
     void (async () => {
@@ -32,6 +35,7 @@ export default function WorkHome() {
       }
       if (t.ok) setTasks(t.data.items);
       if (f.ok) setFiles(f.data);
+      setUnread({ workflows: !w.ok, tasks: !t.ok, files: !f.ok });
       const firstError = [w, t, f].find((r) => !r.ok);
       if (firstError && !firstError.ok) setError(firstError.error.message);
     })();
@@ -63,9 +67,9 @@ export default function WorkHome() {
       )}
 
       <div className="grid gap-4 md:grid-cols-3 mb-8">
-        <SummaryCard label="검토할 작업" value={tasks ? `${review.length}건` : '…'} href="/tasks?status=needs_review" />
-        <SummaryCard label="진행 중" value={tasks ? `${active.length}건` : '…'} href="/tasks" />
-        <SummaryCard label="최근 결과물" value={files ? `${files.length}개` : '…'} href="/files" />
+        <SummaryCard label="검토할 작업" value={tasks ? `${review.length}건` : unread.tasks ? WORK_HOME_UNREAD_VALUE : '…'} href="/tasks?status=needs_review" />
+        <SummaryCard label="진행 중" value={tasks ? `${active.length}건` : unread.tasks ? WORK_HOME_UNREAD_VALUE : '…'} href="/tasks" />
+        <SummaryCard label="최근 결과물" value={files ? `${files.length}개` : unread.files ? WORK_HOME_UNREAD_VALUE : '…'} href="/files" />
       </div>
 
       <div className="mb-3 flex items-center justify-between">
@@ -74,6 +78,7 @@ export default function WorkHome() {
           전체 보기
         </Link>
       </div>
+      {unread.workflows && <p className="mb-10 text-[15px] text-slate-600">{emptyListText(true, '', '업무 비서 목록을')}</p>}
       <div className="grid gap-4 md:grid-cols-3 mb-10">
         {favorite.map((w) => (
           <WorkflowCard key={w.key} workflow={w} canStart={newTasksEnabled} />
@@ -82,7 +87,9 @@ export default function WorkHome() {
 
       <h2 className="mb-3 text-[18px] font-semibold">최근 작업</h2>
       <Card className="p-0 overflow-x-auto">
-        {tasks && tasks.length === 0 ? (
+        {unread.tasks ? (
+          <div className="p-6 text-[15px] text-slate-600">{emptyListText(true, '', '최근 작업을')}</div>
+        ) : tasks && tasks.length === 0 ? (
           <div className="p-6 text-[15px] text-slate-600">
             아직 작업이 없습니다. <Link href="/assistants" className="text-[#003087] underline">업무 비서</Link>에서 처리할 업무를 고르면 첫 작업이 시작됩니다.
           </div>
@@ -93,6 +100,9 @@ export default function WorkHome() {
     </div>
   );
 }
+
+/** 못 읽은 숫자 자리 — '…'(읽는 중)으로 두면 끝나지 않는 읽기처럼 보인다 */
+export const WORK_HOME_UNREAD_VALUE = '읽지 못함';
 
 function SummaryCard({ label, value, href }: { label: string; value: string; href: string }) {
   return (

@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { accountLocks, lockReadDeps } from '@/lib/sign-in-throttle';
 import { logSecurityEvent } from '@/lib/security-log';
 
@@ -29,7 +29,8 @@ export async function GET(_request: NextRequest) {
 
     // 관리자는 자기 부서와 그 하위 부서의 사용자를 관리한다.
     // 예전에는 자기 부서만 조회해, 하위 부서 직원을 볼 수도 옮길 수도 없었다.
-    const managedDeptIds = await getManagedDepartmentIds(departmentId);
+    const managedDeptIds = await managedDepartmentIdsOr503(departmentId);
+    if (managedDeptIds instanceof Response) return managedDeptIds;
 
     // 직원이 1,000명을 넘어도 목록이 잘리지 않게 쪽마다 끝까지(API 상한 1,000행, 2026-11-05)
     const { data: users, error } = await pagedRows<any>((a, b, w) => supabaseAdmin

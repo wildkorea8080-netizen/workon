@@ -4,6 +4,9 @@ import { messagesUntil, type SharedMessage } from '@/lib/shared-conversation';
 
 const NOT_FOUND = () =>
   NextResponse.json({ ok: false, error: { message: '공유된 대화를 찾을 수 없습니다.' } }, { status: 404 });
+/** 못 읽은 것(2026-11-20) — 열지는 않되(닫힘) '없음'이라고 하지 않는다. 링크를 받은 사람이 공유가 취소된 줄 알았다 */
+const UNREAD = () =>
+  NextResponse.json({ ok: false, error: { message: '공유된 대화를 지금 열지 못했습니다. 잠시 뒤 다시 열어 주세요.' } }, { status: 503 });
 
 /**
  * 공개 공유 링크(로그인 없음) — 토큰이 곧 자격.
@@ -41,9 +44,10 @@ export async function GET(
       // 시간순, 같은 시각(한 턴의 질문·답)이면 질문이 먼저(2026-11-18 — 예전엔 순서를 정하지 않았다)
       .order('created_at', { referencedTable: 'messages', ascending: true })
       .order('role', { referencedTable: 'messages', ascending: false })
-      .single();
+      .maybeSingle();
 
-    if (error || !conversation) return NOT_FOUND();
+    if (error) return UNREAD();
+    if (!conversation) return NOT_FOUND();
 
     const row = conversation as unknown as {
       id: string;
@@ -62,7 +66,9 @@ export async function GET(
       .select('is_active, deleted_at')
       .eq('id', row.user_id)
       .maybeSingle();
-    if (ownerError || !owner) return NOT_FOUND();
+    // 주인을 확인하지 못하면 열지 않는다(닫힘) — 다만 '없음'이 아니라 '지금 못 엶'
+    if (ownerError) return UNREAD();
+    if (!owner) return NOT_FOUND();
     if ((owner as { is_active?: boolean | null }).is_active === false || (owner as { deleted_at?: string | null }).deleted_at) {
       return NOT_FOUND();
     }

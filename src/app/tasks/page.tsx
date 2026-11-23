@@ -1,10 +1,11 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShell';
 import { TaskTable } from '@/components/work/WorkHome';
 import { api, TASK_STATUS_LABEL } from '@/lib/work/client';
+import { emptyListText } from '@/lib/ok-json';
 import type { TaskDto } from '@/components/work/types';
 
 const FILTERS = ['', 'needs_review', 'processing', 'ready', 'draft', 'completed'];
@@ -17,16 +18,28 @@ function TasksList() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unread, setUnread] = useState(false);
+  // 거르기를 빨리 바꾸면 늦게 온 앞 거르기의 응답을 버린다
+  const requestSeq = useRef(0);
 
   const load = useCallback(
     async (next: string | null) => {
+      const seq = ++requestSeq.current;
       setLoading(true);
       const q = new URLSearchParams({ limit: '20' });
       if (status) q.set('status', status);
       if (next) q.set('cursor', next);
       const r = await api<{ items: TaskDto[]; nextCursor: string | null }>(`/api/work/tasks?${q}`);
+      if (seq !== requestSeq.current) return;
       setLoading(false);
-      if (!r.ok) return setError(r.error.message);
+      if (!r.ok) {
+        setError(r.error.message);
+        // 첫 쪽을 못 읽었으면 앞 거르기의 작업을 새 거르기 결과처럼 남기지 않는다('더 보기' 실패는 읽은 쪽 그대로)
+        if (!next) { setItems([]); setCursor(null); setUnread(true); }
+        return;
+      }
+      setError(null);
+      setUnread(false);
       setItems((prev) => (next ? [...prev, ...r.data.items] : r.data.items));
       setCursor(r.data.nextCursor);
     },
@@ -53,7 +66,7 @@ function TasksList() {
       </div>
       <ErrorNote message={error} />
       <Card className="p-0 overflow-x-auto">
-        {!loading && items.length === 0 ? <div className="p-6 text-[15px] text-slate-600">해당하는 작업이 없습니다.</div> : <TaskTable tasks={items} />}
+        {!loading && items.length === 0 ? <div className="p-6 text-[15px] text-slate-600">{emptyListText(unread, '해당하는 작업이 없습니다.', '작업 목록을')}</div> : <TaskTable tasks={items} />}
       </Card>
       {cursor && (
         <button onClick={() => load(cursor)} className="mt-4 rounded-lg border border-[#DCE3EC] bg-white px-4 py-2 text-[14px] hover:border-[#003087]">

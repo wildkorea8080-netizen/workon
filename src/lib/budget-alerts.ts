@@ -317,7 +317,9 @@ export function budgetAlertDeps(): BudgetAlertDeps {
         if (ownError) throw new Error(`departments: ${ownError.message}`);
         return cleanRecipients(await activeAdminEmails((own ?? []).map((d: { id: string }) => d.id)));
       }
-      const { data: org } = await supabaseAdmin.from('organizations').select('contact_email').eq('id', organizationId).maybeSingle();
+      // 기관 담당자 주소를 못 읽으면 던진다(2026-11-20 — 예전엔 빼고 관리자에게만 보내 '보냄'으로 끝냈다)
+      const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('contact_email').eq('id', organizationId).maybeSingle();
+      if (orgError) throw new Error(`organizations: ${orgError.message}`);
       const { data: roots, error } = await supabaseAdmin
         .from('departments')
         .select('id')

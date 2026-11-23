@@ -182,7 +182,7 @@ describe('원본', () => {
   it('옛 보고서 템플릿 수·모든 기간 토큰이 돌아오지 않음', () => {
     expect(route).not.toContain('report_templates');
     expect(route).not.toContain('totalTokens');
-    expect(route).toContain('getManagedDepartmentIds(departmentId)');
+    expect(route).toContain('managedDepartmentIdsOr503(departmentId)');
   });
   it('화면 — 새 칸을 읽고, 꾸민 카드(보고서·늘 정상인 상태)가 없음', () => {
     expect(dash).toContain('stats?.monthlyTokens');

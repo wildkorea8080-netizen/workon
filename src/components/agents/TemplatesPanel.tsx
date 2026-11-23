@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TEMPLATE_EXTENSIONS, MAX_TEMPLATES } from '@/lib/template-files';
 import { requestJson } from '@/lib/request-json';
+import { emptyListText } from '@/lib/ok-json';
 
 type TemplateItem = { id: string; name: string; file_name: string; size_bytes: number; created_at: string };
 
@@ -24,11 +25,23 @@ export default function TemplatesPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 못 읽음은 올리기·빼기 오류와 따로 기억한다(올리기가 오류를 지워도 '올린 양식이 없습니다'로 보이지 않게)
+  const [unread, setUnread] = useState(false);
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     const { r } = await requestJson(`/api/agents/${agentId}/templates`);
-    if (r.ok) setItems(r.data.items);
-    else setError(r.error?.message ?? '양식을 불러오지 못했습니다.');
+    if (seq !== requestSeq.current) return;
+    if (r.ok && Array.isArray(r.data?.items)) {
+      setItems(r.data.items);
+      setUnread(false);
+    } else {
+      // 판이 바뀐 뒤 못 읽었으면 앞 판의 양식을 지금 양식처럼 남기지 않는다
+      setItems([]);
+      setUnread(true);
+      setError(r.error?.message ?? '양식을 불러오지 못했습니다.');
+    }
   }, [agentId]);
 
   useEffect(() => {
@@ -112,10 +125,11 @@ export default function TemplatesPanel({
             </button>
           </li>
         ))}
-        {items.length === 0 && <li className="text-xs text-slate-400 py-4 text-center">올린 양식이 없습니다.</li>}
+        {items.length === 0 && <li className="text-xs text-slate-400 py-4 text-center">{emptyListText(unread, '올린 양식이 없습니다.', '양식 목록을')}</li>}
       </ul>
 
-      {items.length < MAX_TEMPLATES && (
+      {/* 목록을 못 읽었으면 몇 개 남았는지 모르니 올리기 칸을 열지 않는다(서버도 503으로 막는다) */}
+      {!unread && items.length < MAX_TEMPLATES && (
         <div className="border border-slate-200 rounded-xl p-3 space-y-2">
           <input
             type="text"

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { cleanStopReason, stopSharedConversation, STOP_REASON_MIN } from '@/lib/shared-conversations-admin';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     const reason = cleanStopReason(body?.reason);
     if (!reason) return fail(`중단 사유를 ${STOP_REASON_MIN}자 이상 적어 주세요.`, 400);
 
-    const managed = await getManagedDepartmentIds(departmentId);
+    const managed = await managedDepartmentIdsOr503(departmentId);
+    if (managed instanceof Response) return managed;
     const result = await stopSharedConversation({
       conversationId: params.id,
       managedDepartmentIds: managed,

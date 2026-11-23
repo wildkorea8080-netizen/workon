@@ -5,6 +5,7 @@ import type { User } from '@/lib/db';
 import CsvRegisterTab from './CsvRegisterTab';
 import { lockUntilLabel } from '@/lib/sign-in-lock-spec';
 import { USER_LIST_FILTERS, matchesUserFilter, type UserListFilter } from '@/lib/user-list-filter';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 interface Invitation {
   id: string;
@@ -62,23 +63,24 @@ export default function UsersManager() {
   const [depts, setDepts] = useState<DeptOption[]>([]);
   const [movingId, setMovingId] = useState<string | null>(null);
 
+  // 못 읽은 것 — '등록된 사용자가 없습니다'·초대 0건과 가른다(2026-11-20 — 예전엔 응답이 실패여도 아무것도 하지 않았다).
+  // 조작마다 지워지는 `error`와 따로 둔다. 앞서 읽은 목록은 그대로 둔다
+  const [unread, setUnread] = useState({ users: false, invitations: false, depts: false });
+
   const loadData = useCallback(async () => {
     setLoading(true);
-    try {
-      const [usersRes, invitesRes, deptsRes] = await Promise.all([
-        fetch('/api/users').then(r => r.json()),
-        fetch('/api/admin/invite').then(r => r.json()),
-        fetch('/api/departments').then(r => r.json()),
-      ]);
-      if (usersRes.ok) { setUsers(usersRes.data); setSeats(usersRes.seats ?? null); setMeId(typeof usersRes.me === 'string' ? usersRes.me : null); }
-      if (invitesRes.ok) setInvitations(invitesRes.data);
-      if (deptsRes.ok) setDepts(flattenDepts(deptsRes.data ?? []));
-    } catch {
-      setError('데이터를 불러올 수 없습니다.');
-    } finally {
-      setLoading(false);
-    }
+    const [usersRes, invitesRes, deptsRes] = await Promise.all([
+      fetchOkJson<{ data: any[]; seats?: any; me?: unknown }>('/api/users'),
+      fetchOkJson<{ data: any[] }>('/api/admin/invite'),
+      fetchOkJson<{ data?: any[] }>('/api/departments'),
+    ]);
+    setUnread({ users: !usersRes, invitations: !invitesRes, depts: !deptsRes });
+    if (usersRes) { setUsers(usersRes.data); setSeats(usersRes.seats ?? null); setMeId(typeof usersRes.me === 'string' ? usersRes.me : null); }
+    if (invitesRes) setInvitations(invitesRes.data);
+    if (deptsRes) setDepts(flattenDepts(deptsRes.data ?? []));
+    setLoading(false);
   }, []);
+  const unreadNames = [unread.users && '사용자 목록', unread.invitations && '초대 목록', unread.depts && '부서 목록'].filter(Boolean) as string[];
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -97,7 +99,7 @@ export default function UsersManager() {
       setInviteResult({ url: result.data.inviteUrl, emailSent: Boolean(result.data.emailSent) });
       await loadData();
     } catch (err) {
-      setInviteError(err instanceof Error ? err.message : '초대 발송에 실패했습니다.');
+      setInviteError(actionErrorText(err, '초대 발송에 실패했습니다.'));
     } finally {
       setInviting(false);
     }
@@ -136,7 +138,7 @@ export default function UsersManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '한도 저장에 실패했습니다.');
+      setError(actionErrorText(err, '한도 저장에 실패했습니다.'));
       await loadData();
     } finally {
       setMovingId(null);
@@ -167,7 +169,7 @@ export default function UsersManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, is_active: result.data.is_active } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '계정 상태를 바꾸지 못했습니다.');
+      setError(actionErrorText(err, '계정 상태를 바꾸지 못했습니다.'));
     } finally {
       setMovingId(null);
     }
@@ -188,7 +190,7 @@ export default function UsersManager() {
       setResetResult({ email, tempPassword: result.data.tempPassword, emailSent: Boolean(result.data.emailSent) });
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, sign_in_locked_until: null } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '비밀번호를 재발급하지 못했습니다.');
+      setError(actionErrorText(err, '비밀번호를 재발급하지 못했습니다.'));
     } finally {
       setMovingId(null);
     }
@@ -205,7 +207,7 @@ export default function UsersManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, sign_in_locked_until: null } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '잠금을 풀지 못했습니다.');
+      setError(actionErrorText(err, '잠금을 풀지 못했습니다.'));
     } finally {
       setMovingId(null);
     }
@@ -224,7 +226,7 @@ export default function UsersManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '부서 이동에 실패했습니다.');
+      setError(actionErrorText(err, '부서 이동에 실패했습니다.'));
       // 실패했으면 화면이 실제 상태와 어긋나므로 다시 불러온다
       await loadData();
     } finally {
@@ -253,7 +255,7 @@ export default function UsersManager() {
       if (!result.ok) throw new Error(result.error?.message);
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...result.data } : u)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '권한을 바꾸지 못했습니다.');
+      setError(actionErrorText(err, '권한을 바꾸지 못했습니다.'));
       await loadData();
     } finally {
       setMovingId(null);
@@ -313,6 +315,11 @@ export default function UsersManager() {
         ))}
       </div>
 
+      {unreadNames.length > 0 && (
+        <div role="alert" className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm">
+          {unreadNames.join('·')}을 지금 불러오지 못했습니다. 화면을 새로 고쳐 주세요{unread.depts ? ' — 부서 목록이 없으면 소속 부서를 바꿀 수 없습니다' : ''}.
+        </div>
+      )}
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">{error}</div>
       )}
@@ -463,7 +470,7 @@ export default function UsersManager() {
                     <div className="text-center py-8 text-slate-400 text-sm">조건에 맞는 직원이 없습니다.</div>
                   )}
                   {users.length === 0 && (
-                    <div className="text-center py-8 text-slate-400 text-sm">등록된 사용자가 없습니다.</div>
+                    <div className="text-center py-8 text-slate-400 text-sm">{emptyListText(unread.users, '등록된 사용자가 없습니다.', '사용자 목록을')}</div>
                   )}
                 </div>
               </section>

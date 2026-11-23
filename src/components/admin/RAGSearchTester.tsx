@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 import type { Agent, RetrievedChunk } from '@/lib/db';
 import { sourceLocationLabel, sourceTitleLabel } from '@/components/chat/source-label';
 
@@ -16,21 +17,19 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingAgents, setLoadingAgents] = useState(!initialAgents);
+  // 비서 목록을 못 읽은 것 — 예전엔 콘솔에만 남기고 빈 고르기였다(2026-11-22)
+  const [agentsUnread, setAgentsUnread] = useState(false);
   // 검색을 한 번이라도 마쳤는가 — 결과 0개를 '아직 안 함'과 가른다
   const [searched, setSearched] = useState(false);
 
   useEffect(() => {
     if (!initialAgents) {
       // 클라이언트에서 agents 로드
-      fetch('/api/agents')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.ok) {
-            setAgents(data.data);
-          }
-        })
-        .catch((err) => console.error('Failed to load agents:', err))
-        .finally(() => setLoadingAgents(false));
+      void fetchOkJson<{ data?: Agent[] }>('/api/agents').then((data) => {
+        if (data && Array.isArray(data.data)) setAgents(data.data);
+        else setAgentsUnread(true);
+        setLoadingAgents(false);
+      });
     }
   }, [initialAgents]);
 
@@ -67,7 +66,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
       setResults(result.data.chunks || []);
       setSearched(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '알 수 없는 오류');
+      setError(actionErrorText(err, '알 수 없는 오류'));
     } finally {
       setLoading(false);
     }
@@ -98,6 +97,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
                 </option>
               ))}
             </select>
+            {agentsUnread && <p role="alert" className="mt-1 text-xs text-red-600">{emptyListText(true, '', '비서 목록을')}</p>}
           </div>
 
           <div>

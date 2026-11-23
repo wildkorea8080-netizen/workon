@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getAllowedModelIds, describeModels } from '@/lib/model-policy';
+import { readAllowedModelIds, describeModels } from '@/lib/model-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,27 +21,37 @@ export async function GET() {
     );
   }
 
+  // 소속·기관 정책을 못 읽으면 503(2026-11-20) — 예전엔 '기본 모델 하나'로 답해, 비서 편집 창이 허용된 모델을
+  // '허용되지 않음 — 바꿔야 저장됩니다'로 알렸다. 화면은 실패하면 목록 없이 그대로 둔다(실제 제한은 서버가 다시 건다).
+  const unread = () => NextResponse.json(
+    { ok: false, error: { message: '모델 목록을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' } },
+    { status: 503 }
+  );
+
   let departmentId = session.user.departmentId;
   if (!departmentId) {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('department_id')
       .eq('id', session.user.id)
       .maybeSingle();
+    if (error) return unread();
     departmentId = data?.department_id ?? undefined;
   }
 
   let organizationId: string | null = null;
   if (departmentId) {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('departments')
       .select('organization_id')
       .eq('id', departmentId)
       .maybeSingle();
+    if (error) return unread();
     organizationId = data?.organization_id ?? null;
   }
 
-  const allowed = await getAllowedModelIds(organizationId);
+  const allowed = await readAllowedModelIds(organizationId);
+  if (!allowed) return unread();
 
   return NextResponse.json({
     ok: true,

@@ -263,15 +263,16 @@ export function outboundDeps(): OutboundDeps {
         supabaseAdmin.from('app_outbound_endpoints').select('url, secret_encrypted, organization_id, revoked_at, actions').eq('id', row.endpoint_id).maybeSingle(),
         supabaseAdmin.from('messages').select('content, conversation_id, created_at, role, source_references, agent_version').eq('id', row.message_id).maybeSingle(),
         supabaseAdmin.from('agents').select('id, name, app_definition').eq('id', row.agent_id).maybeSingle(),
-        // 일괄 실행의 줄이 낸 결과면 그 묶음 번호(0087 색인) — 못 읽으면 번호 없이 보낸다
+        // 일괄 실행의 줄이 낸 결과면 그 묶음 번호(0087 색인). 비동기 연동은 이 번호(몸의 `run.batch_id`)로 결과를 202 응답과 맞추므로
+        // 못 읽으면 번호 없이 보내지 않고 읽기 실패로 다음 차례에 다시 본다(2026-11-21 — 예전엔 번호 없이 보내 외부 시스템이 결과를 맞추지 못했다)
         supabaseAdmin.from('app_batch_items').select('batch_id').eq('message_id', row.message_id).limit(1).maybeSingle(),
       ]);
-      if (endpoint.error || message.error || agent.error) return null;
+      if (endpoint.error || message.error || agent.error || batchItem.error) return null;
       return {
         endpoint: endpoint.data as DeliveryContext['endpoint'],
         message: message.data as DeliveryContext['message'],
         agent: agent.data as DeliveryContext['agent'],
-        batchId: batchItem.error ? null : ((batchItem.data as { batch_id?: string } | null)?.batch_id ?? null),
+        batchId: (batchItem.data as { batch_id?: string } | null)?.batch_id ?? null,
       };
     },
     async finish(id, patch) {

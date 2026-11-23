@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { kstDay } from '@/lib/kst-time';
+import { actionErrorText, emptyListText } from '@/lib/ok-json';
 
 interface Breakdown {
   key: string;
@@ -61,21 +62,33 @@ export default function UsageSummary() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 못 읽었는지 — 빈 표를 '내역이 없습니다'로 보이지 않고, 앞 조회의 합계를 남기지 않는다(2026-11-21)
+  const [unread, setUnread] = useState(false);
+  // 늦게 온 앞 조회의 응답은 버린다(기간·조건을 바꾸며 연달아 조회할 때)
+  const requestSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ by: axis, from, to });
       const res = await fetch(`/api/admin/usage-summary?${params}`);
       const result = await res.json();
+      if (seq !== requestSeq.current) return;
       if (!result.ok) throw new Error(result.error?.message);
       setRows(result.data ?? []);
       setMeta(result.meta ?? null);
+      setUnread(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '조회에 실패했습니다.');
+      if (seq !== requestSeq.current) return;
+      setError(actionErrorText(err, '조회에 실패했습니다.'));
       setRows([]);
+      // 앞 조회의 '총 N건·사용액'을 새 조건 위에 남기지 않는다
+      setMeta(null);
+      setUnread(true);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [axis, from, to]);
 
@@ -163,7 +176,7 @@ export default function UsageSummary() {
               {loading ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">불러오는 중...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">해당 기간에 사용 내역이 없습니다.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{emptyListText(unread, '해당 기간에 사용 내역이 없습니다.', '사용 내역을')}</td></tr>
               ) : (
                 rows.map((row, i) => (
                   <Fragment key={row.key}>

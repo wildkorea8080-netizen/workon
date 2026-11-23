@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { actionErrorText } from '@/lib/ok-json';
 
 interface Message {
   id: string;
@@ -31,15 +32,20 @@ export default function SharedConversationPage() {
   const [data, setData] = useState<SharedConversation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 정말 없는 링크(404)만 '찾을 수 없습니다' — 서버가 못 읽은 것(503)은 '지금 열지 못했습니다'(2026-11-22)
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     fetch(`/api/shared/${token}`)
-      .then(r => r.json())
-      .then(result => {
-        if (!result.ok) throw new Error(result.error?.message || '대화를 찾을 수 없습니다.');
+      .then(async res => {
+        const result = await res.json().catch(() => null);
+        if (!res.ok || !result?.ok || !result.data) {
+          setMissing(res.status === 404);
+          throw new Error(result?.error?.message);
+        }
         setData(result.data);
       })
-      .catch(err => setError(err.message))
+      .catch(err => setError(actionErrorText(err, '대화를 지금 열지 못했습니다. 잠시 뒤 다시 열어 주세요.')))
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -59,7 +65,7 @@ export default function SharedConversationPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </div>
-        <h1 className="text-lg font-semibold text-slate-800">대화를 찾을 수 없습니다</h1>
+        <h1 className="text-lg font-semibold text-slate-800">{missing ? '대화를 찾을 수 없습니다' : '대화를 지금 열지 못했습니다'}</h1>
         <p className="text-slate-500 text-sm">{error || '공유가 취소됐거나 잘못된 링크입니다.'}</p>
         <Link href="/" className="text-[#003087] text-sm font-medium hover:underline">홈으로 이동</Link>
       </div>

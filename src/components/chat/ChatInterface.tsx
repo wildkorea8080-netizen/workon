@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import { isNearBottom } from './scroll-follow';
+import { fetchConversation, loadStep, prevAfterDiscard } from '@/lib/conversation-load';
 import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import { useFileAttachments } from './useFileAttachments';
@@ -123,6 +125,9 @@ type ModelOption = {
   outputPerMTok: number;
 };
 
+const CONV_LOAD_FAILED = '대화를 지금 불러오지 못했습니다. 앞서 나눈 내용은 지워지지 않았습니다.';
+const CONV_NOT_FOUND = '대화를 찾을 수 없습니다.';
+
 export default function ChatInterface({
   selectedAgent,
   conversationId,
@@ -137,6 +142,9 @@ export default function ChatInterface({
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingConv, setLoadingConv] = useState(false);
+  // 저장된 대화를 열다 못 읽은 것(2026-11-20) — 빈 새 대화 안내·앞 대화의 메시지로 보이지 않게. '다시 불러오기'는 convReload를 올린다
+  const [convLoadError, setConvLoadError] = useState<string | null>(null);
+  const [convReload, setConvReload] = useState(0);
   // 현재 실행 중인 도구 이름 (없으면 null)
   const [activeTool, setActiveTool] = useState<string | null>(null);
   // 보내기 전에 붙여 둔 이미지. 전송 후 비운다.
@@ -193,26 +201,40 @@ export default function ChatInterface({
 
   // conversationId가 바뀌면 메시지 로드
   useEffect(() => {
-    if (conversationId === prevConvIdRef.current) return;
+    // 무엇을 할지는 `conversation-load.ts`가 정한다 — 방금 만든 대화·같은 대화면 그대로 둔다
+    const step = loadStep(prevConvIdRef.current, conversationId);
+    if (step === 'same') return;
     prevConvIdRef.current = conversationId;
     followRef.current = true;
     setOpenSource(null);
 
-    if (!conversationId) {
+    if (step === 'blank' || !conversationId) {
       setMessages([]);
+      setConvLoadError(null);
+      setLoadingConv(false);
       return;
     }
 
+    // 다른 저장된 대화로 바꾸는 것이다(방금 만든 대화는 위에서 걸러진다) — 읽기 전에 앞 대화의 메시지를 지운다.
+    // 예전엔 읽기에 실패하면 앞 대화의 메시지가 새 대화 아래 그대로 남았고(보낸 글은 새 대화로 간다),
+    // 첫 화면에서 열었으면 빈 새 대화 안내가 보였다. 늦게 온 앞 대화의 응답도 버린다
+    let active = true;
+    setMessages([]);
+    setConvLoadError(null);
     setLoadingConv(true);
-    fetch(`/api/conversations/${conversationId}`)
-      .then(r => r.json())
-      .then(result => {
-        if (!result.ok) return;
+    fetchConversation<{ messages?: unknown[]; feedback?: Record<string, MessageFeedback> }>(conversationId)
+      .then((loaded) => {
+        if (!active) return;
+        if (!loaded.ok) {
+          setConvLoadError(loaded.notFound ? CONV_NOT_FOUND : CONV_LOAD_FAILED);
+          return;
+        }
+        const result = { data: loaded.data };
         // 출처는 source_references(JSONB)에 들어 있다.
         // 예전에는 m.sources를 읽어 항상 undefined였고, 대화를 다시 열면
         // 출처가 사라졌다.
         setMessages(
-          (result.data.messages ?? []).map(
+          ((result.data.messages ?? []) as never[]).map(
             (m: {
               id: string;
               role: 'user' | 'assistant';
@@ -259,9 +281,14 @@ export default function ChatInterface({
           )
         );
       })
-      .catch(() => {})
-      .finally(() => setLoadingConv(false));
-  }, [conversationId]);
+      .catch(() => { if (active) setConvLoadError(CONV_LOAD_FAILED); })
+      .finally(() => { if (active) setLoadingConv(false); });
+    return () => {
+      active = false;
+      // 이 읽기를 버렸으니 다음 실행이 무엇이든(같은 대화 다시·새 대화·다른 대화) 처음부터 하게 한다
+      prevConvIdRef.current = prevAfterDiscard(prevConvIdRef.current, conversationId);
+    };
+  }, [conversationId, convReload]);
 
   // 에이전트가 바뀌면 메시지 초기화
   useEffect(() => {
@@ -314,7 +341,7 @@ export default function ChatInterface({
           // 브라우저에서 줄여 보낸다. 요청 본문 상한과 토큰이 함께 줄어든다.
           added.push({ image: await fileToChatImage(file), preview: URL.createObjectURL(file) });
         } catch (err) {
-          setImageError(err instanceof Error ? err.message : '이미지를 처리하지 못했습니다.');
+          setImageError(actionErrorText(err, '이미지를 처리하지 못했습니다.'));
         }
       }
       if (added.length > 0) setPendingImages(prev => [...prev, ...added]);
@@ -655,6 +682,19 @@ export default function ChatInterface({
         {loadingConv ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-5 h-5 border-2 border-ws-accent-text border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : convLoadError ? (
+          <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 pb-10 text-center">
+            <p className="text-sm text-slate-600">{convLoadError}</p>
+            {convLoadError === CONV_LOAD_FAILED && (
+              <button
+                type="button"
+                onClick={() => { prevConvIdRef.current = null; setConvReload(n => n + 1); }}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ws-accent-text"
+              >
+                다시 불러오기
+              </button>
+            )}
           </div>
         ) : messages.length === 0 ? (
           // 아이콘과 이름만 띄우면 무엇을 넣어야 하는지 알 수 없다.

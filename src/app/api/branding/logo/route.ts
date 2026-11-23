@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
+import { isStorageNotFound } from '@/lib/storage-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,11 @@ export const dynamic = 'force-dynamic';
  * 넣으면 경로를 거슬러 올라가 다른 파일을 요청할 수 있다.
  */
 
+/** 못 읽은 것은 '로고 없음'(404)이 아니다(2026-11-22) — 잠깐의 장애가 브라우저에 남지 않게 캐시하지 않는다 */
+function unavailable() {
+  return new NextResponse(null, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest) {
@@ -27,11 +33,12 @@ export async function GET(request: NextRequest) {
     return new NextResponse(null, { status: 400 });
   }
 
-  const { data: org } = await supabaseAdmin
+  const { data: org, error: orgError } = await supabaseAdmin
     .from('organizations')
     .select('logo_url')
     .eq('id', organizationId)
     .maybeSingle();
+  if (orgError) return unavailable();
 
   const path = org?.logo_url;
   if (!path) return new NextResponse(null, { status: 404 });
@@ -47,7 +54,7 @@ export async function GET(request: NextRequest) {
     .from(SUPABASE_DOCUMENTS_BUCKET)
     .download(path);
 
-  if (error || !data) return new NextResponse(null, { status: 404 });
+  if (error || !data) return isStorageNotFound(error) ? new NextResponse(null, { status: 404 }) : unavailable();
 
   const buffer = Buffer.from(await data.arrayBuffer());
 

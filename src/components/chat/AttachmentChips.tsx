@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { formatFileSize } from '@/lib/file-size';
+import { fetchOkJson } from '@/lib/ok-json';
+
+/** 이 대화의 첨부 목록을 못 읽었을 때(2026-11-22) — 예전엔 줄이 사라져 첨부가 없는 대화처럼 보였다 */
+const ATTACHMENTS_UNREAD = '이 대화의 첨부 목록을 지금 불러오지 못했습니다 — 올린 파일은 그대로 있습니다. 잠시 뒤 다시 열어 주세요.';
 import type { AttachmentRow } from '@/lib/attachments/types';
 import type { FileChip } from './useFileAttachments';
 
@@ -77,24 +81,24 @@ export function ConversationAttachments({
   refreshKey: number;
 }) {
   const [items, setItems] = useState<AttachmentRow[]>([]);
+  const [unread, setUnread] = useState(false);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/attachments?conversation_id=${encodeURIComponent(conversationId)}`)
-      .then((r) => r.json())
-      .then((r) => {
-        if (!cancelled) setItems(r.ok && Array.isArray(r.data) ? r.data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      });
+    void fetchOkJson<{ data?: AttachmentRow[] }>(`/api/attachments?conversation_id=${encodeURIComponent(conversationId)}`).then((r) => {
+      if (cancelled) return;
+      const ok = Boolean(r && Array.isArray(r.data));
+      setItems(ok ? (r!.data as AttachmentRow[]) : []);
+      setUnread(!ok);
+    });
     return () => {
       cancelled = true;
     };
   }, [conversationId, refreshKey]);
 
-  if (items.length === 0) return null;
+  if (items.length === 0 && !unread) return null;
+  if (items.length === 0) return <p role="status" className="mb-2 text-xs text-amber-700">{ATTACHMENTS_UNREAD}</p>;
 
   return (
     <div className="mb-2">

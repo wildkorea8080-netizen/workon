@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { chatTokensOf } from '@/lib/org-chat-tokens';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +54,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const managedDeptIds = await getManagedDepartmentIds(departmentId);
+  const managedDeptIds = await managedDepartmentIdsOr503(departmentId);
+  if (managedDeptIds instanceof Response) return managedDeptIds;
 
   const { searchParams } = new URL(request.url);
   const end = searchParams.get('end') ? new Date(searchParams.get('end')!) : new Date();

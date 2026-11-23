@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
-import { getManagedDepartmentIds } from '@/lib/department-scope';
+import { managedDepartmentIdsOr503 } from '@/lib/managed-scope-response';
 import { departmentNameOf } from '@/lib/department-audit';
 import { logSecurityEvent } from '@/lib/security-log';
 
@@ -99,7 +99,8 @@ export async function GET() {
 
   // 관리자는 자기 부서와 그 하위만 관리한다.
   // 기관 전체를 열어두면 하위 부서 관리자가 다른 본부 조직도까지 손댈 수 있다.
-  const managedDeptIds = await getManagedDepartmentIds(ctx.departmentId);
+  const managedDeptIds = await managedDepartmentIdsOr503(ctx.departmentId);
+  if (managedDeptIds instanceof Response) return managedDeptIds;
 
   const { data: departments, error } = await supabaseAdmin
     .from('departments')
@@ -165,7 +166,8 @@ export async function POST(request: NextRequest) {
   // 예전에는 parent_id가 비면 자기 부서 아래로 조용히 붙였다. 화면에서
   // '(최상위 부서)'를 고른 관리자는 그 사실을 알 수 없었고, 그래서 최상위
   // 부서를 하나도 더 만들 수 없었다. 이제 명시적으로 갈라 처리한다.
-  const managedDeptIds = await getManagedDepartmentIds(ctx.departmentId);
+  const managedDeptIds = await managedDepartmentIdsOr503(ctx.departmentId);
+  if (managedDeptIds instanceof Response) return managedDeptIds;
 
   if (parentId === null) {
     if (!ctx.isRootAdmin) {

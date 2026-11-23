@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadReferenceDocument, startReading } from '@/lib/document-upload-client';
 import { kstDay } from '@/lib/kst-time';
+import { emptyListText } from '@/lib/ok-json';
 import type { Document } from '@/lib/db';
 
 /**
@@ -17,6 +18,9 @@ import type { Document } from '@/lib/db';
 type Row = Document & { kick?: boolean };
 
 const POLL_INTERVAL_MS = 5_000;
+
+/** 다시 읽기에 실패했을 때 남은 목록 위의 안내(2026-11-22) — 지운 문서가 남아 보이거나 '읽는 중'이 멈춘 듯 보일 수 있다 */
+export const DOCUMENTS_STALE_NOTE = '참고 문서 목록을 지금 다시 불러오지 못했습니다. 아래는 마지막으로 읽은 목록이라 지금과 다를 수 있습니다 — 잠시 뒤 다시 열어 주세요.';
 
 export function documentStatusLabel(doc: Pick<Row, 'noda_status' | 'noda_reason'>): { text: string; tone: 'ok' | 'busy' | 'bad' | 'muted' } {
   switch (doc.noda_status) {
@@ -47,6 +51,8 @@ const TONE: Record<string, string> = {
 export default function DocumentsPanel({ agentId, docSearchOn }: { agentId: string; docSearchOn: boolean }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 목록을 못 읽은 것은 조작 오류(error)와 따로 — 다시 읽기가 올리기·지우기 실패 글을 덮지 않게(2026-11-22)
+  const [unread, setUnread] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,14 +62,16 @@ export default function DocumentsPanel({ agentId, docSearchOn }: { agentId: stri
   const refresh = useCallback(async () => {
     const seq = ++seqRef.current;
     try {
-      const body = await (await fetch(`/api/documents?agent_id=${encodeURIComponent(agentId)}`)).json();
+      const res = await fetch(`/api/documents?agent_id=${encodeURIComponent(agentId)}`);
+      const body = await res.json().catch(() => null);
       if (seq !== seqRef.current) return;
-      if (!body?.ok) {
-        setError(body?.error?.message ?? '문서를 불러오지 못했습니다.');
+      if (!res.ok || !body?.ok || !Array.isArray(body.data)) {
+        setUnread(true);
         return;
       }
       const list = body.data as Row[];
       setRows(list);
+      setUnread(false);
       for (const r of list) {
         if (r.kick && !kickedRef.current.has(r.id)) {
           kickedRef.current.add(r.id);
@@ -71,7 +79,7 @@ export default function DocumentsPanel({ agentId, docSearchOn }: { agentId: stri
         }
       }
     } catch {
-      if (seq === seqRef.current) setError('문서를 불러오지 못했습니다.');
+      if (seq === seqRef.current) setUnread(true);
     }
   }, [agentId]);
 
@@ -162,7 +170,12 @@ export default function DocumentsPanel({ agentId, docSearchOn }: { agentId: stri
         </p>
       )}
 
-      {rows === null && !error && <p className="text-sm text-slate-400">불러오는 중...</p>}
+      {rows === null && !unread && <p className="text-sm text-slate-400">불러오는 중...</p>}
+      {unread && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          {rows === null ? emptyListText(true, '', '참고 문서 목록을') : DOCUMENTS_STALE_NOTE}
+        </p>
+      )}
 
       <ul className="space-y-2">
         {current.map((doc) => {

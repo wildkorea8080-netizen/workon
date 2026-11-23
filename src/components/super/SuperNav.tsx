@@ -1,5 +1,6 @@
 'use client';
 
+import { confirmedPost, SUPER_LOGOUT_FAILED } from '@/lib/confirmed-post';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -35,7 +36,11 @@ export default function SuperNav({ adminName, adminEmail }: SuperNavProps) {
   const router = useRouter();
 
   const handleLogout = async () => {
-    await fetch('/api/super/auth/logout', { method: 'POST' });
+    // 서버가 쿠키를 지웠을 때만 로그인 화면으로 — 실패했는데 이동하면 로그인된 채 나간 줄 안다(2026-11-20)
+    if (!(await confirmedPost('/api/super/auth/logout'))) {
+      window.alert(SUPER_LOGOUT_FAILED);
+      return;
+    }
     router.push('/super/login');
     router.refresh();
   };

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { actionErrorText } from '@/lib/ok-json';
 import type { CandidateStatus, CitingDocument, ReferenceRow, ReferenceSummary } from '@/lib/document-references';
 
 interface ReferencesData {
@@ -103,7 +104,7 @@ export default function DocumentReferencesModal({ documentId, onClose }: { docum
       }
       await load();
     } catch (e) {
-      setIndexError(e instanceof Error ? e.message : '참조 색인을 만들지 못했습니다.');
+      setIndexError(actionErrorText(e, '참조 색인을 만들지 못했습니다.'));
     } finally {
       setIndexing(null);
     }

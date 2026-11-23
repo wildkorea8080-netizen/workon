@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { actionErrorText, requestJson, serverErrorText } from '@/lib/ok-json';
 import { parseIpList, isIpAllowed, isValidIpPattern } from '@/lib/ip-access';
 import { DEFAULT_THEME_COLOR, THEME_PRESETS, normalizeHex, themeColorProblem, themeVars } from '@/lib/theme-color';
 import { resetBrandingCache } from '@/lib/use-branding';
@@ -69,10 +70,17 @@ export default function OrganizationManager() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const [orgRes, budgetRes] = await Promise.all([
-      fetch('/api/admin/organization').then((r) => r.json()),
-      fetch('/api/admin/budget').then((r) => r.json()),
+    // 던지지 않는다 — 예전엔 응답을 못 읽으면 오류 글 없이 빈 칸의 기관 정보 양식이 보였다(2026-11-22)
+    const [orgReply, budgetReply] = await Promise.all([
+      requestJson('/api/admin/organization'),
+      requestJson('/api/admin/budget'),
     ]);
+    const orgRes = orgReply.ok && orgReply.body?.data
+      ? orgReply.body
+      : { ok: false, error: { message: serverErrorText(orgReply.body, '기관 정보를 불러오지 못했습니다.') } };
+    const budgetRes = budgetReply.ok
+      ? budgetReply.body
+      : { ok: false, error: { message: serverErrorText(budgetReply.body, '예산 현황을 불러오지 못했습니다.') } };
 
     if (orgRes.ok) {
       setOrg(orgRes.data);
@@ -156,7 +164,7 @@ export default function OrganizationManager() {
       resetBrandingCache();
       notify('저장했습니다.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '저장에 실패했습니다.');
+      setError(actionErrorText(err, '저장에 실패했습니다.'));
     } finally {
       setSaving(false);
     }
@@ -176,7 +184,7 @@ export default function OrganizationManager() {
       setLogoVersion((v) => v + 1);
       notify('로고를 변경했습니다.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '로고 업로드에 실패했습니다.');
+      setError(actionErrorText(err, '로고 업로드에 실패했습니다.'));
     } finally {
       setSaving(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -197,7 +205,7 @@ export default function OrganizationManager() {
       setOrg((prev) => (prev ? { ...prev, ...result.data } : result.data));
       notify('로고를 제거했습니다.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '제거에 실패했습니다.');
+      setError(actionErrorText(err, '제거에 실패했습니다.'));
     } finally {
       setSaving(false);
     }
@@ -429,7 +437,7 @@ export default function OrganizationManager() {
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={handleSave}
-            disabled={saving || !name.trim()}
+            disabled={saving || !org || !name.trim()}
             className="px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
           >
             {saving ? '저장 중...' : '변경하기'}

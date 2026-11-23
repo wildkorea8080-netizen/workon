@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { csvCell } from '@/lib/csv-cell';
 import { orgSuspendConfirmText, requestOrgStatusChange } from '@/lib/org-status';
+import { fetchOkJson, ORG_FILTER_UNREAD } from '@/lib/ok-json';
 
 const fmt = (n: number) =>
   n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n/1_000).toFixed(0)}K` : String(n ?? 0);
@@ -28,18 +29,24 @@ export default function UsagePage() {
   const [endDate, setEndDate]     = useState('');
   const [orgId, setOrgId]         = useState('all');
   const [orgs, setOrgs]           = useState<any[]>([]);
+  const [orgsUnread, setOrgsUnread] = useState(false);
   const [data, setData]           = useState<any>(null);
   const [alerts, setAlerts]       = useState<any>(null);
   const [realtime, setRealtime]   = useState<any>(null);
   const [loading, setLoading]     = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // 한도 경보·실시간 숫자를 못 읽은 것(2026-11-20) — 예전엔 경보를 못 읽으면 '한도 초과·경고 기관' 칸이 그냥 안 보여
+  // 넘은 기관이 없는 줄 알았고, 실시간 읽기는 연결이 끊기면 처리되지 않은 오류였다. 앞서 읽은 값은 그대로 둔다
+  const [alertsUnread, setAlertsUnread] = useState(false);
+  const [realtimeUnread, setRealtimeUnread] = useState(false);
   const [limitModal, setLimitModal] = useState<any>(null);
   const realtimeRef = useRef<NodeJS.Timeout>();
 
   // 기관 목록
   useEffect(() => {
-    fetch('/api/super/organizations?limit=100').then(r => r.json())
-      .then(d => { if (d.ok) setOrgs(d.data); });
+    void fetchOkJson<{ data: unknown }>('/api/super/organizations?limit=100').then(d => {
+      if (d && Array.isArray(d.data)) setOrgs(d.data); else setOrgsUnread(true);
+    });
   }, []);
 
   const fetchMain = useCallback(async () => {
@@ -55,13 +62,14 @@ export default function UsagePage() {
     if (main?.ok) { setData(main.data); setLoadError(null); }
     else { setData(null); setLoadError('사용량을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'); }
     if (alertRes?.ok) setAlerts(alertRes.data);
+    setAlertsUnread(!alertRes?.ok);
     setLoading(false);
   }, [period, orgId, startDate, endDate]);
 
   const fetchRealtime = useCallback(async () => {
-    const res = await fetch('/api/super/usage/realtime');
-    const d   = await res.json();
-    if (d.ok) setRealtime(d.data);
+    const d = await fetchOkJson<{ data: any }>('/api/super/usage/realtime');
+    setRealtimeUnread(!d);
+    if (d) setRealtime(d.data);
   }, []);
 
   useEffect(() => { fetchMain(); }, [fetchMain]);
@@ -146,6 +154,7 @@ export default function UsagePage() {
         <select value={orgId} onChange={e => setOrgId(e.target.value)}
           className="px-3 py-1.5 bg-[#0F172A] border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-[#7C3AED]">
           <option value="all">전체 기관</option>
+          {orgsUnread && <option value="__unread" disabled>{ORG_FILTER_UNREAD}</option>}
           {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         <button onClick={fetchMain} className="px-5 py-1.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-sm font-semibold rounded-lg transition-colors">
@@ -270,6 +279,17 @@ export default function UsagePage() {
 
       {loadError && (
         <div className="p-3 bg-red-950/30 border border-red-800/40 rounded-xl text-sm text-red-300">{loadError}</div>
+      )}
+
+      {alertsUnread && (
+        <div role="alert" className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-sm text-amber-300">
+          한도 초과·경고 기관을 지금 불러오지 못했습니다{alerts ? ' — 아래는 앞서 읽은 내용입니다' : ''}. 화면을 새로 고쳐 주세요.
+        </div>
+      )}
+      {period === 'today' && realtimeUnread && (
+        <div role="alert" className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-sm text-amber-300">
+          실시간 현황을 지금 불러오지 못했습니다{realtime ? ' — 위 숫자는 마지막으로 읽은 값입니다' : ''}.
+        </div>
       )}
 
       {/* 한도 알림 섹션 */}

@@ -11,10 +11,11 @@ import { uploadReferenceDocument, startReading, type DocumentUploadStage } from 
 import { isInForce, kstToday } from '@/lib/edition-dates';
 import EditionCompareModal, { compareEndpoint } from '@/components/admin/EditionCompareModal';
 import DocumentReferencesModal from '@/components/admin/DocumentReferencesModal';
-import { applyVocabulary, filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
+import { applyVocabulary, filterDocuments, normalizeDocumentTags, tagCounts, MAX_DOCUMENT_TAGS, TAG_VOCABULARY_UNREAD, type DocumentFilter, type DocumentStatusFilter } from '@/lib/document-tags';
 import TagVocabularyPanel, { type VocabularyState } from '@/components/admin/TagVocabularyPanel';
 import TagBatchDraft from '@/components/admin/TagBatchDraft';
 import { mergeSuggestedTags } from '@/lib/document-tag-suggest';
+import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 /** 바꿀 옛 판 후보(0055) — 고른 비서 하나의 현재 판(지난 판·지우는 중 아님). 비서를 하나만 골랐을 때만 */
 export function replaceCandidates(docs: Document[], agentIds: string[]): Document[] {
@@ -91,6 +92,9 @@ export default function DocumentsManager() {
   });
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  // 처음 읽기에서 못 읽은 것 — '아직 업로드된 문서가 없습니다'·'등록된 비서가 없습니다'와 가른다(2026-11-20).
+  // 조작마다 지워지는 `errorMessage`와 따로 둔다. 다시 읽기(주기)가 성공하면 문서 쪽은 풀린다
+  const [unread, setUnread] = useState({ documents: false, agents: false });
   const [uploadStage, setUploadStage] = useState<DocumentUploadStage | null>(null);
   const [dragging, setDragging] = useState(false);
   // 비서 추가 모달
@@ -106,6 +110,7 @@ export default function DocumentsManager() {
   const [tagEdit, setTagEdit] = useState<{ id: string; text: string; error: string | null; saving: boolean; suggesting?: boolean; note?: string | null } | null>(null);
   // 기관 태그 분류표(0061) — 못 불러오면 null(태그 저장은 서버가 분류표를 다시 본다)
   const [vocab, setVocab] = useState<VocabularyState | null>(null);
+  const [vocabUnread, setVocabUnread] = useState(false);
 
   // 이 화면에서 이미 다시 걸어 본 문서 — 한 번만 건다
   const kickedRef = useRef<Set<string>>(new Set());
@@ -129,7 +134,7 @@ export default function DocumentsManager() {
     try {
       const result = await (await fetch('/api/documents')).json();
       if (seq !== listSeqRef.current) return;
-      if (result.ok) applyDocuments(result.data);
+      if (result.ok) { applyDocuments(result.data); setUnread((u) => (u.documents ? { ...u, documents: false } : u)); }
     } catch {
       // 다음 주기에 다시 부른다
     }
@@ -140,12 +145,10 @@ export default function DocumentsManager() {
   }, []);
 
   const loadVocabulary = useCallback(async () => {
-    try {
-      const result = await (await fetch('/api/documents/tag-vocabulary')).json();
-      if (result.ok) setVocab(result.data as VocabularyState);
-    } catch {
-      // 분류표 없이도 태그는 붙인다 — 저장 때 서버가 다시 본다
-    }
+    // 못 읽으면 분류표 칸이 조용히 사라지지 않게 따로 기억해 알린다(2026-11-22) — 저장 때는 서버가 다시 본다
+    const result = await fetchOkJson<{ data?: VocabularyState }>('/api/documents/tag-vocabulary');
+    if (result?.data) { setVocab(result.data); setVocabUnread(false); }
+    else setVocabUnread(true);
   }, []);
   useEffect(() => {
     void loadVocabulary();
@@ -171,22 +174,15 @@ export default function DocumentsManager() {
 
   const loadData = async () => {
     const seq = ++listSeqRef.current;
-    try {
-      const [agentsResponse, docsResponse] = await Promise.all([
-        fetch('/api/agents'),
-        fetch('/api/documents'),
-      ]);
-      const [agentsResult, docsResult] = await Promise.all([
-        agentsResponse.json(),
-        docsResponse.json(),
-      ]);
-      if (agentsResult.ok) setAgents(agentsResult.data);
-      if (docsResult.ok && seq === listSeqRef.current) applyDocuments(docsResult.data);
-    } catch (err) {
-      setErrorMessage('데이터 로드 중 오류가 발생했습니다.');
-    } finally {
-      setLoading(false);
-    }
+    // 응답이 실패여도(503 등) 조용히 넘기지 않는다 — 예전엔 못 읽은 목록이 '없습니다'로 보였다
+    const [agentsResult, docsResult] = await Promise.all([
+      fetchOkJson<{ data: Agent[] }>('/api/agents'),
+      fetchOkJson<{ data: Document[] }>('/api/documents'),
+    ]);
+    if (agentsResult) setAgents(agentsResult.data);
+    if (docsResult && seq === listSeqRef.current) applyDocuments(docsResult.data);
+    setUnread({ documents: !docsResult, agents: !agentsResult });
+    setLoading(false);
   };
 
   const openAssignModal = (doc: Document) => {
@@ -210,7 +206,7 @@ export default function DocumentsManager() {
       startReading(result.data.documentIds ?? []);
       loadData();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '추가 중 오류가 발생했습니다.');
+      setErrorMessage(actionErrorText(err, '추가 중 오류가 발생했습니다.'));
       setAssignModal(null);
     } finally {
       setAssigning(false);
@@ -230,7 +226,7 @@ export default function DocumentsManager() {
       listSeqRef.current++; // 지우기 전에 나간 목록 응답이 지운 행을 되살리지 않게
       setDocuments((prev) => prev.filter((d) => d.id !== documentId));
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
+      setErrorMessage(actionErrorText(err, '삭제 중 오류가 발생했습니다.'));
       // 보관소에서 못 지운 경우(502) 행이 '삭제 대기'로 바뀌었다 — 목록을 다시 불러 보인다
       refreshDocuments();
     }
@@ -327,7 +323,7 @@ export default function DocumentsManager() {
       setUploadForm({ file: null, agentIds: [], title: '', visibility: 'organization', replacesId: '', effectiveFrom: '' });
       loadData();
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
+      setErrorMessage(actionErrorText(err, '업로드 중 오류가 발생했습니다.'));
     } finally {
       setUploading(false);
       setUploadStage(null);
@@ -381,7 +377,7 @@ export default function DocumentsManager() {
             </label>
             <div className="border border-slate-300 rounded-md max-h-48 overflow-y-auto divide-y divide-slate-100">
               {agents.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-slate-400">등록된 비서가 없습니다.</p>
+                <p className="px-3 py-2 text-sm text-slate-400">{emptyListText(unread.agents, '등록된 비서가 없습니다.', '비서 목록을')}</p>
               ) : agents.map((agent) => {
                 const checked = uploadForm.agentIds.includes(agent.id);
                 return (
@@ -615,7 +611,10 @@ export default function DocumentsManager() {
       {/* Documents List */}
       <div>
         <h2 className="text-xl font-semibold mb-4">업로드된 문서</h2>
-        {vocab && <TagVocabularyPanel vocabulary={vocab} documents={documents} onSaved={setVocab} onReload={() => void loadVocabulary()} />}
+        {vocabUnread && (
+          <p role="alert" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{TAG_VOCABULARY_UNREAD}</p>
+        )}
+        {vocab && <TagVocabularyPanel vocabulary={vocab} documents={documents} onSaved={(next) => { setVocab(next); setVocabUnread(false); }} onReload={() => void loadVocabulary()} />}
         {documents.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm" aria-label="문서 찾기">
             <input
@@ -794,8 +793,8 @@ export default function DocumentsManager() {
               <svg className="w-12 h-12 mx-auto mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              <div className="text-sm">아직 업로드된 문서가 없습니다.</div>
-              <div className="text-xs mt-1">위에서 문서를 업로드하면 여기에 표시됩니다.</div>
+              <div className="text-sm">{emptyListText(unread.documents, '아직 업로드된 문서가 없습니다.', '문서 목록을')}</div>
+              {!unread.documents && <div className="text-xs mt-1">위에서 문서를 업로드하면 여기에 표시됩니다.</div>}
             </div>
           )}
         </div>

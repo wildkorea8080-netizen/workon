@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
-import { claimInvitation, invitationEmailMatches, releaseInvitation } from '@/lib/invitation-claim';
+import { claimInvitation, invitationEmailMatches, isInvitationClaimError, releaseInvitation, INVITATION_CLAIM_UNAVAILABLE } from '@/lib/invitation-claim';
 import { checkUserSeats, seatErrorBody } from '@/lib/user-seats';
 import { authErrorMessage } from '@/lib/auth-error-text';
 import { APP_URL } from '@/lib/config';
@@ -164,7 +164,15 @@ export async function POST(request: Request) {
       if (!seats.ok) return NextResponse.json(seatErrorBody(seats), { status: seats.status });
 
       // 계정을 만들기 전에 초대를 차지한다 — 같은 링크로 거의 동시에 둘이 가입하지 못하게
-      inviteClaimedAt = await claimInvitation(inv.id);
+      try {
+        inviteClaimedAt = await claimInvitation(inv.id);
+      } catch (claimError) {
+        // DB가 실패한 것은 '이미 사용됨'이 아니다(2026-11-20)
+        if (isInvitationClaimError(claimError)) {
+          return NextResponse.json<ApiResponse<null>>({ ok: false, error: { message: INVITATION_CLAIM_UNAVAILABLE } }, { status: 503 });
+        }
+        throw claimError;
+      }
       if (!inviteClaimedAt) {
         return NextResponse.json<ApiResponse<null>>(
           { ok: false, error: { message: '이미 사용됐거나 만료된 초대 링크입니다.' } },

@@ -136,7 +136,8 @@ vi.mock('@/lib/supabaseAdmin', () => ({
           },
           download(path: string) {
             const b = objects.get(path);
-            if (!b) return Promise.resolve({ data: null, error: { message: 'not found' } });
+            // 실제 저장소가 없는 객체에 주는 꼴(2026-11-20 — 내려받기 실패를 '없음'과 '지금 못 받음'으로 가른다)
+            if (!b) return Promise.resolve({ data: null, error: { message: 'Object not found', statusCode: '404' } });
             return Promise.resolve({ data: new Blob([b]), error: null });
           },
           remove(paths: string[]) {

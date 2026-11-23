@@ -146,7 +146,7 @@ describe('원본', () => {
   const ui = readFileSync('src/components/admin/SettingsManager.tsx', 'utf8');
   it('라우트가 칸을 골라 읽음 — 통째(*)로 읽지 않음', () => {
     expect(route).not.toMatch(/select\(`\s*\*/);
-    expect(route).toContain('getManagedDepartmentIds(departmentId)');
+    expect(route).toContain('managedDepartmentIdsOr503(departmentId)');
   });
   it('화면이 기록 원문을 펼치지 않고, 실패를 "없음"으로 보이지 않음', () => {
     expect(ui).not.toContain('JSON.stringify(log.details');
