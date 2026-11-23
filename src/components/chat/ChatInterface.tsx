@@ -8,6 +8,7 @@ import { isNearBottom } from './scroll-follow';
 import { fetchConversation, loadStep, prevAfterDiscard } from '@/lib/conversation-load';
 import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
+import DocTagFilter from './DocTagFilter';
 import { useFileAttachments } from './useFileAttachments';
 import ReusableFilePicker from './ReusableFilePicker';
 import AnswerFeedback from './AnswerFeedback';
@@ -27,7 +28,7 @@ import {
 import { fileToChatImage } from '@/lib/image-resize';
 import { connectorShortLabel } from '@/lib/connector-labels';
 import { connectorIdsOf } from '@/lib/agent-form';
-import { acceptsChatImages, acceptsChatFiles } from '@/lib/capabilities/settings';
+import { acceptsChatImages, acceptsChatFiles, hasDocSearch } from '@/lib/capabilities/settings';
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_SEND } from '@/lib/attachments/limits';
 import { isImeComposing } from '@/lib/ime';
 import { readRechecked, type RecheckedNumber } from '@/lib/assistant/number-research';
@@ -62,6 +63,8 @@ interface Message {
   numberRechecked?: RecheckedNumber[];
   /** 참고 문서 없이 답함 — 문서를 못 불러와 일반 답변으로 받은 응답 */
   documentsSkipped?: boolean;
+  /** '문서 좁히기'로 고른 태그로 찾은 답(2026-11-23) */
+  docTags?: string[];
   /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
   refusal?: boolean;
   error?: string;
@@ -79,6 +82,8 @@ interface TurnRequest {
   conversationId: string | null;
   images: ChatImage[];
   attachmentIds: string[];
+  /** '문서 좁히기'로 고른 태그 — 거절 뒤 '다시 묻기'도 같은 태그로 */
+  docTags: string[];
 }
 
 /** 서버 거절 코드 — 문서 보관소(NODA)를 부르지 못했다 */
@@ -161,6 +166,10 @@ export default function ChatInterface({
   const canAttachFiles =
     selectedAgent.capabilities === undefined || acceptsChatFiles(selectedAgent.capabilities);
   const fileAttach = useFileAttachments(canAttachFiles);
+  // '문서 좁히기'(2026-11-23) — 문서 찾기가 켜진 비서만. 다른 비서로 바꾸면 비운다(아래 effect)
+  const canFilterDocs = selectedAgent.capabilities !== undefined && hasDocSearch(selectedAgent.capabilities);
+  const [docTags, setDocTags] = useState<string[]>([]);
+  useEffect(() => { setDocTags([]); }, [selectedAgent.id]);
   // 보낼 때마다 올려 대화의 첨부 목록을 다시 불러오게 한다
   const [attachmentsRefresh, setAttachmentsRefresh] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -248,6 +257,7 @@ export default function ChatInterface({
                 attachments?: { id: string; file_name: string }[];
                 number_check?: { unverified?: string[]; rechecked?: unknown };
                 documents_skipped?: boolean;
+                doc_tags?: unknown;
                 revision?: unknown;
                 app_draft?: unknown;
               };
@@ -275,6 +285,9 @@ export default function ChatInterface({
                 : undefined,
               documentsSkipped: m.role === 'assistant' && m.source_references?.documents_skipped === true
                 ? true
+                : undefined,
+              docTags: m.role === 'assistant' && Array.isArray(m.source_references?.doc_tags) && m.source_references.doc_tags.every((t) => typeof t === 'string') && m.source_references.doc_tags.length
+                ? (m.source_references.doc_tags as string[])
                 : undefined,
               revision: m.role === 'assistant' ? readRevision(m.source_references?.revision) : undefined,
             })
@@ -405,6 +418,7 @@ export default function ChatInterface({
         conversationId,
         images,
         attachmentIds: fileIds,
+        docTags: canFilterDocs ? docTags : [],
       },
       sentChips,
       false,
@@ -448,6 +462,7 @@ export default function ChatInterface({
           images: req.images.length > 0 ? req.images : undefined,
           attachment_ids: req.attachmentIds.length > 0 ? req.attachmentIds : undefined,
           skip_documents: skipDocuments ? true : undefined,
+          doc_tags: !skipDocuments && req.docTags.length > 0 ? req.docTags : undefined,
         }),
       });
 
@@ -498,6 +513,7 @@ export default function ChatInterface({
             links: collectedLinks.length ? [...collectedLinks] : undefined,
             files: collectedFiles.length ? [...collectedFiles] : undefined,
             documentsSkipped: skipped,
+            docTags: !skipped && req.docTags.length ? [...req.docTags] : undefined,
           },
         ]);
       };
@@ -764,6 +780,7 @@ export default function ChatInterface({
               numberCheck={msg.numberCheck}
               numberRechecked={msg.numberRechecked}
               documentsSkipped={msg.documentsSkipped}
+              docTags={msg.docTags}
               badge={msg.appDraft ? APP_DRAFT_BADGE : undefined}
               refusal={msg.refusal}
               refusalDisabled={isLoading}
@@ -848,6 +865,7 @@ export default function ChatInterface({
         {canAttachFiles && conversationId && (
           <ConversationAttachments conversationId={conversationId} refreshKey={attachmentsRefresh} />
         )}
+        {canFilterDocs && <DocTagFilter key={selectedAgent.id} agentId={selectedAgent.id} value={docTags} onChange={setDocTags} disabled={isLoading} />}
         <PendingFileChips chips={fileAttach.chips} onRemove={fileAttach.remove} />
 
         {pendingImages.length > 0 && (

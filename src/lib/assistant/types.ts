@@ -60,6 +60,8 @@ export interface PreparedTurn {
   chunks: RetrievedChunk[];
   /** '문서 없이 일반 답변 받기'로 답한 턴 — 답변 행 `source_references.documents_skipped` */
   documentsSkipped: boolean;
+  /** '문서 좁히기'로 고른 태그로 찾은 턴 — 답변 행 `source_references.doc_tags`(2026-11-23) */
+  docTags?: string[];
   /** 문서 찾기에서 유사도 하한으로 뺀 조각 수(NODA `dropped`). NODA를 부르지 않았으면 null. 사용 기록 `details.doc_dropped` */
   docDropped: number | null;
   /** NODA 답변 검증에 보낼 근거(`PrepareResult.verifySources`). 비었으면 검증하지 않는다 */

@@ -78,6 +78,11 @@ export function acceptsChatImages(raw: unknown): boolean {
  * 실제 거절은 서버(assistant/attachments.ts의 attachmentRequestError)가 한다.
  * table_merge도 첨부한 표를 쓰므로 파일을 받는다(S3-b).
  */
+/** 문서 찾기가 켜진 비서인가 — 대화 입력창의 '문서 좁히기'(2026-11-23)를 보일지. 표시일 뿐(서버가 다시 봄) */
+export function hasDocSearch(raw: unknown): boolean {
+  return isPlainObject(raw) && isPlainObject(raw.doc_search);
+}
+
 export function acceptsChatFiles(raw: unknown): boolean {
   return isPlainObject(raw) && (isPlainObject(raw.file_read) || isPlainObject(raw.table_merge));
 }

@@ -52,6 +52,8 @@ export interface PreflightInput {
   skipDocuments: boolean;
   /** 이어지는 대화의 바로 앞 사용자 질문(그 사람의 대화일 때만) — 문서 찾기가 짧은 질문을 다시 찾을 때 쓴다(2026-11-05) */
   previousQuestion?: string;
+  /** 직원이 '문서 좁히기'로 고른 태그(요청 `doc_tags`, 2026-11-23) — 문서 찾기가 이 태그의 문서만 근거로 남긴다 */
+  docTags?: string[];
 }
 
 /**
@@ -69,6 +71,8 @@ export interface PrepareResult {
   dropped?: number;
   /** 이번 턴은 참고 문서 없이 답한다 — 답변 행 `source_references.documents_skipped` */
   documentsSkipped?: boolean;
+  /** '문서 좁히기'로 거른 태그 — 답변 행 `source_references.doc_tags`(2026-11-23) */
+  docTags?: string[];
   /**
    * NODA 답변 검증(`/verify`)에 보낼 이 턴의 근거 — `/context` `sources[]`를 **받은 순서 그대로** `{doc_id, chunk_id}`만.
    * 답의 `[n]`이 `sources[n-1]`을 가리키므로 순서가 바뀌면 안 된다. 형식이 깨진 원소가 하나라도 있으면 빈 배열.

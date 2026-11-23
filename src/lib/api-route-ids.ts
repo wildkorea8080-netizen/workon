@@ -56,6 +56,7 @@ export const API_ROUTES: readonly string[] = [
   'agents',
   'agents/[id]',
   'agents/[id]/app-draft',
+  'agents/[id]/document-tags',
   'agents/[id]/history',
   'agents/[id]/promote',
   'agents/[id]/revert',

@@ -16,6 +16,7 @@ import {
 import type { NodaStatus, RetrievedChunk } from '@/lib/db';
 import { kstToday, notCitableEditionIds } from '@/lib/edition-dates';
 import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-types';
+import { docTagsNote } from '@/lib/chat-doc-tags';
 import type { Capability, PreflightResult, TurnContext } from './types';
 import {
   commonSourcesToChunks,
@@ -57,6 +58,8 @@ export interface AgentDocument {
   replaces_id?: string | null;
   /** 시행일(0055). 옛 판을 가리키는 새 판은 이 날(KST)부터 근거다 — 그 전에는 옛 판이 근거 */
   effective_from?: string | null;
+  /** 사람이 붙인 태그(0060) — 대화의 '문서 좁히기'(2026-11-23)가 고른 태그로 근거를 거른다 */
+  tags?: string[] | null;
 }
 
 export interface DocSearchDeps {
@@ -86,7 +89,7 @@ const defaultDeps: DocSearchDeps = {
     // 비서당 문서는 50개가 상한(MAX_AGENT_DOCUMENTS)이라 API 상한(1,000행)에 닿지 않는다 — 매 대화마다 도는 길이라 개수 조회 없이 한 번만
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, title, file_name, noda_status, replaces_id, effective_from')
+      .select('id, title, file_name, noda_status, replaces_id, effective_from, tags')
       .eq('agent_id', agentId)
       .order('id')
       .limit(1000);
@@ -365,25 +368,32 @@ export function docSearchAddendum(input: {
   commonOrgType?: string | null;
   /** 이번 턴에 공통 보관함도 찾았다 — '근거 없음' 문구를 공통까지 넓힌다 */
   searchedCommon?: boolean;
+  /** 직원이 '문서 좁히기'로 고른 태그(2026-11-23) — 그 태그의 문서에서만 찾았다고 모델에게 알린다 */
+  docTags?: string[];
 }): string | undefined {
   if (input.skipped) return SKIPPED.join('\n');
   const context = input.context?.trim() ?? '';
   const commonContext = input.commonContext?.trim() ?? '';
   const withAgent = context !== '' && input.chunks.some((c) => c.scope !== 'common');
   const withCommon = commonContext !== '' && !!input.commonOrgType && input.chunks.some((c) => c.scope === 'common');
+  const tagLine = input.docTags?.length ? `- ${docTagsNote(input.docTags)}(직원이 '문서 좁히기'로 골랐다).` : null;
   if (withAgent || withCommon) {
     return [
       ...(withAgent ? [AGENT_CONTEXT_HEAD, context, ''] : []),
       ...(withCommon ? [commonContextHead(input.commonOrgType as string), commonContext, ''] : []),
       ...CITATION_RULES,
       ...(withCommon ? COMMON_CITATION_RULES : []),
+      ...(tagLine ? [tagLine] : []),
     ].join('\n');
   }
   if (input.hasDocuments) {
     const lines = input.searchedCommon
       ? NO_RESULT.map((line) => (line === NO_RESULT_AGENT_LINE ? NO_RESULT_COMMON_LINE : line))
       : NO_RESULT;
-    return lines.join('\n');
+    return [
+      ...lines,
+      ...(tagLine ? [tagLine, "- 고른 태그의 문서에서 찾지 못했다고 밝히고, '문서 좁히기'를 풀고 다시 물으면 모든 문서에서 찾는다고 안내하세요."] : []),
+    ].join('\n');
   }
   return undefined;
 }
@@ -397,7 +407,20 @@ interface CommonCarry {
 
 type DocSearchCarry =
   | { skipped: true }
-  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry; followUp?: true };
+  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry; followUp?: true; docTags?: string[] };
+
+/**
+ * '문서 좁히기'(2026-11-23)에서 비서 보관함에 받는 예산(글자) — 찾은 뒤 태그로 걸러 남는 것이 줄어드니 평소의 두 배를 받는다.
+ * 모델에게는 남긴 조각의 블록만 싣는다(keepContextBlocks) — 프롬프트가 두 배가 되지 않는다
+ */
+export const TAG_FILTER_BUDGET = NODA_CONTEXT_BUDGET * 2;
+
+/** 고른 태그가 하나라도 붙은 문서의 조각만(대소문자 무시). 공통 자료실 조각은 태그가 없어 뺀다 — filterChunksByTags와 같은 규칙 */
+export function keepTaggedChunks(chunks: RetrievedChunk[], docs: AgentDocument[], tags: readonly string[]): RetrievedChunk[] {
+  const want = new Set(tags.map((t) => t.toLocaleLowerCase('ko')));
+  const tagsOf = new Map(docs.map((d) => [d.id.toLowerCase(), (d.tags ?? []).map((t) => t.toLocaleLowerCase('ko'))]));
+  return chunks.filter((c) => c.scope !== 'common' && (tagsOf.get(String(c.documentId).toLowerCase()) ?? []).some((t) => want.has(t)));
+}
 
 type MatchInput = { agentId: string; organizationId: string | null };
 
@@ -716,7 +739,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
     description: '이 비서에 연결한 문서에서 근거를 찾아 출처와 함께 답합니다.',
     isAvailable: () => true,
 
-    async preflight({ organizationId, agentId, message, skipDocuments, previousQuestion }) {
+    async preflight({ organizationId, agentId, message, skipDocuments, previousQuestion, docTags }) {
       if (skipDocuments) return { ok: true, carry: { skipped: true } satisfies DocSearchCarry };
 
       // 비서 문서 행과 (기관 유형 → 그 유형의 공통 문서 행)을 함께 읽는다. 유형은 그 턴에 읽는다(설계 5.1)
@@ -752,7 +775,9 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       }
 
       const searchAgent = hasReady(docs);
-      const commonType = orgType !== null && hasCurrentCommon(commonDocs) ? orgType : null;
+      // '문서 좁히기'면 이 비서 보관함만 찾는다 — 공통 자료실 문서에는 태그가 없다(2026-11-23)
+      const tags = docTags?.length ? docTags : null;
+      const commonType = !tags && orgType !== null && hasCurrentCommon(commonDocs) ? orgType : null;
       if (!searchAgent && !commonType) return { ok: true, carry: { docs: [] } satisfies DocSearchCarry };
 
       // 두 곳을 찾으면 예산을 나눈다 — 모델에 가는 발췌가 두 배로 늘지 않게(설계 5.1)
@@ -760,7 +785,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       const search = (query: string) =>
         Promise.allSettled([
           searchAgent
-            ? Promise.resolve().then(() => deps.fetchContext(agentId, query, both ? CONTEXT_BUDGET_AGENT_SHARED : NODA_CONTEXT_BUDGET))
+            ? Promise.resolve().then(() => deps.fetchContext(agentId, query, tags ? TAG_FILTER_BUDGET : both ? CONTEXT_BUDGET_AGENT_SHARED : NODA_CONTEXT_BUDGET))
             : Promise.resolve(undefined),
           commonType
             ? Promise.resolve().then(() =>
@@ -828,6 +853,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         carry: {
           docs,
           ...(followUp ? { followUp: true } : {}),
+          ...(tags ? { docTags: tags } : {}),
           ...(result ? { result } : {}),
           ...(commonType && commonResult ? { common: { orgType: commonType, docs: commonDocs, result: commonResult } } : {}),
         } satisfies DocSearchCarry,
@@ -861,7 +887,9 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
 
       // 어느 쪽이든 섞였으면 그 턴 근거 전체를 버린다(공통 쪽은 5.3)
       const mixed = agentMatch.mixed || common?.mixed === true;
-      const agentChunks = mixed ? [] : agentMatched;
+      // '문서 좁히기' — 고른 태그가 붙은 문서의 조각만(2026-11-23). 섞임 판정은 거르기 전에 했다(남의 근거를 거르기로 숨기지 않게)
+      const tagged = carry.docTags?.length ? carry.docTags : null;
+      const agentChunks = mixed ? [] : tagged ? keepTaggedChunks(agentMatched, carry.docs, tagged) : agentMatched;
       const commonChunks = mixed ? [] : (common?.chunks ?? []);
       const chunks = [...agentChunks, ...commonChunks];
 
@@ -879,7 +907,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         // 비서 묶음은 S4 그대로 통째로 싣되, 대신된 옛 판 조각이 있었으면 받아들인 조각의 블록만(옛 규정 글이 모델에게 가지 않게)
         context: carry.result
           ? stripNodaPrefixes(
-              agentMatch.superseded
+              agentMatch.superseded || tagged
                 ? keepContextBlocks(carry.result.context, new Set(agentChunks.map((c) => c.n).filter((n): n is number => typeof n === 'number')))
                 : carry.result.context
             )
@@ -898,12 +926,14 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
           : null,
         commonOrgType: carry.common?.orgType ?? null,
         searchedCommon: carry.common !== undefined,
+        ...(tagged ? { docTags: tagged } : {}),
       });
       return {
         chunks,
         dropped: (carry.result?.dropped ?? 0) + (carry.common?.result.dropped ?? 0),
         verifySources,
         ...(verifyTenant ? { verifyTenant } : {}),
+        ...(tagged ? { docTags: tagged } : {}),
         // 앞 질문과 묶어 찾은 턴은 지금 질문과 관련 있을 때만 쓰라고 한 줄 더한다
         systemAddendum: carry.followUp && chunks.length > 0 && addendum ? `${addendum}\n${FOLLOW_UP_NOTE}` : addendum,
       };

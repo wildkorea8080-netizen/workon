@@ -1,5 +1,6 @@
 // src/lib/assistant/prepare.ts
 import type { Session } from 'next-auth';
+import { parseChatDocTags } from '@/lib/chat-doc-tags';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { isStorageNotFound } from '@/lib/storage-error';
 import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE, getActorScope, isActorScopeReadError } from '@/lib/actor-scope';
@@ -100,6 +101,10 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const { agent_id, message: rawMessage, conversation_id, images, attachment_ids } = body;
   // '문서 없이 일반 답변 받기'. 정확히 true일 때만 — 다른 값으로 문서 찾기가 꺼지면 안 된다
   const skipDocuments = body.skip_documents === true;
+  // '문서 좁히기'(2026-11-23) — 고른 태그의 문서만 근거로. 꼴이 틀리면 거절(조용히 무시하면 좁힌 줄 알고 모든 문서의 답을 받는다)
+  const docTagsParsed = parseChatDocTags(body.doc_tags);
+  if (!docTagsParsed.ok) return reject(docTagsParsed.message, 400);
+  const docTags = skipDocuments ? [] : docTagsParsed.tags;
 
   if (typeof agent_id !== 'string' || !agent_id) return reject('에이전트 ID는 필수입니다.', 400);
   if (typeof rawMessage !== 'string' || !rawMessage.trim()) return reject('메시지는 필수입니다.', 400);
@@ -265,7 +270,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       : undefined;
   for (const cap of capabilities) {
     if (!cap.preflight) continue;
-    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments, previousQuestion });
+    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments, previousQuestion, ...(docTags.length ? { docTags } : {}) });
     if (!result.ok) return reject(result.message, result.status, { code: result.code });
     if (result.carry !== undefined) preflight[cap.id] = result.carry;
   }
@@ -426,6 +431,7 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       isNewConversation,
       chunks,
       documentsSkipped: prepared.some((p) => p.documentsSkipped === true),
+      docTags: prepared.find((p) => p.docTags?.length)?.docTags,
       docDropped: dropped ?? null,
       verifySources,
       verifyTenant,

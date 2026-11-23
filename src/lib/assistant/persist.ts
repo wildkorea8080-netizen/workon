@@ -32,6 +32,8 @@ export interface MessageRowInput {
   numberCheck?: NumberCheck | null;
   /** 참고 문서 없이 답한 턴. 참일 때만 답변 행에 `documents_skipped: true`를 싣는다(지난 대화에서도 표시) */
   documentsSkipped: boolean;
+  /** '문서 좁히기'로 고른 태그 — 있을 때만 답변 행에 `doc_tags`(지난 대화에서도 표시, 2026-11-23) */
+  docTags?: string[];
   /** NODA 답변 검증 결과(감사 기록, 판정 R1). 검증을 부르고 결과를 받은 턴만 답변 행에 `verify`로 싣는다 */
   verify?: NodaVerifyResult | null;
   /** 두 행의 id를 미리 정한다(2026-11-05) — 화면이 방금 받은 답변을 평가할 수 있게 `done`에 답변 id를 싣는다. 주면 두 행 모두에 넣는다(키 집합 같음) */
@@ -115,6 +117,7 @@ export function buildMessageRows(input: MessageRowInput): Record<string, unknown
           ? { number_check: { unverified: input.numberCheck.unverified, ...(input.numberCheck.rechecked?.length ? { rechecked: input.numberCheck.rechecked } : {}) } }
           : {}),
         ...(input.documentsSkipped ? { documents_skipped: true } : {}),
+        ...(input.docTags?.length ? { doc_tags: input.docTags } : {}),
         ...(input.verify
           ? {
               verify: {

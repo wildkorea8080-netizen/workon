@@ -115,6 +115,6 @@ describe('연결 (원본)', () => {
     const src = readFileSync('src/lib/assistant/prepare.ts', 'utf8');
     expect(src).toContain("await previousUserQuestion(conversation_id, actor.userId, agent_id)");
     expect(src).toContain(".eq('user_id', userId)\n      .eq('agent_id', agentId)");
-    expect(src).toContain("message, skipDocuments, previousQuestion });");
+    expect(src).toContain("message, skipDocuments, previousQuestion, ...(docTags.length ? { docTags } : {}) });"); // 0274부터 문서 좁히기 태그도
   });
 });
