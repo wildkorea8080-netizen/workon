@@ -5,6 +5,13 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-23(오후 2): 대화에서 태그로 문서 좁혀 찾기(0274) — 마이그레이션 없음
+
+- 코드 배포 `dpl_DQmKFcPDJtkvvRh8YPWcrmC8zbbH`(커밋 `9760427`, 2026-11-23 16:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `64193be`(오후 기록), `9a5b362` 기능 — 문서 찾기가 켜진 비서의 입력창 위 '문서 좁히기'(태그 5개까지)로 고른 태그 문서에서만 근거를 찾는다(비서 보관함만 예산 두 배로 찾은 뒤 거름·공통 자료실 뺌·모델에는 남긴 블록만·남는 것이 없으면 그렇다고 답하게·답변 행 `doc_tags`), `GET /api/agents/[id]/document-tags`(쓸 수 있는 사람만, 태그와 문서 수만), 요청 `doc_tags`가 틀리면 400. `9760427` 문서. 가지 Preview(`workon-5hapo4em3`, `dpl_3nj72eYHeXjnrePkw1BSaurRZxXT`) Ready 뒤 `main`. 배포 전 전체 시험 428파일 4,921개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_8UJ4QdQvGGjUDiPjirSeVRiEejz5`(4196a01)로 promote.
+- 배포 전 운영 확인(읽기만): `documents.tags`·`retired_at`·`noda_status`·`agent_id` 있음, RLS 꺼진 표 0·공개 키 표 권한 0·마지막 적용 마이그레이션 0097. **운영에는 아직 태그가 붙은 읽힌 문서가 0개** — 관리자가 문서에 태그를 붙이기 전까지 '문서 좁히기' 줄은 보이지 않는다(태그가 없으면 그리지 않음 — 의도).
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, 새 `document-tags` uuid id는 인증 401·엉뚱한 id는 미들웨어 404, `/api/chat`(doc_tags 실음) 인증 없이 401. 실행기 호출 16:30~16:34 KST 모두 200(heartbeat 16:30), 최근 24시간 critical 0건·20분 warning 이상 0건. 화면은 브라우저로 눌러 보지 않았다(태그 붙은 문서가 없어 운영에서도 아직 볼 수 없음).
+
 ## 2026-11-23(오후): 깨진 요청 400·엉뚱한 id 404·환경 변수·늦은 응답·두 번 누름(0269~0273) — 마이그레이션 없음
 
 - 코드 배포 `dpl_8UJ4QdQvGGjUDiPjirSeVRiEejz5`(커밋 `4196a01`, 2026-11-23 14:35 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `c0164de`(낮 기록), `b5991ac` 다섯 묶음 — 깨진 요청 몸을 500 대신 400(라우트 열셋, `readJsonObject`)(0269), 주소의 id 자리가 uuid 꼴이 아니면 미들웨어가 404(`api-route-ids.ts` 라우트 214개 목록 — 예전엔 DB 22P02 거절이 읽기 실패로 잡혀 503)·시험 DB 경합으로 가끔 실패하던 0090 시험 안정화(0270), 슈퍼관리자 라우트 여섯의 환경 변수를 config.ts로(0271), 늦게 온 앞 응답이 새 결과를 덮던 화면 여덟(`latestGate`)(0272), 처리 중에도 열려 있던 조작 단추(`useInFlight`)(0273). `d64b1b5` 문서, `4196a01` 줄바꿈 정리(편집 도구가 넣은 `\r\r\n` 때문에 글 파일로 인식되지 않고 커밋된 파일 아홉을 되돌림 — 내용 같음). 가지 Preview(`workon-b6b0adjzs`, `dpl_7hvQ4reAHw1fSKgWv6DstknU4A6D`) Ready 뒤 `main`. 배포 전 전체 시험 427파일 4,907개 통과·tsc 0.
