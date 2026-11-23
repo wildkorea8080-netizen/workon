@@ -5,6 +5,7 @@ import type { Agent } from '@/lib/db';
 import AgentEditorModal from '@/components/agents/AgentEditorModal';
 import { TIER_LABELS, connectorIdsOf, CREATE_CONNECTOR_LIST_UNREAD } from '@/lib/agent-form';
 import { isImeComposing } from '@/lib/ime';
+import { useInFlight } from '@/lib/use-in-flight';
 import { actionErrorText, emptyListText, fetchOkJson } from '@/lib/ok-json';
 
 type Tab = 'official' | 'pending' | 'rejected';
@@ -505,6 +506,9 @@ export default function AgentsManager() {
   };
 
   // ── 카테고리 ────────────────────────────────────────────────
+  // Enter와 단추가 함께 부른다 — 처리 중에 다시 보내지 않게(2026-11-23 — 두 번째가 같은 이름으로 거절돼 성공 뒤 실패 글)
+  const categoryFlight = useInFlight();
+  const addCategory = () => void categoryFlight.run('add', handleAddCategory);
   const handleAddCategory = async () => {
     const name = newCategoryName.trim();
     if (!name) return;
@@ -744,12 +748,12 @@ export default function AgentsManager() {
                   type="text"
                   value={newCategoryName}
                   onChange={e => setNewCategoryName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); handleAddCategory(); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); addCategory(); } }}
                   placeholder="새 카테고리 (예: 인사·복무)"
                   maxLength={30}
                   className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
                 />
-                <button onClick={handleAddCategory} disabled={!newCategoryName.trim()}
+                <button onClick={addCategory} disabled={!newCategoryName.trim() || categoryFlight.running !== null}
                   className="px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
                   추가
                 </button>

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { IS_PRODUCTION, SUPABASE_ANON_KEY, SUPABASE_URL } from '@/lib/config';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { signSuperJWT, SUPER_COOKIE_NAME } from '@/lib/super-auth';
@@ -10,7 +12,9 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password } = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: BAD_BODY_MESSAGE }, { status: 400 });
+    const { email, password } = body;
 
     if (!email || !password) {
       return NextResponse.json(
@@ -32,8 +36,8 @@ export async function POST(request: NextRequest) {
 
     // 1) anon key 클라이언트로 비밀번호 검증
     //    service role 키는 signInWithPassword 용도에 적합하지 않음
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseUrl = SUPABASE_URL;
+    const supabaseAnonKey = SUPABASE_ANON_KEY;
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: false },
     });
@@ -98,7 +102,7 @@ export async function POST(request: NextRequest) {
       name: SUPER_COOKIE_NAME,
       value: jwt,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: IS_PRODUCTION,
       sameSite: 'lax',
       path: '/',
       maxAge: 86400,

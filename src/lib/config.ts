@@ -24,6 +24,10 @@ export const SUPABASE_SERVICE_ROLE_KEY = getEnv('SUPABASE_SERVICE_ROLE_KEY');
 export { SUPABASE_DOCUMENTS_BUCKET } from './config-public';
 export const NEXTAUTH_URL = getEnv('NEXTAUTH_URL');
 export const NEXTAUTH_SECRET = getEnv('NEXTAUTH_SECRET');
+// 슈퍼관리자 첫 설정 키 — 비면 첫 설정을 받지 않는다(2026-11-23까지 라우트가 process.env를 직접 읽었다)
+export const SUPER_ADMIN_SETUP_KEY = getEnv('SUPER_ADMIN_SETUP_KEY', false);
+// 운영 빌드인가 — 쿠키 secure 등
+export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export const ANTHROPIC_API_KEY = getEnv('ANTHROPIC_API_KEY');
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? 'WORKON';
 

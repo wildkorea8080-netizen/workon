@@ -3,7 +3,7 @@ import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { encode } from 'next-auth/jwt';
 import { logSystem } from '@/lib/logger';
-import { NEXTAUTH_SECRET } from '@/lib/config';
+import { NEXTAUTH_SECRET, NEXTAUTH_URL } from '@/lib/config';
 import { narrowImpersonationNotice, pickImpersonationTarget } from '@/lib/impersonation-target';
 
 const IMPERSONATION_NOT_LOGGED = '대리 접근 기록을 남기지 못해 대리 접근을 내주지 않았습니다';
@@ -11,7 +11,7 @@ const IMPERSONATION_NOT_LOGGED = '대리 접근 기록을 남기지 못해 대�
 export const dynamic = 'force-dynamic';
 
 function nextAuthCookieName() {
-  const url = process.env.NEXTAUTH_URL ?? '';
+  const url = NEXTAUTH_URL ?? '';
   return url.startsWith('https://')
     ? '__Secure-next-auth.session-token'
     : 'next-auth.session-token';
@@ -124,7 +124,7 @@ export async function POST(
   });
 
   // 6) 응답 — 쿠키 설정
-  const isProd = (process.env.NEXTAUTH_URL ?? '').startsWith('https://');
+  const isProd = (NEXTAUTH_URL ?? '').startsWith('https://');
   const response = NextResponse.json({
     ok: true,
     data: { redirectUrl: '/admin', orgName: org.name, wholeOrganization: pick.wholeOrganization },

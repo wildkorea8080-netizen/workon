@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { latestGate } from '@/lib/latest-request';
 import { useRouter } from 'next/navigation';
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
@@ -49,7 +50,10 @@ export default function UsagePage() {
     });
   }, []);
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const fetchMain = useCallback(async () => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const p = new URLSearchParams({ period, orgId });
     if (period === 'custom' && startDate) p.set('startDate', startDate);
@@ -58,6 +62,7 @@ export default function UsagePage() {
       fetch(`/api/super/usage?${p}`).then(r => r.json()).catch(() => null),
       fetch('/api/super/usage/alerts').then(r => r.json()).catch(() => null),
     ]);
+    if (!gate.current.isLatest(ticket)) return;
     // 못 읽었으면 지난 숫자·'데이터 없음'으로 두지 않고 알린다(2026-11-18)
     if (main?.ok) { setData(main.data); setLoadError(null); }
     else { setData(null); setLoadError('사용량을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'); }

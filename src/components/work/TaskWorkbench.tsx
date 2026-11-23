@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useInFlight } from '@/lib/use-in-flight';
 import {
   api,
   newIdempotencyKey,
@@ -40,6 +41,8 @@ type RightTab = 'review' | 'evidence' | 'revise';
 const ORIGIN_LABEL: Record<FieldDto['origin'], string> = { empty: '빈 칸', form: '입력값', ai: 'AI 초안', user: '직접 수정', restore: '복구', system: '찾은 근거로 정리' };
 
 export default function TaskWorkbench({ taskId }: { taskId: string }) {
+  // '검토 완료' 처리 중에 다시 누르지 못하게(2026-11-23 — 두 번째가 '이미 완료'로 거절돼 성공 뒤 실패 글이 떴다). 아래 이른 return보다 앞에 둔다(갈고리 규칙)
+  const approveFlight = useInFlight();
   const [detail, setDetail] = useState<TaskDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -125,7 +128,8 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
   const openBlocking = detail.review.filter((i) => i.severity === 'blocking' && i.state === 'open').length;
   const canApprove = task.access.review && version && current && openBlocking === 0 && task.status !== 'completed';
 
-  async function approve() {
+  const approve = () => void approveFlight.run('approve', approveNow);
+  async function approveNow() {
     if (!version) return;
     const r = await api(`/api/work/tasks/${taskId}/review`, { method: 'POST', json: { action: 'approve', versionId: version.id } });
     if (!r.ok) return setError(r.error.message);
@@ -169,7 +173,7 @@ export default function TaskWorkbench({ taskId }: { taskId: string }) {
         {task.access.review && version && (
           <button
             onClick={approve}
-            disabled={!canApprove}
+            disabled={!canApprove || approveFlight.running !== null}
             title={!canApprove ? (openBlocking ? `반드시 고칠 사항 ${openBlocking}건` : !current ? '이 판의 파일이 아직 없음' : '') : undefined}
             className="rounded-[10px] bg-[#003087] px-4 py-2 text-[14px] font-semibold text-white disabled:bg-slate-300"
           >
@@ -517,6 +521,7 @@ function FieldEditor({ detail, taskId, selected, onSelect, onSaved, setError, on
 function ReviewPanel({ detail, taskId, onChanged, setError }: { detail: TaskDetailDto; taskId: string; onChanged: () => Promise<void>; setError: (m: string | null) => void }) {
   const items = [...detail.review].sort((a, b) => Number(a.state !== 'open') - Number(b.state !== 'open'));
   const canAct = detail.task.access.edit || detail.task.access.review;
+  const flight = useInFlight();
   async function act(itemId: string, action: 'resolve' | 'acknowledge') {
     const r = await api(`/api/work/tasks/${taskId}/review`, { method: 'POST', json: { action, itemId } });
     if (!r.ok) return setError(r.error.message);
@@ -541,8 +546,8 @@ function ReviewPanel({ detail, taskId, onChanged, setError }: { detail: TaskDeta
           {i.fieldIds[0] && <a href={`#field-${i.fieldIds[0]}`} className="text-[13px] text-[#003087] underline">해당 칸으로</a>}
           {i.state === 'open' && canAct && (
             <div className="mt-2 flex gap-2">
-              <button onClick={() => act(i.id, 'resolve')} className="rounded border border-slate-300 bg-white px-2 py-1 text-[13px]">고쳤음</button>
-              {i.severity !== 'blocking' && <button onClick={() => act(i.id, 'acknowledge')} className="rounded border border-slate-300 bg-white px-2 py-1 text-[13px]">확인함(그대로 둠)</button>}
+              <button onClick={() => void flight.run(i.id, () => act(i.id, 'resolve'))} disabled={flight.running !== null} className="rounded border border-slate-300 bg-white px-2 py-1 text-[13px] disabled:opacity-50">고쳤음</button>
+              {i.severity !== 'blocking' && <button onClick={() => void flight.run(i.id, () => act(i.id, 'acknowledge'))} disabled={flight.running !== null} className="rounded border border-slate-300 bg-white px-2 py-1 text-[13px] disabled:opacity-50">확인함(그대로 둠)</button>}
             </div>
           )}
         </li>
@@ -622,6 +627,7 @@ function EvidencePanel({ detail, selected }: { detail: TaskDetailDto; selected: 
 const QUICK = ['핵심만 3줄로', '공문체로 다듬기', '더 간결하게', '항목을 개조식으로'];
 
 function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: { detail: TaskDetailDto; taskId: string; selected: string[]; onApplied: (m: string) => Promise<void>; onRun: (r: RunDto) => void; setError: (m: string | null) => void }) {
+  const applyFlight = useInFlight();
   const [instruction, setInstruction] = useState('');
   const [proposal, setProposal] = useState<{ id: string; status: string; changes: { fieldId: string; before: string; after: string }[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -663,6 +669,7 @@ function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: {
 
   async function apply() {
     if (!proposal) return;
+    // 처리 중에 다시 누르면 둘째가 판이 바뀜(409)으로 거절돼 성공 뒤 실패 글이 떴다(2026-11-23)
     const r = await api<{ version: { version: number }; run: RunDto | null }>(`/api/work/tasks/${taskId}/revision-proposals/${proposal.id}/apply`, { method: 'POST', json: { baseVersion: version!.version } });
     if (!r.ok) return setError(r.error.message);
     setProposal(null);
@@ -697,7 +704,7 @@ function RevisePanel({ detail, taskId, selected, onApplied, onRun, setError }: {
           ))}
           {proposal.changes.length > 0 && (
             <div className="flex gap-2">
-              <button onClick={apply} className="flex-1 rounded-[10px] bg-[#003087] px-3 py-2 font-semibold text-white">적용(새 판·새 파일)</button>
+              <button onClick={() => void applyFlight.run('apply', apply)} disabled={applyFlight.running !== null} className="flex-1 rounded-[10px] bg-[#003087] px-3 py-2 font-semibold text-white disabled:bg-slate-300">{applyFlight.running ? '적용하는 중…' : '적용(새 판·새 파일)'}</button>
               <button onClick={() => setProposal(null)} className="rounded-[10px] border border-[#DCE3EC] px-3 py-2">버리기</button>
             </div>
           )}

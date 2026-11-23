@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
@@ -58,7 +59,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
     if (!canEditAgent(agent, actor)) return jsonError('이 비서를 고칠 권한이 없습니다.', 403);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = await readJsonObject(request);
+    if (!body) return jsonError(BAD_BODY_MESSAGE, 400);
 
     const { data: current, error: currentError } = await supabaseAdmin
       .from('agents')

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
@@ -230,7 +231,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = await readJsonObject(request);
+    if (!body) return jsonError(BAD_BODY_MESSAGE, 400);
 
     const split = splitAgentBody(body, { currentType: 'chat', ...knownIds() });
     if (split.error) return jsonError(split.error, 400);

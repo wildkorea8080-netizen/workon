@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { latestGate } from '@/lib/latest-request';
 import { fetchOkJson, ORG_FILTER_UNREAD } from '@/lib/ok-json';
 import { isImeComposing } from '@/lib/ime';
 import { SYSTEM_LOG_CATEGORIES, SYSTEM_LOG_LEVELS, parseLogLink, type LogLinkState, type LogTab } from '@/lib/super-log-links';
@@ -110,7 +111,10 @@ function AccessLogsTab() {
     });
   }, []);
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const load = useCallback(async (p = 1) => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const params = new URLSearchParams({ period, page: String(p), limit: String(LIMIT) });
     if (filterOrg)            params.set('orgId', filterOrg);
@@ -118,6 +122,7 @@ function AccessLogsTab() {
     if (search)               params.set('search', search);
     // 응답을 못 읽어도 던지지 않는다(도는 표시가 멈추지 않던 것). 실패면 앞 조회의 '총 N건'·의심 IP를 남기지 않는다(2026-11-21)
     const data = await readLogJson(`/api/super/logs/access?${params}`);
+    if (!gate.current.isLatest(ticket)) return;
     if (data.ok) { setRows(data.data); setMeta(data.meta); setSuspicious(data.suspiciousIps ?? []); setLoadError(null); }
     else { setRows([]); setMeta({ total: 0 }); setSuspicious([]); setLoadError(data.error?.message ?? '접속 기록을 불러오지 못했습니다.'); }
     setLoading(false);
@@ -245,10 +250,14 @@ function SystemLogsTab({ initial }: { initial?: LogLinkState | null }) {
   const [detail, setDetail]   = useState<any>(null);
   const LIMIT = 50;
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const load = useCallback(async (p = 1) => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const params = new URLSearchParams({ period, level: filterLevel, category: filterCategory, page: String(p), limit: String(LIMIT) });
     const data = await readLogJson(`/api/super/logs/system?${params}`);
+    if (!gate.current.isLatest(ticket)) return;
     if (data.ok) { setRows(data.data); setSummary(data.summary ?? {}); setLoadError(null); }
     // 앞 조회의 '오늘·이번주 ERROR' 수를 남기지 않는다(빈 값이면 '—')
     else { setRows([]); setSummary({}); setLoadError(data.error?.message ?? '시스템 기록을 불러오지 못했습니다.'); }
@@ -369,9 +378,13 @@ function ImpersonationLogsTab() {
   const [page, setPage]       = useState(1);
   const LIMIT = 50;
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const load = useCallback(async (p = 1) => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const data = await readLogJson(`/api/super/logs/impersonation?page=${p}&limit=${LIMIT}`);
+    if (!gate.current.isLatest(ticket)) return;
     if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
     else { setRows([]); setMeta({ total: 0 }); setLoadError(data.error?.message ?? '대리 접근 기록을 불러오지 못했습니다.'); }
     setLoading(false);
@@ -460,17 +473,18 @@ function AdminLogsTab() {
   const [action, setAction]   = useState('all');
   const LIMIT = 50;
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const load = useCallback(async (p = 1, a = 'all') => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const qs = new URLSearchParams({ page: String(p), limit: String(LIMIT) });
     if (a !== 'all') qs.set('action', a);
-    try {
-      const res  = await fetch(`/api/super/logs/admin?${qs}`);
-      const data = await res.json();
+    const data = await readLogJson(`/api/super/logs/admin?${qs}`);
+    if (!gate.current.isLatest(ticket)) return;
+    {
       if (data.ok) { setRows(data.data); setMeta(data.meta); setLoadError(null); }
       else { setRows([]); setMeta({ total: 0 }); setLoadError(data.error?.message ?? '조작 기록을 불러오지 못했습니다.'); }
-    } catch {
-      setRows([]); setMeta({ total: 0 }); setLoadError('조작 기록을 불러오지 못했습니다.');
     }
     setLoading(false);
   }, []);

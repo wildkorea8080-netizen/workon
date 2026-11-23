@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ApiResponse } from '@/lib/db';
@@ -74,7 +75,8 @@ async function createUserRecord(userId: string, email: string, fullName: string,
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: { message: BAD_BODY_MESSAGE } }, { status: 400 });
     const email           = typeof body.email           === 'string' ? body.email.toLowerCase().trim() : '';
     const password        = typeof body.password        === 'string' ? body.password : '';
     const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : '';

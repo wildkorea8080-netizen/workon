@@ -104,6 +104,19 @@ describe.skipIf(!url)('0090 공개 키 닫기 (시험 DB)', () => {
   afterAll(async () => { await db?.end(); });
   it('RLS 꺼진 표·공개 정책·anon 권한을 모두 닫고, 두 번 적용해도 된다', async () => {
     const sql = readFileSync('supabase/migrations/0090_close_public_key_access.sql', 'utf8');
+    // 0090은 public의 모든 표 권한을 바꾼다 — 같은 시험 DB에서 나란히 도는 다른 DB 시험과 시스템 목록 줄이 겹치면
+    // 'tuple concurrently updated'로 트랜잭션이 깨진다(2026-11-23, 시험 DB 경합이지 마이그레이션 문제가 아님). 그때만 처음부터 다시
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await runOnce(sql);
+        return;
+      } catch (err) {
+        if (attempt < 4 && /tuple concurrently updated/.test(String((err as Error)?.message))) continue;
+        throw err;
+      }
+    }
+  });
+  async function runOnce(sql: string) {
     await db.query('BEGIN');
     try {
       await db.query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF; END $$");
@@ -124,5 +137,5 @@ describe.skipIf(!url)('0090 공개 키 닫기 (시험 DB)', () => {
       const priv = await db.query("SELECT has_table_privilege('anon', 'public.v0090', 'SELECT') v, has_table_privilege('anon', 'public.t0090_open', 'INSERT') t");
       expect(priv.rows[0]).toEqual({ v: false, t: false });
     } finally { await db.query('ROLLBACK'); }
-  });
+  }
 });

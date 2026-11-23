@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
@@ -46,7 +47,8 @@ export async function POST(request: NextRequest) {
     const actor = await getActorScope(session);
     if (!actor) return jsonError('소속 부서가 지정되지 않았습니다. 기관 관리자에게 문의하세요.', 403);
 
-    const raw = (await request.json()) as Record<string, unknown>;
+    const raw = await readJsonObject(request);
+    if (!raw) return jsonError(BAD_BODY_MESSAGE, 400);
     const tier = raw.tier === 'department' ? 'department' : 'personal';
 
     // 옛 화면은 systemPrompt(camelCase)로 보낸다

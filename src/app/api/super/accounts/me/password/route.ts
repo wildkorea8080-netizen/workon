@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { IS_PRODUCTION } from '@/lib/config';
 import { getSuperAdminFromRequest, SUPER_COOKIE_NAME } from '@/lib/super-auth';
 import { changeOwnPassword, passwordChangeDeps } from '@/lib/password-change';
 import { LOCKED_MESSAGE, requestIp, throttleDeps } from '@/lib/sign-in-throttle';
@@ -51,7 +52,7 @@ export async function PATCH(request: NextRequest) {
   const signedOut = !result.sessionsKept;
   const res = NextResponse.json({ ok: true, data: { signedOut } });
   if (signedOut) {
-    res.cookies.set({ name: SUPER_COOKIE_NAME, value: '', httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 });
+    res.cookies.set({ name: SUPER_COOKIE_NAME, value: '', httpOnly: true, secure: IS_PRODUCTION, sameSite: 'lax', path: '/', maxAge: 0 });
   }
   return res;
 }

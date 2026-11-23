@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
@@ -131,7 +132,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ ok: false, error: { message: '부서 정보를 찾을 수 없습니다.' } }, { status: 403 });
     }
 
-    const { documentId } = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: { message: BAD_BODY_MESSAGE } }, { status: 400 });
+    const { documentId } = body;
     if (!documentId) {
       return NextResponse.json({ ok: false, error: { message: 'documentId가 필요합니다.' } }, { status: 400 });
     }

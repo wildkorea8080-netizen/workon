@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { latestGate } from '@/lib/latest-request';
 import { ORG_TYPES } from '@/lib/org-types';
 import { kstDay } from '@/lib/kst-time';
 import { actionErrorText } from '@/lib/ok-json';
@@ -69,7 +70,10 @@ export default function OrganizationsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const LIMIT = 20;
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const fetchOrgs = useCallback(async (p = 1) => {
+    const ticket = gate.current.begin();
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(p), limit: String(LIMIT) });
@@ -78,13 +82,15 @@ export default function OrganizationsPage() {
       if (filterPlan   !== 'all') params.set('plan', filterPlan);
       const res = await fetch(`/api/super/organizations?${params}`);
       const result = await res.json().catch(() => null);
+      if (!gate.current.isLatest(ticket)) return;
       // 못 읽으면 '등록된 기관이 없습니다'가 아니라 그렇다고(2026-11-19)
       if (res.ok && result?.ok) { setOrgs(result.data); setTotal(result.meta?.total ?? 0); setLoadError(null); }
       else { setOrgs([]); setTotal(0); setLoadError(typeof result?.error === 'string' ? result.error : '기관 목록을 불러오지 못했습니다.'); }
     } catch {
+      if (!gate.current.isLatest(ticket)) return;
       setOrgs([]); setTotal(0); setLoadError('기관 목록을 불러오지 못했습니다.');
     } finally {
-      setLoading(false);
+      if (gate.current.isLatest(ticket)) setLoading(false);
     }
   }, [search, filterStatus, filterPlan]);
 

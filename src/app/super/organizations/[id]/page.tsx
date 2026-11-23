@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { latestGate } from '@/lib/latest-request';
 import { useParams, useRouter } from 'next/navigation';
 import {
   LineChart, Line, BarChart, Bar,
@@ -395,17 +396,24 @@ function UsersTab({ orgId }: { orgId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const fetch_ = useCallback(async () => {
+    const ticket = gate.current.begin();
     setLoading(true);
     const params = new URLSearchParams({ search });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let found: any[] | null = null;
     try {
       const res  = await fetch(`/api/super/organizations/${orgId}/users?${params}`);
       const data = await res.json().catch(() => null);
-      // 못 읽으면 '사용자가 없습니다'가 아니라 실패로 보인다(2026-11-19)
-      if (res.ok && data?.ok) { setUsers(data.data); setLoadError(false); }
-      else { setUsers([]); setLoadError(true); }
-    } catch { setUsers([]); setLoadError(true); }
-    finally { setLoading(false); }
+      if (res.ok && data?.ok && Array.isArray(data.data)) found = data.data;
+    } catch { /* 아래에서 실패로 */ }
+    if (!gate.current.isLatest(ticket)) return;
+    // 못 읽으면 '사용자가 없습니다'가 아니라 실패로 보인다(2026-11-19)
+    if (found) { setUsers(found); setLoadError(false); }
+    else { setUsers([]); setLoadError(true); }
+    setLoading(false);
   }, [orgId, search]);
 
   useEffect(() => { fetch_(); }, [fetch_]);

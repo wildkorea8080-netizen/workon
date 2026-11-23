@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { useInFlight } from '@/lib/use-in-flight';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, executeRun, formatDateTime } from '@/lib/work/client';
 import type { ArtifactDto } from '@/components/work/types';
@@ -23,6 +24,8 @@ export default function HistoryPage({ params }: { params: { id: string } }) {
   const [rows, setRows] = useState<VersionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
+  // 복구 처리 중에 다시 누르지 못하게(2026-11-23 — 두 번째가 판이 바뀜으로 거절돼 성공 뒤 실패 글이 떴다)
+  const flight = useInFlight();
   const load = useCallback(async () => {
     const [v, t] = await Promise.all([api<VersionRow[]>(`/api/work/tasks/${params.id}/versions`), api<{ task: { access: { edit: boolean } } }>(`/api/work/tasks/${params.id}`)]);
     if (v.ok) setRows(v.data);
@@ -69,8 +72,8 @@ export default function HistoryPage({ params }: { params: { id: string } }) {
                 ))}
                 {!r.artifacts.length && <span className="text-slate-500">이 판의 파일 없음(만드는 중이거나 실패)</span>}
                 {canEdit && !r.current && (
-                  <button onClick={() => restore(r)} className="ml-auto rounded-lg border border-[#DCE3EC] px-3 py-1 hover:border-[#003087]">
-                    이 판 내용으로 복구
+                  <button onClick={() => void flight.run(r.id, () => restore(r))} disabled={flight.running !== null} className="ml-auto rounded-lg border border-[#DCE3EC] px-3 py-1 hover:border-[#003087] disabled:opacity-50">
+                    {flight.running === r.id ? '복구하는 중…' : '이 판 내용으로 복구'}
                   </button>
                 )}
               </div>

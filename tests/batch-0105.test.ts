@@ -104,6 +104,6 @@ describe('연결(원본)', () => {
     expect(src).toContain(".eq('is_super_admin', false)");
     expect(src).not.toContain('fallback-secret');
     expect(src).not.toContain('process.env.NEXTAUTH_SECRET');
-    expect(src).toContain("import { NEXTAUTH_SECRET } from '@/lib/config';");
+    expect(src).toContain("import { NEXTAUTH_SECRET, NEXTAUTH_URL } from '@/lib/config';"); // 0271부터 NEXTAUTH_URL도 config에서
   });
 });

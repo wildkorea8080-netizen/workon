@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { jsonError } from '@/lib/agent-route-helpers';
 import { prepareTurn } from '@/lib/assistant/prepare';
@@ -21,7 +22,8 @@ export async function POST(request: NextRequest) {
     const session = await getServerAuthSession();
     if (!session?.user?.id) return jsonError('인증이 필요합니다.', 401);
 
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = await readJsonObject(request);
+    if (!body) return jsonError(BAD_BODY_MESSAGE, 400);
     const prepared = await prepareTurn(session, body);
     if (!prepared.ok) {
       // 능력 preflight 거절(참고 문서를 불러오지 못함 등)은 화면이 버튼을 고르도록 error.code에 싣는다.

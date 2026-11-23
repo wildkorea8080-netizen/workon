@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
+import { BAD_ROUTE_ID_MESSAGE, badRouteId } from '@/lib/api-route-ids';
 import {
   allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
   type SessionVerdict,
@@ -126,6 +127,12 @@ async function verifySuperTokenEdge(token: string): Promise<boolean> {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // 주소의 id 자리가 uuid 꼴이 아니면 라우트까지 보내지 않는다(2026-11-23) — DB가 'uuid 꼴이 아님'(22P02)으로
+  // 거절해 라우트가 503 '잠시 뒤 다시'(읽기 실패)로 답하던 것. 없는 주소는 404다(src/lib/api-route-ids.ts)
+  if (badRouteId(pathname)) {
+    return NextResponse.json({ ok: false, error: { message: BAD_ROUTE_ID_MESSAGE } }, { status: 404 });
+  }
 
   // ── 점검 모드 체크 (/super, /maintenance, /api/super, /api/system은 제외) ──
   const isExempt =

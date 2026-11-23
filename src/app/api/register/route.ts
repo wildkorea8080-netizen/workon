@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { claimInvitation, isInvitationClaimError, releaseInvitation, INVITATION_CLAIM_UNAVAILABLE } from '@/lib/invitation-claim';
@@ -7,7 +8,8 @@ import { SIGNUP_READ_FAILED_MESSAGE, departmentOrgRejection, departmentOrgState 
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: { message: BAD_BODY_MESSAGE } }, { status: 400 });
     const { token, name, password } = body;
 
     if (!token || !password) {

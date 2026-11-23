@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { complete } from '@/lib/llm';
 import { getActorScope } from '@/lib/actor-scope';
@@ -26,7 +27,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: { message: limitMessage(limitStatus) } }, { status: 429 });
     }
 
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: { message: BAD_BODY_MESSAGE } }, { status: 400 });
     const { prompt, type } = body;
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {

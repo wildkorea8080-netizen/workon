@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getActorScope } from '@/lib/actor-scope';
@@ -24,7 +25,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { documentId, agentIds: rawAgentIds } = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: { message: BAD_BODY_MESSAGE } }, { status: 400 });
+    const { documentId, agentIds: rawAgentIds } = body;
     if (typeof documentId !== 'string' || !documentId || !Array.isArray(rawAgentIds) || rawAgentIds.length === 0) {
       return NextResponse.json({ ok: false, error: { message: 'documentId, agentIds 필수' } }, { status: 400 });
     }

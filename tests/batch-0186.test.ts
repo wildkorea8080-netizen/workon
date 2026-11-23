@@ -17,7 +17,7 @@ const state = {
 
 vi.mock('@/lib/super-auth', () => ({ getSuperAdminFromRequest: () => ({ sub: 'super-1' }) }));
 vi.mock('@/lib/logger', () => ({ logSystem: vi.fn(async () => {}) }));
-vi.mock('@/lib/config', () => ({ NEXTAUTH_SECRET: 'x'.repeat(32) }));
+vi.mock('@/lib/config', () => ({ NEXTAUTH_SECRET: 'x'.repeat(32), NEXTAUTH_URL: '' }));
 vi.mock('next-auth/jwt', () => ({ encode: vi.fn(async ({ token }: { token: Record<string, unknown> }) => { state.encoded.push(token); return 'tok'; }) }));
 vi.mock('@/lib/supabaseAdmin', () => ({
   supabaseAdmin: {

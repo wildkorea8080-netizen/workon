@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { SUPER_ADMIN_SETUP_KEY } from '@/lib/config';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { constantTimeEqual } from '@/lib/super-secret';
 import { findAuthUserByEmail } from '@/lib/super-admin-create';
@@ -7,10 +9,12 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name, setupKey } = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return NextResponse.json({ ok: false, error: BAD_BODY_MESSAGE }, { status: 400 });
+    const { email, password, name, setupKey } = body;
 
     // 1) 셋업 키 검증
-    const validSetupKey = process.env.SUPER_ADMIN_SETUP_KEY;
+    const validSetupKey = SUPER_ADMIN_SETUP_KEY;
     if (!validSetupKey || typeof setupKey !== 'string' || !constantTimeEqual(setupKey, validSetupKey)) {
       return NextResponse.json(
         { ok: false, error: '셋업 키가 올바르지 않습니다.' },

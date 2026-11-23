@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getServerAuthSession } from '@/lib/auth';
 import { getActorScope } from '@/lib/actor-scope';
 import { canEditAgent, canDeleteAgent } from '@/lib/agent-permissions';
@@ -20,7 +21,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     if (!agent || agent.deleted_at || agent.tier !== 'personal') return jsonError('비서를 찾을 수 없습니다.', 404);
     if (!canEditAgent(agent, actor)) return jsonError('본인의 비서만 수정할 수 있습니다.', 403);
 
-    const { systemPrompt, base_version, ...rest } = (await request.json()) as Record<string, unknown>;
+    const parsed = await readJsonObject(request);
+    if (!parsed) return jsonError(BAD_BODY_MESSAGE, 400);
+    const { systemPrompt, base_version, ...rest } = parsed;
     const split = splitAgentBody(
       { ...rest, ...(systemPrompt !== undefined ? { system_prompt: systemPrompt } : {}) },
       { currentType: 'chat', ...knownIds() }

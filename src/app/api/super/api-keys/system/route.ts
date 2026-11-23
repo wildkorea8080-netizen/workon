@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { BAD_BODY_MESSAGE, readJsonObject } from '@/lib/request-body';
 import { getSuperAdminFromRequest } from '@/lib/super-auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { pagedRows } from '@/lib/paged-select';
@@ -72,7 +73,9 @@ export async function PATCH(request: NextRequest) {
   if (!admin)
     return NextResponse.json({ ok: false, error: '인증 필요' }, { status: 401 });
 
-  const { provider, keyValue } = await request.json();
+  const body = await readJsonObject(request);
+  if (!body) return NextResponse.json({ ok: false, error: BAD_BODY_MESSAGE }, { status: 400 });
+  const { provider, keyValue } = body;
   if (!provider || !keyValue)
     return NextResponse.json({ ok: false, error: 'provider, keyValue 필수' }, { status: 400 });
   if (!isApiKeyProvider(provider))

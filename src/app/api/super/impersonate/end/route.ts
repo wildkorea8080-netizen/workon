@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { NEXTAUTH_URL } from '@/lib/config';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getServerAuthSession } from '@/lib/auth';
 import { logSystem } from '@/lib/logger';
@@ -7,7 +8,7 @@ import { dbErrorText } from '@/lib/db-error-text';
 export const dynamic = 'force-dynamic';
 
 function nextAuthCookieName() {
-  const url = process.env.NEXTAUTH_URL ?? '';
+  const url = NEXTAUTH_URL ?? '';
   return url.startsWith('https://')
     ? '__Secure-next-auth.session-token'
     : 'next-auth.session-token';
@@ -34,7 +35,7 @@ export async function POST(_request: NextRequest) {
       name: nextAuthCookieName(),
       value: '',
       httpOnly: true,
-      secure: (process.env.NEXTAUTH_URL ?? '').startsWith('https://'),
+      secure: (NEXTAUTH_URL ?? '').startsWith('https://'),
       sameSite: 'lax',
       path: '/',
       maxAge: 0,

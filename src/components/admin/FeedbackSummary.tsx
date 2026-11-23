@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { latestGate } from '@/lib/latest-request';
 import { actionErrorText } from '@/lib/ok-json';
 import { FEEDBACK_REASONS, type FeedbackReason, type FeedbackSummary as Summary } from '@/lib/message-feedback-spec';
 
@@ -61,7 +62,10 @@ export default function FeedbackSummary() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // 늦게 온 앞 요청의 응답은 버린다(2026-11-23 — 거르기·찾기·쪽을 바꾸면 앞 응답이 새 결과를 덮었다)
+  const gate = useRef(latestGate());
   const load = useCallback(async (f: string, t: string) => {
+    const ticket = gate.current.begin();
     setLoading(true);
     setError(null);
     const q = new URLSearchParams();
@@ -70,16 +74,18 @@ export default function FeedbackSummary() {
     try {
       const res = await fetch(`/api/admin/feedback-summary${q.size ? `?${q}` : ''}`);
       const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: Data; error?: { message?: string } } | null;
+      if (!gate.current.isLatest(ticket)) return;
       if (!res.ok || !body?.ok || !body.data) throw new Error(body?.error?.message ?? '답변 평가를 불러오지 못했습니다.');
       setData(body.data);
       setFrom(body.data.from);
       setTo(body.data.to);
     } catch (e) {
+      if (!gate.current.isLatest(ticket)) return;
       // 못 읽었으면 앞 기간의 표를 남기지 않는다(2026-11-20 — 예전엔 새 기간 조회가 실패해도 앞 기간 표가 새 날짜 아래 그대로 보였다)
       setData(null);
       setError(actionErrorText(e, '답변 평가를 불러오지 못했습니다.'));
     } finally {
-      setLoading(false);
+      if (gate.current.isLatest(ticket)) setLoading(false);
     }
   }, []);
 
