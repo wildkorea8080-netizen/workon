@@ -2,7 +2,7 @@ import { Suspense, type CSSProperties } from 'react';
 import LoginForm from '@/components/auth/LoginForm';
 import { themeColorForSlug } from '@/lib/org-theme';
 import { themeStyle } from '@/lib/theme-color';
-import { ssoButtonForSlug } from '@/lib/org-sso';
+import { ssoLoginForSlug } from '@/lib/org-sso';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,8 @@ export const dynamic = 'force-dynamic';
 export default async function OrgSignInPage({ params }: { params: { slug: string } }) {
   // 기관 테마 색(0067)은 서버에서 먼저 읽어 첫 그림부터 그 색으로 — 없으면 null(기본 남색)
   // 기관 테마 색·SSO 단추(0107)를 함께 읽는다 — SSO를 못 읽으면 단추만 없다(비밀번호 로그인은 그대로)
-  const [themeColor, ssoLabel] = await Promise.all([themeColorForSlug(params.slug), ssoButtonForSlug(params.slug)]);
+  // SSO 전용(0109)이면 기관 계정 단추를 먼저 보이고 비밀번호 칸은 '관리자' 안내와 함께 아래에
+  const [themeColor, sso] = await Promise.all([themeColorForSlug(params.slug), ssoLoginForSlug(params.slug)]);
   const theme = themeStyle(themeColor);
   return (
     <Suspense fallback={
@@ -28,7 +29,7 @@ export default async function OrgSignInPage({ params }: { params: { slug: string
         style={(theme ?? undefined) as CSSProperties | undefined}
       />
     }>
-      <LoginForm slug={params.slug} themeColor={themeColor} ssoLabel={ssoLabel} />
+      <LoginForm slug={params.slug} themeColor={themeColor} ssoLabel={sso?.label ?? null} ssoOnly={sso?.ssoOnly === true} />
     </Suspense>
   );
 }

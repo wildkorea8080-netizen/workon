@@ -89,7 +89,7 @@ describe('handleOrgApiCall — 호출 확인', () => {
     const t = deps();
     const run = vi.fn(async (ctx: { departmentIds: string[]; organizationId: string; keyId: string }) => ({ data: ctx }));
     const res = await handleOrgApiCall(t.d, req(), 'adoption-report', run);
-    expect(res).toEqual({ status: 200, body: { ok: true, data: { keyId: 'k1', organizationId: ORG, departmentIds: ['top', 'child'], creatorId: 'u1', creatorDepartmentId: 'top' } } });
+    expect(res).toEqual({ status: 200, body: { ok: true, data: { keyId: 'k1', organizationId: ORG, departmentIds: ['top', 'child'], creatorId: 'u1', creatorDepartmentId: 'top', scopes: expect.any(Array) } } });
     expect(t.recordCall).toHaveBeenCalledWith('k1', ORG, 'adoption-report', 200);
   });
   it('키 꼴이 틀리거나 무효면 같은 401, 차지 전에 끊고 기록하지 않는다', async () => {

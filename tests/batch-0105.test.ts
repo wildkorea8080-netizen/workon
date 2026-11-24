@@ -91,7 +91,7 @@ describe('연결(원본)', () => {
   it('끝난 세션 — 쿠키를 지우고 API는 401, 로그인 화면은 그대로, 그 밖은 로그인으로', () => {
     expect(mw).toContain('sessionCookieNames(req.cookies.getAll().map((c) => c.name))');
     expect(mw).toContain('{ status: 401 }');
-    expect(mw).toContain("url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : 'session_ended');");
+    expect(mw).toContain("url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : 'session_ended');");
     expect(mw).toContain('SIGN_IN_PAGES.test(pathname)');
     const form = readFileSync('src/components/auth/LoginForm.tsx', 'utf8');
     expect(form).toContain("redirectError === 'session_changed'");

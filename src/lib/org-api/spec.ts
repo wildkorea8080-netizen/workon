@@ -17,8 +17,8 @@ export const ORG_API_NAME_MAX = 40;
 /** 이용통계 한 번에 볼 수 있는 기간(일) */
 export const ORG_API_USAGE_MAX_DAYS = 366;
 
-export type OrgApiScope = 'adoption' | 'usage' | 'documents' | 'documents_write' | 'documents_delete' | 'chat';
-export const ORG_API_SCOPES: OrgApiScope[] = ['adoption', 'usage', 'documents', 'documents_write', 'documents_delete', 'chat'];
+export type OrgApiScope = 'adoption' | 'usage' | 'documents' | 'documents_write' | 'documents_delete' | 'chat' | 'chat_as_user';
+export const ORG_API_SCOPES: OrgApiScope[] = ['adoption', 'usage', 'documents', 'documents_write', 'documents_delete', 'chat', 'chat_as_user'];
 export const ORG_API_SCOPE_LABELS: Record<OrgApiScope, string> = {
   adoption: '도입 현황(월별·부서별)',
   usage: '이용통계(비서별·부서별)·답변 평가·앱 실행·예산',
@@ -30,11 +30,15 @@ export const ORG_API_SCOPE_LABELS: Record<OrgApiScope, string> = {
   documents_delete: '문서 지우기(비서 문서함에서 지움 — 되돌릴 수 없음)',
   // (2026-11-24, 0101) 비서에게 묻기 — 답 글·근거 발췌가 기관 시스템으로 나간다. 키를 만든 관리자의 대화로 남고 그 사람의 한도를 쓴다
   chat: '비서에게 묻기(답 글·근거 발췌가 밖으로 나감 — 키를 만든 관리자의 대화·한도)',
+  // (2026-11-25, 0108) 직원으로 묻기 — asUser(이메일)로 그 직원의 권한·한도·대화로 묻는다. 기관 시스템이 직원을 확인했다고 믿는 것이라 따로 고른다
+  chat_as_user: '직원으로 묻기(asUser — 그 직원의 권한·한도·대화로, 비서에게 묻기와 함께)',
 };
 /** 쓰기 범위 — 화면이 고를 때 따로 경고한다 */
 export const ORG_API_WRITE_SCOPES: OrgApiScope[] = ['documents_write', 'documents_delete'];
 /** 글을 밖으로 내는 범위 — 화면이 고를 때 따로 경고한다(0101) */
 export const ORG_API_CONTENT_SCOPES: OrgApiScope[] = ['chat'];
+/** 직원 신원을 대신하는 범위(0108) — 화면이 고를 때 따로 경고한다 */
+export const ORG_API_IDENTITY_SCOPES: OrgApiScope[] = ['chat_as_user'];
 
 export type OrgApiEndpoint = 'adoption-report' | 'adoption-departments' | 'usage-summary' | 'feedback-summary' | 'app-runs' | 'budget' | 'documents'
   | 'documents-upload-url' | 'documents-create' | 'documents-delete' | 'chat' | 'chat-attachment-upload-url' | 'chat-attachment-confirm';
@@ -75,7 +79,15 @@ export function writableAgent<T extends { deleted_at: string | null; tier: strin
 export const ORG_API_CHAT_MAX_CHARS = 4000;
 /** 한 번에 붙이는 첨부 — 화면 대화와 같은 10개(attachments/limits.ts MAX_ATTACHMENTS_PER_SEND) */
 export const ORG_API_CHAT_MAX_ATTACHMENTS = 10;
-export type ChatAskInput = { agentId: string; question: string; conversationId: string | null; skipDocuments: boolean; tags: unknown; stream: boolean; attachmentIds: string[] };
+export type ChatAskInput = { agentId: string; question: string; conversationId: string | null; skipDocuments: boolean; tags: unknown; stream: boolean; attachmentIds: string[]; asUser: string | null };
+
+const AS_USER_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** `asUser`(0108) 읽기 — 없으면 null, 이메일 꼴이 아니면 까닭. 소문자로 */
+export function parseAsUser(raw: unknown): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  if (typeof raw !== 'string' || raw.length > 254 || !AS_USER_EMAIL.test(raw.trim())) return { ok: false, message: 'asUser에는 직원의 이메일을 적어 주세요.' };
+  return { ok: true, value: raw.trim().toLowerCase() };
+}
 
 /** `{ agentId, question, conversationId?, skipDocuments?, tags? }` — 태그 꼴은 대화 실행기가 화면과 같은 함수로 다시 본다 */
 export function parseChatAsk(raw: unknown): { ok: true; value: ChatAskInput } | { ok: false; message: string } {
@@ -101,7 +113,9 @@ export function parseChatAsk(raw: unknown): { ok: true; value: ChatAskInput } | 
     attachmentIds = [...new Set((b.attachmentIds as string[]).map((id) => id.toLowerCase()))];
     if (attachmentIds.length > ORG_API_CHAT_MAX_ATTACHMENTS) return { ok: false, message: `첨부는 한 번에 ${ORG_API_CHAT_MAX_ATTACHMENTS}개까지 붙일 수 있습니다.` };
   }
-  return { ok: true, value: { agentId: b.agentId.toLowerCase(), question, conversationId, skipDocuments: b.skipDocuments === true, tags: b.tags ?? undefined, stream: b.stream === true, attachmentIds } };
+  const asUser = parseAsUser(b.asUser);
+  if (!asUser.ok) return { ok: false, message: asUser.message };
+  return { ok: true, value: { agentId: b.agentId.toLowerCase(), question, conversationId, skipDocuments: b.skipDocuments === true, tags: b.tags ?? undefined, stream: b.stream === true, attachmentIds, asUser: asUser.value } };
 }
 
 // ── 문서 올리기(/api/v1/documents/upload-url · POST /api/v1/documents, 0100) ──
@@ -244,6 +258,8 @@ export function parseCreateKey(raw: unknown): { ok: true; value: CreateKeyInput 
   if (given.some((s) => !ORG_API_SCOPES.includes(s as OrgApiScope))) return { ok: false, message: '읽을 범위가 올바르지 않습니다.' };
   const scopes = ORG_API_SCOPES.filter((s) => given.includes(s));
   if (!scopes.length) return { ok: false, message: '읽을 범위를 하나 이상 고르세요.' };
+  // 직원으로 묻기(0108)는 묻기와 함께만 — 혼자서는 부를 끝점이 없다
+  if (scopes.includes('chat_as_user') && !scopes.includes('chat')) return { ok: false, message: "'직원으로 묻기'는 '비서에게 묻기'와 함께 고르세요." };
   const days = Number(body.days);
   if (!(ORG_API_EXPIRY_DAYS as readonly number[]).includes(days)) return { ok: false, message: `유효 기간은 ${ORG_API_EXPIRY_DAYS.join('·')}일 중에서 고르세요.` };
   return { ok: true, value: { name, scopes, days: days as CreateKeyInput['days'] } };

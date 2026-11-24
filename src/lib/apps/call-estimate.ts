@@ -27,10 +27,11 @@ export function estimateAppCalls(def: AppDefinition, inputs: Record<string, stri
   steps.forEach((step, index) => {
     if (index < skipUntil) return;
     const last = index === steps.length - 1;
-    const calls = last ? 1 : step.lookup ? 0 : step.repeat ? (repeatsFiles(step.repeat) ? fileCount : repeatItems(inputs[step.repeat.field]).length) : 1;
-    const lookup = !last && step.lookup ? 1 : 0;
+    const calls = last ? 1 : step.lookup ? 0 : step.research ? 1 : step.repeat ? (repeatsFiles(step.repeat) ? fileCount : repeatItems(inputs[step.repeat.field]).length) : 1;
+    const lookup = !last && (step.lookup || step.research) ? 1 : 0;
     // 더 찾기(2026-11-09) — AI가 '없음'이라고 하면 덜 부르므로 '많으면'에만 센다
-    const refines = !last && step.lookup?.refine ? step.lookup.refine : 0;
+    // 조사 단계(2026-11-25) — 첫 라운드는 늘, 뒤 라운드는 AI가 '끝'이라고 하면 덜 부르므로 '많으면'에만
+    const refines = !last && step.lookup?.refine ? step.lookup.refine : !last && step.research ? step.research.rounds - 1 : 0;
     let surely: boolean;
     if (!step.when || last) surely = !maybeSkipped.has(index) || last;
     else if (onClassify(step.when)) { max += calls + refines; lookups += lookup; surely = false; markJumps(false); return; }

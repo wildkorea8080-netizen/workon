@@ -55,7 +55,7 @@ describe('설정 검사', () => {
     expect(normalizeIssuer('http://a.example.com')).toBeNull();
     expect(normalizeIssuer('https://u:p@a.example.com')).toBeNull();
     expect(parseSsoConfig({ issuer: 'https://a.example.com/', clientId: ' c1 ', emailDomains: '@Agency.go.kr, agency.go.kr', enabled: true }))
-      .toEqual({ ok: true, value: { issuer: 'https://a.example.com', clientId: 'c1', clientSecret: null, emailDomains: ['agency.go.kr'], enabled: true, buttonLabel: SSO_DEFAULT_LABEL } });
+      .toEqual({ ok: true, value: { issuer: 'https://a.example.com', clientId: 'c1', clientSecret: null, emailDomains: ['agency.go.kr'], enabled: true, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL } });
     expect(parseSsoConfig({ issuer: 'ftp://a', clientId: 'c' }).ok).toBe(false);
     expect(parseSsoConfig({ issuer: 'https://a.example.com', clientId: 'a b' }).ok).toBe(false);
     expect(parseSsoConfig({ issuer: 'https://a.example.com', clientId: 'c', emailDomains: ['not a domain'] }).ok).toBe(false);
@@ -248,7 +248,7 @@ describe('관리자 설정 저장', () => {
         upsert: async (row: Record<string, unknown>) => { upserts.push(row); return { ...config(), ...row } as SsoConfigRow; }, ...over },
     };
   };
-  const input = (over: Record<string, unknown> = {}) => ({ issuer: ISSUER, clientId: CLIENT, clientSecret: null, emailDomains: [], enabled: true, buttonLabel: SSO_DEFAULT_LABEL, ...over });
+  const input = (over: Record<string, unknown> = {}) => ({ issuer: ISSUER, clientId: CLIENT, clientSecret: null, emailDomains: [], enabled: true, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL, ...over });
   it('켤 때는 비밀값이 있어야 하고, 발견 문서를 읽지 못하면 저장하지 않는다', async () => {
     expect(await saveSsoConfig(ORG, 'admin', input(), adminIo(null).io)).toMatchObject({ ok: false, status: 400 });
     const failing = adminIo(null, { publicHost: async () => false });
@@ -287,7 +287,7 @@ describe('잇기', () => {
     const cb = readFileSync('src/app/api/sso/callback/route.ts', 'utf8');
     expect(cb).toContain("res.cookies.set({ name: SSO_STATE_COOKIE, value: '', maxAge: 0, path: '/api/sso' })");
     expect(readFileSync('src/components/auth/LoginForm.tsx', 'utf8')).toContain('/api/sso/${encodeURIComponent(slug)}/start');
-    expect(readFileSync('src/app/signin/[slug]/page.tsx', 'utf8')).toContain('ssoButtonForSlug(params.slug)');
+    expect(readFileSync('src/app/signin/[slug]/page.tsx', 'utf8')).toContain('ssoLoginForSlug(params.slug)');
     // 계정을 만드는 길이 없다
     const lib = readFileSync('src/lib/org-sso.ts', 'utf8');
     expect(lib).not.toMatch(/from\('users'\)\.(insert|upsert|update)/);

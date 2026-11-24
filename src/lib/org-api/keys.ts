@@ -57,6 +57,8 @@ export interface OrgApiContext {
   /** 키를 만든 기관 전체 관리자 — 쓰기 끝점(0100)이 이 사람의 이름으로 문서를 올린다 */
   creatorId: string;
   creatorDepartmentId: string;
+  /** 키의 범위 — 끝점 범위 밖의 추가 권한(직원으로 묻기 0108)을 실행 쪽이 본다 */
+  scopes?: string[];
 }
 
 /** `stream`이 있으면 몸 대신 그 흐름으로 답한다(비서에게 묻기의 스트리밍 — 2026-11-24, 확인을 마친 뒤에만) */
@@ -115,7 +117,7 @@ export async function handleOrgApiCall(
   if (!departmentIds.length) return respond(fail(403, ORG_API_CREATOR_UNAVAILABLE));
 
   try {
-    const out = await run({ keyId: key.id, organizationId: key.organization_id, departmentIds, creatorId: creator!.id, creatorDepartmentId: creator!.department_id! });
+    const out = await run({ keyId: key.id, organizationId: key.organization_id, departmentIds, creatorId: creator!.id, creatorDepartmentId: creator!.department_id!, scopes: key.scopes });
     if ('message' in out) return respond(fail(out.status, out.message, out.code));
     // 흐름은 연 때를 200으로 기록한다(흐름 안의 실패는 error 사건으로 — 상태 코드는 이미 보냈다)
     if ('stream' in out) return respond({ status: 200, body: {}, stream: out.stream });

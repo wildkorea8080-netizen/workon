@@ -5,7 +5,7 @@ import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
 import { BAD_ROUTE_ID_MESSAGE, badRouteId } from '@/lib/api-route-ids';
 import {
-  allowedWhileMustChange, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
+  allowedWhileMustChange, deptSsoOnly, readDeptSsoOnly, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
   type SessionVerdict,
 } from '@/lib/middleware-db';
 
@@ -58,6 +58,8 @@ const superStatusCache = new Map<string, { active: boolean; at: number }>();
 
 // 직원 세션 계정 상태 기억(2026-11-16) — 30초
 const userStatusCache: Parameters<typeof userSessionVerdict>[0] = new Map();
+// 부서의 기관이 SSO 전용(0109)인가 — 30초
+const ssoOnlyCache = new Map<string, { on: boolean; at: number }>();
 
 /** 로그인 화면들 — 끝난 세션이면 쿠키만 지우고 그대로 보인다(로그인 화면으로 다시 보내면 돌기만 한다) */
 const SIGN_IN_PAGES = /^\/(login|signin|signup|register|forgot-password|reset-password)(\/|$)/;
@@ -65,14 +67,14 @@ const SIGN_IN_PAGES = /^\/(login|signin|signup|register|forgot-password|reset-pa
 /** 끝난 직원 세션 — 쿠키를 지우고 API는 401, 화면은 로그인으로 */
 function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerdict | 'impersonation'): NextResponse {
   const res = pathname.startsWith('/api')
-    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : verdict === 'password_changed' ? '비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
+    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : verdict === 'password_changed' ? '비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해 주세요.' : verdict === 'sso_only' ? '이 기관은 직원 로그인을 기관 계정(SSO)으로만 받습니다. 기관 계정으로 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
     : SIGN_IN_PAGES.test(pathname)
       ? NextResponse.next()
       : (() => {
           const url = req.nextUrl.clone();
           url.pathname = '/login';
           url.search = '';
-          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : 'session_ended');
+          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : 'session_ended');
           return NextResponse.redirect(url);
         })();
   for (const name of sessionCookieNames(req.cookies.getAll().map((c) => c.name))) {
@@ -207,7 +209,8 @@ export async function middleware(req: NextRequest) {
     // ── 직원 세션 계정 상태(2026-11-16) — 비활성·탈퇴·권한/소속이 바뀐 계정의 옛 토큰을 끝낸다.
     // 대리 접근 토큰은 들어온 슈퍼관리자도 아직 활성인지 본다(비활성화한 슈퍼관리자의 대리 접근 2시간을 끊는다).
     if (ipToken?.sub) {
-      const verdict = await userSessionVerdict(userStatusCache, ipToken, (sub) => readUserStatus(restConfig(), sub, fetch));
+      const verdict = await userSessionVerdict(userStatusCache, ipToken, (sub) => readUserStatus(restConfig(), sub, fetch), Date.now(),
+        (departmentId) => deptSsoOnly(ssoOnlyCache, departmentId, (id) => readDeptSsoOnly(restConfig(), id, fetch)));
       // 임시 비밀번호(0093) — 로그인은 살려 두고 '비밀번호 바꾸기'로만 보낸다
       if (verdict === 'must_change_password') {
         if (!allowedWhileMustChange(pathname)) {

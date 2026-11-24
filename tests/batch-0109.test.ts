@@ -70,7 +70,7 @@ describe('연결(원본)', () => {
     expect(auth).toContain("await record('login_failed');");
     expect(auth).toContain("await record('login', { id: local.id, departmentId: local.departmentId ?? null });");
     expect(auth).toContain("await record('login', { id: authUser.id, departmentId: decision.departmentId });");
-    expect(auth.match(/await record\('login_rejected'/g)).toHaveLength(4); // 비활성·소속 없음 + 장기 미접속(두 길, 0095)
+    expect(auth.match(/await record\('login_rejected'/g)).toHaveLength(6); // 비활성·소속 없음 + 장기 미접속(두 길, 0095) + SSO 전용(두 길, 0109)
   });
   it('감사 화면 — 접속 기록을 관리 범위 부서로, CSV 이름', () => {
     const route = readFileSync('src/app/api/admin/audit-logs/route.ts', 'utf8');

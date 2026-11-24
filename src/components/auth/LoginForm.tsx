@@ -8,7 +8,7 @@ import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
 import { ACCOUNT_DORMANT, ACCOUNT_LOCKED, DORMANT_MESSAGE, IP_LOCKED, IP_LOCKED_MESSAGE, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
 import { AUTH_UNAVAILABLE, AUTH_UNAVAILABLE_MESSAGE } from '@/lib/auth-unavailable';
-import { ssoErrorMessage } from '@/lib/org-sso-spec';
+import { SSO_ONLY, SSO_ONLY_MESSAGE, ssoErrorMessage } from '@/lib/org-sso-spec';
 
 /**
  * 로그인 폼.
@@ -16,7 +16,7 @@ import { ssoErrorMessage } from '@/lib/org-sso-spec';
  * /login 과 /signin/{slug} 가 함께 쓴다. 화면을 복제하면 한쪽만 고치는
  * 사고가 나므로 한 벌만 둔다. slug가 있으면 그 기관 브랜딩으로 그린다.
  */
-export default function LoginForm({ slug, themeColor, ssoLabel }: { slug?: string; themeColor?: string | null; ssoLabel?: string | null }) {
+export default function LoginForm({ slug, themeColor, ssoLabel, ssoOnly = false }: { slug?: string; themeColor?: string | null; ssoLabel?: string | null; ssoOnly?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // 기관 전용 경로(/signin/{slug})면 그 기관 브랜딩으로 그린다.
@@ -46,7 +46,7 @@ export default function LoginForm({ slug, themeColor, ssoLabel }: { slug?: strin
     if (res?.error) {
       // 로그인 실패 잠금(2026-11-13) — 서버가 ACCOUNT_LOCKED를 던지면 잠김 안내
       // IP 잠금(2026-11-17)은 계정 잠금과 안내가 다르다 — 기관 관리자가 아니라 서비스 운영자가 푼다
-      setMessage(res.error === ACCOUNT_LOCKED ? LOCKED_MESSAGE : res.error === IP_LOCKED ? IP_LOCKED_MESSAGE : res.error === ACCOUNT_DORMANT ? DORMANT_MESSAGE : res.error === AUTH_UNAVAILABLE ? AUTH_UNAVAILABLE_MESSAGE : '이메일 또는 비밀번호가 올바르지 않습니다.');
+      setMessage(res.error === ACCOUNT_LOCKED ? LOCKED_MESSAGE : res.error === IP_LOCKED ? IP_LOCKED_MESSAGE : res.error === ACCOUNT_DORMANT ? DORMANT_MESSAGE : res.error === AUTH_UNAVAILABLE ? AUTH_UNAVAILABLE_MESSAGE : res.error === SSO_ONLY ? SSO_ONLY_MESSAGE : '이메일 또는 비밀번호가 올바르지 않습니다.');
       return;
     }
     router.push(isAdminLogin ? '/admin' : '/');
@@ -134,6 +134,17 @@ export default function LoginForm({ slug, themeColor, ssoLabel }: { slug?: strin
             </div>
           )}
 
+          {/* 기관 SSO 전용(0109) — 직원은 기관 계정 단추로. 비밀번호 칸은 기관 관리자용으로 아래에 남긴다 */}
+          {slug && ssoLabel && ssoOnly && (
+            <div className="mb-5">
+              <a href={`/api/sso/${encodeURIComponent(slug)}/start`} className={`block w-full rounded-xl py-3 text-center text-sm font-semibold text-white ${c.button} transition-colors shadow-sm`}>
+                {ssoLabel}
+              </a>
+              <p className="mt-2 text-xs leading-5 text-slate-500">이 기관의 직원은 기관 계정으로 로그인합니다. 아래 이메일·비밀번호 로그인은 기관 관리자만 됩니다.</p>
+              <div className="mt-4 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />관리자 로그인<span className="h-px flex-1 bg-slate-200" /></div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">이메일</label>
@@ -180,7 +191,7 @@ export default function LoginForm({ slug, themeColor, ssoLabel }: { slug?: strin
           </form>
 
           {/* 기관 SSO(0107) — 이 기관이 켰을 때만. 계정 서비스로 갔다가 이 기관에 등록된 직원이면 들어온다 */}
-          {slug && ssoLabel && (
+          {slug && ssoLabel && !ssoOnly && (
             <div className="mt-4">
               <div className="mb-3 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />또는<span className="h-px flex-1 bg-slate-200" /></div>
               <a href={`/api/sso/${encodeURIComponent(slug)}/start`} className="block w-full rounded-xl border border-slate-300 py-3 text-center text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50">

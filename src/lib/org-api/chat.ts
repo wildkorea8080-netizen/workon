@@ -23,6 +23,7 @@ import { logSystem } from '@/lib/logger';
 import { sourceLocationLabel, sourceTitleLabel, stripNodaPrefixes } from '@/components/chat/source-label';
 import type { RetrievedChunk } from '@/lib/db';
 import { parseChatAsk, writableAgent, type ChatAskInput } from './spec';
+import { apiActor, asUserIo, type ApiActor, type AsUserIo } from './as-user';
 import type { OrgApiContext } from './keys';
 
 type Out = { data: unknown } | { status: number; message: string; code?: string };
@@ -46,8 +47,10 @@ export interface OrgApiChatIo {
   conversationKey(conversationId: string, userId: string, agentId: string): Promise<string | null>;
   prepare(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome>;
   stream(turn: PreparedTurn, send: SendEvent, options: { deadlineAt: number }): Promise<void>;
-  /** 새 대화에 키 표시를 남긴다(이어 묻기의 근거) — 실패하면 던진다 */
-  markConversation(conversationId: string, keyId: string, startedAt: string): Promise<void>;
+  /** 새 대화에 키 표시를 남긴다(이어 묻기의 근거) — 실패하면 던진다. asUser(0108)면 직원으로 물은 대화라고도 */
+  markConversation(conversationId: string, keyId: string, startedAt: string, asUser?: boolean): Promise<void>;
+  /** 직원으로 묻기(0108) — 이메일로 직원 찾기 */
+  asUser?: AsUserIo;
   /** 제목 앞 `[API] ` — 표시일 뿐이라 실패해도 답은 그대로 */
   retitle(conversationId: string): Promise<void>;
   now(): number;
@@ -68,7 +71,7 @@ function sourceOf(c: RetrievedChunk): OrgApiChatSource {
   };
 }
 
-type Prepared = { turn: PreparedTurn; ask: ChatAskInput; continuable: boolean };
+type Prepared = { turn: PreparedTurn; ask: ChatAskInput; continuable: boolean; actor: ApiActor };
 
 /** 스트리밍(2026-11-24)으로 밖에 내보내는 사건 — 답 글 조각·부른 도구 이름 */
 export type OrgApiChatProgress = { event: 'delta'; text: string } | { event: 'tool'; name: string };
@@ -79,19 +82,24 @@ async function prepareAsk(ctx: OrgApiContext, ask: ChatAskInput, io: OrgApiChatI
   if (!writableAgent(agent, ctx.organizationId) || !agent.is_active) return { fail: { status: 404, message: ORG_API_CHAT_AGENT_NOT_FOUND } };
   if (agent.agent_type === 'link' || agent.app_definition != null) return { fail: { status: 400, message: ORG_API_CHAT_NOT_CONVERSATIONAL } };
 
+  // 묻는 사람 — 키를 만든 관리자, 또는 asUser 직원(0108, 범위 chat_as_user). 이어 묻기·권한·한도·대화는 이 사람의 것
+  const who = await apiActor(ctx, ask.asUser, io.asUser ?? asUserIo());
+  if (!who.ok) return { fail: { status: who.status, message: who.message } };
+  const actor = who.actor;
+
   if (ask.conversationId) {
     let key: string | null;
     try {
-      key = await io.conversationKey(ask.conversationId, ctx.creatorId, ask.agentId);
+      key = await io.conversationKey(ask.conversationId, actor.id, ask.agentId);
     } catch {
       return { fail: { status: 503, message: ORG_API_CHAT_READ_FAILED } };
     }
     if (key !== ctx.keyId) return { fail: { status: 404, message: ORG_API_CHAT_CONVERSATION_NOT_FOUND } };
   }
 
-  // handleOrgApiCall이 '최상위 부서의 활성 ADMIN'임을 확인한 뒤에만 여기 온다
+  // 키 주인은 handleOrgApiCall이 '최상위 부서의 활성 ADMIN'임을 확인했고, asUser 직원은 apiActor가 이 기관의 쓸 수 있는 직원임을 확인했다
   const session = {
-    user: { id: ctx.creatorId, role: 'ADMIN', departmentId: ctx.creatorDepartmentId },
+    user: { id: actor.id, role: actor.role, departmentId: actor.departmentId },
     expires: new Date(io.now() + 5 * 60_000).toISOString(),
   } as unknown as Session;
   const prepared = await io.prepare(session, {
@@ -114,7 +122,7 @@ async function prepareAsk(ctx: OrgApiContext, ask: ChatAskInput, io: OrgApiChatI
   let continuable = true;
   if (turn.isNewConversation) {
     try {
-      await io.markConversation(conversationId, ctx.keyId, new Date(io.now()).toISOString());
+      await io.markConversation(conversationId, ctx.keyId, new Date(io.now()).toISOString(), actor.asUser);
     } catch (error) {
       continuable = false;
       await logSystem({
@@ -124,9 +132,9 @@ async function prepareAsk(ctx: OrgApiContext, ask: ChatAskInput, io: OrgApiChatI
       });
     }
     await logSecurityEvent(ctx.creatorDepartmentId, ctx.creatorId, 'org_api_chat_started',
-      { key_id: ctx.keyId, conversation_id: conversationId, agent_id: ask.agentId, ...(ask.stream ? { stream: true } : {}) }, 'low');
+      { key_id: ctx.keyId, conversation_id: conversationId, agent_id: ask.agentId, ...(ask.stream ? { stream: true } : {}), ...(actor.asUser ? { as_user_id: actor.id } : {}) }, actor.asUser ? 'medium' : 'low');
   }
-  return { turn, ask, continuable };
+  return { turn, ask, continuable, actor };
 }
 
 /** 답을 만든다 — 끝까지 모아 응답 꼴로. `onProgress`가 있으면 글 조각·도구 이름을 그때그때 넘긴다(스트리밍) */
@@ -242,10 +250,10 @@ export function defaultOrgApiChatIo(): OrgApiChatIo {
     },
     prepare: prepareTurn,
     stream: (turn, send, options) => streamTurn(turn, send, { deadlineAt: options.deadlineAt }),
-    async markConversation(conversationId, keyId, startedAt) {
+    async markConversation(conversationId, keyId, startedAt, asUser) {
       const { data, error } = await supabaseAdmin.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
       if (error || !data) throw new Error(`conversations(read): ${error?.message ?? 'missing'}`);
-      const metadata = { ...((data as { metadata: Record<string, unknown> | null }).metadata ?? {}), org_api: { key_id: keyId, started_at: startedAt } };
+      const metadata = { ...((data as { metadata: Record<string, unknown> | null }).metadata ?? {}), org_api: { key_id: keyId, started_at: startedAt, ...(asUser ? { as_user: true } : {}) } };
       const { error: writeError } = await supabaseAdmin.from('conversations').update({ metadata }).eq('id', conversationId);
       if (writeError) throw new Error(`conversations(write): ${writeError.message}`);
     },

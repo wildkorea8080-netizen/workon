@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ORG_API_DAILY_LIMIT, ORG_API_ENDPOINTS, ORG_API_EXPIRY_DAYS, ORG_API_MAX_ACTIVE_KEYS, ORG_API_NAME_MAX, ORG_API_SCOPES, ORG_API_SCOPE_LABELS, ORG_API_WRITE_SCOPES, ORG_API_CONTENT_SCOPES,
+  ORG_API_DAILY_LIMIT, ORG_API_ENDPOINTS, ORG_API_EXPIRY_DAYS, ORG_API_MAX_ACTIVE_KEYS, ORG_API_NAME_MAX, ORG_API_SCOPES, ORG_API_SCOPE_LABELS, ORG_API_WRITE_SCOPES, ORG_API_CONTENT_SCOPES, ORG_API_IDENTITY_SCOPES,
   type OrgApiCallView, type OrgApiKeyView, type OrgApiScope,
 } from '@/lib/org-api/spec';
 import { emptyListText } from '@/lib/ok-json';
@@ -101,6 +101,11 @@ export default function OrgApiKeysPanel() {
             {scopes.some((s) => ORG_API_WRITE_SCOPES.includes(s)) && (
               <p role="note" className="text-xs text-amber-800">
                 '문서 올리기' 범위는 이 키로 비서 문서함에 문서를 올리고 새 판으로 바꿀 수 있습니다{scopes.includes('documents_delete') ? ". '문서 지우기' 범위는 공식·부서 비서의 문서를 지웁니다 — 되돌릴 수 없습니다" : ''}(키를 만든 사람의 이름으로 남고 보안 로그에 남습니다). 읽기용 키와 나눠 만들고, 문서관리시스템처럼 올리고 내릴 일이 있는 곳에만 주세요.
+              </p>
+            )}
+            {scopes.some((s) => ORG_API_IDENTITY_SCOPES.includes(s)) && (
+              <p role="note" className="text-xs font-semibold text-red-700">
+                '직원으로 묻기' 범위는 이 키를 가진 시스템이 asUser(이메일)만 적으면 이 기관의 어느 직원으로든 물을 수 있게 합니다 — 그 직원의 비서 권한·월 한도·대화 기록으로 남습니다. WORKON은 그 시스템이 직원을 제대로 확인했는지 알 수 없으니, 직원 로그인을 이미 확인하는 그룹웨어·업무포털에만 주세요.
               </p>
             )}
             {scopes.some((s) => ORG_API_CONTENT_SCOPES.includes(s)) && (

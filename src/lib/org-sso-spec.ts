@@ -6,7 +6,7 @@ export const SSO_LABEL_MAX = 30;
 export const SSO_MAX_DOMAINS = 10;
 
 /** 로그인 화면으로 돌려보낼 때의 까닭(`?error=`) — 화면이 아래 글로 바꾼다 */
-export type SsoErrorCode = 'sso_unavailable' | 'sso_denied' | 'sso_expired' | 'sso_no_account' | 'sso_domain' | 'sso_rejected' | 'sso_dormant';
+export type SsoErrorCode = 'sso_unavailable' | 'sso_denied' | 'sso_expired' | 'sso_no_account' | 'sso_domain' | 'sso_rejected' | 'sso_dormant' | 'sso_only';
 
 export const SSO_ERROR_MESSAGES: Record<SsoErrorCode, string> = {
   sso_unavailable: '기관 계정 로그인을 지금 확인하지 못했습니다. 잠시 뒤 다시 시도하거나 이메일·비밀번호로 로그인해 주세요.',
@@ -16,7 +16,16 @@ export const SSO_ERROR_MESSAGES: Record<SsoErrorCode, string> = {
   sso_domain: '이 기관에서 허용하지 않은 이메일 도메인의 계정입니다.',
   sso_rejected: '사용 중지된 계정입니다. 기관 관리자에게 문의하세요.',
   sso_dormant: '오래 로그인하지 않아 계정이 잠겼습니다. 기관 관리자에게 다시 사용을 요청하세요.',
+  // (0109) 비밀번호로 들어와 있던 직원의 로그인을 미들웨어가 끝냈을 때
+  sso_only: '이 기관은 직원 로그인을 기관 계정(SSO)으로만 받습니다. 기관 전용 로그인 화면에서 기관 계정으로 로그인해 주세요.',
 };
+
+/**
+ * SSO 전용(0109) — 기관이 '직원은 기관 계정으로만'을 켰는데 직원이 이메일·비밀번호로 로그인했을 때 서버가 던지는 까닭.
+ * 비밀번호가 맞았을 때만 던진다(틀린 비밀번호는 지금처럼 '올바르지 않습니다')
+ */
+export const SSO_ONLY = 'SSO_ONLY';
+export const SSO_ONLY_MESSAGE = '이 기관은 직원 로그인을 기관 계정(SSO)으로만 받습니다. 기관 전용 로그인 화면의 기관 계정 로그인 단추를 써 주세요(비밀번호 로그인은 기관 관리자만 됩니다).';
 
 export function ssoErrorMessage(code: string | null | undefined): string | null {
   return code && code in SSO_ERROR_MESSAGES ? SSO_ERROR_MESSAGES[code as SsoErrorCode] : null;
@@ -29,11 +38,13 @@ export interface SsoConfigView {
   hasSecret: boolean;
   emailDomains: string[];
   enabled: boolean;
+  /** 직원은 기관 계정으로만(0109) — 관리자는 비밀번호도 된다 */
+  ssoOnly: boolean;
   buttonLabel: string;
   updatedAt: string | null;
 }
 
-export type SsoConfigInput = { issuer: string; clientId: string; clientSecret: string | null; emailDomains: string[]; enabled: boolean; buttonLabel: string };
+export type SsoConfigInput = { issuer: string; clientId: string; clientSecret: string | null; emailDomains: string[]; enabled: boolean; ssoOnly: boolean; buttonLabel: string };
 
 const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
@@ -68,7 +79,10 @@ export function parseSsoConfig(raw: unknown): { ok: true; value: SsoConfigInput 
     if (bad) return { ok: false, message: `도메인 꼴이 아닙니다: ${bad.slice(0, 60)}` };
   }
   if (b.enabled !== undefined && typeof b.enabled !== 'boolean') return { ok: false, message: '켜기는 true 또는 false로 보내 주세요.' };
+  if (b.ssoOnly !== undefined && typeof b.ssoOnly !== 'boolean') return { ok: false, message: 'SSO 전용은 true 또는 false로 보내 주세요.' };
+  // 켜지 않은 SSO로 비밀번호 로그인을 끄면 직원이 아무도 못 들어온다
+  if (b.ssoOnly === true && b.enabled !== true) return { ok: false, message: '직원 비밀번호 로그인 끄기는 기관 계정 로그인을 켤 때만 고를 수 있습니다.' };
   const label = typeof b.buttonLabel === 'string' ? b.buttonLabel.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, '').trim() : '';
   if (Array.from(label).length > SSO_LABEL_MAX) return { ok: false, message: `단추 글은 ${SSO_LABEL_MAX}자까지입니다.` };
-  return { ok: true, value: { issuer, clientId, clientSecret, emailDomains, enabled: b.enabled === true, buttonLabel: label || SSO_DEFAULT_LABEL } };
+  return { ok: true, value: { issuer, clientId, clientSecret, emailDomains, enabled: b.enabled === true, ssoOnly: b.ssoOnly === true, buttonLabel: label || SSO_DEFAULT_LABEL } };
 }

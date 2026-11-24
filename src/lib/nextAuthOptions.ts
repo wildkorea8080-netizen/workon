@@ -12,6 +12,8 @@ import { dormantDeps, lockIfDormant } from '@/lib/dormant-lock';
 import { ACCOUNT_DORMANT } from '@/lib/sign-in-lock-spec';
 import { AUTH_UNAVAILABLE, isAuthUnavailable } from '@/lib/auth-unavailable';
 import { logSystem } from '@/lib/logger';
+import { passwordLoginBlocked } from '@/lib/sso-only';
+import { SSO_ONLY } from '@/lib/org-sso-spec';
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -57,6 +59,11 @@ export const authOptions: AuthOptions = {
           }
           if (local) {
             await noteSignInSuccess(throttle, 'user', credentials.email);
+            // 기관 SSO 전용(0109) — 직원은 기관 계정으로만. 비밀번호가 맞아도 막는다(관리자는 그대로)
+            if (await passwordLoginBlocked(local)) {
+              await record('login_rejected', { id: local.id, departmentId: local.departmentId ?? null });
+              throw new Error(SSO_ONLY);
+            }
             // 장기 미접속 잠금(0095, 기관이 켰을 때) — 비밀번호가 맞아도 사용 중지로 돌리고 막는다
             if (await lockIfDormant(dormantDeps(), local.id)) {
               await record('login_rejected', { id: local.id, departmentId: local.departmentId ?? null });
@@ -96,6 +103,11 @@ export const authOptions: AuthOptions = {
           console.warn('[nextAuth] 로그인 거절 — 소속을 확인할 수 없음:', decision.reason);
           await record('login_rejected', existingUser ? { id: existingUser.id, departmentId: existingUser.department_id ?? null } : null);
           return null;
+        }
+        // 기관 SSO 전용(0109) — 위 저장해 둔 비밀번호 길과 같은 규칙
+        if (await passwordLoginBlocked({ role: decision.role, departmentId: decision.departmentId })) {
+          await record('login_rejected', { id: authUser.id, departmentId: decision.departmentId });
+          throw new Error(SSO_ONLY);
         }
         if (await lockIfDormant(dormantDeps(), authUser.id)) {
           await record('login_rejected', { id: authUser.id, departmentId: decision.departmentId });

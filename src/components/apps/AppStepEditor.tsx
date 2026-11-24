@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, APP_LOOKUP_TAGS_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { APP_RESEARCH_PER_ROUND, APP_RESEARCH_ROUNDS_MAX, APP_RESEARCH_TOOLS_MAX, researchToolAllowed, APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, APP_LOOKUP_TAGS_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -100,7 +100,7 @@ export function switchStepKind(step: AppStep, kind: '' | AppLookupTool, fields: 
     const { lookup: _lookup, ...rest } = step;
     return { ...rest, instruction: step.instruction.trim() ? step.instruction : '앞 단계의 조회 결과와 원래 입력을 바탕으로 정리하세요.' };
   }
-  const { branches: _branches, classify: _classify, repeat: _repeat, ...rest } = step;
+  const { branches: _branches, classify: _classify, repeat: _repeat, research: _research, ...rest } = step;
   // 조문 칸은 본문 도구끼리만 이어 간다(검색 도구에는 둘 수 없다)
   const article = APP_LOOKUP_TOOLS[kind].article && step.lookup?.article ? { article: step.lookup.article } : {};
   return { ...rest, lookup: { tool: kind, query: step.lookup?.query ?? (fields[0] ? `{{${fields[0].key}}}` : ''), ...article } };
@@ -108,7 +108,7 @@ export function switchStepKind(step: AppStep, kind: '' | AppLookupTool, fields: 
 
 /** 조회어에 넣을 수 있는 앞 단계 번호(1부터) — 이 단계보다 앞의 AI 단계(처리·분류)만 */
 export function stepRefChoices(steps: AppStep[] | undefined, index: number): number[] {
-  return (steps ?? []).slice(0, index).flatMap((s, i) => (s.lookup ? [] : [i + 1]));
+  return (steps ?? []).slice(0, index).flatMap((s, i) => (s.lookup || s.research ? [] : [i + 1]));
 }
 
 /** 문서 찾기 단계가 찾을 수 있는 다른 비서(2026-11-09) — 내가 쓸 수 있고 문서 찾기가 켜진 비서(링크형·이 앱 비서 빼고) */
@@ -127,6 +127,8 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
   const fields = definition.fields;
   // 기관 연동 시스템 조회는 관리자가 허용한 곳이 있어야 고른다(커넥터·능력이 아니다)
   const toolAvailable = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].external ? lookupEndpoints.length > 0 : lookupTools.includes(tool));
+  // 조사 단계(2026-11-25)에서 고를 수 있는 도구 — 이 기관에서 쓰는 조회 도구(연동 시스템 빼고)
+  const researchTools = (Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).filter(tool => researchToolAllowed(tool) && toolAvailable(tool));
   const toolUnread = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].external ? Boolean(lookupUnread.endpoints) : Boolean(lookupUnread.tools));
   const toolPrefix = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].capability === 'doc_search' || APP_LOOKUP_TOOLS[tool].external ? '' : '공공 데이터 조회 — ');
   function changeStep(index: number, patch: Partial<AppStep>) { onChange(d => ({ ...d, steps: d.steps?.map((step, i) => i === index ? { ...step, ...patch } : step) })); }
@@ -218,9 +220,19 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
             : <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>)}
           {last && <p role="alert" className="text-xs text-red-700">마지막 결과 작성 단계는 AI 처리여야 합니다. 조회 단계를 위로 옮겨 주세요.</p>}
         </div>
-        : <textarea className={input} aria-label={`단계 ${index + 1} 처리 지시`} maxLength={2000} rows={3} placeholder={step.classify ? '분류 기준 — 예: 요청이 처리해 달라는 것이면 민원, 묻는 것이면 질의' : undefined} value={step.instruction} onChange={e => changeStep(index, { instruction: e.target.value })} />}
+        : <textarea className={input} aria-label={`단계 ${index + 1} 처리 지시`} maxLength={2000} rows={3} placeholder={step.classify ? '분류 기준 — 예: 요청이 처리해 달라는 것이면 민원, 묻는 것이면 질의' : step.research ? '조사 목표 — 예: 입력한 사업의 근거 법령·기관 규정의 지원 한도·최근 통계를 찾아 빠진 근거가 없게' : undefined} value={step.instruction} onChange={e => changeStep(index, { instruction: e.target.value })} />}
         {!step.lookup && <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 분류 단계`} disabled={last} checked={Boolean(step.classify)} onChange={e => changeStep(index, e.target.checked ? { classify: { options: ['예', '아니오'] }, branches: undefined, repeat: undefined } : { classify: undefined })} />분류 단계로 쓰기 — AI가 아래 선택지 중 하나만 고르고, 뒤 단계의 조건·갈래가 그 결과로 가릅니다{last ? ' (마지막 단계는 안 됨)' : ''}</label>
+          {!step.classify && <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} AI 조사 단계`} disabled={last || (!step.research && !researchTools.length)} checked={Boolean(step.research)} onChange={e => changeStep(index, e.target.checked ? { research: { tools: researchTools.slice(0, 2), rounds: 2 }, branches: undefined, repeat: undefined, classify: undefined } : { research: undefined })} />AI 조사 단계로 쓰기 — 조회어를 정해 두지 않고, AI가 라운드마다 어느 도구로 무엇을 찾을지 정해 찾습니다{last ? ' (마지막 단계는 안 됨)' : !step.research && !researchTools.length ? (lookupUnread.tools ? ' (도구 목록을 확인하지 못함)' : ' (쓸 수 있는 도구 없음)') : ''}</label>}
+          {step.research && <div className="space-y-2 rounded-lg border border-teal-100 bg-white p-3">
+            <div className="text-xs text-slate-600">조사에 쓸 도구({APP_RESEARCH_TOOLS_MAX}개까지)</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">{[...new Set([...researchTools, ...step.research.tools])].map(tool => <label key={tool} className="flex items-center gap-1 text-xs text-slate-700"><input type="checkbox" aria-label={`단계 ${index + 1} 조사 도구 ${APP_LOOKUP_TOOLS[tool].label}`} checked={step.research!.tools.includes(tool)} onChange={e => { const tools = e.target.checked ? [...step.research!.tools, tool].slice(0, APP_RESEARCH_TOOLS_MAX) : step.research!.tools.filter(t => t !== tool); changeStep(index, { research: { ...step.research!, tools } }); }} />{APP_LOOKUP_TOOLS[tool].label}{researchTools.includes(tool) ? '' : lookupUnread.tools ? ' (그대로 둠 — 목록을 확인하지 못함)' : ' (지금 쓸 수 없음 — 빼 주세요)'}</label>)}</div>
+            <label className="block text-xs text-slate-600">조사 라운드<select aria-label={`단계 ${index + 1} 조사 라운드`} className={`${input} mt-1`} value={step.research.rounds} onChange={e => changeStep(index, { research: { ...step.research!, rounds: Number(e.target.value) } })}>
+              {Array.from({ length: APP_RESEARCH_ROUNDS_MAX }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}번{n === 1 ? ' — 한 번 정해 찾고 끝' : ''}</option>)}
+            </select></label>
+            <p className="text-xs leading-5 text-slate-500">라운드마다 AI가 원래 입력과 지금까지 찾은 것을 보고 고른 도구로 찾을 조회어를 최대 {APP_RESEARCH_PER_ROUND}개 정합니다(합쳐 10개). 충분하면 일찍 멈춥니다. 라운드마다 AI를 한 번 부르고, 찾은 것은 출처와 함께 다음 단계 자료로 넘어갑니다. 못 찾은 조회는 ‘정보 공백’으로 넘어가고, 모든 조회가 실패하면 단계가 멈춥니다. 위 지시 칸이 조사 목표입니다.</p>
+            {!step.research.tools.length && <p role="alert" className="text-xs text-red-700">도구를 하나 이상 골라 주세요.</p>}
+          </div>}
+          {!step.research && <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" aria-label={`단계 ${index + 1} 분류 단계`} disabled={last} checked={Boolean(step.classify)} onChange={e => changeStep(index, e.target.checked ? { classify: { options: ['예', '아니오'] }, branches: undefined, repeat: undefined } : { classify: undefined })} />분류 단계로 쓰기 — AI가 아래 선택지 중 하나만 고르고, 뒤 단계의 조건·갈래가 그 결과로 가릅니다{last ? ' (마지막 단계는 안 됨)' : ''}</label>}
           {step.classify && <>
             <input className={input} aria-label={`단계 ${index + 1} 분류 선택지`} value={step.classify.options.join(',')} placeholder="선택지를 쉼표로 — 예: 민원,질의,제안" onChange={e => changeStep(index, { classify: { options: e.target.value.split(',').slice(0, APP_CLASSIFY_MAX) } })} />
             <p className="text-xs leading-5 text-slate-500">선택지는 {APP_CLASSIFY_MAX}개까지, 하나에 {APP_CLASSIFY_LABEL_MAX}자까지. AI가 선택지 밖의 답을 내면 단계가 멈춥니다(지어낸 분류로 가지 않음). 뒤 단계의 조건 항목에 ‘{index + 1}단계 분류 결과’가 생깁니다.</p>
@@ -232,7 +244,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
         {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={visible} label={`단계 ${index + 1} 조건 ${r + 1}`} disabled={last} onChange={next => changeRules(index, rules.map((x, i) => i === r ? next : x), mode)} onRemove={() => changeRules(index, rules.filter((_, i) => i !== r), mode)} />)}
         {!last && rules.length > 0 && rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeRules(index, [...rules, defaultRule(fields[0])], mode)}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
         {last && step.when && <p role="alert" className="text-xs text-red-700">마지막 단계는 조건을 ‘항상 실행’으로 바꿔 주세요.</p>}
-        {!step.lookup && !step.classify && (() => {
+        {!step.lookup && !step.classify && !step.research && (() => {
           const lists = fields.filter(f => f.type === 'textarea');
           // 파일마다 반복(2026-11-07) — 파일 첨부 받기를 켠 앱만. 고르는 값은 항목 키 또는 FILES
           const files = Boolean(definition.attachments);
@@ -248,7 +260,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
             </select>}
           </div>;
         })()}
-        {!step.lookup && !step.classify && <div className="space-y-2 border-t border-slate-200 pt-3">
+        {!step.lookup && !step.classify && !step.research && <div className="space-y-2 border-t border-slate-200 pt-3">
           <div className="text-xs text-slate-600">갈래 (선택) — 위에서부터 처음 맞는 갈래의 지시로 처리하고, 맞는 갈래가 없으면 위의 기본 지시로 처리합니다</div>
           {(step.branches ?? []).map((branch, b) => <BranchEditor key={b} branch={branch} fields={visible} label={`단계 ${index + 1} 갈래 ${b + 1}`} stepIndex={index} steps={definition.steps ?? []} onChange={next => changeBranches(index, (step.branches ?? []).map((x, i) => i === b ? next : x))} onRemove={() => changeBranches(index, (step.branches ?? []).filter((_, i) => i !== b))} />)}
           {(step.branches?.length ?? 0) < APP_MAX_BRANCHES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeBranches(index, [...(step.branches ?? []), defaultBranch(fields, (step.branches?.length ?? 0) + 1)])}>+ 갈래 추가</button>}

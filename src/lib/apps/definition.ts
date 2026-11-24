@@ -90,7 +90,9 @@ export const APP_DOC_SOURCE_PATH = /^\/api\/(?:documents|common-documents)\/[0-9
 /** 문서 찾기 조회 단계를 쓰는가 — 빌더가 앱 능력에 `doc_search`를 켜고, 저장 검사가 능력과 맞춰 본다 */
 export function appUsesDocSearchLookup(def: AppDefinition | null | undefined): boolean {
   // 다른 비서의 문서함을 찾는 단계(`agent`)는 이 앱의 문서 찾기 능력이 필요 없다 — 그 비서의 능력을 실행 때 본다
-  return (def?.steps ?? []).some(step => step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' && !step.lookup.agent);
+  return (def?.steps ?? []).some(step => (step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' && !step.lookup.agent)
+    // 조사 단계(2026-11-25)가 문서 찾기를 고르면 이 앱 비서의 문서함을 찾는다
+    || Boolean(step.research?.tools.some((t) => APP_LOOKUP_TOOLS[t].capability === 'doc_search')));
 }
 /** 문서 찾기 단계가 찾을 다른 비서들(이 앱 비서는 빼고, 중복 없이) — 실행 전에 권한을 한 번에 본다 */
 export function appLookupAgentIds(steps: AppStep[] | null | undefined, ownAgentId: string): string[] {
@@ -150,7 +152,10 @@ export function lookupStepRefs(template: string): number[] {
 }
 /** 정의가 조회 단계에 쓰는 커넥터 — 빌더가 앱 능력(public_data)에 넣고, 저장 검사가 능력과 맞춰 본다 */
 export function appLookupConnectors(def: AppDefinition | null | undefined): string[] {
-  return [...new Set((def?.steps ?? []).flatMap(step => { const connector = step.lookup ? APP_LOOKUP_TOOLS[step.lookup.tool].connector : null; return connector ? [connector] : []; }))];
+  return [...new Set((def?.steps ?? []).flatMap(step => {
+    const tools: AppLookupTool[] = [...(step.lookup ? [step.lookup.tool] : []), ...(step.research?.tools ?? [])];
+    return tools.flatMap((t) => { const connector = APP_LOOKUP_TOOLS[t].connector; return connector ? [connector] : []; });
+  }))];
 }
 /**
  * 분류 단계(2026-11-05) — 중간 단계의 AI가 정해 둔 선택지 **하나만** 고른다(지시 = 고르는 기준). 고른 값은 기록에 남고,
@@ -167,7 +172,42 @@ export type AppRepeat = { field: string } | { files: true };
 export function repeatsFiles(repeat: AppRepeat | undefined): repeat is { files: true } {
   return Boolean(repeat && 'files' in repeat && repeat.files === true);
 }
-export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify; repeat?: AppRepeat };
+/**
+ * 조사 단계(2026-11-25, Deep Research) — 조회어를 미리 정하지 않고 **AI가 라운드마다 어느 도구로 무엇을 찾을지 정한다**(지시 = 조사 목표).
+ * 라운드마다 `도구: 조회어` 줄을 쓰면 그대로 찾아 결과를 보여 주고, 충분하면 '끝'. 고른 도구(`tools` — 공공 데이터·문서 찾기, 연동 시스템 제외)만,
+ * 라운드 `rounds`번·라운드마다 3개·합쳐 10개. 찾은 것은 조회 단계처럼 출처와 함께 다음 단계 자료로 넘긴다(모델 호출은 라운드마다 한 번)
+ */
+export type AppResearch = { tools: AppLookupTool[]; rounds: number };
+export const APP_RESEARCH_ROUNDS_MAX = 4;
+export const APP_RESEARCH_PER_ROUND = 3;
+export const APP_RESEARCH_TOOLS_MAX = 6;
+/** 조사 단계에서 고를 수 있는 도구 — 기관 연동 시스템은 곳·동작을 따로 정해야 해서 뺀다 */
+export const researchToolAllowed = (tool: AppLookupTool) => !APP_LOOKUP_TOOLS[tool].external;
+/**
+ * 조사 계획 줄 읽기 — `도구: 조회어`(도구는 고른 것의 열쇠 그대로, 앞 번호·글머리는 뗌). 첫 줄이 '끝'·'없음'이면 빈 목록(멈춤).
+ * 고르지 않은 도구·빈 조회어·200자 넘는 조회어·중괄호·이미 보낸 것(같은 도구·같은 조회어)은 뺀다. 최대 `room`개
+ */
+export function researchPlanLines(text: string | undefined, tools: readonly AppLookupTool[], sent: readonly string[], room: number): Array<{ tool: AppLookupTool; query: string }> {
+  const lines = String(text ?? '').split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*•·]|\d+[.)])\s*/, '').trim()).filter(Boolean);
+  if (!lines.length || /^(끝|없음|더 찾을 것 없음)\.?$/.test(lines[0])) return [];
+  const seen = new Set(sent);
+  const out: Array<{ tool: AppLookupTool; query: string }> = [];
+  for (const line of lines) {
+    if (out.length >= room) break;
+    const m = /^([a-z_]+)\s*[:：]\s*(.+)$/.exec(line);
+    if (!m) continue;
+    const tool = m[1] as AppLookupTool;
+    const query = m[2].replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!tools.includes(tool) || !query || query.length > APP_LOOKUP_QUERY_MAX || /[{}]/.test(query)) continue;
+    const key = `${tool}\u0000${query}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ tool, query });
+  }
+  return out;
+}
+
+export type AppStep = { name: string; instruction: string; when?: AppStepCondition; branches?: AppBranch[]; lookup?: AppLookup; classify?: AppClassify; repeat?: AppRepeat; research?: AppResearch };
 /** attachments.library — 그 앱 비서의 참고 문서에서 골라 원자료로 쓰기(2026-11-05, library-documents.ts). required는 올린 파일·고른 문서 중 하나 이상 */
 /** `exportTemplateId`(2026-11-08) — 결과 한글 파일의 기본 양식: 이 앱 비서에 올린 HWPX 양식 id. 쓸 때 그 앱의 지금 양식인지 다시 보고, 아니면 표준 보고서 */
 /** `deliverEndpointId`(2026-11-09, 0076) — 실행을 마친 결과를 보낼 곳(기관 전체 관리자가 승인한 https 주소) id. 쓸 때마다 그 기관의 회수되지 않은 곳인지 서버가 다시 본다 */
@@ -396,7 +436,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         const keys = [...lookup.query.matchAll(PLACEHOLDER)].map(m => m[1]);
         // 앞 단계 결과({{@N}}, 보완 조사) — 이 단계보다 앞의 AI 단계(처리·분류)만. 조회 단계의 결과는 조회어로 쓰지 않는다
         const refs = lookupStepRefs(lookup.query);
-        if (refs.some(n => n > steps.length || Boolean(steps[n - 1]?.lookup))) return { ok: false, message: `${step.name.trim()}: 조회어의 앞 단계 결과는 이 단계보다 앞의 AI 단계(처리·분류)만 쓸 수 있습니다.` };
+        if (refs.some(n => n > steps.length || Boolean(steps[n - 1]?.lookup) || Boolean(steps[n - 1]?.research))) return { ok: false, message: `${step.name.trim()}: 조회어의 앞 단계 결과는 이 단계보다 앞의 AI 단계(처리·분류)만 쓸 수 있습니다.` };
         if (keys.some(key => !fields.some(f => f.key === key)) || /[{}]{2}/.test(lookup.query.replace(STEP_REF, '').replace(PLACEHOLDER, ''))) return { ok: false, message: '조회어에는 현재 입력 항목과 앞선 AI 단계의 결과만 넣을 수 있습니다.' };
         if (step.branches !== undefined) return { ok: false, message: '공공 데이터 조회 단계에는 갈래를 둘 수 없습니다.' };
         normalized.lookup = { tool: lookup.tool, query: lookup.query.trim() };
@@ -494,6 +534,18 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           normalized.repeat = { field: field.key };
         }
       }
+      if (step.research !== undefined) {
+        // 조사 단계(2026-11-25) — 지시 = 조사 목표. 조회·분류·반복·갈래와 함께 두지 않는다
+        if (isLookup || step.classify !== undefined || step.repeat !== undefined || normalized.branches) return { ok: false, message: `${normalized.name}: 조사 단계에는 조회·분류·반복·갈래를 함께 둘 수 없습니다.` };
+        const research = step.research;
+        const tools = object(research) && Array.isArray(research.tools) ? research.tools : null;
+        if (!tools || tools.length < 1 || tools.length > APP_RESEARCH_TOOLS_MAX || !tools.every((t) => isLookupTool(t) && researchToolAllowed(t)) || new Set(tools).size !== tools.length) {
+          return { ok: false, message: `${normalized.name}: 조사에 쓸 도구를 1~${APP_RESEARCH_TOOLS_MAX}개 골라 주세요(기관 연동 시스템은 조사 단계에서 쓸 수 없습니다).` };
+        }
+        const rounds = object(research) ? research.rounds : undefined;
+        if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 1 || rounds > APP_RESEARCH_ROUNDS_MAX) return { ok: false, message: `${normalized.name}: 조사 라운드는 1~${APP_RESEARCH_ROUNDS_MAX}번으로 정해 주세요.` };
+        normalized.research = { tools: tools as AppLookupTool[], rounds };
+      }
       if (step.classify !== undefined) {
         // 분류 단계 — AI 처리 중간 단계만, 갈래 없이. 선택지는 한 줄·30자·서로 다른 2~6개
         if (isLookup) return { ok: false, message: '공공 데이터 조회 단계는 분류 단계로 둘 수 없습니다.' };
@@ -508,6 +560,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
     if (steps[steps.length - 1].lookup) return { ok: false, message: '마지막 결과 작성 단계는 AI 처리여야 합니다. 공공 데이터 조회는 앞 단계에 두세요.' };
     if (steps[steps.length - 1].repeat) return { ok: false, message: '마지막 결과 작성 단계는 반복할 수 없습니다. 반복은 앞 단계에 두세요.' };
     if (steps[steps.length - 1].classify) return { ok: false, message: '마지막 결과 작성 단계는 분류 단계로 둘 수 없습니다. 분류는 앞 단계에 두세요.' };
+    if (steps[steps.length - 1].research) return { ok: false, message: '마지막 결과 작성 단계는 조사 단계로 둘 수 없습니다. 조사는 앞 단계에 두세요.' };
   }
   return { ok: true, value: { schemaVersion: 1, fields, output: raw.output as AppDefinition['output'], ...(steps.length ? { steps } : {}), ...(object(raw.attachments) ? { attachments: { required: raw.attachments.required as boolean, ...(raw.attachments.library === true ? { library: true } : {}) } } : {}), ...(typeof raw.exportTemplateId === 'string' ? { exportTemplateId: raw.exportTemplateId.toLowerCase() } : {}), ...(typeof raw.deliverEndpointId === 'string' ? { deliverEndpointId: raw.deliverEndpointId.toLowerCase(), ...(raw.deliverFile === true ? { deliverFile: true as const } : {}), ...(typeof raw.deliverAction === 'string' ? { deliverAction: raw.deliverAction } : {}) } : {}) } };
 }

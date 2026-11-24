@@ -78,8 +78,8 @@ describe('요청 검사', () => {
     expect(parseChatAsk({ agentId: AG, question: '연가?', conversationId: 'abc' })).toMatchObject({ ok: false });
     expect(parseChatAsk({ agentId: AG, question: '연가?', skipDocuments: 'true' })).toMatchObject({ ok: false });
     expect(parseChatAsk({ agentId: AG.toUpperCase(), question: ' 연가? ', conversationId: CONV, skipDocuments: true, tags: ['복무'] }))
-      .toEqual({ ok: true, value: { agentId: AG, question: '연가?', conversationId: CONV, skipDocuments: true, tags: ['복무'], stream: false, attachmentIds: [] } });
-    expect(parseChatAsk({ agentId: AG, question: '연가?' })).toEqual({ ok: true, value: { agentId: AG, question: '연가?', conversationId: null, skipDocuments: false, tags: undefined, stream: false, attachmentIds: [] } });
+      .toEqual({ ok: true, value: { agentId: AG, question: '연가?', conversationId: CONV, skipDocuments: true, tags: ['복무'], stream: false, attachmentIds: [], asUser: null } });
+    expect(parseChatAsk({ agentId: AG, question: '연가?' })).toEqual({ ok: true, value: { agentId: AG, question: '연가?', conversationId: null, skipDocuments: false, tags: undefined, stream: false, attachmentIds: [], asUser: null } });
   });
 });
 
@@ -102,7 +102,7 @@ describe('비서에게 묻기', () => {
       documentsSkipped: false,
     } });
     // 새 대화 — 키 표시·[API] 제목·보안 로그(질문 글 없음)
-    expect(calls.marked).toEqual([[CONV, 'k1', new Date(NOW).toISOString()]]);
+    expect(calls.marked).toEqual([[CONV, 'k1', new Date(NOW).toISOString(), false]]);
     expect(calls.retitled).toEqual([CONV]);
     expect(mocks.logSecurityEvent).toHaveBeenCalledWith('top', 'u-admin', 'org_api_chat_started', { key_id: 'k1', conversation_id: CONV, agent_id: AG }, 'low');
     expect(JSON.stringify(mocks.logSecurityEvent.mock.calls)).not.toContain('연가 며칠');

@@ -157,6 +157,8 @@ export function ssoEmail(claims: IdClaims, domains: string[]): { ok: true; email
 export type SsoConfigRow = {
   organization_id: string; issuer: string; client_id: string; client_secret_encrypted: string | null;
   email_domains: string[] | null; enabled: boolean; button_label: string | null; updated_at: string | null;
+  /** 0109 — 칸이 없던 옛 행은 undefined(= 끔) */
+  sso_only?: boolean | null;
 };
 export type SsoUserRow = {
   id: string; email: string | null; full_name: string | null; role: string | null; department_id: string | null;
@@ -331,6 +333,7 @@ export function configView(row: SsoConfigRow | null): SsoConfigView | null {
     hasSecret: Boolean(row.client_secret_encrypted),
     emailDomains: row.email_domains ?? [],
     enabled: row.enabled,
+    ssoOnly: row.enabled && row.sso_only === true,
     buttonLabel: row.button_label || SSO_DEFAULT_LABEL,
     updatedAt: row.updated_at,
   };
@@ -363,6 +366,8 @@ export async function saveSsoConfig(
   if (input.clientSecret) changed.push('client_secret');
   if (!before || JSON.stringify(before.email_domains ?? []) !== JSON.stringify(input.emailDomains)) changed.push('email_domains');
   if (!before || before.enabled !== input.enabled) changed.push('enabled');
+  const ssoOnly = input.enabled && input.ssoOnly; // 꺼진 SSO에는 걸지 않는다(0109 CHECK)
+  if ((before?.sso_only === true) !== ssoOnly) changed.push('sso_only');
   if (!before || (before.button_label || SSO_DEFAULT_LABEL) !== input.buttonLabel) changed.push('button_label');
   const row = await io.upsert({
     organization_id: organizationId,
@@ -371,6 +376,7 @@ export async function saveSsoConfig(
     client_secret_encrypted: secretEncrypted,
     email_domains: input.emailDomains,
     enabled: input.enabled,
+    sso_only: ssoOnly,
     button_label: input.buttonLabel === SSO_DEFAULT_LABEL ? null : input.buttonLabel,
     updated_by: userId,
     updated_at: new Date(io.now()).toISOString(),
@@ -378,16 +384,25 @@ export async function saveSsoConfig(
   return { ok: true, view: configView(row)!, changed };
 }
 
-/** 로그인 화면 단추 — 켜진 기관이면 단추 글, 아니면 null(못 읽으면 null — 비밀번호 로그인은 그대로) */
-export async function ssoButtonForSlug(slug: string, io: SsoIo = defaultSsoIo()): Promise<string | null> {
+/**
+ * 로그인 화면의 기관 계정 로그인 — 켜진 기관이면 단추 글과 SSO 전용(0109) 여부, 아니면 null
+ * (못 읽으면 null — 비밀번호 로그인 칸은 그대로 보이고, 막을지는 서버가 로그인 때 다시 본다)
+ */
+export async function ssoLoginForSlug(slug: string, io: SsoIo = defaultSsoIo()): Promise<{ label: string; ssoOnly: boolean } | null> {
   try {
     const org = await io.loadOrgBySlug(slug);
     if (!org || isStoppedOrgStatus(org.status)) return null;
     const config = await io.loadConfig(org.id);
-    return config?.enabled && config.client_secret_encrypted ? config.button_label || SSO_DEFAULT_LABEL : null;
+    if (!config?.enabled || !config.client_secret_encrypted) return null;
+    return { label: config.button_label || SSO_DEFAULT_LABEL, ssoOnly: config.sso_only === true };
   } catch {
     return null;
   }
+}
+
+/** 로그인 화면 단추 글 — 켜진 기관이면 단추 글, 아니면 null */
+export async function ssoButtonForSlug(slug: string, io: SsoIo = defaultSsoIo()): Promise<string | null> {
+  return (await ssoLoginForSlug(slug, io))?.label ?? null;
 }
 
 export function sessionCookieName(appUrl = NEXTAUTH_URL ?? ''): string {
@@ -398,7 +413,7 @@ export function appBaseUrl(): string {
   return (NEXTAUTH_URL ?? '').replace(/\/+$/, '');
 }
 
-export const SSO_CONFIG_COLUMNS = 'organization_id, issuer, client_id, client_secret_encrypted, email_domains, enabled, button_label, updated_at';
+export const SSO_CONFIG_COLUMNS = 'organization_id, issuer, client_id, client_secret_encrypted, email_domains, enabled, sso_only, button_label, updated_at';
 
 /** 접속 기록에 남길 요청 주소·브라우저 — 라우트가 넘긴다 */
 export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null } = { ip: null, userAgent: null }): SsoIo {

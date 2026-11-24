@@ -204,7 +204,46 @@ export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: Fe
   }
 }
 
-export type SessionVerdict = 'ok' | 'inactive' | 'changed' | 'password_changed' | 'must_change_password';
+export type SessionVerdict = 'ok' | 'inactive' | 'changed' | 'password_changed' | 'must_change_password' | 'sso_only';
+
+/**
+ * 부서의 기관이 'SSO 전용'(0109 — 켜진 SSO + sso_only)인가. 못 읽으면 'error'(칸이 없던 옛 DB도 — select가 거절됨)
+ */
+export async function readDeptSsoOnly(cfg: RestConfig | null, departmentId: string, f: FetchLike): Promise<boolean | 'error'> {
+  if (!UUID.test(departmentId)) return false;
+  if (!cfg) return 'error';
+  try {
+    const dept = await f(`${cfg.url}/rest/v1/departments?id=eq.${departmentId}&select=organization_id`, { headers: headers(cfg) });
+    if (!dept.ok) return 'error';
+    const deptRows = (await dept.json()) as { organization_id?: string | null }[];
+    if (!Array.isArray(deptRows)) return 'error';
+    const org = deptRows[0]?.organization_id;
+    if (typeof org !== 'string' || !UUID.test(org)) return false;
+    const res = await f(`${cfg.url}/rest/v1/org_sso_providers?organization_id=eq.${org}&select=enabled,sso_only`, { headers: headers(cfg) });
+    if (!res.ok) return 'error';
+    const rows = (await res.json()) as { enabled?: boolean | null; sso_only?: boolean | null }[];
+    if (!Array.isArray(rows)) return 'error';
+    return rows[0]?.enabled === true && rows[0]?.sso_only === true;
+  } catch {
+    return 'error';
+  }
+}
+
+/** 부서마다 30초 기억, 못 읽으면 10분 안의 마지막 값, 그것도 없으면 **끄지 않음**(열림 — 로그인 쪽 검사와 같다) */
+export async function deptSsoOnly(
+  cache: Map<string, { on: boolean; at: number }>,
+  departmentId: string,
+  read: (departmentId: string) => Promise<boolean | 'error'>,
+  now = Date.now(),
+): Promise<boolean> {
+  const hit = cache.get(departmentId);
+  if (hit && now - hit.at < SUPER_STATUS_TTL_MS) return hit.on;
+  const got = await read(departmentId);
+  if (got === 'error') return hit && now - hit.at < SUPER_STATUS_STALE_MS ? hit.on : false;
+  if (cache.size > 2000) cache.clear();
+  cache.set(departmentId, { on: got, at: now });
+  return got;
+}
 type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: number };
 
 /**
@@ -219,6 +258,8 @@ export async function userSessionVerdict(
   token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown; isImpersonating?: unknown; sso?: unknown },
   read: (sub: unknown) => Promise<UserStatus>,
   now = Date.now(),
+  /** 기관 SSO 전용(0109)인가 — 부서 id로. 없으면 보지 않는다 */
+  ssoOnly?: (departmentId: string) => Promise<boolean>,
 ): Promise<SessionVerdict> {
   const key = typeof token.sub === 'string' ? token.sub : '';
   const hit = cache.get(key);
@@ -249,6 +290,8 @@ export async function userSessionVerdict(
   // 임시 비밀번호(0093) — 본인이 바꾸기 전까지는 '비밀번호 바꾸기'만. 대리 접근(슈퍼관리자)은 그 관리자 대신 바꾸지 않으므로 묶지 않는다
   // 기관 SSO(0107)로 들어온 로그인도 묶지 않는다 — 비밀번호를 쓰지 않아 지금 비밀번호를 모른다(임시 비밀번호 로그인은 그대로 묶임)
   if (status.mustChangePassword && token.isImpersonating !== true && token.sso !== true) return 'must_change_password';
+  // 기관 SSO 전용(0109) — 비밀번호로 들어와 있던 직원 로그인을 끝낸다(SSO 로그인·관리자·대리 접근은 그대로)
+  if (ssoOnly && status.role === 'USER' && token.sso !== true && token.isImpersonating !== true && status.departmentId && (await ssoOnly(status.departmentId))) return 'sso_only';
   return 'ok';
 }
 

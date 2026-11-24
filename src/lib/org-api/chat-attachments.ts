@@ -14,6 +14,7 @@ import { createUpload, confirmUpload } from '@/lib/attachments/store';
 import { CONFIRM_WINDOW_MS } from '@/lib/attachments/limits';
 import type { AttachmentRow } from '@/lib/attachments/types';
 import type { OrgApiContext } from './keys';
+import { apiActor, asUserIo, parseAsUser, type AsUserIo } from './as-user';
 
 type Out = { data: unknown } | { status: number; message: string; code?: string };
 
@@ -23,10 +24,19 @@ export interface ChatAttachmentIo {
   createUpload: typeof createUpload;
   confirmUpload: typeof confirmUpload;
   now(): number;
+  /** 직원으로 묻기(0108) — asUser 이메일로 직원 찾기 */
+  asUser?: AsUserIo;
 }
 const defaultIo = (): ChatAttachmentIo => ({ createUpload, confirmUpload, now: () => Date.now() });
 
-const actorOf = (ctx: OrgApiContext) => ({ userId: ctx.creatorId, departmentId: ctx.creatorDepartmentId, organizationId: ctx.organizationId });
+/** 첨부 주인 — 키를 만든 관리자, 또는 asUser 직원(0108 — 그 직원으로 물을 때 붙일 첨부는 그 직원의 것이어야 한다) */
+async function actorOf(ctx: OrgApiContext, b: Record<string, unknown>, io: ChatAttachmentIo): Promise<{ ok: true; actor: { userId: string; departmentId: string; organizationId: string } } | { ok: false; status: number; message: string }> {
+  const parsed = parseAsUser(b.asUser);
+  if (!parsed.ok) return { ok: false, status: 400, message: parsed.message };
+  const who = await apiActor(ctx, parsed.value, io.asUser ?? asUserIo());
+  if (!who.ok) return who;
+  return { ok: true, actor: { userId: who.actor.id, departmentId: who.actor.departmentId, organizationId: ctx.organizationId } };
+}
 
 /** ① 올리기 주소 — 경로는 서버가 정하고(키 주인의 첨부 자리), 서명 주소는 저장소가 준다 */
 export async function issueChatAttachmentUrl(ctx: OrgApiContext, raw: unknown, io: ChatAttachmentIo = defaultIo()): Promise<Out> {
@@ -34,7 +44,9 @@ export async function issueChatAttachmentUrl(ctx: OrgApiContext, raw: unknown, i
   if (!b) return { status: 400, message: '요청 몸은 JSON 객체로 보내 주세요.' };
   if (typeof b.fileName !== 'string' || !b.fileName.trim()) return { status: 400, message: 'fileName에 파일 이름(확장자 포함)을 적어 주세요.' };
   if (typeof b.size !== 'number' || !Number.isInteger(b.size) || b.size <= 0) return { status: 400, message: 'size에 파일 크기(바이트, 양의 정수)를 적어 주세요.' };
-  const issued = await io.createUpload(actorOf(ctx), { fileName: b.fileName.normalize('NFC'), size: b.size });
+  const who = await actorOf(ctx, b, io);
+  if (!who.ok) return { status: who.status, message: who.message };
+  const issued = await io.createUpload(who.actor, { fileName: b.fileName.normalize('NFC'), size: b.size });
   if (!issued.ok) return { status: issued.status, message: issued.message };
   if (!issued.signedUrl) return { status: 503, message: '올리기 주소를 만들지 못했습니다. 잠시 뒤 다시 호출해 주세요.' };
   return {
@@ -77,7 +89,9 @@ export async function confirmChatAttachment(ctx: OrgApiContext, raw: unknown, io
   const b = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
   if (!b) return { status: 400, message: '요청 몸은 JSON 객체로 보내 주세요.' };
   if (!isUuid(b.attachmentId)) return { status: 400, message: 'attachmentId는 올리기 주소 응답의 attachmentId(uuid)를 그대로 넣어 주세요.' };
-  const confirmed = await io.confirmUpload(actorOf(ctx), b.attachmentId.toLowerCase());
+  const who = await actorOf(ctx, b, io);
+  if (!who.ok) return { status: who.status, message: who.message };
+  const confirmed = await io.confirmUpload(who.actor, b.attachmentId.toLowerCase());
   if (!confirmed.ok) return { status: confirmed.status, message: confirmed.message };
   return { data: attachmentView(confirmed.attachment) };
 }

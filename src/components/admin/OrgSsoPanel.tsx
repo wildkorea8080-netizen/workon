@@ -20,6 +20,7 @@ export default function OrgSsoPanel() {
   const [domains, setDomains] = useState('');
   const [label, setLabel] = useState('');
   const [enabled, setEnabled] = useState(false);
+  const [ssoOnly, setSsoOnly] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const saving = useInFlight();
 
@@ -31,6 +32,7 @@ export default function OrgSsoPanel() {
     setDomains((c?.emailDomains ?? []).join(', '));
     setLabel(c && c.buttonLabel !== SSO_DEFAULT_LABEL ? c.buttonLabel : '');
     setEnabled(c?.enabled ?? false);
+    setSsoOnly(c?.ssoOnly ?? false);
     setSecret('');
   };
 
@@ -56,11 +58,11 @@ export default function OrgSsoPanel() {
     setMsg(null);
     const r = await requestJson('/api/admin/sso', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issuer, clientId, clientSecret: secret || undefined, emailDomains: domains, buttonLabel: label, enabled }),
+      body: JSON.stringify({ issuer, clientId, clientSecret: secret || undefined, emailDomains: domains, buttonLabel: label, enabled, ssoOnly: enabled && ssoOnly }),
     });
     if (!r.ok) { setMsg({ ok: false, text: serverErrorText(r.body, 'SSO 설정을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.') }); return; }
     fill({ ...loaded, config: (r.body as { data: { config: SsoConfigView } }).data.config });
-    setMsg({ ok: true, text: enabled ? '저장했습니다. 기관 로그인 화면에 단추가 보입니다.' : '저장했습니다(꺼짐).' });
+    setMsg({ ok: true, text: !enabled ? '저장했습니다(꺼짐).' : enabled && ssoOnly ? '저장했습니다. 직원은 이제 기관 계정으로만 로그인하고, 비밀번호로 들어와 있던 직원 로그인은 곧 끝납니다.' : '저장했습니다. 기관 로그인 화면에 단추가 보입니다.' });
   });
 
   const disabled = !loaded.canManage || saving.running !== null;
@@ -70,7 +72,7 @@ export default function OrgSsoPanel() {
       <h2 className="text-base font-semibold text-slate-900">기관 계정 로그인(SSO)</h2>
       <p className="mt-1 text-sm leading-6 text-slate-600">
         기관이 쓰는 계정 서비스(Microsoft Entra ID·Google Workspace·Keycloak 등 OpenID Connect)로 로그인합니다. 켜면 기관 로그인 화면{loaded.loginPath ? <> (<code>{loaded.loginPath}</code>)</> : ''}에 단추가 생기고,
-        비밀번호 로그인도 그대로 됩니다. <b>계정을 새로 만들지 않습니다</b> — 계정 서비스의 이메일과 같은 이메일로 이 기관에 이미 등록된 직원만 들어옵니다.
+        아래 &apos;직원은 기관 계정으로만&apos;을 고르지 않으면 비밀번호 로그인도 그대로 됩니다. <b>계정을 새로 만들지 않습니다</b> — 계정 서비스의 이메일과 같은 이메일로 이 기관에 이미 등록된 직원만 들어옵니다.
       </p>
       <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
         계정 서비스에 앱(클라이언트)을 만들 때 돌아올 주소(Redirect URI)로 <code className="break-all">{loaded.redirectUri}</code> 을 등록하세요. 권한 범위는 <code>openid email profile</code>, 인증 방식은 클라이언트 비밀값(POST)입니다.
@@ -97,6 +99,17 @@ export default function OrgSsoPanel() {
           켜기 — 켤 때 발급자 주소의 OIDC 문서를 실제로 읽어 봅니다
         </label>
       </div>
+      {/* SSO 전용(0109) — 켜진 SSO에만. 관리자는 비밀번호도 된다(계정 서비스 장애 때 설정을 고칠 사람이 남게) */}
+      <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
+        <input type="checkbox" className="mt-1" checked={enabled && ssoOnly} onChange={(e) => setSsoOnly(e.target.checked)} disabled={disabled || !enabled} />
+        <span>
+          직원은 기관 계정으로만 로그인(직원 비밀번호 로그인 끄기)
+          <span className="block text-xs leading-5 text-slate-500">
+            켜면 직원은 이메일·비밀번호로 로그인할 수 없고, 비밀번호로 들어와 있던 직원 로그인은 1분 안에 끝납니다. 기관 관리자는 계정 서비스가 고장 났을 때 설정을 고칠 수 있게 비밀번호 로그인을 그대로 씁니다.
+            먼저 관리자 한 명이 기관 계정 로그인으로 실제로 들어와 보고 켜세요.
+          </span>
+        </span>
+      </label>
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-3 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.text}</p>}
       {loaded.canManage && (
         <button type="button" disabled={disabled || !issuer.trim() || !clientId.trim()} onClick={() => void save()}

@@ -64,7 +64,7 @@ export async function PUT(request: NextRequest) {
     const saved = await saveSsoConfig(scope.organizationId, scope.userId, parsed.value, defaultSsoAdminIo());
     if (!saved.ok) return jsonError(saved.message, saved.status);
     if (saved.changed.length) {
-      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, issuer: saved.view.issuer }, 'high');
+      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, sso_only: saved.view.ssoOnly, issuer: saved.view.issuer }, 'high');
     }
     return NextResponse.json({ ok: true, data: { config: saved.view } });
   } catch (error) {

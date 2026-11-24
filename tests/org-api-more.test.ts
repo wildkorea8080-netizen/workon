@@ -114,6 +114,7 @@ describe.skipIf(!url)('호출 기록 CHECK (0086, 시험 DB)', () => {
     await db.query(readFileSync('supabase/migrations/0101_org_api_chat_scope.sql', 'utf8'));
     await db.query(readFileSync('supabase/migrations/0104_org_api_documents_delete.sql', 'utf8'));
     await db.query(readFileSync('supabase/migrations/0105_org_api_chat_attachments.sql', 'utf8'));
+    await db.query(readFileSync('supabase/migrations/0108_org_api_chat_as_user.sql', 'utf8'));
   });
   afterAll(async () => { await db?.end(); });
   it('새 끝점 셋은 받고 모르는 끝점은 거절', async () => {
