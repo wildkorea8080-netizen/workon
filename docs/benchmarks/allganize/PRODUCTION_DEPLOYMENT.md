@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-25(새벽): 공개 링크 막기·답변 한글 파일·기관 API 문서/묻기·연동 조회·자료함·기관 SSO(0275~0286) — 0098~0107 운영 적용
+
+- 코드 배포 `dpl_FKSexBiXxdTiddZ1RsqwwCuXvL4o`(커밋 `4768228`, 2026-11-25 00:44 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `6345287`(11-23 오후 2 기록), `97a0b0d` 기능 열둘 — 기관 전체 대화 공개 링크 막기(0098), 대화 답변 한글 파일, 기관 API 문서함 목록(0099)·문서 올리기(0100)·비서에게 묻기(0101)·문서 지우기(0104)·묻기 스트리밍·묻기 첨부(0105), 앱 조회 단계 '기관 연동 시스템 조회'(0102), 내 자료함(0103)·부서 자료함(0106), 기관 SSO(OIDC, 0107). `4768228` 문서. 기능이 같은 파일을 여럿 함께 고쳐 열둘을 한 커밋으로 묶었다. 가지 Preview(`workon-k3cgwev4n`, `dpl_7Ba8TLNvJi984usRXZpnutNiNEjQ`) Ready 뒤 `main`. 배포 전 전체 시험 440파일 5,079개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_DQmKFcPDJtkvvRh8YPWcrmC8zbbH`(9760427)로 promote — 마이그레이션 0098~0107은 추가만이라 옛 코드도 돈다(새 칸·표를 읽지 않음).
+- 배포 전 운영 확인(읽기만): 마지막 적용 0097, 새 칸·표 없음, 바꿀 CHECK(`org_api_keys_scopes_check` 1~2개·`org_api_key_calls_endpoint_check` 여섯 값) 확인, RLS 꺼진 표 0·공개 키 표 권한 0. **0098~0107을 코드보다 먼저 적용**(`npm run db:migrate`, 10건 OK) → 다시 읽어 새 칸·표 있음·CHECK가 1~6개·`documents_delete`·`chat`·끝점 열셋으로 넓어짐·RLS 꺼진 표 0·공개 키 권한 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/signin/{없는 경로}`·`/api/branding` 200, 새 API는 인증 없이 401(`/api/my-library`·`/api/v1/chat`·`/api/v1/chat/attachments`·`upload-url`·`DELETE /api/v1/documents/{uuid}`·공개 링크 스위치)·관리자 SSO 설정 403, 엉뚱한 id 404, 틀린 키 401, `/api/sso/{없는 경로}/start` → `/signin/…?error=sso_unavailable`, 상태 없는 `/api/sso/callback` → `/login?error=sso_expired`. 실행기 호출 00:47~00:51 KST 모두 200(heartbeat 00:50), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 기관 SSO는 실제 계정 서비스(Entra ID·Keycloak)로 로그인해 보지 않았다(시험은 실제 RSA·EC 키로 서명한 id_token과 가짜 계정 서비스). 기관 API 문서 올리기·묻기 첨부의 실제 PUT, 묻기 스트리밍을 운영에서 흘려 받기, 연동 시스템 조회를 실제 기관 시스템으로 부르기, 새 화면(자료함·SSO 설정·공개 링크 스위치)을 브라우저로 눌러 보기는 하지 않았다.
+
 ## 2026-11-23(오후 2): 대화에서 태그로 문서 좁혀 찾기(0274) — 마이그레이션 없음
 
 - 코드 배포 `dpl_DQmKFcPDJtkvvRh8YPWcrmC8zbbH`(커밋 `9760427`, 2026-11-23 16:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `64193be`(오후 기록), `9a5b362` 기능 — 문서 찾기가 켜진 비서의 입력창 위 '문서 좁히기'(태그 5개까지)로 고른 태그 문서에서만 근거를 찾는다(비서 보관함만 예산 두 배로 찾은 뒤 거름·공통 자료실 뺌·모델에는 남긴 블록만·남는 것이 없으면 그렇다고 답하게·답변 행 `doc_tags`), `GET /api/agents/[id]/document-tags`(쓸 수 있는 사람만, 태그와 문서 수만), 요청 `doc_tags`가 틀리면 400. `9760427` 문서. 가지 Preview(`workon-5hapo4em3`, `dpl_3nj72eYHeXjnrePkw1BSaurRZxXT`) Ready 뒤 `main`. 배포 전 전체 시험 428파일 4,921개 통과·tsc 0.
