@@ -121,13 +121,19 @@ export function lookupAgentChoices(agents: Array<{ id: string; name: string; tie
     .map(a => ({ id: a.id.toLowerCase(), name: a.name, tier: a.tier ?? null }));
 }
 
-export default function AppStepEditor({ definition, onChange, lookupTools = [], lookupAgents = [], lookupUnread = {} }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[]; lookupAgents?: LookupAgentChoice[]; /** 선택지를 못 읽은 것 — 고른 값을 '쓸 수 없음'으로 알리지 않는다(2026-11-20) */ lookupUnread?: { tools?: boolean; agents?: boolean } }) {
+/** 기관 연동 시스템 조회(0102)에 고를 수 있는 곳 — 관리자가 '앱 조회에도 쓰기'를 켠 보낼 곳(이름·동작만) */
+export type LookupEndpointChoice = { id: string; name: string; actions: Array<{ key: string; label: string }> };
+export default function AppStepEditor({ definition, onChange, lookupTools = [], lookupAgents = [], lookupEndpoints = [], lookupUnread = {} }: { definition: AppDefinition; onChange: Dispatch<SetStateAction<AppDefinition>>; lookupTools?: AppLookupTool[]; lookupAgents?: LookupAgentChoice[]; lookupEndpoints?: LookupEndpointChoice[]; /** 선택지를 못 읽은 것 — 고른 값을 '쓸 수 없음'으로 알리지 않는다(2026-11-20) */ lookupUnread?: { tools?: boolean; agents?: boolean; endpoints?: boolean } }) {
   const fields = definition.fields;
+  // 기관 연동 시스템 조회는 관리자가 허용한 곳이 있어야 고른다(커넥터·능력이 아니다)
+  const toolAvailable = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].external ? lookupEndpoints.length > 0 : lookupTools.includes(tool));
+  const toolUnread = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].external ? Boolean(lookupUnread.endpoints) : Boolean(lookupUnread.tools));
+  const toolPrefix = (tool: AppLookupTool) => (APP_LOOKUP_TOOLS[tool].capability === 'doc_search' || APP_LOOKUP_TOOLS[tool].external ? '' : '공공 데이터 조회 — ');
   function changeStep(index: number, patch: Partial<AppStep>) { onChange(d => ({ ...d, steps: d.steps?.map((step, i) => i === index ? { ...step, ...patch } : step) })); }
   function changeRules(index: number, rules: AppRule[], mode: AppConditionMode) { changeStep(index, { when: rules.length ? makeCondition(mode, rules) : undefined }); }
   function changeBranches(index: number, branches: AppBranch[]) { changeStep(index, { branches: branches.length ? branches : undefined }); }
   return <section className="space-y-4 border-t pt-5"><h2 className="font-semibold">4. 단계별 처리 (선택)</h2>
-    <p className="text-xs leading-5 text-slate-500">최대 {APP_MAX_STEPS}단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 갈래마다 처리한 뒤 뒤쪽 단계로 건너가게 할 수 있습니다(앞으로만 — 사이 단계는 건너뛰고, 여러 갈래가 같은 단계로 가면 거기서 합쳐집니다). 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). ‘문서 찾기’로 바꾸면 이 앱 비서(또는 고른 다른 비서)의 문서함을 정해 둔 조회어로 찾습니다(근거가 없으면 정보 공백으로 넘김). 파일 생성·외부 시스템 변경은 단계에서 지원하지 않습니다.</p>
+    <p className="text-xs leading-5 text-slate-500">최대 {APP_MAX_STEPS}단계를 순서대로 처리합니다. 실행한 단계마다 AI 사용량이 발생합니다. 입력값에 따라 중간 단계를 생략할 수 있으며(조건은 단계마다 {APP_MAX_RULES}개까지 — 모두 맞을 때 또는 하나라도 맞을 때 실행, 앞 분류 단계의 결과로도 가를 수 있음), 마지막 결과 작성 단계는 항상 실행합니다. 단계마다 갈래를 {APP_MAX_BRANCHES}개까지 두면 입력값에 따라 다른 지시로 처리합니다 — 위에서부터 처음 맞는 갈래 하나, 맞는 갈래가 없으면 기본 지시. 갈래마다 처리한 뒤 뒤쪽 단계로 건너가게 할 수 있습니다(앞으로만 — 사이 단계는 건너뛰고, 여러 갈래가 같은 단계로 가면 거기서 합쳐집니다). 비워 둔 입력은 ‘비어 있음’ 조건에만 맞습니다. 중간 단계는 처리 방식을 ‘공공 데이터 조회’로 바꿔 법령·통계표·입찰공고 검색을 정해 둔 조회어로 한 번 부를 수 있습니다(기관이 쓰는 공공 데이터만, AI 사용량 없음). ‘문서 찾기’로 바꾸면 이 앱 비서(또는 고른 다른 비서)의 문서함을 정해 둔 조회어로 찾습니다(근거가 없으면 정보 공백으로 넘김). ‘기관 연동 시스템 조회’로 바꾸면 기관 관리자가 승인한 연동 시스템에 조회어를 보내고 그 답을 다음 단계 자료로 씁니다. 파일 생성은 단계에서 지원하지 않습니다.</p>
     {!definition.steps?.length && <button type="button" className="text-sm text-ws-accent-text" onClick={() => onChange(d => ({ ...d, steps: [{ name: '자료 정리', instruction: '원문에 있는 사실과 요구 사항을 정리하세요.' }, { name: '초안 작성', instruction: '원문과 앞 단계의 정리 결과를 바탕으로 업무 초안을 작성하세요.' }, { name: '검토·보완', instruction: '원문과 초안을 대조해 근거 없는 표현을 고치고 최종 초안을 작성하세요.' }] }))}>정리 → 초안 → 검토 구성 추가</button>}
     {definition.steps?.map((step, index) => {
       const last = index === definition.steps!.length - 1;
@@ -143,7 +149,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
         <input className={input} aria-label={`단계 ${index + 1} 이름`} maxLength={40} value={step.name} onChange={e => changeStep(index, { name: e.target.value })} />
         <label className="block text-xs text-slate-600">처리 방식<select aria-label={`단계 ${index + 1} 처리 방식`} className={`${input} mt-2`} value={step.lookup?.tool ?? ''} onChange={e => { const kind = e.target.value; if (kind === '' || isLookupTool(kind)) onChange(d => ({ ...d, steps: d.steps?.map((s, i) => i === index ? switchStepKind(s, kind, d.fields) : s) })); }}>
           <option value="">AI 처리</option>
-          {(Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).map(tool => <option key={tool} value={tool} disabled={last || !lookupTools.includes(tool)}>{APP_LOOKUP_TOOLS[tool].capability === 'doc_search' ? APP_LOOKUP_TOOLS[tool].label : `공공 데이터 조회 — ${APP_LOOKUP_TOOLS[tool].label}`}{lookupTools.includes(tool) ? '' : lookupUnread.tools ? ' (확인하지 못함)' : ' (기관에서 쓰지 않음)'}</option>)}
+          {(Object.keys(APP_LOOKUP_TOOLS) as AppLookupTool[]).map(tool => <option key={tool} value={tool} disabled={last || !toolAvailable(tool)}>{toolPrefix(tool)}{APP_LOOKUP_TOOLS[tool].label}{toolAvailable(tool) ? '' : toolUnread(tool) ? ' (확인하지 못함)' : APP_LOOKUP_TOOLS[tool].external ? ' (관리자가 허용한 곳 없음)' : ' (기관에서 쓰지 않음)'}</option>)}
         </select></label>
         {step.lookup ? <div className="space-y-2 rounded-lg border border-teal-100 bg-white p-3">
           <input className={input} aria-label={`단계 ${index + 1} 조회어`} maxLength={APP_LOOKUP_QUERY_MAX} value={step.lookup.query} placeholder="조회어 — 입력 항목을 넣으려면 아래 단추를 누르세요" onChange={e => changeStep(index, { lookup: { ...step.lookup!, query: e.target.value } })} />
@@ -157,7 +163,7 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
             {!APP_LOOKUP_TOOLS[step.lookup.tool].body && <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={Boolean(step.lookup.each && lookupStepRefs(step.lookup.query).includes(step.lookup.each))} onChange={e => { const { each: _each, ...rest } = step.lookup!; changeStep(index, { lookup: e.target.checked ? { ...rest, each: lookupStepRefs(step.lookup!.query)[0] } : rest }); }} />{lookupStepRefs(step.lookup.query)[0]}단계 결과의 줄마다 찾기(최대 {APP_LOOKUP_EACH_MAX}줄 — 조사 계획)</label>}
           </>}
           {/* 더 찾기(2026-11-09) — AI가 조회 결과를 보고 빠진 부분의 새 조회어로 다시 찾는다(검색 도구만) */}
-          {!APP_LOOKUP_TOOLS[step.lookup.tool].body && <div className="space-y-2 border-t border-slate-100 pt-2">
+          {!APP_LOOKUP_TOOLS[step.lookup.tool].body && !APP_LOOKUP_TOOLS[step.lookup.tool].external && <div className="space-y-2 border-t border-slate-100 pt-2">
             <label className="block text-xs text-slate-600">더 찾기<select aria-label={`단계 ${index + 1} 더 찾기`} className={`${input} mt-1`} value={step.lookup.refine ?? 0} onChange={e => { const n = Number(e.target.value); const { refine: _refine, ...rest } = step.lookup!; changeStep(index, { lookup: n ? { ...rest, refine: n } : rest }); }}>
               <option value={0}>하지 않음</option>
               {Array.from({ length: APP_LOOKUP_REFINE_MAX }, (_, i) => i + 1).map(n => <option key={n} value={n}>AI가 빠진 부분을 보고 {n}번까지 더 찾기</option>)}
@@ -186,8 +192,28 @@ export default function AppStepEditor({ definition, onChange, lookupTools = [], 
               ? <p role="alert" className="text-xs text-amber-700">비서 목록을 지금 불러오지 못해 고른 비서를 쓸 수 있는지 확인하지 못했습니다 — 고른 비서는 그대로 둡니다(화면을 새로 고치면 다시 읽습니다).</p>
               : <p role="alert" className="text-xs text-red-700">고른 비서를 지금 쓸 수 없거나 문서 찾기가 꺼져 있습니다. 다른 문서함을 고르세요.</p>)}
           </div>}
-          {APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' ? <p className="text-xs leading-5 text-slate-500">찾을 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'} — AI를 부르지 않고 {step.lookup.agent ? '고른 비서' : '이 앱 비서'}에 올린 문서(기관 유형의 공통 기준 포함)를 대화와 같은 규칙으로 찾습니다. 찾은 근거(문서 이름·쪽)는 다음 단계의 자료가 되고, <strong>근거가 없으면 멈추지 않고 ‘정보 공백’으로 넘겨</strong> 결과에 확인 필요로 밝히게 합니다. 조회어를 다르게 한 문서 찾기 단계를 여럿 두면 주제마다 따로 찾습니다. {step.lookup.agent ? '' : '저장하면 앱의 문서 찾기가 켜집니다 — 앱 비서에 문서를 올려 두세요.'}</p> : <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 자료를 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>}
-          {!lookupTools.includes(step.lookup.tool) && (lookupUnread.tools
+          {APP_LOOKUP_TOOLS[step.lookup.tool].external && (() => {
+            const chosen = lookupEndpoints.find(e => e.id === step.lookup!.endpoint);
+            const actions = chosen?.actions ?? [];
+            const gone = Boolean(step.lookup!.endpoint && !chosen && !lookupUnread.endpoints);
+            return <div className="space-y-1">
+              <label className="block text-xs text-slate-600">부를 연동 시스템<select aria-label={`단계 ${index + 1} 연동 시스템`} className={`${input} mt-1`} value={step.lookup!.endpoint ?? ''} onChange={e => { const { endpoint: _e, action: _a, ...rest } = step.lookup!; void _e; void _a; const next = lookupEndpoints.find(x => x.id === e.target.value); changeStep(index, { lookup: e.target.value ? { ...rest, endpoint: e.target.value, ...(next?.actions[0] ? { action: next.actions[0].key } : {}) } : rest }); }}>
+                <option value="">(골라 주세요)</option>
+                {lookupEndpoints.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                {step.lookup!.endpoint && !chosen && <option value={step.lookup!.endpoint}>{lookupUnread.endpoints ? '(고른 곳 — 그대로 둠)' : '(지금 쓸 수 없는 곳)'}</option>}
+              </select></label>
+              {(actions.length > 0 || step.lookup!.action) && <label className="block text-xs text-slate-600">받는 쪽 동작<select aria-label={`단계 ${index + 1} 연동 동작`} className={`${input} mt-1`} value={step.lookup!.action ?? ''} onChange={e => { const { action: _a, ...rest } = step.lookup!; void _a; changeStep(index, { lookup: e.target.value ? { ...rest, action: e.target.value } : rest }); }}>
+                {!step.lookup!.action && <option value="">(골라 주세요)</option>}
+                {actions.map(a => <option key={a.key} value={a.key}>{a.label} ({a.key})</option>)}
+                {step.lookup!.action && !actions.some(a => a.key === step.lookup!.action) && <option value={step.lookup!.action}>{lookupUnread.endpoints ? `(고른 동작 ${step.lookup!.action} — 그대로 둠)` : `(없어진 동작 ${step.lookup!.action})`}</option>}
+              </select></label>}
+              <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup!.query, fields) || '(비어 있음)'} — AI를 부르지 않고 기관 관리자가 승인하고 ‘앱 조회에도 쓰기’를 켠 연동 시스템에 <strong>조회어만</strong> 서명해 보냅니다(8초 안에 답해야 함). 받은 답(JSON이면 result·text·answer 칸, 출처는 sources)은 다음 단계의 자료가 되고 출처 링크는 답변에 붙습니다. 연동 시스템이 실패로 답하면 실행이 그 자리에서 멈춥니다. 다른 입력값·중간 결과는 보내지 않습니다.</p>
+              {gone && <p role="alert" className="text-xs text-red-700">고른 연동 시스템이 회수됐거나 관리자가 앱 조회를 껐습니다 — 실행되지 않습니다. 다른 곳을 고르거나 AI 처리로 바꿔 주세요.</p>}
+              {lookupUnread.endpoints && <p role="alert" className="text-xs text-amber-700">연동 시스템 목록을 지금 불러오지 못했습니다 — 고른 곳은 그대로 둡니다(화면을 새로 고치면 다시 읽습니다).</p>}
+            </div>;
+          })()}
+          {APP_LOOKUP_TOOLS[step.lookup.tool].external ? null : APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' ? <p className="text-xs leading-5 text-slate-500">찾을 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'} — AI를 부르지 않고 {step.lookup.agent ? '고른 비서' : '이 앱 비서'}에 올린 문서(기관 유형의 공통 기준 포함)를 대화와 같은 규칙으로 찾습니다. 찾은 근거(문서 이름·쪽)는 다음 단계의 자료가 되고, <strong>근거가 없으면 멈추지 않고 ‘정보 공백’으로 넘겨</strong> 결과에 확인 필요로 밝히게 합니다. 조회어를 다르게 한 문서 찾기 단계를 여럿 두면 주제마다 따로 찾습니다. {step.lookup.agent ? '' : '저장하면 앱의 문서 찾기가 켜집니다 — 앱 비서에 문서를 올려 두세요.'}</p> : <p className="text-xs leading-5 text-slate-500">보낼 조회어: {describeLookupQuery(step.lookup.query, fields) || '(비어 있음)'}{step.lookup.article ? ` · 조문: ${describeLookupQuery(step.lookup.article, fields)}` : ''} — AI를 부르지 않고 {APP_LOOKUP_TOOLS[step.lookup.tool].label}을 한 번 부릅니다{APP_LOOKUP_TOOLS[step.lookup.tool].appOnly ? '(검색해 이름이 같은 결과, 없으면 첫 결과의 본문 — 어느 자료를 골랐는지 결과 머리에 적힙니다)' : ''}. 결과(원문 링크 포함)는 다음 단계의 자료가 되고 답변 출처에 붙습니다. 조회어가 비면 실행이 멈추니, 비워 둘 수 있는 항목이면 ‘입력됨’ 조건을 두세요.</p>}
+          {!APP_LOOKUP_TOOLS[step.lookup.tool].external && !lookupTools.includes(step.lookup.tool) && (lookupUnread.tools
             ? <p role="alert" className="text-xs text-amber-700">공공 데이터 연결 목록을 지금 불러오지 못해 이 조회를 쓸 수 있는지 확인하지 못했습니다 — 고른 조회는 그대로 둡니다(화면을 새로 고치면 다시 읽습니다).</p>
             : <p role="alert" className="text-xs text-red-700">이 기관에서 쓰지 않는 공공 데이터라 실행되지 않습니다. 다른 조회를 고르거나 AI 처리로 바꿔 주세요.</p>)}
           {last && <p role="alert" className="text-xs text-red-700">마지막 결과 작성 단계는 AI 처리여야 합니다. 조회 단계를 위로 옮겨 주세요.</p>}

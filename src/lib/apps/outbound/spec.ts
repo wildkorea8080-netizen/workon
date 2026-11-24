@@ -56,6 +56,47 @@ export const OUTBOUND_HEADERS = {
 } as const;
 export const OUTBOUND_EVENT = 'app.run.completed';
 
+// ── 기관 연동 시스템 조회(0102) — 입력형 앱의 조회 단계가 승인된 보낼 곳에 조회어를 보내고 답을 다음 단계 자료로 ──
+export const OUTBOUND_LOOKUP_EVENT = 'app.lookup';
+/** 조회 답에서 읽는 앞부분(바이트) — 넘으면 자른다 */
+export const OUTBOUND_LOOKUP_MAX_BYTES = 65_536;
+/** 조회 답의 출처 링크 상한 */
+export const OUTBOUND_LOOKUP_SOURCES_MAX = 10;
+export const OUTBOUND_LOOKUP_DISABLED = '관리자가 이 연동 시스템을 앱 조회에 쓰도록 허용하지 않았습니다 — 앱 설정에서 다른 곳을 고르거나 기관 관리자에게 문의하세요.';
+export const OUTBOUND_LOOKUP_GONE = '고른 연동 시스템이 회수됐거나 이 기관의 것이 아닙니다 — 앱 설정에서 다시 골라 주세요.';
+
+/**
+ * 조회 답 읽기 — JSON 객체면 `result`·`text`·`answer`(글)를 본문으로, `sources: [{title, url}]`(https만, 10개)을 출처로.
+ * 그런 글 칸이 없는 JSON은 보기 좋게 펼친 JSON 글을 본문으로, JSON이 아니면 받은 글 그대로. 제어 글자(줄바꿈·탭 빼고)·보이지 않는 서식 글자는 지운다. 비면 null
+ */
+export function parseLookupResponse(raw: string): { content: string; sources: Array<{ title: string; url: string }> } | null {
+  const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/\p{Cf}/gu, '').trim();
+  const text = raw.replace(/^﻿/, '');
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+  if (parsed !== undefined && parsed !== null && typeof parsed === 'object') {
+    const obj = Array.isArray(parsed) ? null : (parsed as Record<string, unknown>);
+    const field = obj ? (['result', 'text', 'answer'].map((k) => obj[k]).find((v) => typeof v === 'string' && v.trim()) as string | undefined) : undefined;
+    const sources: Array<{ title: string; url: string }> = [];
+    if (obj && Array.isArray(obj.sources)) {
+      for (const s of obj.sources) {
+        if (!s || typeof s !== 'object') continue;
+        const url = typeof (s as { url?: unknown }).url === 'string' ? (s as { url: string }).url.trim() : '';
+        if (!/^https:\/\/\S+$/i.test(url) || url.length > OUTBOUND_URL_MAX || sources.some((x) => x.url === url)) continue;
+        const title = typeof (s as { title?: unknown }).title === 'string' ? clean((s as { title: string }).title).replace(/\s+/g, ' ').slice(0, 200) : '';
+        sources.push({ title: title || url, url });
+        if (sources.length >= OUTBOUND_LOOKUP_SOURCES_MAX) break;
+      }
+    }
+    let rest: unknown = parsed;
+    if (obj && 'sources' in obj) { const { sources: _s, ...others } = obj; void _s; rest = others; }
+    const content = clean(field ?? JSON.stringify(rest, null, 2));
+    return content && content !== '{}' && content !== '[]' ? { content, sources } : null;
+  }
+  const content = clean(text);
+  return content ? { content, sources: [] } : null;
+}
+
 export type OutboundStatus = 'awaiting_approval' | 'pending' | 'sending' | 'sent' | 'gave_up' | 'rejected';
 export const OUTBOUND_STATUS_LABELS: Record<OutboundStatus, string> = {
   awaiting_approval: '직원 확인 기다림', pending: '보낼 차례 기다림', sending: '보내는 중', sent: '보냄', gave_up: '그만둠', rejected: '직원이 보내지 않음',
@@ -82,6 +123,8 @@ export interface OutboundEndpointView {
   requireApproval: boolean;
   /** 받는 쪽 동작(0081) — 비면 동작 없이 보낸다 */
   actions: OutboundAction[];
+  /** 입력형 앱의 '기관 연동 시스템 조회' 단계에도 쓴다(0102) — 기본 꺼짐 */
+  lookupEnabled: boolean;
   createdAt: string;
   createdByName: string | null;
   revokedAt: string | null;
@@ -185,7 +228,7 @@ export function resolveAction(actions: OutboundAction[], key: string | null | un
   return found ? { ok: true, action: found } : { ok: false, message: OUTBOUND_ACTION_GONE };
 }
 
-export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string; requireApproval: boolean; actions: OutboundAction[] } } | { ok: false; message: string } {
+export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: string; url: string; requireApproval: boolean; actions: OutboundAction[]; lookupEnabled: boolean } } | { ok: false; message: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: '보낼 곳 정보를 확인해 주세요.' };
   const body = raw as Record<string, unknown>;
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
@@ -194,7 +237,7 @@ export function parseCreateEndpoint(raw: unknown): { ok: true; value: { name: st
   if (!url.ok) return url;
   const actions = parseActions(body.actions);
   if (!actions.ok) return actions;
-  return { ok: true, value: { name, url: url.url, requireApproval: body.require_approval === true, actions: actions.actions } };
+  return { ok: true, value: { name, url: url.url, requireApproval: body.require_approval === true, actions: actions.actions, lookupEnabled: body.lookup_enabled === true } };
 }
 
 export function parseRevokeReason(raw: unknown): { ok: true; reason: string } | { ok: false; message: string } {

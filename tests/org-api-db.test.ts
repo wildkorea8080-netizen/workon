@@ -78,7 +78,7 @@ describe.skipIf(!url)('기관 통계 API 키 DB (0075)', () => {
        VALUES ($1, $2, $3, $4, 'wo_api_abcde', $5, $6, $7, $8, '2026-11-01T00:00:00Z')`, [orgId, userId, name, hash, scopes, status, revoked, expires]);
     await expect(insert('a'.repeat(64), [])).rejects.toThrow(/check/i);
     await expect(insert('b'.repeat(64), ['users'])).rejects.toThrow(/check/i);
-    await expect(insert('c'.repeat(64), ['adoption', 'usage', 'adoption'])).rejects.toThrow(/check/i);
+    await expect(insert('c'.repeat(64), ['adoption', 'usage', 'documents', 'documents_write', 'documents_delete', 'chat', 'adoption'])).rejects.toThrow(/check/i);
     await expect(insert('nothex', ['adoption'])).rejects.toThrow(/check/i);
     await expect(insert('d'.repeat(64), ['adoption'], 'revoked', null)).rejects.toThrow(/check/i);
     await expect(insert('e'.repeat(64), ['adoption'], 'active', null, 'x'.repeat(41))).rejects.toThrow(/check/i);

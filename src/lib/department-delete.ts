@@ -25,6 +25,8 @@ export const DEPARTMENT_RECORD_TABLES: ReadonlyArray<{ table: string; label: str
   { table: 'work_tasks', label: '업무 작업' },
   { table: 'generated_files', label: '만든 파일' },
   { table: 'chat_attachments', label: '대화 첨부' },
+  // 부서 자료함(0106) — 부서 사람이 함께 쓰는 파일. 남아 있으면 부서를 지우지 않는다(옮기거나 지운 뒤)
+  { table: 'my_library_files', label: '부서 자료함' },
 ];
 
 export type DepartmentDeleteCheck =

@@ -33,7 +33,11 @@ export type AppBranch = { name: string; when: AppStepCondition; instruction: str
  * `doc_search`(2026-11-09)는 공공 데이터가 아니라 **이 앱 비서의 문서 찾기** — 커넥터가 없고(`connector: null`) 앱의 `doc_search` 능력이 켜져 있어야 돈다.
  * 대화와 같은 찾기(비서 문서 + 기관 유형의 공통 자료실)를 조회어로 한 번 하고, 근거가 없으면 멈추지 않고 '정보 공백'으로 다음 단계에 넘긴다
  */
-export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'admrul_article' | 'interpretation_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search';
+/**
+ * `external`(2026-11-24, 0102) — 공공 데이터가 아니라 **기관 연동 시스템**: 기관 전체 관리자가 승인하고 '앱 조회에도 쓰기'를 켠 보낼 곳(0076)에 조회어를 서명해 보내고
+ * 받은 답을 다음 단계 자료로 쓴다(`apps/outbound/lookup.ts`). 커넥터·능력이 없고, 고른 곳(`endpoint`)·동작(`action`)은 실행 때마다 서버가 다시 본다
+ */
+export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'admrul_article' | 'interpretation_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search' | 'external';
 /** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
 /** `agent`(2026-11-09) — 문서 찾기가 이 앱 비서 대신 찾을 **다른 비서**(그 비서의 문서함·공통 기준). 실행 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */
 /**
@@ -41,7 +45,8 @@ export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' |
  * AI가 '없음'이라고 하면 멈춘다. 단계 지시(비워도 됨)가 무엇이 빠졌는지 가늠하는 기준이다. 조문 칸을 받는 본문 도구에는 없다
  */
 /** `tags`(2026-11-09) — 문서 찾기가 찾은 근거 중 **이 태그가 붙은 이 기관 문서**의 것만 남긴다(태그 하나라도 맞으면, 대소문자 무시, 공통 기준은 태그가 없어 뺀다) */
-export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string; refine?: number; tags?: string[] };
+/** `endpoint`·`action`(0102) — 기관 연동 시스템 조회 단계만: 부를 곳(보낼 곳 id)과 그 곳이 정해 둔 동작 키 */
+export type AppLookup = { tool: AppLookupTool; query: string; article?: string; each?: number; agent?: string; refine?: number; tags?: string[]; endpoint?: string; action?: string };
 /** 문서 찾기 단계 하나의 태그 거르기 상한 */
 export const APP_LOOKUP_TAGS_MAX = 5;
 /** 줄마다 조회의 최대 줄 수 — 조회 한 번은 모델을 부르지 않지만 바깥 호출이라 상한을 둔다 */
@@ -68,7 +73,7 @@ export function refineQueryLines(text: string | undefined, sent: readonly string
 }
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
 // `body` = 검색해 이름이 같은 결과(없으면 첫 결과)의 본문을 읽는 단계(더 찾기·줄마다 찾기 없음), `article` = 그중 조문 번호로 좁힐 수 있는 것(법령·자치법규)
-export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; body?: true; article?: true; capability?: 'doc_search' }> = {
+export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; body?: true; article?: true; capability?: 'doc_search'; external?: true }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
   law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
   ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
@@ -78,6 +83,7 @@ export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis
   kosis_search_tables: { connector: 'kosis', label: '통계표 검색(국가통계포털)', param: 'query' },
   g2b_search_bids: { connector: 'g2b', label: '입찰공고 검색(나라장터)', param: 'keyword' },
   doc_search: { connector: null, label: '문서 찾기(이 앱 비서의 문서함·공통 기준)', param: 'query', appOnly: true, capability: 'doc_search' },
+  external: { connector: null, label: '기관 연동 시스템 조회(관리자가 승인한 주소)', param: 'query', appOnly: true, external: true },
 };
 /** 문서 원본 주소 — 문서 찾기 조회의 출처는 바깥 링크가 아니라 이 꼴만 받는다(권한은 원본 라우트가 다시 본다) */
 export const APP_DOC_SOURCE_PATH = /^\/api\/(?:documents|common-documents)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/original(?:\?page=\d{1,6})?$/;
@@ -399,6 +405,17 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
           if (APP_LOOKUP_TOOLS[lookup.tool].capability !== 'doc_search' || typeof lookup.agent !== 'string' || !AGENT_ID.test(lookup.agent.toLowerCase())) return { ok: false, message: `${step.name.trim()}: 찾을 비서는 문서 찾기 단계에서만, 목록에서 골라 주세요.` };
           normalized.lookup.agent = lookup.agent.toLowerCase();
         }
+        // 기관 연동 시스템(0102) — 그 단계만 부를 곳이 있어야 하고, 다른 단계에는 둘 수 없다. 곳이 이 기관의 쓸 수 있는 곳인지는 실행 때 서버가 본다
+        const hasEndpoint = lookup.endpoint !== undefined && lookup.endpoint !== null && lookup.endpoint !== '';
+        const hasAction = lookup.action !== undefined && lookup.action !== null && lookup.action !== '';
+        if (APP_LOOKUP_TOOLS[lookup.tool].external) {
+          if (!hasEndpoint || typeof lookup.endpoint !== 'string' || !AGENT_ID.test(lookup.endpoint.toLowerCase())) return { ok: false, message: `${step.name.trim()}: 부를 연동 시스템을 목록에서 골라 주세요.` };
+          normalized.lookup.endpoint = lookup.endpoint.toLowerCase();
+          if (hasAction) {
+            if (typeof lookup.action !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(lookup.action)) return { ok: false, message: `${step.name.trim()}: 연동 시스템의 동작을 목록에서 골라 주세요.` };
+            normalized.lookup.action = lookup.action;
+          }
+        } else if (hasEndpoint || hasAction) return { ok: false, message: `${step.name.trim()}: 연동 시스템은 기관 연동 시스템 조회 단계에서만 고를 수 있습니다.` };
         if (lookup.tags !== undefined && lookup.tags !== null && !(Array.isArray(lookup.tags) && lookup.tags.length === 0)) {
           // 태그로 좁히기 — 문서 찾기 단계만, 문서 태그와 같은 다듬기(20자), 5개까지
           const tags = normalizeDocumentTags(lookup.tags);
@@ -414,7 +431,7 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
         }
         if (lookup.refine !== undefined && lookup.refine !== null && lookup.refine !== 0) {
           // 더 찾기 — 검색 도구만(조문 칸을 받는 본문 도구는 아님), 1~2번
-          if (APP_LOOKUP_TOOLS[lookup.tool].body || typeof lookup.refine !== 'number' || !Number.isInteger(lookup.refine) || lookup.refine < 1 || lookup.refine > APP_LOOKUP_REFINE_MAX) return { ok: false, message: `${step.name.trim()}: 더 찾기는 검색 단계에서 1~${APP_LOOKUP_REFINE_MAX}번만 둘 수 있습니다.` };
+          if (APP_LOOKUP_TOOLS[lookup.tool].body || APP_LOOKUP_TOOLS[lookup.tool].external || typeof lookup.refine !== 'number' || !Number.isInteger(lookup.refine) || lookup.refine < 1 || lookup.refine > APP_LOOKUP_REFINE_MAX) return { ok: false, message: `${step.name.trim()}: 더 찾기는 검색 단계에서 1~${APP_LOOKUP_REFINE_MAX}번만 둘 수 있습니다.` };
           normalized.lookup.refine = lookup.refine;
         }
         if (lookup.article !== undefined && lookup.article !== '') {

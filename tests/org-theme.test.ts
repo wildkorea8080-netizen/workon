@@ -60,8 +60,9 @@ describe('기관 전용 로그인 테마 색', () => {
     expect(form).toContain("bg: 'from-[#001a5c] via-[#003087] to-[#0066CC]'");
     expect(form).toContain('${c.button}');
     const page = read('src/app/signin/[slug]/page.tsx');
-    expect(page).toContain('const themeColor = await themeColorForSlug(params.slug);');
-    expect(page).toContain('<LoginForm slug={params.slug} themeColor={themeColor} />');
+    // 기관 SSO 단추(0107)와 함께 읽는다
+    expect(page).toContain('const [themeColor, ssoLabel] = await Promise.all([themeColorForSlug(params.slug), ssoButtonForSlug(params.slug)]);');
+    expect(page).toContain('<LoginForm slug={params.slug} themeColor={themeColor} ssoLabel={ssoLabel} />');
     expect(read('src/app/login/page.tsx')).not.toContain('themeColor');
   });
 });

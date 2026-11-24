@@ -101,7 +101,7 @@ describe('앱 정의·연결', () => {
     expect(deliver).toContain("...(input.action ? { action: input.action } : {})");
     expect(deliver).toContain('resolveAction(actionsOf(ctx.endpoint.actions), row.action)');
     const admin = readFileSync('src/lib/apps/outbound/admin.ts', 'utf8');
-    expect(admin).toContain("select('id, name, require_approval, actions')");
+    expect(admin).toContain("select('id, name, require_approval, actions, lookup_enabled')");
     expect(admin).toContain('parseActions(body!.actions)');
     expect(readFileSync('src/components/admin/OutboundEndpointsPanel.tsx', 'utf8')).toContain('받는 쪽 동작');
     expect(readFileSync('src/app/apps/builder/page.tsx', 'utf8')).toContain('aria-label="받는 쪽 동작"');

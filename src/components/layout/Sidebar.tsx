@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { isImeComposing } from '@/lib/ime';
 import { MAX_CONVERSATION_TITLE } from '@/lib/conversation-title';
-import { emptyListText, fetchOkJson } from '@/lib/ok-json';
+import { actionErrorText, emptyListText, fetchOkJson, serverErrorText } from '@/lib/ok-json';
 
 interface Conversation {
   id: string;
@@ -130,8 +130,9 @@ export default function Sidebar({
     e.stopPropagation();
     try {
       const res = await fetch(`/api/conversations/${id}/share`, { method: 'POST' });
-      const result = await res.json();
-      if (!result.ok) throw new Error(result.error?.message);
+      const result = await res.json().catch(() => null);
+      // 서버 안내(기관이 공개 링크를 막았다 등)를 그대로 — 없으면 아래 정해 둔 글(0098, 2026-11-23)
+      if (!res.ok || !result?.ok) throw new Error(serverErrorText(result, '공유 링크 생성에 실패했습니다.'));
       await navigator.clipboard.writeText(result.data.shareUrl);
       setConversations(prev =>
         prev.map(c => (c.id === id ? { ...c, is_shared: true } : c))
@@ -140,8 +141,8 @@ export default function Sidebar({
       showToast(result.data.updated
         ? '🔗 링크가 복사됐습니다 — 지금까지의 대화로 갱신했습니다'
         : '🔗 링크가 복사됐습니다 — 지금까지의 대화만 보입니다');
-    } catch {
-      showToast('공유 링크 생성에 실패했습니다.');
+    } catch (err) {
+      showToast(actionErrorText(err, '공유 링크 생성에 실패했습니다.'));
     }
   };
 

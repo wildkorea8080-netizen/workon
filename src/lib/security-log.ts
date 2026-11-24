@@ -35,6 +35,11 @@ export type SecurityEventType =
   /** 기관 전체 관리자가 기관 통계 API 키를 만듦 / 회수함 (0075) */
   | 'org_api_key_created'
   | 'org_api_key_revoked'
+  /** 기관 API 키(범위 documents_write)로 비서 문서함에 문서를 올림 (0100) */
+  | 'org_api_document_uploaded'
+  /** 기관 API 키(범위 documents_delete)로 비서 문서함의 문서를 지움 (0104) */
+  | 'org_api_document_deleted'
+  | 'org_api_chat_started'
   /** 기관 전체 관리자가 앱 결과를 보낼 곳을 만듦 / 회수함 (0076) */
   | 'app_outbound_endpoint_created'
   | 'app_outbound_endpoint_revoked'
@@ -55,6 +60,8 @@ export type SecurityEventType =
   | 'user_reactivated'
   | 'user_dormant_locked'
   | 'dormant_lock_changed'
+  /** 기관 SSO(OIDC) 설정 바꾸기 (0107) */
+  | 'org_sso_changed'
   /** 기관 관리자가 직원의 권한 / 부서 / 개인 월 한도를 바꿈 (2026-11-18 — 그 전에는 어디에도 남지 않았다) */
   | 'user_role_changed'
   | 'user_department_changed'
@@ -76,7 +83,10 @@ export type SecurityEventType =
   | 'conversation_shared'
   | 'conversation_unshared'
   /** 기관 관리자가 직원의 대화 공개 링크를 멈춤 (2026-11-18) */
-  | 'conversation_unshared_by_admin';
+  | 'conversation_unshared_by_admin'
+  /** 기관 전체 관리자가 대화 공개 링크 기능을 막음 / 다시 엶 (0098, 2026-11-23) */
+  | 'conversation_share_org_disabled'
+  | 'conversation_share_org_enabled';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

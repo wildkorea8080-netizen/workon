@@ -43,6 +43,8 @@ vi.mock('@/lib/auth', () => ({
   isAdminSession: (s: { user?: { role?: string } } | null) => s?.user?.role === 'ADMIN',
 }));
 vi.mock('@/lib/department-scope', () => ({ getManagedDepartmentIds: async () => state.managed }));
+// 목록 응답의 기관 스위치(0098, 2026-11-23)는 batch-0275가 본다 — 여기서는 소속을 읽지 않는다
+vi.mock('@/lib/actor-scope-response', () => ({ actorScopeOr503: async () => null }));
 vi.mock('@/lib/security-log', () => ({
   logSecurityEvent: async (dept: unknown, user: unknown, type: string, details: Record<string, unknown>, severity: string) => {
     state.logs.push({ dept, user, type, details, severity });

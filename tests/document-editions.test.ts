@@ -154,7 +154,8 @@ describe('화면·연결(원본 확인)', () => {
     expect(readFileSync('src/lib/document-reading.ts', 'utf8')).toMatch(/afterReady: async \(id\) => \{\s*await retireReplacedDocument\(id\);/);
     const list = readFileSync('src/app/api/documents/route.ts', 'utf8');
     expect(list).toContain('pendingRetirements(rows');
-    expect(list).toContain("doc.noda_status !== 'retired'");
+    // 지우는 순서는 화면·기관 API(0104)가 함께 쓰는 src/lib/document-delete.ts에 있다
+    expect(readFileSync('src/lib/document-delete.ts', 'utf8')).toContain("doc.noda_status !== 'retired'");
     expect(readFileSync('src/app/api/documents/assign/route.ts', 'utf8')).toContain("src.noda_status === 'retired'");
     const confirm = readFileSync('src/app/api/documents/confirm/route.ts', 'utf8');
     expect(confirm).toContain('replaceTargetError(');

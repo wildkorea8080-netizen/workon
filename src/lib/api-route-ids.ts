@@ -44,10 +44,12 @@ export const API_ROUTES: readonly string[] = [
   'admin/outbound-endpoints',
   'admin/outbound-endpoints/[id]',
   'admin/preset-agents',
+  'admin/sso',
   'admin/rag-eval',
   'admin/rag-eval/sets',
   'admin/shared-conversations',
   'admin/shared-conversations/[id]',
+  'admin/shared-conversations/switch',
   'admin/usage-summary',
   'admin/work-installations',
   'admin/work-overview',
@@ -127,6 +129,9 @@ export const API_ROUTES: readonly string[] = [
   'messages/[id]/feedback',
   'messages/[id]/revise',
   'models',
+  'my-library',
+  'my-library/[id]',
+  'my-library/[id]/original',
   'my/password',
   'my/sign-ins',
   'my/stats',
@@ -142,6 +147,8 @@ export const API_ROUTES: readonly string[] = [
   'shared/[token]',
   'signup',
   'signup/invite-info',
+  'sso/[slug]/start',
+  'sso/callback',
   'stats',
   'stats/usage',
   'super/accounts/me/password',
@@ -200,6 +207,12 @@ export const API_ROUTES: readonly string[] = [
   'v1/adoption-report/departments',
   'v1/app-runs',
   'v1/budget',
+  'v1/chat',
+  'v1/chat/attachments',
+  'v1/chat/attachments/upload-url',
+  'v1/documents',
+  'v1/documents/[id]',
+  'v1/documents/upload-url',
   'v1/feedback-summary',
   'v1/usage-summary',
   'work/artifacts/[id]/download',
@@ -230,7 +243,8 @@ export const API_ROUTES: readonly string[] = [
 ];
 
 /** uuid가 아닌 동적 자리 — 보지 않는다 */
-export const NON_UUID_SEGMENTS: ReadonlySet<string> = new Set(['[token]']);
+// [slug] — 기관 로그인 경로(기관 SSO 시작, 0107)
+export const NON_UUID_SEGMENTS: ReadonlySet<string> = new Set(['[token]', '[slug]']);
 
 export const BAD_ROUTE_ID_MESSAGE = '찾을 수 없습니다.';
 

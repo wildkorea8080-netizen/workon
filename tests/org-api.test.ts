@@ -89,7 +89,7 @@ describe('handleOrgApiCall — 호출 확인', () => {
     const t = deps();
     const run = vi.fn(async (ctx: { departmentIds: string[]; organizationId: string; keyId: string }) => ({ data: ctx }));
     const res = await handleOrgApiCall(t.d, req(), 'adoption-report', run);
-    expect(res).toEqual({ status: 200, body: { ok: true, data: { keyId: 'k1', organizationId: ORG, departmentIds: ['top', 'child'] } } });
+    expect(res).toEqual({ status: 200, body: { ok: true, data: { keyId: 'k1', organizationId: ORG, departmentIds: ['top', 'child'], creatorId: 'u1', creatorDepartmentId: 'top' } } });
     expect(t.recordCall).toHaveBeenCalledWith('k1', ORG, 'adoption-report', 200);
   });
   it('키 꼴이 틀리거나 무효면 같은 401, 차지 전에 끊고 기록하지 않는다', async () => {
@@ -154,7 +154,7 @@ describe('숫자만', () => {
     expect(agentNameEntry({ name: '여비 안내', tier: 'official' })).toEqual({ name: '여비 안내', sub: '' });
   });
   it('직원별 이용통계는 DB를 부르기 전에 400, 모르는 축도 400', async () => {
-    const ctx = { keyId: 'k', organizationId: ORG, departmentIds: ['d'] };
+    const ctx = { keyId: 'k', organizationId: ORG, departmentIds: ['d'], creatorId: 'u', creatorDepartmentId: 'd' };
     expect(await usageSummary(ctx, { by: 'user', from: null, to: null })).toEqual({ status: 400, message: USAGE_USER_AXIS_DENIED });
     expect(await usageSummary(ctx, { by: 'model', from: null, to: null })).toMatchObject({ status: 400 });
     expect(await usageSummary(ctx, { by: 'agent', from: '2026-13-01', to: null })).toMatchObject({ status: 400 });

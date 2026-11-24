@@ -74,37 +74,44 @@ describe('붙인 행 (buildAssignedDocumentRow)', () => {
 describe('DELETE /api/documents', () => {
   const route = readFileSync('src/app/api/documents/route.ts', 'utf8');
   const del = route.slice(route.indexOf('export async function DELETE'));
+  // 지우는 순서는 기관 API 지우기(0104)와 함께 쓰는 한 곳 — src/lib/document-delete.ts
+  const lib = readFileSync('src/lib/document-delete.ts', 'utf8');
+
+  it('화면 삭제는 함께 쓰는 지우기를 부른다', () => {
+    expect(del).toContain('deleteAgentDocument(doc, actor.userId)');
+    expect(del).not.toContain('noda.deleteDocument(');
+  });
 
   it('NODA → DB → 원본 순서', () => {
-    const nodaAt = del.indexOf('noda.deleteDocument(');
-    const dbAt = del.indexOf(".from('documents').delete()");
-    const storageAt = del.indexOf('removeStorageFileIfUnused(');
+    const nodaAt = lib.indexOf('noda.deleteDocument(');
+    const dbAt = lib.indexOf(".from('documents').delete()");
+    const storageAt = lib.indexOf('removeStorageFileIfUnused(');
     expect(nodaAt).toBeGreaterThan(-1);
     expect(nodaAt).toBeLessThan(dbAt);
     expect(dbAt).toBeLessThan(storageAt);
   });
 
   it('NODA에 간 적 있는 행만 NODA에 묻는다 (옛 행은 건너뜀)', () => {
-    expect(del).toMatch(/doc\.agent_id && doc\.noda_filename && doc\.noda_status/);
-    expect(del).toContain('nodaTenant(doc.agent_id)');
+    expect(lib).toMatch(/doc\.agent_id && doc\.noda_filename && doc\.noda_status/);
+    expect(lib).toContain('nodaTenant(doc.agent_id)');
   });
 
   it('NODA 삭제가 실패하면 행을 지우지 않고 deleting', () => {
-    expect(del).toContain("noda_status: 'deleting'");
-    expect(route).toContain('문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.');
-    expect(del).toContain('NODA_DELETE_FAILED_MESSAGE');
-    expect(del).toContain('status: 502');
+    expect(lib).toContain("noda_status: 'deleting'");
+    expect(lib).toContain('문서 보관소에서 지우지 못했습니다. 잠시 뒤 다시 지워 주세요.');
+    expect(lib).toContain('NODA_DELETE_FAILED_MESSAGE');
+    expect(lib).toContain('status: 502');
     // 502로 돌려보내는 곳이 행 삭제보다 앞이다
-    expect(del.indexOf('status: 502')).toBeLessThan(del.indexOf(".from('documents').delete()"));
+    expect(lib.indexOf('status: 502')).toBeLessThan(lib.indexOf(".from('documents').delete()"));
     // 502를 돌려주기 전에 deleting 표시를 먼저 남기고, 그 오류를 확인한다
-    expect(del.indexOf("noda_status: 'deleting'")).toBeLessThan(del.indexOf('status: 502'));
-    expect(del).toContain('markError');
+    expect(lib.indexOf("noda_status: 'deleting'")).toBeLessThan(lib.indexOf('status: 502'));
+    expect(lib).toContain('markError');
   });
 
   it('NODA 실패는 따로 둔 참거짓 표시로 가른다 — 던진 값이 비어도(throw undefined) 행을 지우지 않게', () => {
-    expect(del).toContain('nodaFailed = true');
-    expect(del).toContain('if (nodaFailed)');
-    expect(del).not.toMatch(/if \(nodaError\)/);
+    expect(lib).toContain('nodaFailed = true');
+    expect(lib).toContain('if (nodaFailed)');
+    expect(lib).not.toMatch(/if \(nodaError\)/);
   });
 
   it('권한 판정은 그대로다', () => {

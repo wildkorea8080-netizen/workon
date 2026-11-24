@@ -20,6 +20,7 @@ import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type N
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
 import { appDocSearchRunner } from '@/lib/apps/app-doc-lookup';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
+import { callExternalLookup } from '@/lib/apps/outbound/lookup';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
 import { APP_TIME_BUDGET_CODE } from '@/lib/apps/stream';
 import { isInputOnlyRun } from '@/lib/apps/resume';
@@ -50,6 +51,8 @@ export interface StreamTurnDeps {
   searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
   /** 앱 결과 보내기 기록 넣기(0076) — 시험이 바꿔 끼운다 */
   enqueueOutbound?: typeof enqueueOutbound;
+  /** 앱의 기관 연동 시스템 조회 단계(0102)가 부르는 곳 — 기본은 `callExternalLookup`. 시험이 바꿔 끼운다 */
+  externalLookup?: typeof callExternalLookup;
 }
 
 /**
@@ -374,7 +377,9 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       files: turn.appFileNames,
       messages: turn.messages, usage: progress.usage, complete, update: updateStep,
       // 문서 찾기 조회 단계(2026-11-09)는 이 턴의 비서·기관으로 대화와 같은 찾기 — 시험은 searchDocs로 바꿔 끼운다
-      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined, turn.appLookupAgents ?? [])),
+      guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined, turn.appLookupAgents ?? []),
+        // 기관 연동 시스템 조회(0102) — 이 턴의 기관·앱으로, 승인된 곳인지는 부를 때마다 다시 본다
+        (query, endpoint, action) => (deps.externalLookup ?? callExternalLookup)({ organizationId: turn.ctx.organizationId, agentId: turn.ctx.agentId, appName: turn.appName ?? '앱', appVersion: turn.ctx.agentVersion }, { endpointId: endpoint, action, query })),
     }) : null;
     result = await runToolLoop(
       {

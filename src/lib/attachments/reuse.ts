@@ -10,6 +10,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { attachmentExtension, MAX_ATTACHMENT_BYTES } from './limits';
 import { confirmUpload, createUpload, deleteAttachment } from './store';
+import { findLibraryOriginal } from '@/lib/my-library';
 import type { AttachmentRow } from './types';
 import type { ReusableFile, ReuseKind } from './reuse-types';
 export type { ReusableFile, ReuseKind } from './reuse-types';
@@ -73,7 +74,7 @@ export async function listReusableFiles(userId: string, now = Date.now()): Promi
 }
 
 /** 원본 — 요청자의 것만. 첨부는 읽힌(`ready`) 것만(읽지 못한 것은 원본을 지웠다) */
-async function findSource(userId: string, kind: ReuseKind, id: string): Promise<{ storage_path: string; file_name: string } | null | 'error'> {
+async function findSource(userId: string, kind: 'attachment' | 'generated', id: string): Promise<{ storage_path: string; file_name: string } | null | 'error'> {
   const query = kind === 'attachment'
     ? supabaseAdmin.from('chat_attachments').select('storage_path, file_name, status').eq('id', id).eq('user_id', userId).eq('status', 'ready')
     : supabaseAdmin.from('generated_files').select('storage_path, file_name').eq('id', id).eq('user_id', userId);
@@ -88,8 +89,11 @@ async function findSource(userId: string, kind: ReuseKind, id: string): Promise<
  * 새 첨부는 직접 올린 것과 똑같이 보낼 때 대화에 묶이고, 보내지 않으면 24시간 뒤 정리된다
  */
 export async function reuseFile(actor: Actor, kind: unknown, id: unknown): Promise<{ ok: true; attachment: AttachmentRow } | Failure> {
-  if ((kind !== 'attachment' && kind !== 'generated') || typeof id !== 'string' || !UUID.test(id)) return { ok: false, status: 404, message: MSG_NOT_FOUND };
-  const source = await findSource(actor.userId, kind, id.toLowerCase());
+  if ((kind !== 'attachment' && kind !== 'generated' && kind !== 'library') || typeof id !== 'string' || !UUID.test(id)) return { ok: false, status: 404, message: MSG_NOT_FOUND };
+  // 내 자료함(0103) — 주인·같은 기관인 행, 부서 자료함(0106) — 지금 내 부서의 행만. 붙일 때마다 다시 찾는다
+  const source = kind === 'library'
+    ? await findLibraryOriginal({ userId: actor.userId, organizationId: actor.organizationId, departmentId: actor.departmentId, isAdmin: false }, id).catch(() => 'error' as const)
+    : await findSource(actor.userId, kind, id.toLowerCase());
   if (source === 'error') return { ok: false, status: 503, message: MSG_RETRY };
   if (!source) return { ok: false, status: 404, message: MSG_NOT_FOUND };
   return attachStoredObject(actor, source);

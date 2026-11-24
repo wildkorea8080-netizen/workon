@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { randomBytes } from 'crypto';
 import { APP_URL } from '@/lib/config';
 import { logSecurityEvent } from '@/lib/security-log';
+import { shareCreateBlockedMessage, shareSwitchForDepartment } from '@/lib/share-switch';
 
 function nanoid12() {
   return randomBytes(9).toString('base64url').slice(0, 12);
@@ -44,6 +45,17 @@ export async function POST(
 
     if (fetchError) return fail('대화를 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 500);
     if (!existing) return fail('대화를 찾을 수 없습니다.', 404);
+
+    // 기관이 공개 링크를 막았으면 만들지도 범위를 늘리지도 않는다(0098) — 못 읽으면 만들지 않는다(닫힘)
+    let blocked;
+    try {
+      blocked = await shareSwitchForDepartment(existing.department_id as string | null);
+    } catch {
+      return fail('공개 링크를 지금 만들 수 있는지 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+    }
+    if (blocked.disabled) {
+      return NextResponse.json({ ok: false, error: { message: shareCreateBlockedMessage(blocked.reason), code: 'share_disabled' } }, { status: 403 });
+    }
 
     const wasShared = Boolean(existing.is_shared && existing.share_token);
     // 공유 중이면 같은 주소를 쓴다(중단하면 주소를 버리므로 여기 남은 토큰은 살아 있는 링크다)

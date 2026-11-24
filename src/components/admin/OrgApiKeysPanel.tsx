@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ORG_API_DAILY_LIMIT, ORG_API_ENDPOINTS, ORG_API_EXPIRY_DAYS, ORG_API_MAX_ACTIVE_KEYS, ORG_API_NAME_MAX, ORG_API_SCOPES, ORG_API_SCOPE_LABELS,
+  ORG_API_DAILY_LIMIT, ORG_API_ENDPOINTS, ORG_API_EXPIRY_DAYS, ORG_API_MAX_ACTIVE_KEYS, ORG_API_NAME_MAX, ORG_API_SCOPES, ORG_API_SCOPE_LABELS, ORG_API_WRITE_SCOPES, ORG_API_CONTENT_SCOPES,
   type OrgApiCallView, type OrgApiKeyView, type OrgApiScope,
 } from '@/lib/org-api/spec';
 import { emptyListText } from '@/lib/ok-json';
@@ -76,6 +76,7 @@ export default function OrgApiKeysPanel() {
         <p className="mt-1 text-sm leading-6 text-slate-600">
           기관의 다른 시스템(경영정보 대시보드·보고 시스템)이 WORKON의 도입 현황·이용통계를 <strong>숫자만</strong> 읽어 가게 하는 키입니다.
           직원 이름·질문 원문·답변 글은 내보내지 않고, 직원별 이용통계는 API로 내지 않습니다(나만의 비서는 이름 없이 묶음).
+          &lsquo;문서함 현황&rsquo; 범위는 문서관리시스템이 문서함과 맞대 보게 문서 이름·비서·읽기 상태·판·태그를 읽습니다 — 본문·원본은 내보내지 않고 나만의 비서의 문서는 빠집니다.
           키 하나에 하루 {ORG_API_DAILY_LIMIT.toLocaleString('ko-KR')}번, 기관에 쓸 수 있는 키 {ORG_API_MAX_ACTIVE_KEYS}개까지입니다. 기관의 접속 허용 IP를 정해 두었다면 그 밖에서 부른 호출은 막힙니다.
         </p>
       </div>
@@ -97,6 +98,16 @@ export default function OrgApiKeysPanel() {
                 </select>
               </label>
             </div>
+            {scopes.some((s) => ORG_API_WRITE_SCOPES.includes(s)) && (
+              <p role="note" className="text-xs text-amber-800">
+                '문서 올리기' 범위는 이 키로 비서 문서함에 문서를 올리고 새 판으로 바꿀 수 있습니다{scopes.includes('documents_delete') ? ". '문서 지우기' 범위는 공식·부서 비서의 문서를 지웁니다 — 되돌릴 수 없습니다" : ''}(키를 만든 사람의 이름으로 남고 보안 로그에 남습니다). 읽기용 키와 나눠 만들고, 문서관리시스템처럼 올리고 내릴 일이 있는 곳에만 주세요.
+              </p>
+            )}
+            {scopes.some((s) => ORG_API_CONTENT_SCOPES.includes(s)) && (
+              <p role="note" className="text-xs text-amber-800">
+                '비서에게 묻기' 범위는 이 키로 공식·부서 비서에게 묻고 답 글과 근거 발췌를 받아 갑니다. 대화는 키를 만든 사람의 대화('[API]' 제목)로 남고 그 사람의 월 한도를 씁니다. 민원 창구·업무 봇처럼 물을 일이 있는 곳에만 주세요.
+              </p>
+            )}
             <button type="button" disabled={busy || unread || !name.trim() || !scopes.length || active >= ORG_API_MAX_ACTIVE_KEYS} onClick={() => void create()}
               className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '키 만들기'}</button>
           </div>
@@ -110,9 +121,9 @@ export default function OrgApiKeysPanel() {
           )}
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <div className="text-xs text-slate-600">
-            <p className="font-semibold text-slate-700">부를 수 있는 주소(GET)</p>
+            <p className="font-semibold text-slate-700">부를 수 있는 주소</p>
             <ul className="mt-1 list-disc pl-5">
-              {Object.values(ORG_API_ENDPOINTS).map((e) => <li key={e.path}><code className="font-mono">{e.path}</code> — {e.label} · 범위 {ORG_API_SCOPE_LABELS[e.scope]}</li>)}
+              {Object.values(ORG_API_ENDPOINTS).map((e) => <li key={`${e.method ?? 'GET'} ${e.path}`}><code className="font-mono">{e.method ?? 'GET'} {e.path}</code> — {e.label} · 범위 {ORG_API_SCOPE_LABELS[e.scope]}</li>)}
             </ul>
           </div>
           <table className="w-full text-left text-xs">

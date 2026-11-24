@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { messagesUntil, type SharedMessage } from '@/lib/shared-conversation';
+import { SHARE_OPEN_BLOCKED_MESSAGE, shareSwitchForDepartment } from '@/lib/share-switch';
 
 const NOT_FOUND = () =>
   NextResponse.json({ ok: false, error: { message: '공유된 대화를 찾을 수 없습니다.' } }, { status: 404 });
@@ -30,6 +31,7 @@ export async function GET(
         created_at,
         is_shared,
         user_id,
+        department_id,
         metadata,
         agent:agents(id, name, description),
         messages(
@@ -54,6 +56,7 @@ export async function GET(
       title: string | null;
       created_at: string;
       user_id: string | null;
+      department_id: string | null;
       metadata: { shared_at?: unknown } | null;
       agent: unknown;
       messages: SharedMessage[] | null;
@@ -71,6 +74,17 @@ export async function GET(
     if (!owner) return NOT_FOUND();
     if ((owner as { is_active?: boolean | null }).is_active === false || (owner as { deleted_at?: string | null }).deleted_at) {
       return NOT_FOUND();
+    }
+
+    // 기관이 공개 링크를 막았으면 열지 않는다(0098, 2026-11-23) — 링크는 지우지 않아 다시 열면 그대로. 못 읽으면 열지 않는다(닫힘)
+    let blocked;
+    try {
+      blocked = await shareSwitchForDepartment(row.department_id);
+    } catch {
+      return UNREAD();
+    }
+    if (blocked.disabled) {
+      return NextResponse.json({ ok: false, error: { message: SHARE_OPEN_BLOCKED_MESSAGE, code: 'share_disabled' } }, { status: 403 });
     }
 
     return NextResponse.json({

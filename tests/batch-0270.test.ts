@@ -28,8 +28,9 @@ describe('라우트 목록', () => {
   });
   it('동적 자리 이름은 아는 것뿐 — 새 이름이면 uuid인지 보고 NON_UUID_SEGMENTS를 정한다', () => {
     const names = new Set(onDisk.flatMap((r) => r.split('/').filter((s) => s.startsWith('['))));
-    expect([...names].sort()).toEqual(['[...nextauth]', '[documentId]', '[id]', '[proposalId]', '[runId]', '[templateId]', '[token]', '[versionId]']);
-    expect([...NON_UUID_SEGMENTS]).toEqual(['[token]']);
+    expect([...names].sort()).toEqual(['[...nextauth]', '[documentId]', '[id]', '[proposalId]', '[runId]', '[slug]', '[templateId]', '[token]', '[versionId]']);
+    // [slug] — 기관 로그인 경로(기관 SSO 시작, 0107)는 uuid가 아니다
+    expect([...NON_UUID_SEGMENTS]).toEqual(['[token]', '[slug]']);
   });
 });
 

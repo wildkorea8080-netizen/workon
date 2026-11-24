@@ -9,6 +9,9 @@ import type { MyGeneratedFile } from '@/lib/my-generated-files';
 import { fileBadge } from '@/lib/file-badge';
 import { matchesFileQuery, normalizeFileQuery, MY_FILES_QUERY_MAX } from '@/lib/file-search';
 import { emptyListText } from '@/lib/ok-json';
+import { useInFlight } from '@/lib/use-in-flight';
+import MyLibrarySection, { askFolder } from '@/components/files/MyLibrarySection';
+import { LIBRARY_SPACE_LABEL, LIBRARY_UNFILED_LABEL, type LibraryFile, type LibrarySpace } from '@/lib/my-library-spec';
 
 /** 결과물 모음 — 볼 수 있는 작업의 파일만, 판별로. 내려받기는 그때마다 권한을 다시 본다 */
 export default function FilesPage() {
@@ -18,6 +21,10 @@ export default function FilesPage() {
   // 입력 중인 글과 건 글을 따로 둔다(목록의 '더 보기'는 건 글로 이어 읽는다)
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
+  // 내 자료함(0103) — 아래 목록에서 담으면 자료함 목록을 다시 읽는다
+  const [libraryKey, setLibraryKey] = useState(0);
+  // 내 자료함 · 부서 자료함(0106) — 아래 목록의 '담기'도 고른 자리로
+  const [librarySpace, setLibrarySpace] = useState<LibrarySpace>('personal');
   useEffect(() => {
     api<ArtifactDto[]>('/api/work/files').then((r) => (r.ok ? setFiles(r.data) : setError(r.error.message)));
   }, []);
@@ -30,12 +37,13 @@ export default function FilesPage() {
       <div className="mx-auto max-w-6xl px-4 py-8 md:px-8">
         <PageTitle title="결과물" subtitle="업무 작업·AI 대화에서 만들고 올린 내 파일입니다." />
         <form role="search" aria-label="내 파일 찾기" className="mb-6 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setQuery(normalizeFileQuery(draft) ?? ''); }}>
-          <input aria-label="파일 이름으로 내 파일 찾기" value={draft} maxLength={MY_FILES_QUERY_MAX} onChange={(e) => setDraft(e.target.value)} placeholder="파일 이름으로 찾기 — 업무 결과물·대화에서 만든 파일·대화에 올린 파일"
+          <input aria-label="파일 이름으로 내 파일 찾기" value={draft} maxLength={MY_FILES_QUERY_MAX} onChange={(e) => setDraft(e.target.value)} placeholder="파일 이름으로 찾기 — 내 자료함·업무 결과물·대화에서 만든 파일·대화에 올린 파일"
             className="min-w-[260px] flex-1 rounded-lg border border-[#DCE3EC] px-3 py-2 text-[15px]" />
           <button type="submit" className="rounded-lg border border-[#DCE3EC] px-4 py-2 text-[15px]">찾기</button>
           {query && <button type="button" onClick={() => { setDraft(''); setQuery(''); }} className="px-2 text-[14px] text-slate-500">전체 보기</button>}
         </form>
-        <h2 className="mb-1 text-[17px] font-semibold text-slate-900">업무 결과물</h2>
+        <MyLibrarySection query={query} refreshKey={libraryKey} space={librarySpace} onSpaceChange={setLibrarySpace} />
+        <h2 className="mb-1 mt-8 text-[17px] font-semibold text-slate-900">업무 결과물</h2>
         <p className="mb-3 text-[13px] text-slate-500">업무 작업에서 만든 파일입니다. 대화를 지워도 남습니다.</p>
         <ErrorNote message={error} />
         <Card className="p-0 overflow-x-auto">
@@ -84,6 +92,9 @@ export default function FilesPage() {
           sourceHeader="만든 곳"
           emptyText="대화에서 만든 파일이 없습니다."
           downloadHref={(id) => `/api/files/${id}`}
+          saveKind="generated"
+          saveSpace={librarySpace}
+          onSaved={() => setLibraryKey((k) => k + 1)}
         />
         <PagedFiles
           query={query}
@@ -93,6 +104,9 @@ export default function FilesPage() {
           sourceHeader="구분"
           emptyText="대화에 올린 파일이 없습니다."
           downloadHref={(id) => `/api/attachments/${id}/original`}
+          saveKind="attachment"
+          saveSpace={librarySpace}
+          onSaved={() => setLibraryKey((k) => k + 1)}
         />
       </div>
     </WorkShell>
@@ -103,9 +117,20 @@ export default function FilesPage() {
  * 쪽으로 읽는 내 파일 목록 — '대화에서 만든 파일'(2026-11-07, 양식 채우기·표 합치기·앱 결과 내보내기)과 '대화에 올린 파일'(2026-11-08).
  * 내 것만, 50개씩. 찾기 글은 페이지 위 통합 찾기에서 받는다(바뀌면 처음부터 다시 읽는다)
  */
-function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyText, downloadHref }: {
+function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyText, downloadHref, saveKind, saveSpace, onSaved }: {
   query: string; endpoint: string; title: string; description: string; sourceHeader: string; emptyText: string; downloadHref: (id: string) => string;
+  /** 내 자료함에 담을 때의 원본 종류(0103) */
+  saveKind: 'generated' | 'attachment'; saveSpace: LibrarySpace; onSaved: () => void;
 }) {
+  const saving = useInFlight();
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const save = (f: MyGeneratedFile) => saving.run(f.id, async () => {
+    const folder = askFolder(`'${f.file_name}'을(를) ${LIBRARY_SPACE_LABEL[saveSpace]}의 어느 폴더에 담을까요?`, '');
+    if (folder === null) return;
+    const r = await api<LibraryFile>('/api/my-library', { method: 'POST', json: { kind: saveKind, id: f.id, folder, space: saveSpace } });
+    setSaveNote(r.ok ? `'${r.data.file_name}'을(를) ${LIBRARY_SPACE_LABEL[saveSpace]} ${r.data.folder || LIBRARY_UNFILED_LABEL}에 담았습니다.` : r.error.message);
+    if (r.ok) onSaved();
+  });
   const [files, setFiles] = useState<MyGeneratedFile[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +165,7 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
       <h2 className="text-[17px] font-semibold text-slate-900">{title}</h2>
       <p className="mt-1 mb-3 text-[13px] text-slate-500">{description}</p>
       <ErrorNote message={error} />
+      {saveNote && <p role="status" className="mb-3 text-[13px] text-slate-700">{saveNote}</p>}
       <Card className="p-0 overflow-x-auto">
         {(unread && !files) || (files && files.length === 0) ? (
           <div className="p-6 text-[15px] text-slate-600">{unread && !files ? emptyListText(true, emptyText, '파일 목록을') : query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : emptyText}</div>
@@ -166,10 +192,13 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
                     <Link href={`/chat?conv=${encodeURIComponent(f.conversation_id)}`} className="text-slate-700 underline">{f.conversation_title ?? '대화 열기'}</Link>
                   </td>
                   <td className="px-5 py-3 text-[14px] text-slate-500">{formatDateTime(f.created_at)}</td>
-                  <td className="px-5 py-3 text-right">
+                  <td className="whitespace-nowrap px-5 py-3 text-right">
                     <a href={downloadHref(f.id)} className="rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px] hover:border-[#003087]">
                       내려받기
                     </a>
+                    <button type="button" disabled={saving.running !== null} onClick={() => void save(f)} className="ml-2 text-[14px] text-slate-600 underline disabled:opacity-50">
+                      {saving.running === f.id ? '담는 중…' : `${LIBRARY_SPACE_LABEL[saveSpace]}에 담기`}
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -2,6 +2,7 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { listUserFilePaths, removeUserFiles } from '@/lib/generated-files';
 import { listUserAttachmentPaths, removeUserAttachmentObjects } from '@/lib/attachments/store';
+import { listUserLibraryPaths } from '@/lib/my-library';
 import { softDeleteAgent } from '@/lib/agent-store';
 import { logSystem } from '@/lib/logger';
 import { WITHDRAWAL_REVOKED_REASON } from '@/lib/apps/automation-admin-spec';
@@ -74,6 +75,13 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   // ① 경로 먼저 (DB 연쇄 삭제는 저장소를 지우지 않는다) — 생성 파일(앱 결과 내보내기 포함)과 채팅 첨부
   const filePaths = await listUserFilePaths(userId);
   const attachmentPaths = await listUserAttachmentPaths(userId);
+  // 내 자료함 사본(0103) — 못 읽으면 행을 지우지 않는다(경로를 잃으면 사본이 기록 없이 남는다)
+  let libraryPaths: string[];
+  try {
+    libraryPaths = await listUserLibraryPaths(userId);
+  } catch (e) {
+    return dbFailure('자료함 읽기', userId, { message: e instanceof Error ? e.message : String(e) });
+  }
 
   // ② 대화 — messages·generated_files·묶인 chat_attachments는 conversation_id로 연쇄 삭제된다
   const { error: convError } = await supabaseAdmin.from('conversations').delete().eq('user_id', userId);
@@ -81,6 +89,10 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   // 대화에 안 묶인 첨부 행(보내지 않은 것·묘비) — 사용자 행은 남으므로 user_id로 직접 지운다
   const { error: attachError } = await supabaseAdmin.from('chat_attachments').delete().eq('user_id', userId);
   if (attachError) return dbFailure('첨부 삭제', userId, attachError);
+  // 내 자료함 행(0103) — 사본은 ⑤에서 지운다
+  // 부서 자료함(0106)에 담은 파일은 부서의 것이라 남긴다 — 내 자료함만
+  const { error: libraryError } = await supabaseAdmin.from('my_library_files').delete().eq('user_id', userId).eq('space', 'personal');
+  if (libraryError) return dbFailure('자료함 삭제', userId, libraryError);
   // 앱 예약 — 저장한 입력값이 개인 내용이라 지운다. 앱 연동 — 외부 시스템이 더 부르지 못하게 회수한다(실행 때도 계정 검사가 막지만 '쓰는 중'으로 남지 않게)
   // 예약의 올린 파일 사본(0073)은 지운 행에서 경로를 받아 ⑤에서 지운다
   const { data: removedSchedules, error: scheduleError } = await supabaseAdmin.from('app_schedules').delete().eq('user_id', userId).select('files');
@@ -132,6 +144,7 @@ export async function withdrawUser(userId: string, actorId: string): Promise<Wit
   // ⑤ 저장소 (실패는 시스템 로그에 남기고 계속) — 생성 파일과 첨부 원본·읽은 내용
   await removeUserFiles(userId, filePaths);
   await removeUserAttachmentObjects(userId, attachmentPaths);
+  await removeUserFiles(userId, libraryPaths);
   await removeScheduleFileObjects(scheduleFiles, '사용자 탈퇴 뒤 예약 파일');
 
   // ⑥ 로그인 계정

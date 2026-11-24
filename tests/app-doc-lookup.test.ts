@@ -173,7 +173,8 @@ describe('화면', () => {
     expect(builder).toContain('return connector === null || allowed.has(connector);');
     expect(builder).toContain('if (appUsesDocSearchLookup(checked.value)) capabilities.doc_search = {};');
     const editor = readFileSync('src/components/apps/AppStepEditor.tsx', 'utf8');
-    expect(editor).toContain("APP_LOOKUP_TOOLS[tool].capability === 'doc_search' ? APP_LOOKUP_TOOLS[tool].label");
+    // 문서 찾기·기관 연동 시스템 조회(0102)는 '공공 데이터 조회 —' 머리 없이 보인다
+    expect(editor).toContain("APP_LOOKUP_TOOLS[tool].capability === 'doc_search' || APP_LOOKUP_TOOLS[tool].external ? '' : '공공 데이터 조회 — '");
   });
   it('채팅 실행기가 이 턴의 비서·기관으로 문서 찾기 실행기를 넘긴다', () => {
     const stream = readFileSync('src/lib/assistant/stream.ts', 'utf8');

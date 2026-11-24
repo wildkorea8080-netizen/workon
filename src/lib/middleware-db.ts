@@ -216,7 +216,7 @@ type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: numb
  */
 export async function userSessionVerdict(
   cache: Map<string, UserCacheEntry>,
-  token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown; isImpersonating?: unknown },
+  token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown; isImpersonating?: unknown; sso?: unknown },
   read: (sub: unknown) => Promise<UserStatus>,
   now = Date.now(),
 ): Promise<SessionVerdict> {
@@ -247,7 +247,8 @@ export async function userSessionVerdict(
     if (loginSec !== null && loginSec < Math.floor(status.passwordChangedAt / 1000)) return 'password_changed';
   }
   // 임시 비밀번호(0093) — 본인이 바꾸기 전까지는 '비밀번호 바꾸기'만. 대리 접근(슈퍼관리자)은 그 관리자 대신 바꾸지 않으므로 묶지 않는다
-  if (status.mustChangePassword && token.isImpersonating !== true) return 'must_change_password';
+  // 기관 SSO(0107)로 들어온 로그인도 묶지 않는다 — 비밀번호를 쓰지 않아 지금 비밀번호를 모른다(임시 비밀번호 로그인은 그대로 묶임)
+  if (status.mustChangePassword && token.isImpersonating !== true && token.sso !== true) return 'must_change_password';
   return 'ok';
 }
 

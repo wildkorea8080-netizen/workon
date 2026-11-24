@@ -90,6 +90,11 @@ vi.mock('@/lib/attachments/store', () => ({
   removeUserAttachmentObjects: async (id: string, paths: string[]) => { steps.push(`removeUserAttachmentObjects:${id}:${paths.join(',')}`); },
 }));
 
+// 내 자료함 사본(0103)
+vi.mock('@/lib/my-library', () => ({
+  listUserLibraryPaths: async (id: string) => { steps.push(`listUserLibraryPaths:${id}`); return ['my-library/o/u1/l.pdf']; },
+}));
+
 vi.mock('@/lib/agent-store', () => ({
   softDeleteAgent: async (id: string, actor: string) => { steps.push(`softDeleteAgent:${id}:${actor}`); return state.softDeleteOk; },
 }));
@@ -131,8 +136,10 @@ describe('withdrawUser — 순서', () => {
       'users.select',
       'listUserFilePaths:u1',
       'listUserAttachmentPaths:u1',
+      'listUserLibraryPaths:u1',
       'conversations.delete',
       'chat_attachments.delete',
+      'my_library_files.delete',
       'app_schedules.delete',
       'app_webhooks.update',
       'agents.select',
@@ -140,6 +147,7 @@ describe('withdrawUser — 순서', () => {
       'users.update',
       'removeUserFiles:u1:generated/o/c/f.hwpx',
       'removeUserAttachmentObjects:u1:chat-uploads/o/u1/a.xlsx,chat-uploads/o/u1/a.json',
+      'removeUserFiles:u1:my-library/o/u1/l.pdf',
       'auth.deleteUser:u1',
     ]);
   });

@@ -15,7 +15,7 @@ export type WebhookSwitchState = { disabled: boolean; disabledAt: string | null;
 /** 연동·예약 스위치는 같은 꼴이다 */
 export type OrgSwitchState = WebhookSwitchState;
 export type OrgSwitchView = WebhookSwitchView;
-export type OrgSwitchKind = 'webhooks' | 'schedules';
+export type OrgSwitchKind = 'webhooks' | 'schedules' | 'shares';
 
 const KINDS = {
   webhooks: {
@@ -25,6 +25,11 @@ const KINDS = {
   schedules: {
     at: 'app_schedules_disabled_at', reason: 'app_schedules_disabled_reason', label: '앱 예약',
     disabledEvent: 'app_schedules_org_disabled', enabledEvent: 'app_schedules_org_enabled',
+  },
+  // 대화 공개 링크(0098, 2026-11-23) — 막으면 새 링크 403·이미 만든 링크도 열리지 않음(share-switch.ts)
+  shares: {
+    at: 'conversation_share_disabled_at', reason: 'conversation_share_disabled_reason', label: '대화 공개 링크 기능',
+    disabledEvent: 'conversation_share_org_disabled', enabledEvent: 'conversation_share_org_enabled',
   },
 } as const;
 

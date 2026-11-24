@@ -24,6 +24,8 @@ export default function OutboundEndpointsPanel() {
   const [url, setUrl] = useState('');
   const [requireApproval, setRequireApproval] = useState(true);
   const [actionsText, setActionsText] = useState('');
+  // 앱 조회에도 쓰기(0102) — 기본 꺼짐
+  const [lookupEnabled, setLookupEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ name: string; secret: string } | null>(null);
 
@@ -44,10 +46,10 @@ export default function OutboundEndpointsPanel() {
     if (busy || !name.trim() || !url.trim()) return;
     setBusy(true); setError(null); setCreated(null);
     try {
-      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, require_approval: requireApproval, ...(actionsText.trim() ? { actions: actionsText } : {}) }) });
+      const res = await fetch('/api/admin/outbound-endpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, require_approval: requireApproval, lookup_enabled: lookupEnabled, ...(actionsText.trim() ? { actions: actionsText } : {}) }) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 만들지 못했습니다.');
-      else { setCreated({ name: body.data.endpoint.name, secret: body.data.secret }); setName(''); setUrl(''); setActionsText(''); await load(); }
+      else { setCreated({ name: body.data.endpoint.name, secret: body.data.secret }); setName(''); setUrl(''); setActionsText(''); setLookupEnabled(false); await load(); }
     } finally { setBusy(false); }
   }
 
@@ -60,6 +62,19 @@ export default function OutboundEndpointsPanel() {
     const res = await fetch(`/api/admin/outbound-endpoints/${encodeURIComponent(endpoint.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ require_approval: next }) });
     const body = await res.json().catch(() => null);
     if (!res.ok || !body?.ok) setError(body?.error?.message ?? '보낼 곳을 바꾸지 못했습니다.');
+    else await load();
+  }
+
+  /** 앱 조회에도 쓰기(0102) 켜고 끄기 — 켜면 입력형 앱의 '기관 연동 시스템 조회' 단계가 이 주소에 조회어를 보내고 답을 다음 단계 자료로 쓴다 */
+  async function toggleLookup(endpoint: OutboundEndpointView) {
+    const next = !endpoint.lookupEnabled;
+    if (!window.confirm(next
+      ? `'${endpoint.name}'을(를) 앱 조회에도 씁니다. 직원이 입력형 앱의 조회 단계에서 이 곳을 고르면 실행마다 조회어를 이 주소로 보내고, 받은 답이 AI에게 자료로 들어갑니다. 받는 시스템이 조회(event: app.lookup)에 답하도록 준비됐는지 확인하세요.`
+      : `'${endpoint.name}'의 앱 조회를 끕니다. 이 곳을 고른 앱의 조회 단계는 다음 실행부터 멈춥니다(결과 보내기는 그대로).`)) return;
+    setError(null);
+    const res = await fetch(`/api/admin/outbound-endpoints/${encodeURIComponent(endpoint.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lookup_enabled: next }) });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) setError(body?.error?.message ?? '앱 조회 허용을 바꾸지 못했습니다.');
     else await load();
   }
 
@@ -110,6 +125,7 @@ export default function OutboundEndpointsPanel() {
         <textarea aria-label="받는 쪽 동작" value={actionsText} onChange={(e) => setActionsText(e.target.value)} rows={2} placeholder={'draft=기안 임시 저장\nboard=게시판 등록'} className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs" />
         <span className="text-xs text-slate-500">정하면 앱마다 그중 하나를 골라야 보내고, 보내는 몸의 <code>action</code>과 <code>X-Workon-Action</code> 머리글에 실립니다.</span>
       </label>
+      <label className="flex items-start gap-2 text-sm text-slate-700"><input type="checkbox" className="mt-1" checked={lookupEnabled} onChange={(e) => setLookupEnabled(e.target.checked)} /><span>앱 조회에도 쓰기(선택)<span className="block text-xs text-slate-500">켜면 입력형 앱의 ‘기관 연동 시스템 조회’ 단계가 이 주소에 조회어를 같은 서명으로 보내고(<code>event: app.lookup</code>, 8초) 받은 답(JSON <code>result</code>·<code>text</code>·<code>answer</code>, 출처 <code>sources</code>)을 다음 단계의 자료로 씁니다. 조회어 말고 다른 입력값은 보내지 않습니다.</span></span></label>
       {created && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6">
           <p className="font-semibold">'{created.name}'의 서명 비밀값 — 지금 한 번만 보입니다. 받는 시스템에 넣어 두세요.</p>
@@ -119,7 +135,7 @@ export default function OutboundEndpointsPanel() {
       )}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <table className="w-full text-left text-xs">
-        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">보내기 전 확인</th><th className="pr-2">동작</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
+        <thead className="text-slate-500"><tr><th className="py-1 pr-2">이름</th><th className="pr-2">주소</th><th className="pr-2">비밀값 앞부분</th><th className="pr-2">보내기 전 확인</th><th className="pr-2">동작</th><th className="pr-2">앱 조회</th><th className="pr-2">만든 때</th><th className="pr-2">상태</th><th /></tr></thead>
         <tbody>{endpoints.map((e) => (
           <tr key={e.id} className="border-t border-slate-100 align-top">
             <td className="py-1 pr-2 font-medium">{e.name}</td>
@@ -127,11 +143,12 @@ export default function OutboundEndpointsPanel() {
             <td className="pr-2"><code>{e.secretPrefix}…</code></td>
             <td className="pr-2">{e.requireApproval ? '받음' : '안 받음'}{!e.revokedAt && <button type="button" onClick={() => void toggleApproval(e)} className="ml-1 text-ws-accent-text underline">{e.requireApproval ? '끄기' : '켜기'}</button>}</td>
             <td className="pr-2">{e.actions.length ? e.actions.map((a) => `${a.label}(${a.key})`).join(', ') : '—'}{!e.revokedAt && <button type="button" onClick={() => void editActions(e)} className="ml-1 text-ws-accent-text underline">바꾸기</button>}</td>
+            <td className="pr-2">{e.lookupEnabled ? '씀' : '안 씀'}{!e.revokedAt && <button type="button" onClick={() => void toggleLookup(e)} className="ml-1 text-ws-accent-text underline">{e.lookupEnabled ? '끄기' : '켜기'}</button>}</td>
             <td className="pr-2">{kst(e.createdAt)}{e.createdByName ? ` · ${e.createdByName}` : ''}</td>
             <td className="pr-2">{e.revokedAt ? <span className="text-slate-500">회수됨({kst(e.revokedAt)}) — {e.revokedReason}</span> : <span className="text-emerald-700">쓰는 중</span>}</td>
             <td>{!e.revokedAt && <button type="button" onClick={() => void revoke(e)} className="text-red-600 underline">회수</button>}</td>
           </tr>))}
-          {!endpoints.length && <tr><td colSpan={8} className="py-2 text-slate-500">{emptyListText(unread, '아직 보낼 곳이 없습니다.', '보낼 곳 목록을')}</td></tr>}
+          {!endpoints.length && <tr><td colSpan={9} className="py-2 text-slate-500">{emptyListText(unread, '아직 보낼 곳이 없습니다.', '보낼 곳 목록을')}</td></tr>}
         </tbody>
       </table>
       <div>

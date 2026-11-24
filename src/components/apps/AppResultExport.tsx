@@ -20,11 +20,16 @@ function loadTemplates(conversationId: string): Promise<TemplateOption[]> {
 
 const STANDARD = '';
 
-export default function AppResultExport({ conversationId, messageId, content, defaultTemplateId }: { conversationId: string; messageId?: string; content: string; /** 앱 설정의 결과 한글 파일 양식 — 목록에 있으면 먼저 골라 둔다 */ defaultTemplateId?: string }) {
+export default function AppResultExport({ conversationId, messageId, content, defaultTemplateId, variant, intro }: {
+  conversationId: string; messageId?: string; content: string;
+  /** 앱 설정의 결과 한글 파일 양식 — 목록에 있으면 먼저 골라 둔다 */ defaultTemplateId?: string;
+  /** 근거로 고쳐 쓴 답을 담을 때(2026-11-23) — `content`도 고쳐 쓴 글이어야 한다(서버가 해시로 맞댄다) */ variant?: 'revised';
+  /** 위 안내 글 — 대화 답변은 '저장된 답변을…' */ intro?: string;
+}) {
   const [files, setFiles] = useState<Record<string, FileRef>>({}); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateOption[]>([]); const [choice, setChoice] = useState(STANDARD);
   const pending = useRef(false);
-  useEffect(() => { setFiles({}); setError(null); }, [conversationId, messageId, content]);
+  useEffect(() => { setFiles({}); setError(null); }, [conversationId, messageId, content, variant]);
   useEffect(() => {
     let live = true;
     setTemplates([]); setChoice(STANDARD);
@@ -39,14 +44,14 @@ export default function AppResultExport({ conversationId, messageId, content, de
     try {
       const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
       const expectedHash = Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('');
-      const response = await api<FileRef>('/api/apps/export', { method: 'POST', json: { conversationId, ...(messageId ? { messageId } : {}), expectedHash, ...(target ? { templateId: target } : {}) } });
+      const response = await api<FileRef>('/api/apps/export', { method: 'POST', json: { conversationId, ...(messageId ? { messageId } : {}), expectedHash, ...(target ? { templateId: target } : {}), ...(variant ? { variant } : {}) } });
       if (response.ok) setFiles(prev => ({ ...prev, [target]: response.data })); else setError(response.error.message);
     } catch { setError('파일을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.'); }
     finally { pending.current = false; setBusy(false); }
   }
   return (
     <div className="my-5 rounded-xl border border-teal-100 bg-teal-50/50 p-4">
-      <p className="mb-3 text-xs text-slate-600">내용을 검토한 뒤 한글 파일로 받을 수 있습니다. 저장된 결과를 그대로 담으며 AI를 다시 호출하지 않습니다.</p>
+      <p className="mb-3 text-xs text-slate-600">{intro ?? '내용을 검토한 뒤 한글 파일로 받을 수 있습니다. 저장된 결과를 그대로 담으며 AI를 다시 호출하지 않습니다.'}</p>
       {templates.length > 0 && (
         <label className="mb-3 block text-xs text-slate-600">
           담을 양식

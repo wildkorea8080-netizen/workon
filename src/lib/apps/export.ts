@@ -4,8 +4,24 @@ import { paragraphPrefix } from '@/lib/doc-fill/xml-scan';
 import { checkPackage } from '@/lib/work/documents/package-check';
 import { markdownToDocumentBlocks, tableAsText, type DocumentTable } from '@/lib/apps/markdown-text';
 import { insertHwpxTables, tableFits, tableMarker } from '@/lib/doc-fill/hwpx-table';
+import { sourceTitleLabel } from '@/components/chat/source-label';
 
-export type AppResultInput = { name: string; version: number | null; content: string; references: Record<string, unknown>; createdAt: string };
+export type AppResultInput = {
+  name: string; version: number | null; content: string; references: Record<string, unknown>; createdAt: string;
+  /**
+   * 무엇의 결과인가(2026-11-23) — `app`(입력형 앱 실행, 기본)·`answer`(일반 대화 답변). 대화 답변은 비서 이름·질문을 앞에 싣고
+   * 제목을 질문으로 단다. `revised`면 근거로 고쳐 쓴 답(원래 답변은 대화에 그대로)
+   */
+  kind?: 'app' | 'answer';
+  question?: string | null;
+  revised?: boolean;
+};
+
+/** 대화 답변 파일의 질문 줄·제목 길이 */
+export const ANSWER_EXPORT_QUESTION_CHARS = 300;
+export const ANSWER_EXPORT_TITLE_CHARS = 40;
+const oneLine = (text: string) => text.normalize('NFC').replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+const cutText = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 /** 기관 양식에서 결과 본문을 넣을 표시 — 앞의 것부터 처음 있는 하나(`{{주요 내용}}`·`{{본문}}`·`{{결과}}`·`{{내용}}`) */
 export const APP_EXPORT_BODY_MARKERS = ['주요 내용', '본문', '결과', '내용'] as const;
@@ -16,7 +32,16 @@ export class AppExportTemplateError extends Error {}
 /** 저장된 답을 문서 조각으로 — 모델 없이 마크다운 표시만 걷어내고 표는 표지로 남긴다(두 내보내기가 같은 규칙) */
 function composeAppResult(input: AppResultInput) {
   if (!input.content.trim() || input.content.length > 60000) throw new Error('내보낼 결과의 길이를 확인해 주세요.');
-  const overview = [`AI가 작성한 초안입니다. 최종 사용 전 사실과 표현을 검토해 주세요.`, `앱: ${input.name}`, ...(input.version ? [`실행 설정 버전: ${input.version}`] : [])];
+  const answer = input.kind === 'answer';
+  const question = answer && typeof input.question === 'string' ? oneLine(input.question) : '';
+  const overview = [`AI가 작성한 초안입니다. 최종 사용 전 사실과 표현을 검토해 주세요.`];
+  if (answer) {
+    overview.push(`비서: ${input.name}`, ...(input.version ? [`비서 설정 판: ${input.version}`] : []));
+    if (question) overview.push(`질문: ${cutText(question, ANSWER_EXPORT_QUESTION_CHARS)}`);
+  } else {
+    overview.push(`앱: ${input.name}`, ...(input.version ? [`실행 설정 버전: ${input.version}`] : []));
+  }
+  if (input.revised) overview.push('근거로 고쳐 쓴 답입니다 — 원래 답변은 대화에 그대로 있습니다.');
   const refs = input.references;
   if (refs.documents_skipped === true) overview.push('참고 문서 없이 작성된 결과입니다.');
   const numbers = refs.number_check as { unverified?: unknown } | undefined;
@@ -27,7 +52,11 @@ function composeAppResult(input: AppResultInput) {
   if (Array.isArray(refs.chunks)) for (const [index, raw] of refs.chunks.entries()) {
     if (!raw || typeof raw !== 'object') continue;
     const c = raw as Record<string, unknown>;
-    if (typeof c.documentTitle === 'string') citations.push(`[${typeof c.n === 'number' ? c.n : index + 1}] ${c.documentTitle}${typeof c.page === 'number' ? ` · ${c.page}쪽` : ''}`);
+    if (typeof c.documentTitle !== 'string') continue;
+    // 공통 자료실은 `[공통] 이름(연도)`(2026-11-23), 위치는 쪽 → 칸 주소 → 절
+    const title = sourceTitleLabel({ documentTitle: c.documentTitle, scope: c.scope === 'common' ? 'common' : undefined, editionYear: typeof c.editionYear === 'number' ? c.editionYear : undefined });
+    const where = typeof c.page === 'number' ? `${c.page}쪽` : typeof c.cellRange === 'string' && c.cellRange.trim() ? c.cellRange.trim() : typeof c.section === 'string' && c.section.trim() ? oneLine(c.section) : '';
+    citations.push(`[${typeof c.n === 'number' ? c.n : index + 1}] ${title}${where ? ` · ${where}` : ''}`);
   }
   if (Array.isArray(refs.links)) for (const raw of refs.links) {
     if (!raw || typeof raw !== 'object') continue;
@@ -40,7 +69,7 @@ function composeAppResult(input: AppResultInput) {
   if (!text.trim()) throw new Error('내보낼 결과의 길이를 확인해 주세요.');
   const cellLines = tables.flatMap(t => [t.header, ...t.rows].flat()).flatMap(c => c.split(/<br\s*\/?>/i)).map(c => c.trim()).filter(Boolean);
   const body = text + (citations.length ? `\n\n참고한 출처\n${citations.join('\n')}` : '');
-  const title = `[AI 작성 초안] ${input.name}`;
+  const title = `[AI 작성 초안] ${question ? cutText(question, ANSWER_EXPORT_TITLE_CHARS) : input.name}`;
   const lines = text.split('\n').filter(line => line && !tables.some((_, i) => line === tableMarker(i)));
   return { title, overview: overview.join('\n'), body, tables, checkValues: [title, ...lines, ...cellLines] };
 }

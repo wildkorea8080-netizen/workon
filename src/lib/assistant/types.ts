@@ -30,6 +30,8 @@ export type SendEvent = (event: TurnEvent) => void;
 
 export interface PreparedTurn {
   appSteps?: import('@/lib/apps/definition').AppStep[];
+  /** 앱 이름 — 기관 연동 시스템 조회(0102)가 받는 쪽에 어느 앱이 부르는지 알린다 */
+  appName?: string;
   appStepInputs?: Record<string, string>;
   /** 문서 찾기 단계가 찾을 다른 비서 중 실행 전에 권한을 확인한 것(2026-11-09) — 실행기는 이 목록 밖의 비서를 찾지 않는다 */
   appLookupAgents?: string[];

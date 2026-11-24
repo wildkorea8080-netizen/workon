@@ -8,6 +8,7 @@ import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
 import { ACCOUNT_DORMANT, ACCOUNT_LOCKED, DORMANT_MESSAGE, IP_LOCKED, IP_LOCKED_MESSAGE, LOCKED_MESSAGE } from '@/lib/sign-in-lock-spec';
 import { AUTH_UNAVAILABLE, AUTH_UNAVAILABLE_MESSAGE } from '@/lib/auth-unavailable';
+import { ssoErrorMessage } from '@/lib/org-sso-spec';
 
 /**
  * 로그인 폼.
@@ -15,7 +16,7 @@ import { AUTH_UNAVAILABLE, AUTH_UNAVAILABLE_MESSAGE } from '@/lib/auth-unavailab
  * /login 과 /signin/{slug} 가 함께 쓴다. 화면을 복제하면 한쪽만 고치는
  * 사고가 나므로 한 벌만 둔다. slug가 있으면 그 기관 브랜딩으로 그린다.
  */
-export default function LoginForm({ slug, themeColor }: { slug?: string; themeColor?: string | null }) {
+export default function LoginForm({ slug, themeColor, ssoLabel }: { slug?: string; themeColor?: string | null; ssoLabel?: string | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // 기관 전용 경로(/signin/{slug})면 그 기관 브랜딩으로 그린다.
@@ -56,7 +57,9 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
     redirectError === 'unauthenticated' ? '다시 로그인해주세요.' :
     redirectError === 'session_changed' ? '권한이나 소속이 바뀌어 로그아웃되었습니다. 다시 로그인해 주세요.' :
     redirectError === 'session_ended' ? '로그인이 끝났습니다. 다시 로그인해 주세요.' :
-    redirectError === 'password_changed' ? '비밀번호가 바뀌어 로그아웃되었습니다. 새 비밀번호로 다시 로그인해 주세요.' : null;
+    redirectError === 'password_changed' ? '비밀번호가 바뀌어 로그아웃되었습니다. 새 비밀번호로 다시 로그인해 주세요.' :
+    // 기관 SSO(0107)에서 돌아온 까닭
+    ssoErrorMessage(redirectError);
 
   return (
     <main className={`min-h-screen bg-gradient-to-br ${c.bg} flex items-center justify-center px-4`} style={(theme ?? undefined) as CSSProperties | undefined}>
@@ -175,6 +178,16 @@ export default function LoginForm({ slug, themeColor }: { slug?: string; themeCo
               ) : '로그인'}
             </button>
           </form>
+
+          {/* 기관 SSO(0107) — 이 기관이 켰을 때만. 계정 서비스로 갔다가 이 기관에 등록된 직원이면 들어온다 */}
+          {slug && ssoLabel && (
+            <div className="mt-4">
+              <div className="mb-3 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />또는<span className="h-px flex-1 bg-slate-200" /></div>
+              <a href={`/api/sso/${encodeURIComponent(slug)}/start`} className="block w-full rounded-xl border border-slate-300 py-3 text-center text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50">
+                {ssoLabel}
+              </a>
+            </div>
+          )}
 
           {/* 하단 링크 */}
           <div className="mt-5 pt-5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">

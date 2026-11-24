@@ -30,7 +30,7 @@ vi.mock('@/lib/usage-limit', () => ({ organizationBudgetStatus: budget.organizat
 import { appRunsReport, budgetReport, feedbackSummaryReport } from '@/lib/org-api/reports';
 import { ORG_API_ENDPOINTS } from '@/lib/org-api/spec';
 
-const ctx = { keyId: 'k1', organizationId: 'o1', departmentIds: ['d1', 'd2'] };
+const ctx = { keyId: 'k1', organizationId: 'o1', departmentIds: ['d1', 'd2'], creatorId: 'u1', creatorDepartmentId: 'd1' };
 const NOW = Date.parse('2026-11-11T03:00:00Z');
 
 beforeEach(() => { vi.clearAllMocks(); });
@@ -108,6 +108,12 @@ describe.skipIf(!url)('호출 기록 CHECK (0086, 시험 DB)', () => {
     const sql = readFileSync('supabase/migrations/0086_org_api_more_endpoints.sql', 'utf8');
     await db.query(sql);
     await db.query(sql);
+    // 0086만 다시 걸면 뒤 마이그레이션(0099 'documents'·0100 'documents_write'·0101 'chat'·0104 'documents_delete')이 넓힌 CHECK가 좁아진다 — 다른 시험과 같은 DB라 뒤 것까지 다시 건다
+    await db.query(readFileSync('supabase/migrations/0099_org_api_documents_scope.sql', 'utf8'));
+    await db.query(readFileSync('supabase/migrations/0100_org_api_documents_write.sql', 'utf8'));
+    await db.query(readFileSync('supabase/migrations/0101_org_api_chat_scope.sql', 'utf8'));
+    await db.query(readFileSync('supabase/migrations/0104_org_api_documents_delete.sql', 'utf8'));
+    await db.query(readFileSync('supabase/migrations/0105_org_api_chat_attachments.sql', 'utf8'));
   });
   afterAll(async () => { await db?.end(); });
   it('새 끝점 셋은 받고 모르는 끝점은 거절', async () => {

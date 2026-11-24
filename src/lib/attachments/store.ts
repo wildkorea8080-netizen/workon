@@ -174,7 +174,7 @@ function objectPaths(rows: StoredPaths[]): string[] {
 export async function createUpload(
   actor: { userId: string; departmentId: string; organizationId: string },
   input: { fileName: string; size: number }
-): Promise<{ ok: true; id: string; path: string; token: string } | Failure> {
+): Promise<{ ok: true; id: string; path: string; token: string; signedUrl?: string; mimeType?: string } | Failure> {
   const fileName = sanitizeFileName(input.fileName);
   if (!fileName) return { ok: false, status: 400, message: MSG_BAD_NAME };
   const refused = refusedFormatMessage(fileName);
@@ -246,7 +246,8 @@ export async function createUpload(
     return { ok: false, status: 500, message: MSG_RETRY };
   }
 
-  return { ok: true, id, path: storage, token: data.token };
+  // 기관 API 첨부(0105)는 브라우저 SDK 없이 PUT하므로 서명 주소 전체와 형식을 함께 돌려준다(화면은 token만 쓴다)
+  return { ok: true, id, path: storage, token: data.token, signedUrl: data.signedUrl, mimeType: MIME_BY_EXT[ext] };
 }
 
 // ── 확인 ─────────────────────────────────────────────────────

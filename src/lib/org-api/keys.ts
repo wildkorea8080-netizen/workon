@@ -54,21 +54,27 @@ export interface OrgApiContext {
   organizationId: string;
   /** 키를 만든 관리자의 관리 범위(기관 전체 관리자라 기관의 모든 부서) */
   departmentIds: string[];
+  /** 키를 만든 기관 전체 관리자 — 쓰기 끝점(0100)이 이 사람의 이름으로 문서를 올린다 */
+  creatorId: string;
+  creatorDepartmentId: string;
 }
 
-export type OrgApiResponse = { status: number; body: Record<string, unknown>; headers?: Record<string, string> };
+/** `stream`이 있으면 몸 대신 그 흐름으로 답한다(비서에게 묻기의 스트리밍 — 2026-11-24, 확인을 마친 뒤에만) */
+export type OrgApiResponse = { status: number; body: Record<string, unknown>; headers?: Record<string, string>; stream?: ReadableStream<Uint8Array> };
 
-const fail = (status: number, message: string): OrgApiResponse => ({ status, body: { ok: false, error: { message } } });
+const fail = (status: number, message: string, code?: string): OrgApiResponse => ({ status, body: { ok: false, error: code ? { message, code } : { message } } });
 
 /**
  * 호출 하나를 확인하고 `run`으로 숫자를 센다. 차지한 호출은 결과 상태와 함께 기록한다(기록 실패는 응답을 바꾸지 않는다).
- * `run`이 `{ status, message }`를 돌려주면 그 오류로 답한다(입력 오류 400 등)
+ * `run`이 `{ status, message, code? }`를 돌려주면 그 오류로 답한다(입력 오류 400 등 — `code`는 밖의 시스템이 가를 짧은 이름, 예: documents_unavailable)
  */
 export async function handleOrgApiCall(
   deps: OrgApiDeps,
   request: { authorization: string | null; ip: string | null },
   endpoint: OrgApiEndpoint,
-  run: (ctx: OrgApiContext) => Promise<{ data: unknown } | { status: number; message: string }>,
+  run: (ctx: OrgApiContext) => Promise<{ data: unknown } | { stream: ReadableStream<Uint8Array> } | { status: number; message: string; code?: string }>,
+  /** 쓰기 끝점(0100) — 성공 상태(201)·실패 글을 정한다. 없으면 200·'통계를 집계하지 못했습니다' */
+  options: { successStatus?: number; failureMessage?: string } = {},
 ): Promise<OrgApiResponse> {
   const token = bearerOrgApiToken(request.authorization);
   if (!token) return fail(401, ORG_API_INVALID_TOKEN);
@@ -109,12 +115,14 @@ export async function handleOrgApiCall(
   if (!departmentIds.length) return respond(fail(403, ORG_API_CREATOR_UNAVAILABLE));
 
   try {
-    const out = await run({ keyId: key.id, organizationId: key.organization_id, departmentIds });
-    if ('message' in out) return respond(fail(out.status, out.message));
-    return respond({ status: 200, body: { ok: true, data: out.data } });
+    const out = await run({ keyId: key.id, organizationId: key.organization_id, departmentIds, creatorId: creator!.id, creatorDepartmentId: creator!.department_id! });
+    if ('message' in out) return respond(fail(out.status, out.message, out.code));
+    // 흐름은 연 때를 200으로 기록한다(흐름 안의 실패는 error 사건으로 — 상태 코드는 이미 보냈다)
+    if ('stream' in out) return respond({ status: 200, body: {}, stream: out.stream });
+    return respond({ status: options.successStatus ?? 200, body: { ok: true, data: out.data } });
   } catch (error) {
     console.error('[org-api]', endpoint, error instanceof Error ? error.message : error);
-    return respond(fail(500, '통계를 집계하지 못했습니다. 잠시 뒤 다시 호출해 주세요.'));
+    return respond(fail(500, options.failureMessage ?? '통계를 집계하지 못했습니다. 잠시 뒤 다시 호출해 주세요.'));
   }
 }
 

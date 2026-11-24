@@ -34,6 +34,7 @@ import { isImeComposing } from '@/lib/ime';
 import { readRechecked, type RecheckedNumber } from '@/lib/assistant/number-research';
 import { readRevision, revisionEligibility, type RevisionView } from '@/lib/assistant/answer-revise-spec';
 import AnswerRevision from './AnswerRevision';
+import AnswerExport from './AnswerExport';
 
 interface ToolLink {
   title: string;
@@ -805,6 +806,10 @@ export default function ChatInterface({
             )}
             {msg.appSteps && <AppStepResults steps={msg.appSteps} />}
             {conversationId && msg.role === 'assistant' && !msg.appDraft && <AppResumeLink agentId={selectedAgent.id} conversationId={conversationId} messageId={msg.id} steps={msg.appSteps} inputs={msg.appInputs} />}
+            {/* 일반 대화 답변도 한글 파일로(2026-11-23) — 앱 결과는 아래 큰 칸, 그 밖의 저장된 답은 작은 단추 */}
+            {conversationId && msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && !(selectedAgent.app_definition || msg.appSteps) && (
+              <AnswerExport key={`export-${msg.savedId}`} conversationId={conversationId} messageId={msg.savedId} content={msg.content} revision={msg.revision ?? null} />
+            )}
             {conversationId && msg.role === 'assistant' && /^[0-9a-f-]{36}$/i.test(msg.id) && msg.content && (selectedAgent.app_definition || msg.appSteps) && appStepsCompleted(msg.appSteps) && <AppResultExport conversationId={conversationId} messageId={msg.id} content={msg.content} defaultTemplateId={(selectedAgent.app_definition as { exportTemplateId?: string } | null | undefined)?.exportTemplateId} />}
             </div>
           ))

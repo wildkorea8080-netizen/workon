@@ -31,6 +31,8 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/branding', '기관 전용 로그인 화면이 로그인 전에 기관명·로고를 그린다'],
   ['/branding/logo', '위와 같은 이유. org는 UUID로만 받고 경로를 재확인한다'],
   ['/signup', '가입 자체가 비인증 행위'],
+  ['/sso/[slug]/start', '기관 SSO 시작(0107) — 로그인 전이라 공개. 켜진 기관의 계정 서비스로 보낼 뿐 계정·세션을 만들지 않는다'],
+  ['/sso/callback', '기관 SSO 돌아옴(0107) — 로그인 전이라 공개. 서명한 상태 쿠키·state·id_token 서명·nonce가 자격이고, 이 기관에 이미 등록된 직원만 들인다'],
   ['/signup/invite-info', '초대 토큰으로 기관을 확인한다'],
   ['/register', '가입 자체가 비인증 행위'],
   ['/register/validate-token', '초대 토큰 검증'],
@@ -53,6 +55,12 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/v1/feedback-summary', '위와 같은 기관 통계 읽기 API(답변 평가 요약, 0086) — 같은 확인(handleOrgApiCall)'],
   ['/v1/app-runs', '위와 같은 기관 통계 읽기 API(입력형 앱 실행 현황 — 단계 이름·상태만, 0086) — 같은 확인(handleOrgApiCall)'],
   ['/v1/budget', '위와 같은 기관 통계 읽기 API(기관·부서 예산 소진, 0086) — 같은 확인(handleOrgApiCall)'],
+  ['/v1/documents', '위와 같은 기관 API(GET 문서함 목록 — 이름·읽기 상태·판·태그만, 본문·원본 없음, 나만의 비서 문서 제외, 0099; POST 올린 문서 등록, 0100) — 같은 확인(handleOrgApiCall, 범위 documents·documents_write)'],
+  ['/v1/chat', '위와 같은 기관 API(비서에게 묻기, 0101) — 같은 확인(handleOrgApiCall, 범위 chat). 묻는 사람은 키를 만든 기관 전체 관리자, 대화 실행기가 비서 권한·한도·금지어를 다시 본다'],
+  ['/v1/chat/attachments', '위와 같은 기관 API(묻기에 붙일 첨부 확인·읽기, 0105) — 같은 확인(handleOrgApiCall, 범위 chat). 첨부 주인은 키를 만든 기관 전체 관리자'],
+  ['/v1/chat/attachments/upload-url', '위와 같은 기관 API(묻기에 붙일 첨부 올리기 주소, 0105) — 같은 확인(handleOrgApiCall, 범위 chat)'],
+  ['/v1/documents/[id]', '위와 같은 기관 API(DELETE 문서 지우기, 0104) — 같은 확인(handleOrgApiCall, 범위 documents_delete). 지운 사람은 키를 만든 기관 전체 관리자, 공식·부서 비서의 문서만'],
+  ['/v1/documents/upload-url', '위와 같은 기관 API(문서 올리기 주소, 0100) — 같은 확인(handleOrgApiCall, 범위 documents_write). 올린 사람은 키를 만든 기관 전체 관리자'],
   ['/cron/noda-events', 'Vercel 예약 작업이 부르는 곳(하루 한 번 놓친 NODA 웹훅 다시 받기). CRON_SECRET Bearer 상수 시간 비교가 자격이고, 하는 일은 NODA 일 장부를 웹훅과 같은 조건부 처리로 반영하는 것뿐'],
 ]);
 

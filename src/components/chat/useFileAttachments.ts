@@ -120,7 +120,7 @@ export function useFileAttachments(enabled: boolean, maxFiles = MAX_ATTACHMENTS_
    * 화면 목록은 표시일 뿐이고 서버가 원본이 내 것인지 다시 본다
    */
   const addReused = useCallback(
-    (file: { kind: 'attachment' | 'generated'; id: string; file_name: string; size_bytes: number }) => {
+    (file: { kind: 'attachment' | 'generated' | 'library'; id: string; file_name: string; size_bytes: number }) => {
       setNotice(null);
       if (!enabled) return;
       const active = chipsRef.current.filter((c) => c.stage !== 'failed').length;
