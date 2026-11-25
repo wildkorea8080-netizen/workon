@@ -77,6 +77,18 @@
 
 시험: `tests/batch-0298.test.ts`.
 
+## 공유 자료함 — 여러 부서만 골라 함께 (2026-11-25, 0116)
+
+기관 전체 관리자가 '기관 정보' 화면의 '공유 자료함'(`LibrarySharesPanel` ← `GET`·`POST /api/admin/library-shares`, `PATCH`·`DELETE …/[id]`, `src/lib/library-shares.ts`)에서 이름(1~40자, 기관 안에서 하나)과 함께 쓸 부서(1~50곳)를 골라 만든다. 기관마다 50개, 한 곳에 파일 500개.
+
+- **누가 보나**: 지금 소속 부서가 그 목록에 든 직원(하위·상위 부서는 따로 골라야 함). 요청마다 `loadLibraryShares`(부서 → 공유 자료함, 이 기관 것만)로 든 곳을 읽어 요청자에 싣고(`libraryActorOr` — `src/lib/my-library-actor.ts`, 못 읽으면 503), 요청이 고른 공유 자료함(`share`)이 그 안에 있을 때만 다룬다(`placeActor` — 아니면 읽기 전에 404). 관리자도 자기 부서가 든 공유 자료함만 본다(관리 화면은 이름·부서·파일 수만).
+- **하는 일**: 부서 자료함과 같다 — 누구나 담고 다시 붙이고 내려받고, 이름·폴더 바꾸기·지우기·남의 파일 옮기기는 담은 사람이나 관리자, 폴더째 옮기기는 관리자. 다른 자료함(공유 자료함끼리 포함)으로 복사·옮기기(`to: 'shared'`, `toShare`)도 된다. 다시 붙이기·내려받기는 내 → 부서 → 기관 → 지금 부서가 든 공유 자료함 순(`findSharedRow`).
+- **자리 표시**: `my_library_files.space = 'shared'` + `share_id`(파일이 남은 공유 자료함은 지우지 못함 — 외래 키 RESTRICT, 화면도 409). 경로 `my-library/{기관}/s/{공유 자료함}/…`.
+- **고치기**: 부서를 빼면 그 부서 사람은 더 못 보고 파일은 남는다. 부서를 지우면 그 부서 줄만 빠진다(공유 자료함·파일은 남음). 담은 사람이 탈퇴해도 남는다. 만들기·고치기·지우기는 보안 로그 `library_share_changed`(medium), 대리 접근 중 403.
+- **화면**: 결과물 화면 자료함 탭 뒤에 내가 든 공유 자료함 이름 탭, 대화·입력형 앱 '지난 파일'에도 같은 탭(`GET /api/my-library/shares` — 못 읽으면 탭 없이 그렇다고 알림), 다른 자료함으로 보낼 곳에 공유 자료함.
+
+마이그레이션 **0116**: `library_shares`·`library_share_departments`(RLS 켜고 정책 없음·공개 키 권한 없음) + `my_library_files.share_id` + 자리 CHECK(`shared`는 `share_id`만, 다른 자리는 `share_id` 없음). 추가만, 여러 번 적용해도 안전, **0115 뒤·코드 배포 전에 반드시 적용** — 새 코드가 모든 자료함 요청에서 공유 자료함 목록을 읽어, 없으면 자료함 화면이 503. 시험: `tests/batch-0299.test.ts`.
+
 ## 마이그레이션 0103
 
 `my_library_files`(id·user_id·organization_id·folder(30자)·file_name(1~200자)·size_bytes(>0)·storage_path(유일, `my-library/` 접두)·source(`attachment`·`generated`)·시각) + 색인 `(user_id, created_at DESC, id DESC)`. 추가만, 여러 번 적용해도 안전, RLS 켜고 정책 없음·공개 키 권한 없음. **코드 배포 전에 적용** — 없으면 내 자료함 화면·담기만 실패한다(대화·지난 파일은 그대로).
@@ -90,12 +102,14 @@
 | `PATCH /api/my-library/[id] { file_name?, folder? }` | 이름·폴더 바꾸기 |
 | `POST /api/my-library/[id] { space, to, mode, folder? }` | 다른 자료함으로 복사·옮기기(201) |
 | `POST /api/my-library/transfer { space, to, mode, folder?, ids? \| fromFolder? }` | 여러 파일·폴더째 복사·옮기기(50개까지) |
+| `GET /api/my-library/shares` | 내가 든 공유 자료함(0116) |
+| `GET`·`POST /api/admin/library-shares`, `PATCH`·`DELETE …/[id]` | 공유 자료함 관리(기관 전체 관리자 — 보기는 관리자 누구나) |
 | `DELETE /api/my-library/[id]` | 지우기 |
 | `GET /api/my-library/[id]/original` | 내려받기(302) |
 
 ## 남은 것
 
-- 폴더는 3단계까지(0113). 폴더째 옮기기는 한 자료함 안에서만 — 다른 자료함으로는 파일 하나·고른 여러 파일·폴더째 복사·옮기기(위, 한 번에 50개). 공유는 부서 자료함(0106)·기관 자료함(0112, 기관 전체 관리자만 담음)까지 — 여러 부서만 골라 함께 쓰는 자료함은 없다.
+- 폴더는 3단계까지(0113). 폴더째 옮기기는 한 자료함 안에서만 — 다른 자료함으로는 파일 하나·고른 여러 파일·폴더째 복사·옮기기(위, 한 번에 50개). 공유는 부서 자료함(0106)·기관 자료함(0112, 기관 전체 관리자만 담음)·공유 자료함(0116, 고른 부서들 — 하위 부서를 자동으로 넣지는 않는다).
 - 내용 찾기는 없다(이름만). 자료함 파일을 문서 찾기(NODA)의 근거로 쓰지 않는다 — 붙였을 때 그 대화의 첨부로만 읽힌다.
 - 화면은 브라우저로 열어 보지 않았다(자동 시험만).
 
