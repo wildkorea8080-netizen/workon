@@ -4,12 +4,12 @@ import Link from 'next/link';
 import { api } from '@/lib/work/client';
 import { APP_MAX_FILES, renderAppInput, type AppDefinition } from '@/lib/apps/definition';
 import {
-  APP_MAX_SCHEDULES_PER_USER, FREQUENCY_LABELS, PAUSED_BY_USER, WEEKDAY_LABELS, describeSchedule, parseScheduleSpec,
-  type AppScheduleFrequency, type AppScheduleView,
+  APP_MAX_SCHEDULES_PER_USER, DEFAULT_SCHEDULE_TIME_ZONE, FREQUENCY_LABELS, PAUSED_BY_USER, SCHEDULE_MINUTES, SCHEDULE_TIME_ZONES, otherScheduleTimeZones, WEEKDAY_LABELS, describeSchedule, formatInZone, parseScheduleSpec, timeZoneLabel,
+  type AppScheduleFrequency, type AppScheduleView, type ScheduleTimeZone,
 } from '@/lib/apps/schedule-spec';
 
 /**
- * 실행 화면 아래 '이 입력으로 예약' — 지금 폼의 입력값을 저장해 정해진 시각(한국 시간)에 자동 실행한다.
+ * 실행 화면 아래 '이 입력으로 예약' — 지금 폼의 입력값을 저장해 정해진 시각(고른 시간대 — 기본 한국 시간, 0119)에 자동 실행한다.
  * 지금 붙인(읽힌) 파일은 예약에 사본으로 저장되고 실행마다 새로 붙는다(0073). 문서함에서 고른 문서는 함께 저장되고, 실행 때마다 그 문서의
  * 지금 판으로 읽는다(0062). 파일·문서는 합쳐 3개까지, 파일이 필수인 앱은 둘 중 하나가 있어야 예약할 수 있다. 검사는 서버가 다시 한다
  */
@@ -28,7 +28,10 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
   const [open, setOpen] = useState(Boolean(editing));
   const [frequency, setFrequency] = useState<AppScheduleFrequency>(editing?.spec.frequency ?? 'weekdays');
   const [weekday, setWeekday] = useState(editing?.spec.weekday ?? 1); const [monthDay, setMonthDay] = useState(editing?.spec.monthDay ?? 1);
-  const [hour, setHour] = useState(editing?.spec.hour ?? 9); const [minute, setMinute] = useState<0 | 30>(editing?.spec.minute ?? 0);
+  const [hour, setHour] = useState(editing?.spec.hour ?? 9); const [minute, setMinute] = useState<number>(editing?.spec.minute ?? 0);
+  // 목록 밖 시간대(그 밖의 시간대) — 브라우저가 아는 IANA 이름 중 DB 꼴에 맞는 것
+  const [otherZones] = useState<string[]>(() => otherScheduleTimeZones());
+  const [timeZone, setTimeZone] = useState<ScheduleTimeZone>(editing?.spec.timeZone ?? DEFAULT_SCHEDULE_TIME_ZONE);
   const [notifyOnSuccess, setNotifyOnSuccess] = useState(editing?.notifyOnSuccess ?? false);
   const [exportHwpx, setExportHwpx] = useState(editing?.exportHwpx ?? false);
   const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
   const fileCount = keepIds.length + attachmentIds.length;
   const needsFile = Boolean(definition.attachments?.required) && documentIds.length === 0 && fileCount === 0;
   const tooMany = fileCount + documentIds.length > APP_MAX_FILES;
-  const spec = parseScheduleSpec({ frequency, weekday, month_day: monthDay, hour, minute });
+  const spec = parseScheduleSpec({ frequency, weekday, month_day: monthDay, hour, minute, time_zone: timeZone });
 
   async function save() {
     setError(null); setSaved(null);
@@ -50,14 +53,14 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
     if (needsFile) { setError(library ? '이 앱은 파일이 필요합니다 — 예약하려면 파일을 붙이거나 문서함에서 문서를 골라 주세요.' : '이 앱은 파일이 필요합니다 — 예약하려면 위에서 파일을 붙여 주세요.'); return; }
     if (tooMany) { setError(`예약에는 파일·문서를 합쳐 ${APP_MAX_FILES}개까지 저장할 수 있습니다.`); return; }
     setSaving(true);
-    const result = await api<AppScheduleView>(editing ? `/api/apps/schedules/${encodeURIComponent(editing.id)}` : '/api/apps/schedules', { method: editing ? 'PUT' : 'POST', json: { agent_id: agentId, app_version: appVersion, inputs: values, ...(documentIds.length ? { document_ids: documentIds } : {}), ...(attachmentIds.length ? { attachment_ids: attachmentIds } : {}), ...(editing ? { file_ids: keepIds } : {}), frequency, weekday, month_day: monthDay, hour, minute, notify_on_success: notifyOnSuccess, export_hwpx: exportHwpx } });
+    const result = await api<AppScheduleView>(editing ? `/api/apps/schedules/${encodeURIComponent(editing.id)}` : '/api/apps/schedules', { method: editing ? 'PUT' : 'POST', json: { agent_id: agentId, app_version: appVersion, inputs: values, ...(documentIds.length ? { document_ids: documentIds } : {}), ...(attachmentIds.length ? { attachment_ids: attachmentIds } : {}), ...(editing ? { file_ids: keepIds } : {}), frequency, weekday, month_day: monthDay, hour, minute, time_zone: timeZone, notify_on_success: notifyOnSuccess, export_hwpx: exportHwpx } });
     setSaving(false);
     if (result.ok) setSaved(result.data); else setError(result.error.message);
   }
 
   if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)} className="mt-4 text-sm font-semibold text-ws-accent-text disabled:opacity-40">이 입력으로 예약 실행 걸기</button>;
   return <fieldset disabled={disabled || saving} className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-    <legend className="px-1 text-sm font-semibold">{editing ? '예약 고치기 (한국 시간)' : '예약 실행 (한국 시간)'}</legend>
+    <legend className="px-1 text-sm font-semibold">{editing ? `예약 고치기 (${timeZoneLabel(timeZone)})` : `예약 실행 (${timeZoneLabel(timeZone)})`}</legend>
     {editing && <p className="text-xs leading-5 text-slate-600">지금 입력{library ? '·고른 문서' : ''}·시각과 지금 앱 판으로 이 예약을 고칩니다. 다음 실행 시각은 저장한 때부터 다시 셉니다. {editing.status === 'paused' && editing.pausedReason === PAUSED_BY_USER ? '직접 멈춘 예약이라 고친 뒤에도 멈춰 있습니다 — 목록에서 다시 켜 주세요.' : editing.status === 'paused' ? '고쳐 저장하면 다시 켜집니다.' : ''}</p>}
     {library && <p className="text-xs leading-5 text-slate-600">{documentIds.length ? `문서함에서 고른 문서 ${documentIds.length}개를 함께 저장합니다 — 실행 때마다 그 문서의 지금 판(새 판이 시행되면 새 판)으로 읽습니다.` : '문서함에서 문서를 고르면 함께 저장됩니다.'}</p>}
     {acceptsFiles && <p className="text-xs leading-5 text-slate-600">{attachmentIds.length ? `지금 붙인 파일 ${attachmentIds.length}개를 예약에 사본으로 저장합니다 — 실행 때마다 이 파일을 새로 붙여 실행합니다(나중에 원래 파일을 고쳐도 예약은 저장한 사본을 씁니다).` : hasUploads ? '파일을 읽는 중입니다 — 읽기를 마친 파일만 예약에 저장됩니다.' : '위에서 파일을 붙이면 예약에 함께 저장됩니다.'} 파일·문서는 합쳐 {APP_MAX_FILES}개까지.</p>}
@@ -67,8 +70,10 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
       <label className="text-sm">주기<select aria-label="예약 주기" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={frequency} onChange={e => setFrequency(e.target.value as AppScheduleFrequency)}>{(Object.keys(FREQUENCY_LABELS) as AppScheduleFrequency[]).map(f => <option key={f} value={f}>{FREQUENCY_LABELS[f]}</option>)}</select></label>
       {frequency === 'weekly' && <label className="text-sm">요일<select aria-label="요일" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={weekday} onChange={e => setWeekday(Number(e.target.value))}>{WEEKDAY_LABELS.map((label, i) => <option key={label} value={i}>{label}요일</option>)}</select></label>}
       {frequency === 'monthly' && <label className="text-sm">날<select aria-label="날" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={monthDay} onChange={e => setMonthDay(Number(e.target.value))}>{Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}일</option>)}</select></label>}
-      <label className="text-sm">시각<span className="mt-1 flex gap-2"><select aria-label="시" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={hour} onChange={e => setHour(Number(e.target.value))}>{Array.from({ length: 24 }, (_, i) => i).map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>)}</select><select aria-label="분" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={minute} onChange={e => setMinute(Number(e.target.value) === 30 ? 30 : 0)}><option value={0}>00분</option><option value={30}>30분</option></select></span></label>
+      <label className="text-sm">시각<span className="mt-1 flex gap-2"><select aria-label="시" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={hour} onChange={e => setHour(Number(e.target.value))}>{Array.from({ length: 24 }, (_, i) => i).map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}시</option>)}</select><select aria-label="분" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={minute} onChange={e => setMinute(Number(e.target.value))}>{SCHEDULE_MINUTES.map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}분</option>)}</select></span></label>
+      <label className="text-sm">시간대<select aria-label="시간대" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2" value={timeZone} onChange={e => setTimeZone(e.target.value as ScheduleTimeZone)}><optgroup label="자주 쓰는 시간대">{Object.keys(SCHEDULE_TIME_ZONES).map(tz => <option key={tz} value={tz}>{timeZoneLabel(tz)}</option>)}</optgroup>{(otherZones.length > 0 || !(timeZone in SCHEDULE_TIME_ZONES)) && <optgroup label="그 밖의 시간대(IANA 이름)">{!(timeZone in SCHEDULE_TIME_ZONES) && !otherZones.includes(timeZone) && <option value={timeZone}>{timeZone}</option>}{otherZones.map(tz => <option key={tz} value={tz}>{tz}</option>)}</optgroup>}</select></label>
     </div>
+    {timeZone !== DEFAULT_SCHEDULE_TIME_ZONE && <p className="text-xs leading-5 text-slate-600">고른 시간대의 벽시계로 돕니다 — 서머타임이 있으면 그에 맞춰 한국 시각이 바뀝니다(없는 시각인 날은 한 시간 뒤, 두 번 오는 시각인 날은 앞의 것에 한 번).</p>}
     <label className="flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" className="mt-0.5" checked={notifyOnSuccess} onChange={e => setNotifyOnSuccess(e.target.checked)} /><span>실행을 마치면 메일로 알림 받기 — 앱·시각과 결과 보기 링크만 보냅니다(결과 글은 메일에 싣지 않음). 실패·멈춤 메일은 이 칸과 상관없이 갑니다.</span></label>
     <label className="flex items-start gap-2 text-xs leading-5 text-slate-700"><input type="checkbox" className="mt-0.5" checked={exportHwpx} onChange={e => setExportHwpx(e.target.checked)} /><span>결과를 한글(HWPX) 파일로도 만들기 — 실행마다 표준 보고서 파일을 만들어 결과물 화면 '대화에서 만든 파일'에 둡니다(완료 메일을 받으면 파일 받기 단추도 붙습니다).</span></label>
     <div className="flex flex-wrap items-center gap-3">
@@ -76,6 +81,6 @@ export default function AppScheduleForm({ agentId, appVersion, definition, value
       {editing ? <Link href="/apps/schedules" className="text-sm text-slate-500">예약 목록으로</Link> : <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500">닫기</button>}
     </div>
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
-    {saved && <p role="status" className="text-xs text-teal-800">{editing ? '예약을 고쳤습니다' : '예약했습니다'} — {saved.description}{saved.status === 'paused' ? '(멈춰 있음)' : ''}, 다음 실행 {new Date(saved.nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}. <Link href="/apps/schedules" className="font-semibold underline">앱 예약 목록</Link></p>}
+    {saved && <p role="status" className="text-xs text-teal-800">{editing ? '예약을 고쳤습니다' : '예약했습니다'} — {saved.description}{saved.status === 'paused' ? '(멈춰 있음)' : ''}, 다음 실행 {new Date(saved.nextRunAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}(한국 시간){saved.spec.timeZone !== DEFAULT_SCHEDULE_TIME_ZONE ? ` · 현지 ${formatInZone(saved.nextRunAt, saved.spec.timeZone)}` : ''}. <Link href="/apps/schedules" className="font-semibold underline">앱 예약 목록</Link></p>}
   </fieldset>;
 }

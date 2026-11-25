@@ -44,7 +44,7 @@ const check = (token: string) => verifyLogoutToken(token, { issuer: ISSUER, clie
 
 describe('logout_token 검증', () => {
   it('맞으면 sub와 로그아웃 시각(iat)', () => {
-    expect(check(jwt(logoutClaims()))).toEqual({ ok: true, subject: 'kc-user-1', loggedOutAtMs: NOW - 5000 });
+    expect(check(jwt(logoutClaims()))).toEqual({ ok: true, subject: 'kc-user-1', sid: 'sess-1', loggedOutAtMs: NOW - 5000 });
     // 시계가 조금 앞선 계정 서비스 — 로그아웃 시각은 지금보다 늦지 않게
     expect(check(jwt(logoutClaims({ iat: NOW / 1000 + 60 })))).toMatchObject({ ok: true, loggedOutAtMs: NOW });
     expect(check(jwt(logoutClaims({ aud: ['x', CLIENT] })))).toMatchObject({ ok: true });
@@ -57,7 +57,8 @@ describe('logout_token 검증', () => {
     expect(check(jwt(logoutClaims({ events: { [BACKCHANNEL_LOGOUT_EVENT]: 'yes' } })))).toEqual({ ok: false, reason: 'events' });
     // id_token을 logout_token으로 돌려쓰지 못하게 — nonce가 있으면 거절
     expect(check(jwt(logoutClaims({ nonce: 'n' })))).toEqual({ ok: false, reason: 'nonce' });
-    expect(check(jwt(logoutClaims({ sub: undefined })))).toEqual({ ok: false, reason: 'no_sub' });
+    // sub도 sid도 없으면 거절(0118부터 sid만 온 토큰은 받는다 — tests/batch-0301.test.ts)
+    expect(check(jwt(logoutClaims({ sub: undefined, sid: undefined })))).toEqual({ ok: false, reason: 'no_sub_sid' });
     expect(check(jwt(logoutClaims({ iat: NOW / 1000 - 11 * 60 })))).toEqual({ ok: false, reason: 'stale' });
     expect(check(jwt(logoutClaims({ iat: NOW / 1000 + 600 })))).toEqual({ ok: false, reason: 'iat' });
     expect(check(jwt(logoutClaims({ iat: undefined })))).toEqual({ ok: false, reason: 'iat' });
@@ -120,8 +121,8 @@ describe('back-channel 로그아웃 받기', () => {
     const forged = bcIo();
     expect(await handleBackchannelLogout(jwt(logoutClaims(), other.privateKey), forged.io)).toEqual({ status: 400, ended: 0 });
     expect(forged.calls.subjects).toEqual([]);
-    // 서명은 맞아도 sid만 온 토큰(이 사람을 찾을 수 없음)
-    expect(await handleBackchannelLogout(jwt(logoutClaims({ sub: undefined })), bcIo().io)).toEqual({ status: 400, ended: 0 });
+    // 서명은 맞아도 sub도 sid도 없는 토큰(이 사람을 찾을 수 없음) — sid만 온 토큰은 0118부터 받는다(batch-0301)
+    expect(await handleBackchannelLogout(jwt(logoutClaims({ sub: undefined, sid: undefined })), bcIo().io)).toEqual({ status: 400, ended: 0 });
   });
   it('설정·공개키·직원을 못 읽거나 못 적으면 503(계정 서비스가 다시 보낸다)', async () => {
     const fail = async () => { throw new Error('db'); };

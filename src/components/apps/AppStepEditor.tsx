@@ -1,6 +1,6 @@
 'use client';
 import type { Dispatch, SetStateAction } from 'react';
-import { APP_RESEARCH_PER_ROUND, APP_RESEARCH_ROUNDS_MAX, APP_RESEARCH_TOOLS_MAX, researchToolAllowed, APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, APP_LOOKUP_TAGS_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
+import { APP_RESEARCH_PER_ROUND, APP_RESEARCH_ROUNDS_MAX, APP_RESEARCH_TOOLS_MAX, researchToolAllowed, APP_CLASSIFY_LABEL_MAX, APP_CLASSIFY_MAX, APP_REPEAT_MAX, repeatsFiles, APP_CONDITION_LABELS, APP_LOOKUP_ARTICLE_MAX, APP_LOOKUP_QUERY_MAX, APP_LOOKUP_TOOLS, APP_MAX_BRANCHES, APP_MAX_RULES, APP_MAX_STEPS, APP_LOOP_ROUNDS_MAX, APP_LOOPS_PER_RUN, branchBackIndex, branchJumpIndex, conditionFields, conditionMode, conditionOpsFor, conditionRules, describeLookupQuery, isLookupTool, lookupStepRefs, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_MAX, APP_LOOKUP_REFINE_TOTAL, APP_LOOKUP_TAGS_MAX, makeCondition, type AppBranch, type AppConditionMode, type AppConditionOp, type AppDefinition, type AppField, type AppLookupTool, type AppRule, type AppStep, type AppStepCondition } from '@/lib/apps/definition';
 /** 반복 고르기의 '첨부 파일마다' 값 — 항목 키(영문·숫자·밑줄)와 겹치지 않는다 */
 const FILES = '#files';
 const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm';
@@ -72,6 +72,16 @@ function BranchEditor({ branch, fields, label, stepIndex, steps, onChange, onRem
   // 건너갈 단계(2026-11-08) — 이 단계보다 두 단계 이상 뒤만. 단계 순서를 바꿔 맞지 않게 된 값은 저장 전에 알린다
   const targets = steps.map((s, i) => ({ number: i + 1, name: s.name })).filter(t => t.number >= stepIndex + 3);
   const brokenNext = branch.next !== undefined && branchJumpIndex(stepIndex, branch, steps.length) === null;
+  // 되돌아갈 단계(2026-11-25) — 이 단계 또는 앞, 마지막 단계는 없음
+  const backTargets = stepIndex < steps.length - 1 ? steps.slice(0, stepIndex + 1).map((s, i) => ({ number: i + 1, name: s.name })) : [];
+  const brokenBack = branch.back !== undefined && branchBackIndex(stepIndex, branch, steps.length) === null;
+  const afterValue = branch.back !== undefined ? `b${branch.back}` : branch.next !== undefined ? `n${branch.next}` : '';
+  const setAfter = (value: string) => {
+    const { next: _next, back: _back, rounds: _rounds, ...rest } = branch; void _next; void _back; void _rounds;
+    if (value.startsWith('n')) onChange({ ...rest, next: Number(value.slice(1)) });
+    else if (value.startsWith('b')) onChange({ ...rest, back: Number(value.slice(1)), rounds: branch.rounds ?? 1 });
+    else onChange(rest);
+  };
   const mode = conditionMode(branch.when);
   const changeRules = (next: AppRule[], nextMode: AppConditionMode = mode) => { if (next.length) onChange({ ...branch, when: makeCondition(nextMode, next) }); };
   return <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
@@ -85,12 +95,21 @@ function BranchEditor({ branch, fields, label, stepIndex, steps, onChange, onRem
     {rules.map((rule, r) => <RuleEditor key={r} rule={rule} fields={fields} label={`${label} 조건 ${r + 1}`} disabled={false} onChange={next => changeRules(rules.map((x, i) => i === r ? next : x))} onRemove={() => changeRules(rules.filter((_, i) => i !== r))} />)}
     {rules.length < APP_MAX_RULES && <button type="button" className="text-xs text-ws-accent-text" onClick={() => changeRules([...rules, defaultRule(fields[0])])}>+ 조건 추가 ({MODE_JOINER[mode]})</button>}
     <textarea className={input} aria-label={`${label} 처리 지시`} maxLength={2000} rows={3} placeholder="이 갈래일 때의 처리 지시" value={branch.instruction} onChange={e => onChange({ ...branch, instruction: e.target.value })} />
-    {(targets.length > 0 || branch.next !== undefined) && <label className="block text-xs text-slate-500">이 갈래로 처리한 뒤<select aria-label={`${label} 다음 단계`} className={`${input} mt-1`} value={branch.next ?? ''} onChange={e => { const { next: _next, ...rest } = branch; void _next; onChange(e.target.value ? { ...rest, next: Number(e.target.value) } : rest); }}>
+    {(targets.length > 0 || backTargets.length > 0 || branch.next !== undefined || branch.back !== undefined) && <label className="block text-xs text-slate-500">이 갈래로 처리한 뒤<select aria-label={`${label} 다음 단계`} className={`${input} mt-1`} value={afterValue} onChange={e => setAfter(e.target.value)}>
       <option value="">바로 다음 단계로</option>
-      {targets.map(t => <option key={t.number} value={t.number}>단계 {t.number}({t.name})로 건너가기 — 사이 단계는 건너뜀</option>)}
-      {brokenNext && <option value={branch.next}>단계 {branch.next}(지금은 갈 수 없음)</option>}
+      {targets.map(t => <option key={`n${t.number}`} value={`n${t.number}`}>단계 {t.number}({t.name})로 건너가기 — 사이 단계는 건너뜀</option>)}
+      {backTargets.map(t => <option key={`b${t.number}`} value={`b${t.number}`}>단계 {t.number}({t.name})로 되돌아가기 — 거기서부터 다시</option>)}
+      {brokenNext && <option value={`n${branch.next}`}>단계 {branch.next}(지금은 갈 수 없음)</option>}
+      {brokenBack && <option value={`b${branch.back}`}>단계 {branch.back}로 되돌아가기(지금은 갈 수 없음)</option>}
     </select></label>}
+    {branch.back !== undefined && !brokenBack && <>
+      <label className="block text-xs text-slate-500">되돌아갈 횟수<select aria-label={`${label} 되돌아갈 횟수`} className={`${input} mt-1`} value={branch.rounds ?? 1} onChange={e => onChange({ ...branch, rounds: Number(e.target.value) })}>
+        {Array.from({ length: APP_LOOP_ROUNDS_MAX }, (_, i) => i + 1).map(n => <option key={n} value={n}>최대 {n}번</option>)}
+      </select></label>
+      <p className="text-xs leading-5 text-slate-500">이 갈래로 처리한 결과를 참고 자료로 넘겨 단계 {branch.back}부터 다시 합니다. 조건이 바뀌지 않으면(예: 앞 분류 단계의 판단이 그대로면) 정한 횟수만큼 되풀이하고, 그다음에는 바로 다음 단계로 갑니다. 한 실행에서 되돌아가기는 합쳐 {APP_LOOPS_PER_RUN}번까지이고, 되돌아간 실행은 멈추면 이어 실행하지 않고 처음부터 다시 합니다.</p>
+    </>}
     {brokenNext && <p role="alert" className="text-xs text-red-700">단계 순서가 바뀌어 건너갈 단계가 맞지 않습니다 — 다시 골라 주세요.</p>}
+    {brokenBack && <p role="alert" className="text-xs text-red-700">단계 순서가 바뀌어 되돌아갈 단계가 맞지 않습니다 — 다시 골라 주세요.</p>}
   </div>;
 }
 

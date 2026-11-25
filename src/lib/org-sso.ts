@@ -161,12 +161,13 @@ export const LOGOUT_TOKEN_MAX_LENGTH = 16_000;
 
 /**
  * logout_token 검증(0114) — 서명(id_token과 같은 규칙)·iss·aud·iat(앞서지 않고 10분 안)·exp(있으면)·events에 back-channel 로그아웃 이벤트·
- * nonce 없음·sub(이 사람을 찾는 열쇠 — 세션 번호 sid만 오는 토큰은 받지 않는다). 맞으면 sub와 로그아웃 시각(iat, 지금보다 늦지 않게)
+ * nonce 없음·sub나 sid 중 하나 이상(이 사람을 찾는 열쇠 — 0118부터 세션 번호 sid만 오는 토큰도 받는다). 맞으면 sub·sid(없으면 null)와
+ * 로그아웃 시각(iat, 지금보다 늦지 않게)
  */
 export function verifyLogoutToken(
   token: string,
   expect: { issuer: string; clientId: string; keys: JsonWebKey[]; nowMs: number },
-): { ok: true; subject: string; loggedOutAtMs: number } | { ok: false; reason: string } {
+): { ok: true; subject: string | null; sid: string | null; loggedOutAtMs: number } | { ok: false; reason: string } {
   const signed = verifyJwtSignature(token, expect.keys);
   if (!signed.ok) return signed;
   const c = signed.claims;
@@ -180,8 +181,17 @@ export function verifyLogoutToken(
   const event = events && typeof events === 'object' && !Array.isArray(events) ? events[BACKCHANNEL_LOGOUT_EVENT] : undefined;
   if (!event || typeof event !== 'object' || Array.isArray(event)) return { ok: false, reason: 'events' };
   if (c.nonce !== undefined) return { ok: false, reason: 'nonce' };
-  if (typeof c.sub !== 'string' || !c.sub || c.sub.length > 255) return { ok: false, reason: 'no_sub' };
-  return { ok: true, subject: c.sub, loggedOutAtMs: Math.min(Math.floor(c.iat) * 1000, expect.nowMs) };
+  const subject = ssoKey(c.sub);
+  const sid = ssoKey(c.sid);
+  // 있는데 꼴이 틀리면(빈 글·255자 넘음·글 아님) 거절 — 없는 것과 다르다
+  if ((c.sub !== undefined && !subject) || (c.sid !== undefined && !sid)) return { ok: false, reason: 'bad_sub_sid' };
+  if (!subject && !sid) return { ok: false, reason: 'no_sub_sid' };
+  return { ok: true, subject, sid, loggedOutAtMs: Math.min(Math.floor(c.iat) * 1000, expect.nowMs) };
+}
+
+/** sub·sid 꼴 — 1~255자 글만 */
+function ssoKey(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 && v.length <= 255 ? v : null;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -244,6 +254,8 @@ export interface SsoIo {
   syncRole?(a: { userId: string; organizationId: string; departmentId: string; to: 'ADMIN' | 'USER'; group: string | null }): Promise<boolean>;
   /** (0114) 계정 서비스의 사용자 번호(sub) → 이 직원 — back-channel 로그아웃이 sub만 보내므로. 못 쓰면 던진다(로그인은 그대로) */
   rememberSubject?(a: { organizationId: string; issuer: string; subject: string; userId: string }): Promise<void>;
+  /** (0118) 계정 서비스의 세션 번호(sid) → 이 직원 — sid만 보내는 back-channel 로그아웃용. 못 쓰면 던진다(로그인은 그대로) */
+  rememberSession?(a: { organizationId: string; issuer: string; sid: string; userId: string }): Promise<void>;
   now(): number;
   random(bytes: number): Buffer;
 }
@@ -420,6 +432,15 @@ export async function finishSso(
         await reportFailure('subject', error, org.id);
       }
     }
+    // (0118) sid만 보내는 계정 서비스도 있어 sid → 직원도 적어 둔다(id_token에 sid가 있을 때만)
+    const sid = checked.claims.sid;
+    if (io.rememberSession && typeof sid === 'string' && sid && sid.length <= 255) {
+      try {
+        await io.rememberSession({ organizationId: org.id, issuer, sid, userId: user.id });
+      } catch (error) {
+        await reportFailure('session', error, org.id);
+      }
+    }
     await io.record('login', email, { id: user.id, departmentId });
     return { redirect: '/', session };
   } catch (error) {
@@ -589,6 +610,8 @@ export function defaultSsoLogoutIo(): SsoLogoutIo {
 // ── back-channel 로그아웃(0114) ─────────────────────────────────────────
 
 export const SSO_BACKCHANNEL_PATH = '/api/sso/backchannel-logout';
+/** (0118) 세션 번호 줄을 남기는 기간 — WORKON 기관 계정 로그인(30일)보다 하루 더 */
+export const SSO_SESSION_ROW_TTL_MS = 31 * 24 * 60 * 60 * 1000;
 
 export interface SsoBackchannelIo {
   /** 이 발급자의 SSO 설정들(켜짐과 상관없이 — 로그아웃은 끝내는 쪽이라) — 못 읽으면 던진다 */
@@ -597,13 +620,16 @@ export interface SsoBackchannelIo {
   publicHost: SsoIo['publicHost'];
   /** 기관·발급자·sub로 적어 둔 직원 id — 못 읽으면 던진다 */
   subjectUsers(a: { organizationId: string; issuer: string; subject: string }): Promise<string[]>;
+  /** (0118) 기관·발급자·sid로 적어 둔 직원 id — 못 읽으면 던진다. 없으면 sid만 온 토큰은 아무도 끝내지 않는다 */
+  sessionUsers?(a: { organizationId: string; issuer: string; sid: string }): Promise<string[]>;
   /** 기관 계정 로그아웃 시각을 적는다(지금 값보다 늦을 때만 — 다시 온 옛 토큰은 새 로그인을 끝내지 않게). 바꿨으면 true, 못 쓰면 던진다 */
   markLoggedOut(a: { userId: string; organizationId: string; atMs: number }): Promise<boolean>;
   now(): number;
 }
 
 /**
- * 계정 서비스가 보낸 logout_token(OIDC Back-Channel Logout)을 받아, 그 sub로 기관 계정 로그인한 직원의 로그아웃 시각을 적는다 —
+ * 계정 서비스가 보낸 logout_token(OIDC Back-Channel Logout)을 받아, 그 sub(없으면 sid — 0118)로 기관 계정 로그인한 직원의 로그아웃 시각을 적는다 —
+ * sid만 와도 그 세션 하나가 아니라 그 직원의 그 전 기관 계정 로그인을 모두 끝낸다(WORKON 로그인에 sid를 싣지 않아 하나만 가려 끝낼 수 없다 — 더 넓게 끝내는 쪽).
  * 미들웨어가 그 전에 기관 계정으로 들어온 WORKON 로그인을 끝낸다('sso_logged_out', 30초 안). 비밀번호 로그인·대리 접근은 그대로.
  * 서명 전에는 iss·aud로 설정만 고른다(그 값으로 무엇을 바꾸지 않음). 틀린 토큰 400, 못 읽음 503(계정 서비스가 다시 보낸다), 맞으면 200
  */
@@ -647,7 +673,11 @@ export async function handleBackchannelLogout(raw: unknown, io: SsoBackchannelIo
     if (!checked.ok) { reason = checked.reason; continue; }
     accepted = true;
     try {
-      const users = await io.subjectUsers({ organizationId: config.organization_id, issuer, subject: checked.subject });
+      const users = checked.subject
+        ? await io.subjectUsers({ organizationId: config.organization_id, issuer, subject: checked.subject })
+        : checked.sid && io.sessionUsers
+          ? await io.sessionUsers({ organizationId: config.organization_id, issuer, sid: checked.sid })
+          : [];
       for (const userId of users) {
         if (await io.markLoggedOut({ userId, organizationId: config.organization_id, atMs: checked.loggedOutAtMs })) ended += 1;
       }
@@ -677,6 +707,12 @@ export function defaultSsoBackchannelIo(): SsoBackchannelIo {
       const { data, error } = await supabaseAdmin.from('org_sso_subjects').select('user_id')
         .eq('organization_id', organizationId).eq('issuer', issuer).eq('subject', subject).limit(10);
       if (error) throw new SsoError('sso_unavailable', 'subject_read');
+      return ((data ?? []) as { user_id: string }[]).map((r) => r.user_id);
+    },
+    async sessionUsers({ organizationId, issuer, sid }) {
+      const { data, error } = await supabaseAdmin.from('org_sso_sessions').select('user_id')
+        .eq('organization_id', organizationId).eq('issuer', issuer).eq('sid', sid).limit(10);
+      if (error) throw new SsoError('sso_unavailable', 'session_read');
       return ((data ?? []) as { user_id: string }[]).map((r) => r.user_id);
     },
     async markLoggedOut({ userId, atMs }) {
@@ -761,6 +797,17 @@ export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null
         { onConflict: 'organization_id,issuer,subject' },
       );
       if (error) throw new SsoError('sso_unavailable', 'subject_write');
+    },
+    async rememberSession({ organizationId, issuer, sid, userId }) {
+      const { error } = await supabaseAdmin.from('org_sso_sessions').upsert(
+        { organization_id: organizationId, issuer, sid, user_id: userId, created_at: new Date().toISOString() },
+        { onConflict: 'organization_id,issuer,sid' },
+      );
+      if (error) throw new SsoError('sso_unavailable', 'session_write');
+      // 이 직원의 오래된 세션 번호는 치운다 — WORKON 로그인은 30일이라 그보다 오래된 줄은 끝낼 로그인이 없다(못 치우면 다음 로그인 때)
+      const { error: pruneError } = await supabaseAdmin.from('org_sso_sessions').delete()
+        .eq('user_id', userId).lt('created_at', new Date(Date.now() - SSO_SESSION_ROW_TTL_MS).toISOString());
+      if (pruneError) throw new SsoError('sso_unavailable', 'session_prune');
     },
     async syncRole({ userId, organizationId, departmentId, to, group }) {
       // 올리기는 일반 직원만, 내리기는 이 길로 올린 관리자만 — 조건부로(그 사이 손으로 바꿨으면 바꾸지 않음)

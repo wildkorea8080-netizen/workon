@@ -3,7 +3,7 @@
 // 중간 단계는 한 번(분류도 한 번), 조회 단계는 AI를 부르지 않고(조회로 따로 셈), 반복은 줄 수·파일 수만큼, 마지막 단계는 언제나 한 번.
 // 실행 조건이 입력만 보면 지금 입력으로 판정하고, 앞 분류 결과(@N)를 보면 미리 알 수 없어 '많으면'에만 넣는다.
 // 긴 첨부를 나눠 추리는 호출(조각마다)은 파일을 읽어 봐야 알아 숫자에 넣지 않고 따로 알린다. 화면도 쓰는 잎 모듈 — definition.ts만 가져온다
-import { branchJumpIndex, chooseBranch, conditionHolds, conditionRules, repeatItems, repeatsFiles, type AppDefinition, type AppStepCondition } from './definition';
+import { APP_LOOPS_PER_RUN, branchBackIndex, branchJumpIndex, branchRounds, chooseBranch, conditionHolds, conditionRules, repeatItems, repeatsFiles, type AppDefinition, type AppStepCondition } from './definition';
 
 export type AppCallEstimate = {
   /** 적어도 이만큼 AI를 부른다 */
@@ -24,10 +24,16 @@ export function estimateAppCalls(def: AppDefinition, inputs: Record<string, stri
   // 갈래의 건너가기(2026-11-08) — 입력만 보고 정해지면 사이 단계를 빼고, 분류 결과에 갈리거나 그 단계가 돌지 모르면 사이 단계는 '많으면'에만
   let skipUntil = -1;
   const maybeSkipped = new Set<number>();
+  // 되돌아가기(2026-11-25) — 되돌아가면 그 사이 단계를 다시 부른다. 한 실행에 합쳐 APP_LOOPS_PER_RUN번까지
+  let loopsMin = APP_LOOPS_PER_RUN; let loopsMax = APP_LOOPS_PER_RUN;
+  const callsAt = (i: number) => {
+    const s = steps[i];
+    return i === steps.length - 1 ? 1 : s.lookup ? 0 : s.research ? 1 : s.repeat ? (repeatsFiles(s.repeat) ? fileCount : repeatItems(inputs[s.repeat.field]).length) : 1;
+  };
   steps.forEach((step, index) => {
     if (index < skipUntil) return;
     const last = index === steps.length - 1;
-    const calls = last ? 1 : step.lookup ? 0 : step.research ? 1 : step.repeat ? (repeatsFiles(step.repeat) ? fileCount : repeatItems(inputs[step.repeat.field]).length) : 1;
+    const calls = callsAt(index);
     const lookup = !last && (step.lookup || step.research) ? 1 : 0;
     // 더 찾기(2026-11-09) — AI가 '없음'이라고 하면 덜 부르므로 '많으면'에만 센다
     // 조사 단계(2026-11-25) — 첫 라운드는 늘, 뒤 라운드는 AI가 '끝'이라고 하면 덜 부르므로 '많으면'에만
@@ -43,6 +49,18 @@ export function estimateAppCalls(def: AppDefinition, inputs: Record<string, stri
 
     function markJumps(runs: boolean) {
       if (last || !step.branches?.length) return;
+      // 되돌아가는 갈래 — 입력만으로 정해져 늘 돌면 정한 횟수만큼 반드시, 분류 결과에 갈리면 '많으면'에만
+      const fixed = runs && !step.branches.some((b) => onClassify(b.when));
+      for (const b of step.branches) {
+        const back = branchBackIndex(index, b, steps.length);
+        if (back === null) continue;
+        let span = 0;
+        for (let i = back; i <= index; i++) span += callsAt(i);
+        const sure = fixed && chooseBranch(step, inputs) === b;
+        const roundsMax = Math.min(branchRounds(b), loopsMax);
+        max += span * roundsMax; loopsMax -= roundsMax;
+        if (sure) { const roundsMin = Math.min(branchRounds(b), loopsMin); min += span * roundsMin; loopsMin -= roundsMin; }
+      }
       if (runs && !step.branches.some((b) => onClassify(b.when))) {
         const target = branchJumpIndex(index, chooseBranch(step, inputs), steps.length);
         if (target !== null) skipUntil = target;

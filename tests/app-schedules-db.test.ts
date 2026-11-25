@@ -44,7 +44,7 @@ describe.skipIf(!url)('앱 예약 DB (0048)', () => {
     await expect(insert({ frequency: 'weekly' })).rejects.toThrow(/check/i);
     await expect(insert({ frequency: 'daily', weekday: 1 })).rejects.toThrow(/check/i);
     await expect(insert({ frequency: 'monthly', month_day: 31 })).rejects.toThrow(/check/i);
-    await expect(insert({ run_minute: 15 })).rejects.toThrow(/check/i);
+    await expect(insert({ run_minute: 17 })).rejects.toThrow(/check/i); // 5분 단위만(0119)
     await expect(insert({ frequency: 'hourly' })).rejects.toThrow(/check/i);
     await expect(insert({ inputs: ['x'] })).rejects.toThrow(/check/i);
     const ok = await insert({ frequency: 'weekly', weekday: 1 });

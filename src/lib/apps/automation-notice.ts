@@ -32,7 +32,7 @@ async function targetLabel(n: AutomationNotice): Promise<string> {
     const name = (data as { name?: unknown } | null)?.name;
     return typeof name === 'string' && name.trim() ? `연동 '${name.trim()}'` : '앱 연동';
   }
-  const { data } = await supabaseAdmin.from('app_schedules').select('frequency, weekday, month_day, run_hour, run_minute').eq('id', n.targetId).maybeSingle();
+  const { data } = await supabaseAdmin.from('app_schedules').select('frequency, weekday, month_day, run_hour, run_minute, time_zone').eq('id', n.targetId).maybeSingle();
   try { return data ? `${describeSchedule(specOfRow(data as AppScheduleRowLike))} 예약` : '앱 예약'; } catch { return '앱 예약'; }
 }
 

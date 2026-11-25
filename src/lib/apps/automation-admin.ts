@@ -26,7 +26,7 @@ export * from '@/lib/apps/automation-admin-spec';
 
 const WEBHOOK_SELECT = 'id, name, token_prefix, status, expires_at, revoked_at, revoked_reason, last_used_at, use_count, last_status, created_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
 const BATCH_SELECT = 'id, name, status, total, stop_reason, created_at, finished_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
-const SCHEDULE_SELECT = 'id, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, consecutive_failures, run_count, created_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
+const SCHEDULE_SELECT = 'id, frequency, weekday, month_day, run_hour, run_minute, time_zone, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, consecutive_failures, run_count, created_at, department_id, agent:agents(name, tier), owner:users(full_name, deleted_at)';
 
 export type AdminResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 

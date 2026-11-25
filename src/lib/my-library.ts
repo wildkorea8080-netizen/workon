@@ -28,7 +28,7 @@ export * from '@/lib/my-library-spec';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COLUMNS = 'id, file_name, folder, size_bytes, source, created_at, user_id';
 /** 한 행을 다룰 때(보내기·원본) — 경로와 내용 글(0117, 보낼 때 함께 간다) */
-const ROW_COLUMNS = `${COLUMNS}, storage_path, content_text`;
+const ROW_COLUMNS = `${COLUMNS}, storage_path, content_text, content_checked_at`;
 
 /**
  * 요청자 — 부서 자료함은 이 부서, 관리자면 남이 담은 부서 파일도 고치고 지운다.
@@ -281,6 +281,8 @@ export async function saveToLibrary(
       storage_path: path,
       source: input.kind,
       content_text: libraryContentText(content),
+      // 읽었으면 확인한 때(0120) — 못 읽었으면 비워 두어 5분 실행기가 사본에서 다시 읽는다
+      content_checked_at: libraryContentText(content) ? new Date().toISOString() : null,
     });
     return { ok: true, file: toLibraryFile(row, actor.userId) };
   } catch {
@@ -496,8 +498,9 @@ async function sendRow(
       size_bytes: Number(row.size_bytes ?? 0),
       storage_path: path,
       source: row.source === 'generated' ? 'generated' : 'attachment',
-      // 내용 글도 함께 간다(0117) — 다시 읽지 않는다
+      // 내용 글도 함께 간다(0117) — 다시 읽지 않는다. 확인한 때(0120)도 그대로(원래 아직이면 새 사본도 실행기가 채운다)
       content_text: libraryContentText(row.content_text),
+      content_checked_at: typeof row.content_checked_at === 'string' ? row.content_checked_at : null,
     });
   } catch {
     await io.removeObject(path);

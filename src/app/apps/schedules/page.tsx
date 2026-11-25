@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import WorkShell, { Card, ErrorNote, PageTitle, StatusBadge } from '@/components/work/WorkShell';
 import { api, formatDateTime } from '@/lib/work/client';
-import { APP_MAX_SCHEDULES_PER_USER, SCHEDULE_ORG_DISABLED, SCHEDULE_ORG_STOPPED, scheduleBadge, type AppScheduleView } from '@/lib/apps/schedule-spec';
+import { APP_MAX_SCHEDULES_PER_USER, DEFAULT_SCHEDULE_TIME_ZONE, SCHEDULE_ORG_DISABLED, formatInZone, SCHEDULE_ORG_STOPPED, scheduleBadge, type AppScheduleView } from '@/lib/apps/schedule-spec';
 
 function Schedules() {
   const [items, setItems] = useState<AppScheduleView[]>([]); const [loading, setLoading] = useState(true);
@@ -29,12 +29,12 @@ function Schedules() {
     setBusy(null);
   }
   return <div className="mx-auto max-w-6xl px-5 py-9 md:px-9">
-    <PageTitle title="앱 예약" subtitle={`저장한 입력으로 입력형 앱을 정해진 시각(한국 시간)에 자동 실행합니다. 결과는 앱 실행 기록에 [예약] 제목으로 남습니다. 한 사람당 ${APP_MAX_SCHEDULES_PER_USER}개까지.`} action={<span className="flex gap-4"><Link href="/apps/webhooks" className="text-sm font-semibold text-ws-accent-text">앱 연동</Link><Link href="/apps" className="text-sm font-semibold text-ws-accent-text">업무 앱으로</Link></span>} />
+    <PageTitle title="앱 예약" subtitle={`저장한 입력으로 입력형 앱을 정해진 시각(예약마다 고른 시간대 — 기본 한국 시간)에 자동 실행합니다. 결과는 앱 실행 기록에 [예약] 제목으로 남습니다. 한 사람당 ${APP_MAX_SCHEDULES_PER_USER}개까지.`} action={<span className="flex gap-4"><Link href="/apps/webhooks" className="text-sm font-semibold text-ws-accent-text">앱 연동</Link><Link href="/apps" className="text-sm font-semibold text-ws-accent-text">업무 앱으로</Link></span>} />
     <ErrorNote message={error} />
     {notice && <p role="status" className="mt-3 rounded-lg bg-teal-50 p-3 text-sm text-teal-900">{notice}</p>}
     <div className="my-5 flex justify-end"><button type="button" disabled={loading} onClick={() => void load()} className="text-sm text-ws-accent-text disabled:opacity-40">새로고침</button></div>
     {loading ? <p role="status" className="py-10 text-center text-slate-500">예약을 불러오는 중…</p> : items.length ? <div className="space-y-4">{items.map(s => { const badge = scheduleBadge(s); return <Card key={s.id}>
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-ws-accent-text">{s.appName} · 앱 판 {s.appVersion}</p><h2 className="font-semibold">{s.description}</h2><p className="mt-2 text-xs text-slate-500">다음 실행 {s.status === 'active' ? formatDateTime(s.nextRunAt) : '—'} · 실행 {s.runCount}회{s.lastRunAt ? ` · 마지막 ${formatDateTime(s.lastRunAt)}` : ''}{s.notifyOnSuccess ? ' · 완료 메일 받음' : ''}{s.exportHwpx ? ' · 한글 파일도 만듦' : ''}{s.files.length ? ` · 저장한 파일 ${s.files.length}개` : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-2 text-xs font-medium text-ws-accent-text">{s.appName} · 앱 판 {s.appVersion}</p><h2 className="font-semibold">{s.description}</h2><p className="mt-2 text-xs text-slate-500">다음 실행 {s.status === 'active' ? `${formatDateTime(s.nextRunAt)}${s.spec.timeZone !== DEFAULT_SCHEDULE_TIME_ZONE ? `(한국 시간) · 현지 ${formatInZone(s.nextRunAt, s.spec.timeZone)}` : ''}` : '—'} · 실행 {s.runCount}회{s.lastRunAt ? ` · 마지막 ${formatDateTime(s.lastRunAt)}` : ''}{s.notifyOnSuccess ? ' · 완료 메일 받음' : ''}{s.exportHwpx ? ' · 한글 파일도 만듦' : ''}{s.files.length ? ` · 저장한 파일 ${s.files.length}개` : ''}</p></div><StatusBadge label={badge.label} tone={badge.tone} /></div>
       {s.heldByOrg && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-900">{s.orgStopped ? SCHEDULE_ORG_STOPPED : SCHEDULE_ORG_DISABLED}</p>}
       {s.status === 'paused' && s.pausedReason && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">{s.pausedReason}</p>}
       {s.overdue && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-900">예정 시각이 1시간 넘게 지났는데 실행되지 않았습니다. 실행기가 멈춘 것일 수 있으니 기관 관리자에게 알려 주세요.</p>}

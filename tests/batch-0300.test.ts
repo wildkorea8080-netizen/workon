@@ -135,7 +135,7 @@ describe('코드 모양', () => {
     expect(src).toContain("q.ilike('search_text', fileNamePattern(query))");
     expect(src).not.toContain("q.ilike('file_name'");
     expect(src).toContain('select(query ? `${COLUMNS}, content_text` : COLUMNS)');
-    expect(src).toContain('const ROW_COLUMNS = `${COLUMNS}, storage_path, content_text`;');
+    expect(src).toContain('const ROW_COLUMNS = `${COLUMNS}, storage_path, content_text, content_checked_at`;');
     expect(src).not.toContain('select(`${COLUMNS}, storage_path`)');
   });
   it('첨부는 읽어 둔 내용(loadExtract), 만든 파일은 원본을 다시 읽는다(readOriginalText — 스캔 PDF는 NODA로 보내지 않음)', () => {

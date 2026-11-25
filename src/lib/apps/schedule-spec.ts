@@ -1,6 +1,7 @@
 // src/lib/apps/schedule-spec.ts
 // 입력형 앱 예약의 '언제'(순수 함수 — 화면과 서버가 함께 쓴다. 아무것도 import하지 않는다).
-// 시각은 모두 한국 시간(KST, UTC+9) 기준이고 직원이 시간대를 고르지는 않는다 — 공공기관 직원은 한국에서 일한다.
+// 시각은 예약마다 고른 시간대의 벽시계 기준이다(2026-11-25, 0119 — 기본 한국 시간, 해외 사무소용으로 정해 둔 도시 시간대만).
+// 서머타임이 있는 시간대는 Intl(IANA 시간대 자료)로 그날의 오프셋을 다시 본다.
 
 export type AppScheduleFrequency = 'daily' | 'weekdays' | 'weekly' | 'monthly';
 export type AppScheduleSpec = {
@@ -10,8 +11,79 @@ export type AppScheduleSpec = {
   /** monthly일 때 1~28 — 모든 달에 있는 날만(29~31은 건너뛰는 달이 생긴다) */
   monthDay: number | null;
   hour: number;
-  minute: 0 | 30;
+  /** 0~55, 5분 단위(실행기가 5분마다 돈다 — 2026-11-25 전에는 00·30분만) */
+  minute: number;
+  /** (0119) IANA 시간대 — 자주 쓰는 목록(`SCHEDULE_TIME_ZONES`)이나 이 실행 환경이 아는 IANA 이름(`isScheduleTimeZone`). 기본 'Asia/Seoul' */
+  timeZone: ScheduleTimeZone;
 };
+
+/**
+ * (0119) 고를 수 있는 시간대 — 해외 사무소·주재관이 흔한 도시. 목록 밖은 받지 않는다(저장 값은 IANA 이름이라 목록을 늘리면 마이그레이션 없이 된다)
+ */
+export const SCHEDULE_TIME_ZONES = {
+  'Asia/Seoul': '한국',
+  'Asia/Tokyo': '일본(도쿄)',
+  'Asia/Shanghai': '중국(베이징)',
+  'Asia/Taipei': '대만(타이베이)',
+  'Asia/Ho_Chi_Minh': '베트남(호찌민)',
+  'Asia/Bangkok': '태국(방콕)',
+  'Asia/Singapore': '싱가포르',
+  'Asia/Jakarta': '인도네시아(자카르타)',
+  'Asia/Kolkata': '인도(뉴델리)',
+  'Asia/Dubai': '아랍에미리트(두바이)',
+  'Europe/London': '영국(런던)',
+  'Europe/Paris': '프랑스(파리)',
+  'Europe/Berlin': '독일(베를린)',
+  'America/New_York': '미국 동부(뉴욕·워싱턴)',
+  'America/Chicago': '미국 중부(시카고)',
+  'America/Los_Angeles': '미국 서부(로스앤젤레스)',
+  'Australia/Sydney': '호주(시드니)',
+  UTC: '협정 세계시(UTC)',
+} as const satisfies Record<string, string>;
+/** IANA 시간대 이름 — 값 검사는 `isScheduleTimeZone` */
+export type ScheduleTimeZone = string;
+export const DEFAULT_SCHEDULE_TIME_ZONE: ScheduleTimeZone = 'Asia/Seoul';
+/** 예약에 고를 수 있는 분(5분 단위) */
+export const SCHEDULE_MINUTES: readonly number[] = Array.from({ length: 12 }, (_, i) => i * 5);
+/** DB CHECK(0119)와 같은 꼴 — 영문으로 시작, 영문·숫자·`_`·`+`·`-`, `/`로 세 조각까지, 64자 */
+const TIME_ZONE_SHAPE = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+){0,2}$/;
+const knownZones = new Map<string, boolean>();
+
+function listedZone(raw: string): raw is keyof typeof SCHEDULE_TIME_ZONES {
+  return Object.prototype.hasOwnProperty.call(SCHEDULE_TIME_ZONES, raw);
+}
+
+/**
+ * 고를 수 있는 시간대인가 — 자주 쓰는 목록, 또는 이 실행 환경의 IANA 자료(`Intl`)가 아는 **정식 이름**(대소문자·별칭이 다르면 아님)이고 DB 꼴에 맞는 것
+ */
+export function isScheduleTimeZone(raw: unknown): raw is ScheduleTimeZone {
+  if (typeof raw !== 'string') return false;
+  if (listedZone(raw)) return true;
+  if (raw.length > 64 || !TIME_ZONE_SHAPE.test(raw)) return false;
+  const known = knownZones.get(raw);
+  if (known !== undefined) return known;
+  let ok = false;
+  try { ok = new Intl.DateTimeFormat('en-US', { timeZone: raw }).resolvedOptions().timeZone === raw; } catch { ok = false; }
+  knownZones.set(raw, ok);
+  return ok;
+}
+
+/** 그 시간대의 시간 이름 — '한국 시간'·'미국 동부(뉴욕·워싱턴) 시간', 목록 밖이면 'Europe/Madrid 시간' */
+export function timeZoneLabel(tz: ScheduleTimeZone): string {
+  if (tz === 'UTC') return SCHEDULE_TIME_ZONES.UTC;
+  return listedZone(tz) ? `${SCHEDULE_TIME_ZONES[tz]} 시간` : `${tz} 시간`;
+}
+
+/** 목록 밖에서 고를 수 있는 시간대(화면의 '그 밖의 시간대') — 이 실행 환경이 아는 것 중 목록에 없고 DB 꼴에 맞는 것, 이름 순 */
+export function otherScheduleTimeZones(): string[] {
+  const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+  if (typeof supported !== 'function') return [];
+  try {
+    return supported('timeZone').filter((tz) => !listedZone(tz) && isScheduleTimeZone(tz)).sort();
+  } catch {
+    return [];
+  }
+}
 
 /** 차지(실행 중 표시)가 이보다 오래되면 실행기가 죽은 것으로 보고 다시 잡는다 */
 export const SCHEDULE_CLAIM_STALE_MS = 15 * 60 * 1000;
@@ -40,7 +112,7 @@ export function parseScheduleSpec(raw: unknown): { ok: true; value: AppScheduleS
   if (typeof frequency !== 'string' || !FREQUENCIES.includes(frequency as AppScheduleFrequency)) return { ok: false, message: '예약 주기는 매일·평일·매주·매월 중 하나입니다.' };
   const hour = integer(r.hour); const minute = integer(r.minute);
   if (hour === null || hour < 0 || hour > 23) return { ok: false, message: '실행 시각(시)은 0~23 사이입니다.' };
-  if (minute !== 0 && minute !== 30) return { ok: false, message: '실행 시각(분)은 0 또는 30입니다.' };
+  if (minute === null || minute < 0 || minute > 55 || minute % 5 !== 0) return { ok: false, message: '실행 시각(분)은 0~55 사이 5분 단위입니다.' };
   let weekday: number | null = null; let monthDay: number | null = null;
   if (frequency === 'weekly') {
     weekday = integer(r.weekday);
@@ -50,28 +122,66 @@ export function parseScheduleSpec(raw: unknown): { ok: true; value: AppScheduleS
     monthDay = integer(r.month_day ?? r.monthDay);
     if (monthDay === null || monthDay < 1 || monthDay > 28) return { ok: false, message: '매월 실행할 날은 1~28일 중 하나입니다(모든 달에 있는 날만).' };
   }
-  return { ok: true, value: { frequency: frequency as AppScheduleFrequency, weekday, monthDay, hour, minute } };
+  // 시간대(0119) — 없으면(옛 화면·옛 행) 한국 시간
+  const tzRaw = r.time_zone ?? r.timeZone;
+  const timeZone = tzRaw === undefined || tzRaw === null || tzRaw === '' ? DEFAULT_SCHEDULE_TIME_ZONE : tzRaw;
+  if (!isScheduleTimeZone(timeZone)) return { ok: false, message: '시간대를 확인해 주세요(목록에 있는 시간대나 IANA 시간대 이름만).' };
+  return { ok: true, value: { frequency: frequency as AppScheduleFrequency, weekday, monthDay, hour, minute, timeZone } };
 }
 
-function matchesDay(spec: AppScheduleSpec, kstDay: Date): boolean {
-  const dow = kstDay.getUTCDay();
+function matchesDay(spec: AppScheduleSpec, localDay: Date): boolean {
+  const dow = localDay.getUTCDay();
   switch (spec.frequency) {
     case 'daily': return true;
     case 'weekdays': return dow >= 1 && dow <= 5;
     case 'weekly': return dow === spec.weekday;
-    case 'monthly': return kstDay.getUTCDate() === spec.monthDay;
+    case 'monthly': return localDay.getUTCDate() === spec.monthDay;
   }
+}
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+/** 그 시간대에서 `ms`의 벽시계 성분(연·월·일·시·분) — 서머타임까지 IANA 자료로 */
+function wallParts(tz: ScheduleTimeZone, ms: number): { y: number; m: number; d: number; h: number; min: number } {
+  let f = formatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
+    formatters.set(tz, f);
+  }
+  const p: Record<string, number> = {};
+  for (const part of f.formatToParts(new Date(ms))) if (part.type !== 'literal') p[part.type] = Number(part.value);
+  return { y: p.year, m: p.month, d: p.day, h: p.hour === 24 ? 0 : p.hour, min: p.minute };
+}
+
+/** 그 시간대의 UTC와의 차(밀리초, 분 단위까지) — `ms` 때 */
+export function zoneOffsetMs(tz: ScheduleTimeZone, ms: number): number {
+  if (tz === 'Asia/Seoul') return KST_OFFSET_MS;
+  const w = wallParts(tz, ms);
+  return Date.UTC(w.y, w.m - 1, w.d, w.h, w.min) - Math.floor(ms / 60_000) * 60_000;
+}
+
+/**
+ * 그 시간대의 벽시계 시각(`wallMs` — 날짜·시각을 UTC 성분으로 적은 값) → 실제 UTC 밀리초.
+ * 서머타임으로 그 시각이 두 번 오면(가을) 앞의 것, 없으면(봄에 건너뜀) 건너뛰기 전 오프셋으로 — 한 시간 뒤의 같은 실제 시각에 돈다
+ */
+export function wallToUtc(tz: ScheduleTimeZone, wallMs: number): number {
+  const before = zoneOffsetMs(tz, wallMs - 14 * 3_600_000);
+  const after = zoneOffsetMs(tz, wallMs + 14 * 3_600_000);
+  const valid = Array.from(new Set([before, after])).map((o) => wallMs - o).filter((c) => zoneOffsetMs(tz, c) === wallMs - c);
+  return valid.length ? Math.min(...valid) : wallMs - before;
 }
 
 /**
  * `afterMs`(UTC 밀리초) **뒤** 첫 실행 시각. 그 시각이 정확히 실행 시각이면 다음 차례다(같은 시각에 두 번 돌지 않게).
- * KST 날짜 성분으로 셈한다 — Date에 KST 오프셋을 더한 뒤 UTC 성분을 읽는 방식(한국은 서머타임이 없다)
+ * 고른 시간대의 날짜 성분으로 셈한다 — 날마다 그날의 오프셋으로 바꾼다(서머타임 — `wallToUtc`). 한국 시간은 예전 셈 그대로
  */
 export function nextRunAt(spec: AppScheduleSpec, afterMs: number): Date {
-  const kst = new Date(afterMs + KST_OFFSET_MS);
-  let day = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate());
-  for (let i = 0; i < 70; i++) {
-    const at = day + spec.hour * 3_600_000 + spec.minute * 60_000 - KST_OFFSET_MS;
+  const tz = spec.timeZone ?? DEFAULT_SCHEDULE_TIME_ZONE;
+  const w = wallParts(tz, afterMs);
+  // 그 시간대의 어제부터 본다 — 오프셋이 바뀌는 날에도 놓치지 않게(`at > afterMs`가 거른다)
+  let day = Date.UTC(w.y, w.m - 1, w.d) - 24 * 3_600_000;
+  for (let i = 0; i < 72; i++) {
+    const wall = day + spec.hour * 3_600_000 + spec.minute * 60_000;
+    const at = tz === 'Asia/Seoul' ? wall - KST_OFFSET_MS : wallToUtc(tz, wall);
     if (at > afterMs && matchesDay(spec, new Date(day))) return new Date(at);
     day += 24 * 3_600_000;
   }
@@ -80,17 +190,26 @@ export function nextRunAt(spec: AppScheduleSpec, afterMs: number): Date {
 
 export function describeSchedule(spec: AppScheduleSpec): string {
   const time = `${String(spec.hour).padStart(2, '0')}:${String(spec.minute).padStart(2, '0')}`;
+  const zone = spec.timeZone && spec.timeZone !== DEFAULT_SCHEDULE_TIME_ZONE ? ` (${timeZoneLabel(spec.timeZone)})` : '';
   switch (spec.frequency) {
-    case 'daily': return `매일 ${time}`;
-    case 'weekdays': return `평일 ${time}`;
-    case 'weekly': return `매주 ${WEEKDAY_LABELS[spec.weekday ?? 0]}요일 ${time}`;
-    case 'monthly': return `매월 ${spec.monthDay}일 ${time}`;
+    case 'daily': return `매일 ${time}${zone}`;
+    case 'weekdays': return `평일 ${time}${zone}`;
+    case 'weekly': return `매주 ${WEEKDAY_LABELS[spec.weekday ?? 0]}요일 ${time}${zone}`;
+    case 'monthly': return `매월 ${spec.monthDay}일 ${time}${zone}`;
   }
+}
+
+/** (0119) 그 시간대 벽시계로 'M월 D일 HH:MM' — 한국 시간이 아닌 예약의 다음 실행을 현지 시각으로도 보인다 */
+export function formatInZone(iso: string, tz: ScheduleTimeZone): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  const w = wallParts(tz, ms);
+  return `${w.m}월 ${w.d}일 ${String(w.h).padStart(2, '0')}:${String(w.min).padStart(2, '0')}`;
 }
 
 /** 예약 규칙 → DB 칸(만들기·고치기가 함께 쓴다) */
 export function specColumns(spec: AppScheduleSpec) {
-  return { frequency: spec.frequency, weekday: spec.weekday, month_day: spec.monthDay, run_hour: spec.hour, run_minute: spec.minute };
+  return { frequency: spec.frequency, weekday: spec.weekday, month_day: spec.monthDay, run_hour: spec.hour, run_minute: spec.minute, time_zone: spec.timeZone ?? DEFAULT_SCHEDULE_TIME_ZONE };
 }
 
 /** 기관 전체 관리자가 예약 실행을 꺼 두었을 때(0070) — 직원 목록 안내와 새 예약 거절 */
@@ -112,7 +231,7 @@ export function editedStatus(row: Pick<AppScheduleRowLike, 'status' | 'paused_re
 }
 
 /** 직원 화면이 읽는 칸 — 목록·만들기·멈추기 라우트가 함께 쓴다 */
-export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at, notify_on_success, export_hwpx, files';
+export const SCHEDULE_COLUMNS = 'id, agent_id, app_version, inputs, document_ids, frequency, weekday, month_day, run_hour, run_minute, status, paused_reason, admin_paused_at, next_run_at, last_run_at, last_status, last_error, last_conversation_id, consecutive_failures, run_count, created_at, notify_on_success, export_hwpx, files, time_zone';
 
 /** DB 행 중 화면이 보는 칸. 실행 조건·사용자 id·부서는 내보내지 않는다 */
 export type AppScheduleRowLike = {
@@ -120,6 +239,8 @@ export type AppScheduleRowLike = {
   /** 문서함에서 고른 문서(0062) — 실행 때 새 판을 따라간다 */
   document_ids?: string[] | null;
   frequency: string; weekday: number | null; month_day: number | null; run_hour: number; run_minute: number;
+  /** (0119) IANA 시간대 — 없으면 한국 시간 */
+  time_zone?: string | null;
   status: string; paused_reason: string | null; admin_paused_at?: string | null; next_run_at: string; last_run_at: string | null;
   last_status: string | null; last_error: string | null; last_conversation_id: string | null;
   consecutive_failures: number; run_count: number; created_at: string;
@@ -163,8 +284,8 @@ function fileViews(raw: unknown): { id: string; name: string; size: number }[] {
   });
 }
 
-export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' | 'month_day' | 'run_hour' | 'run_minute'>): AppScheduleSpec {
-  const parsed = parseScheduleSpec({ frequency: row.frequency, weekday: row.weekday, month_day: row.month_day, hour: row.run_hour, minute: row.run_minute });
+export function specOfRow(row: Pick<AppScheduleRowLike, 'frequency' | 'weekday' | 'month_day' | 'run_hour' | 'run_minute' | 'time_zone'>): AppScheduleSpec {
+  const parsed = parseScheduleSpec({ frequency: row.frequency, weekday: row.weekday, month_day: row.month_day, hour: row.run_hour, minute: row.run_minute, time_zone: row.time_zone });
   if (!parsed.ok) throw new Error(`예약 행이 깨졌습니다: ${parsed.message}`);
   return parsed.value;
 }

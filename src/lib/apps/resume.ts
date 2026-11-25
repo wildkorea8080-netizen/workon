@@ -1,4 +1,4 @@
-import { APP_DOC_SOURCE_PATH, APP_LOOKUP_TOOLS, branchJumpIndex, chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
+import { APP_DOC_SOURCE_PATH, APP_LOOKUP_TOOLS, APP_LOOPS_PER_RUN, branchBackIndex, branchJumpIndex, chooseBranch, classifyKey, conditionHolds, renderAppInput, repeatItems, repeatsFiles, type AppDefinition, type AppStep } from './definition';
 import type { AppStepRecord, AppStepSource } from './pipeline';
 
 /**
@@ -47,6 +47,30 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
   if (!references.app_inputs || typeof references.app_inputs !== 'object' || Array.isArray(references.app_inputs)) return fail('이 기록에는 재개용 입력 정보가 없습니다. 새로 실행해 주세요.');
   const original = renderAppInput(definition, references.app_inputs);
   if (!original.ok || original.message !== currentMessage) return fail('원래 입력과 다릅니다. 입력을 바꿨다면 새로 실행해 주세요.');
+  // 되돌아간 실행(2026-11-25) — 되돌아간 횟수(`looped`)와 되돌아온 까닭(`loopFeedback`)을 이어 받는다. 되돌아갈 수 있는 단계의 기록에만,
+  // 횟수는 합쳐 한 실행의 상한 안, 까닭은 되돌아가 다시 하는 중(끝나지 않은 단계)에만 — 아니면 처음부터
+  const loopError = '되돌아간 단계의 기록이 현재 앱과 다릅니다. 새로 실행해 주세요.';
+  let loopTotal = 0; let feedbackCount = 0;
+  for (const [i, s] of (references.app_steps as unknown[]).entries()) {
+    if (!s || typeof s !== 'object') continue;
+    const { looped, loopFeedback, status } = s as { looped?: unknown; loopFeedback?: unknown; status?: unknown };
+    if (looped === undefined && loopFeedback === undefined) continue;
+    const canLoop = Boolean(steps[i]?.branches?.some((b) => branchBackIndex(i, b, steps.length) !== null));
+    if (!canLoop) return fail(loopError);
+    if (looped !== undefined) {
+      if (typeof looped !== 'number' || !Number.isInteger(looped) || looped < 1) return fail(loopError);
+      loopTotal += looped;
+    }
+    if (loopFeedback !== undefined) {
+      if (typeof loopFeedback !== 'string' || !loopFeedback.trim() || loopFeedback.length > 12000 || status === 'completed' || looped === undefined) return fail(loopError);
+      feedbackCount++;
+    }
+  }
+  if (loopTotal > APP_LOOPS_PER_RUN || feedbackCount > 1) return fail(loopError);
+  const loopState = (saved: Record<string, unknown>, pending: boolean): Partial<AppStepRecord> => ({
+    ...(typeof saved.looped === 'number' ? { looped: saved.looped } : {}),
+    ...(pending && typeof saved.loopFeedback === 'string' ? { loopFeedback: saved.loopFeedback } : {}),
+  });
   const records: AppStepRecord[] = []; let failed = false; let completed = 0; let partialReused = false;
   // 조건 판정 값 — 입력값 + 재사용할 분류 단계의 결과(@N). 실행기와 같은 값으로 갈래·건너뛰기를 맞춰 본다
   const judged: Record<string, string> = { ...original.inputs };
@@ -73,7 +97,7 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
       // 기록의 갈래가 지금 정의·입력으로 고를 갈래와 다르면(갈래를 고쳤거나 없앴음) 다른 지시로 만든 결과라 재사용하지 않는다
       const branch = chooseBranch(step, judged)?.name;
       if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
-      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}), ...(step.lookup ? reusedLookup(saved as Record<string, unknown>, APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search') : {}) }); completed++;
+      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...loopState(saved as Record<string, unknown>, false), ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}), ...(step.lookup ? reusedLookup(saved as Record<string, unknown>, APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search') : {}) }); completed++;
       const target = branchJumpIndex(index, step.branches?.find(b => b.name === branch), steps.length);
       if (target !== null) skipUntil = Math.max(skipUntil, target);
     } else if (!failed && saved.status === 'skipped') {
@@ -85,9 +109,9 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
         // 줄마다 반복이 도중에 멈췄으면 끝난 줄은 다시 쓴다(실행 조건이 지금도 맞을 때만)
         const branch = chooseBranch(step, judged)?.name;
         const partial = !step.when || conditionHolds(step.when, judged) ? reusablePartial(step, saved as Record<string, unknown>, original.inputs, branch) : null;
-        if (partial) { records.push({ name: step.name, status: 'pending', partial }); partialReused = true; continue; }
+        if (partial) { records.push({ name: step.name, status: 'pending', partial, ...loopState(saved as Record<string, unknown>, true) }); partialReused = true; continue; }
       } else if (!failed || saved.status !== 'not_run') return fail('중단된 실행 기록만 이어서 실행할 수 있습니다.');
-      records.push({ name: step.name, status: 'pending' });
+      records.push({ name: step.name, status: 'pending', ...loopState(saved as Record<string, unknown>, true) });
     }
   }
   if (!failed || (!completed && !partialReused)) return fail('재사용할 완료 단계가 없습니다. 새로 실행해 주세요.');

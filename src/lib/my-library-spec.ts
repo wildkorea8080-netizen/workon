@@ -119,7 +119,7 @@ export interface LibrarySnippet { before: string; hit: string; after: string }
 /** (0117) 내용 찾기로 담아 두는 글 상한(글자) — DB CHECK와 같다 */
 export const LIBRARY_CONTENT_MAX = 20_000;
 /** 화면 안내 */
-export const LIBRARY_CONTENT_SEARCH_NOTE = `이름과 담은 파일의 내용(앞 ${LIBRARY_CONTENT_MAX.toLocaleString('ko-KR')}자)에서 찾습니다. 스캔 PDF·읽지 못한 파일과 2026-11-25 전에 담은 파일은 이름으로만 찾힙니다.`;
+export const LIBRARY_CONTENT_SEARCH_NOTE = `이름과 담은 파일의 내용(앞 ${LIBRARY_CONTENT_MAX.toLocaleString('ko-KR')}자)에서 찾습니다. 스캔 PDF·읽지 못한 파일은 이름으로만 찾힙니다(내용을 아직 읽지 않은 파일은 몇 분 안에 채워집니다).`;
 
 /**
  * (0117) 담을 때 읽은 글 → 찾기용 글. 제어·서식 글자를 빼고 공백을 하나로 접어 앞 20,000자(코드 포인트 — DB char_length와 같은 셈).

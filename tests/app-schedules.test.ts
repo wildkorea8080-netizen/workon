@@ -13,7 +13,7 @@ import type { PreparedTurn, TurnEvent } from '@/lib/assistant/types';
 
 /** 입력형 앱 예약 실행(0048) — 다음 시각(KST)·실행 결과 반영·차지·멈춤·알림 */
 const kst = (text: string) => Date.parse(`${text}+09:00`);
-const spec = (patch: Partial<AppScheduleSpec> = {}): AppScheduleSpec => ({ frequency: 'daily', weekday: null, monthDay: null, hour: 9, minute: 0, ...patch });
+const spec = (patch: Partial<AppScheduleSpec> = {}): AppScheduleSpec => ({ frequency: 'daily', weekday: null, monthDay: null, hour: 9, minute: 0, timeZone: 'Asia/Seoul', ...patch });
 const row = (patch: Partial<AppScheduleRow> = {}): AppScheduleRow => ({
   id: 's1', agent_id: 'a1', user_id: 'u1', department_id: 'd1', organization_id: 'o1', app_version: 3, inputs: { title: '주간 보고' },
   frequency: 'daily', weekday: null, month_day: null, run_hour: 9, run_minute: 0, status: 'active', paused_reason: null,
@@ -22,11 +22,11 @@ const row = (patch: Partial<AppScheduleRow> = {}): AppScheduleRow => ({
 });
 
 describe('예약 규칙(parseScheduleSpec·describeSchedule)', () => {
-  it('매일·평일·매주(요일)·매월(1~28일)과 시각(0~23시, 0·30분)만 받고, 글 숫자도 읽는다', () => {
+  it('매일·평일·매주(요일)·매월(1~28일)과 시각(0~23시, 5분 단위 분)만 받고, 글 숫자도 읽는다', () => {
     expect(parseScheduleSpec({ frequency: 'daily', hour: '9', minute: '0' })).toEqual({ ok: true, value: spec() });
     expect(parseScheduleSpec({ frequency: 'weekly', weekday: 1, hour: 14, minute: 30 })).toEqual({ ok: true, value: spec({ frequency: 'weekly', weekday: 1, hour: 14, minute: 30 }) });
     expect(parseScheduleSpec({ frequency: 'monthly', month_day: 28, hour: 0, minute: 0 })).toEqual({ ok: true, value: spec({ frequency: 'monthly', monthDay: 28, hour: 0 }) });
-    for (const bad of [null, { frequency: 'hourly', hour: 9, minute: 0 }, { frequency: 'daily', hour: 24, minute: 0 }, { frequency: 'daily', hour: 9, minute: 15 },
+    for (const bad of [null, { frequency: 'hourly', hour: 9, minute: 0 }, { frequency: 'daily', hour: 24, minute: 0 }, { frequency: 'daily', hour: 9, minute: 17 },
       { frequency: 'weekly', hour: 9, minute: 0 }, { frequency: 'weekly', weekday: 7, hour: 9, minute: 0 }, { frequency: 'monthly', month_day: 31, hour: 9, minute: 0 }, { frequency: 'daily', hour: 9.5, minute: 0 }]) {
       const parsed = parseScheduleSpec(bad); expect(parsed.ok).toBe(false); if (!parsed.ok) expect(parsed.message).toMatch(/주기|시각|요일|날/);
     }

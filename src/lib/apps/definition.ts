@@ -23,7 +23,15 @@ export const makeCondition = (mode: AppConditionMode, rules: AppRule[]): AppStep
  * `next`(2026-11-08) = 이 갈래로 단계를 마친 뒤 건너갈 **단계 번호**(1부터) — 사이 단계는 건너뛴다(그래프 분기). 앞으로만, 적어도 한 단계를 건너뛰어야 한다
  * (그래서 고리가 생기지 않는다). 여러 갈래가 같은 단계로 건너가면 거기서 합쳐진다. 없으면 바로 다음 단계
  */
-export type AppBranch = { name: string; when: AppStepCondition; instruction: string; next?: number };
+/**
+ * 갈래 — `next`는 처리한 뒤 앞으로 건너갈 단계(2026-11-08), `back`은 처리한 뒤 **되돌아갈** 단계(이 단계 또는 앞, 2026-11-25)와
+ * 그렇게 되돌아갈 최대 횟수 `rounds`(1~3, 기본 1). 둘을 함께 둘 수 없다
+ */
+export type AppBranch = { name: string; when: AppStepCondition; instruction: string; next?: number; back?: number; rounds?: number };
+/** 갈래 하나가 되돌아갈 수 있는 최대 횟수 */
+export const APP_LOOP_ROUNDS_MAX = 3;
+/** 한 실행에서 되돌아가는 횟수의 합 상한 — 여러 갈래가 되돌아가도 모델 호출이 끝없이 늘지 않게 */
+export const APP_LOOPS_PER_RUN = 3;
 /**
  * 공공 데이터 조회 단계(2026-11-04) — 모델을 부르지 않고 승인된 커넥터의 검색 도구 **하나를 정해 둔 조회어로** 부른다
  * (알리웍스 연동 노드의 '툴 하나 고정 호출' 꼴). 조회어의 `{{항목 키}}`는 입력값으로 바뀐다. 결과 글은 다음 단계의 자료가 된다.
@@ -365,6 +373,22 @@ export function branchJumpIndex(stepIndex: number, branch: AppBranch | null | un
 }
 
 /**
+ * 갈래로 단계를 마친 뒤 **되돌아갈** 단계의 자리(0부터, 2026-11-25) — 이 단계 또는 앞, 마지막 단계는 되돌아가지 않는다. 아니면 null.
+ * 실행기(pipeline.ts)·호출 수 어림(call-estimate.ts)·빌더가 같은 규칙을 쓴다
+ */
+export function branchBackIndex(stepIndex: number, branch: AppBranch | null | undefined, stepCount: number): number | null {
+  if (!branch?.back || !Number.isInteger(branch.back) || stepIndex >= stepCount - 1) return null;
+  const target = branch.back - 1;
+  return target >= 0 && target <= stepIndex ? target : null;
+}
+
+/** 갈래의 되돌아갈 횟수(1~3, 없으면 1) */
+export function branchRounds(branch: AppBranch | null | undefined): number {
+  const n = branch?.rounds;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= APP_LOOP_ROUNDS_MAX ? n : 1;
+}
+
+/**
  * 이 입력에서 항목이 필수인가 — 늘 필수이거나, 조건부 필수(`requiredWhen`)의 조건이 지금 다른 항목 값으로 맞을 때.
  * 서버 입력 검사(renderAppInput)와 실행 화면 표시가 같은 판정을 쓴다
  */
@@ -515,7 +539,25 @@ export function validateAppDefinition(raw: unknown): { ok: true; value: AppDefin
               return { ok: false, message: `갈래 '${name}'의 다음 단계는 단계 ${here}보다 두 단계 이상 뒤(단계 ${here + 2}~${stepCount})여야 합니다. 단계 순서를 바꿨다면 다음 단계를 다시 골라 주세요.` };
             }
           }
-          branches.push({ name, when, instruction: branch.instruction.trim(), ...(typeof branch.next === 'number' ? { next: branch.next } : {}) });
+          // 되돌아갈 단계(2026-11-25) — 이 단계 또는 앞, 마지막 단계는 안 됨, 건너가기와 함께 둘 수 없음, 횟수 1~3
+          if (branch.back !== undefined && branch.back !== null) {
+            const here = steps.length + 1;
+            if (branch.next !== undefined && branch.next !== null) return { ok: false, message: `갈래 '${name}'에는 건너가기와 되돌아가기를 함께 둘 수 없습니다.` };
+            if (here >= stepCount) return { ok: false, message: '마지막 단계의 갈래는 되돌아갈 수 없습니다(되돌아가려면 그 앞 단계에 갈래를 두세요).' };
+            if (typeof branch.back !== 'number' || !Number.isInteger(branch.back) || branch.back < 1 || branch.back > here) {
+              return { ok: false, message: `갈래 '${name}'이 되돌아갈 단계는 단계 1~${here}(이 단계 또는 앞)여야 합니다. 단계 순서를 바꿨다면 다시 골라 주세요.` };
+            }
+            if (branch.rounds !== undefined && branch.rounds !== null && (typeof branch.rounds !== 'number' || !Number.isInteger(branch.rounds) || branch.rounds < 1 || branch.rounds > APP_LOOP_ROUNDS_MAX)) {
+              return { ok: false, message: `갈래 '${name}'이 되돌아갈 횟수는 1~${APP_LOOP_ROUNDS_MAX}번입니다.` };
+            }
+          } else if (branch.rounds !== undefined && branch.rounds !== null) {
+            return { ok: false, message: `갈래 '${name}'의 되돌아갈 횟수는 되돌아갈 단계를 고를 때만 둡니다.` };
+          }
+          branches.push({
+            name, when, instruction: branch.instruction.trim(),
+            ...(typeof branch.next === 'number' ? { next: branch.next } : {}),
+            ...(typeof branch.back === 'number' ? { back: branch.back, rounds: typeof branch.rounds === 'number' ? branch.rounds : 1 } : {}),
+          });
         }
         normalized.branches = branches;
       }

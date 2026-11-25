@@ -44,7 +44,7 @@ export type AdminWebhookRow = {
   agent: Joined<AgentJoin>; owner: Joined<UserJoin>;
 };
 export type AdminScheduleRow = {
-  id: string; frequency: string; weekday: number | null; month_day: number | null; run_hour: number; run_minute: number;
+  id: string; frequency: string; weekday: number | null; month_day: number | null; run_hour: number; run_minute: number; time_zone?: string | null;
   status: string; paused_reason: string | null; admin_paused_at: string | null; next_run_at: string; last_run_at: string | null;
   last_status: string | null; consecutive_failures: number; run_count: number; created_at: string; department_id: string;
   agent: Joined<AgentJoin>; owner: Joined<UserJoin>;

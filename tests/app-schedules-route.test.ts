@@ -78,7 +78,7 @@ describe('POST /api/apps/schedules', () => {
     state.actor = false; expect((await post(valid)).status).toBe(403); state.actor = true;
     expect((await post({ ...valid, agent_id: 'x' })).status).toBe(400);
     expect((await post({ ...valid, frequency: 'hourly' })).status).toBe(400);
-    expect((await post({ ...valid, minute: 15 })).status).toBe(400);
+    expect((await post({ ...valid, minute: 17 })).status).toBe(400); // 5분 단위만(0119)
     expect(state.calls.filter(c => c[0] === 'agents')).toHaveLength(0); // 꼴 검사에서 거절되면 DB를 안 본다
 
     state.results.agents = [{ data: null }]; expect((await post(valid)).status).toBe(404);
