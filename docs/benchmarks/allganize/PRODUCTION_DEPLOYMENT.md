@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-25(오후): 기관 SSO 그룹·함께 로그아웃·back-channel 로그아웃·자료함 확장(0290~0296) — 0110~0114 운영 적용
+
+- 코드 배포 `dpl_5YEpesarmv15RQv5AVm2mn3KhAC6`(커밋 `fbc9aa6`, 2026-11-25 15:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b2523fe`(아침 기록), `4972b73` 기능 — 기관 SSO 그룹 → 부서 맞추기(0110)(0290), 함께 로그아웃(RP-Initiated, 0111)(0291), 기관 자료함(0112)(0292), 자료함 여러 단계 폴더(0113)(0293)·폴더째 이름 바꾸기/옮기기(0294), 기관 SSO back-channel 로그아웃(0114 — `users.sso_logout_at`·`org_sso_subjects`, `POST /api/sso/backchannel-logout`)(0295), 자료함 사이 복사·옮기기(마이그레이션 없음)(0296). `fbc9aa6` 문서. 가지 Preview(`workon-mgkz2v219`, `dpl_DM1yseaZzgNzXhwEbsLEeqKf8U6q`) Ready 뒤 `main`. 배포 전 전체 시험 450파일 5,205개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_CnshvY8zUmcrkgU286TibSisFCmu`(580f63c)로 promote — 0110~0114는 추가·값 넓힘이라 옛 코드도 돈다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0109, 새 칸·표 없음, `my_library_files_folder_check` 30자·`space_check` 둘, 자료함 행 0·SSO 설정 행 0, RLS 꺼진 표 0. **0110~0114를 코드보다 먼저 적용**(`npm run db:migrate`, 5건 OK) → 다시 읽어 `group_claim`·`group_mappings`·`single_logout`·`users.sso_logout_at`·`org_sso_subjects` 있음, 폴더 CHECK 100자, 자리 CHECK 셋(`organization`), RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음(표·뷰 64·칸 832·함수 33).
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/my-library` 인증 없이 401, 복사·옮기기(`POST /api/my-library/{uuid}`) 인증 없이 401·엉뚱한 id 404, 관리자 SSO 설정 403, `/api/sso/backchannel-logout` 토큰 없음·틀린 토큰 400(GET 405), `/api/sso/logout`·`/api/my-library/folders` GET 405. 실행기 호출 15:30~15:34 KST 모두 200(heartbeat 15:30), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: SSO 그룹 맞추기·함께 로그아웃·back-channel 로그아웃을 실제 계정 서비스(Keycloak·Entra ID)로 해 보지 않았다(운영에 SSO 설정 행이 아직 없다). 기관 자료함·여러 단계 폴더·폴더째 옮기기·자료함 사이 복사/옮기기를 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-25(아침): AI 조사 단계·기관 API 직원으로 묻기·기관 SSO 전용(0287~0289) — 0108·0109 운영 적용
 
 - 코드 배포 `dpl_CnshvY8zUmcrkgU286TibSisFCmu`(커밋 `580f63c`, 2026-11-25 08:10 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `40cd8d8`(새벽 기록), `570da80` 기능 셋 — 입력형 앱의 AI 조사 단계(`research` — AI가 라운드마다 조회 도구·조회어를 정해 찾고 실패·근거 없음은 정보 공백, 마이그레이션 없음)(0287), 기관 API 키 범위 `chat_as_user` — `asUser`(직원 이메일)로 그 직원의 권한·한도·대화로 묻기(0108)(0288), 기관 SSO 전용 — 직원 비밀번호 로그인 끄기·비밀번호로 들어와 있던 직원 로그인은 미들웨어가 끝냄·관리자는 그대로(0109)(0289). `580f63c` 문서. 가지 Preview(`workon-d7cglud8f`, `dpl_8op8bMgDSFhRwxqX4bMBciNq4k4A`) Ready 뒤 `main`. 배포 전 전체 시험 5,117개 통과·tsc 0.
