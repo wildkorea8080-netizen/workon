@@ -161,8 +161,8 @@ describe('고치기·지우기·원본', () => {
     // 자리 조건(scoped)이 내 자료함은 담은 사람·기관, 부서 자료함은 지금 부서·기관을 건다
     expect(io).toContain(".eq('space', 'personal').eq('user_id', actor.userId).eq('organization_id', actor.organizationId)");
     expect(io).toContain(".eq('space', 'department').eq('department_id', actor.departmentId).eq('organization_id', actor.organizationId)");
-    // 넣기 말고 여섯(폴더 값·쪽·한 행·고치기·지우기·폴더째 옮기기 0294) 모두 그 조건으로
-    expect(io.split('scoped(').length - 1).toBe(6);
+    // 넣기 말고 일곱(폴더 값·쪽·한 행·고치기·지우기·폴더째 옮기기 0294·여러 행 0298) 모두 그 조건으로
+    expect(io.split('scoped(').length - 1).toBe(7);
   });
 });
 

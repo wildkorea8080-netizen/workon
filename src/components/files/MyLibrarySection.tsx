@@ -16,7 +16,9 @@ import {
 type Page = { space: LibrarySpace; files: LibraryFile[]; next: string | null; folders: LibraryFolder[]; total: number; limit: number; canManage: boolean; canAdd?: boolean; canAddTo?: Record<LibrarySpace, boolean> };
 type TransferMode = 'copy' | 'move';
 /** 다른 자료함으로 보내기(0296) — 고르는 중인 파일·보낼 곳·방식·폴더 */
-type TransferDraft = { file: LibraryFile; to: LibrarySpace; mode: TransferMode; folder: string };
+type TransferWhat = { kind: 'file'; file: LibraryFile } | { kind: 'files'; ids: string[]; names: string[] } | { kind: 'folder'; folder: string };
+type TransferDraft = { what: TransferWhat; to: LibrarySpace; mode: TransferMode; folder: string; canMove: boolean };
+type BatchResult = { sent: number; failed: { id: string; file_name: string; message: string }[]; warnings: string[] };
 
 /** 자리마다 설명 — 누가 보고 누가 담는지 */
 const SPACE_NOTE: Record<LibrarySpace, string> = {
@@ -51,6 +53,8 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
   const latest = useRef(0);
   const action = useInFlight();
   const [transfer, setTransfer] = useState<TransferDraft | null>(null);
+  // 여러 파일 고르기(0298) — 이 자리·이 목록의 파일 id
+  const [selected, setSelected] = useState<string[]>([]);
 
   const load = async (cursor: string | null) => {
     const seq = ++latest.current;
@@ -76,7 +80,9 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(null); }, [query, folder, refreshKey, space]);
   // 자리를 바꾸면 폴더 고르기를 처음으로(다른 자리의 폴더 이름은 뜻이 없다)
-  useEffect(() => { setFolder(null); setNotice(null); setTransfer(null); }, [space]);
+  useEffect(() => { setFolder(null); setNotice(null); setTransfer(null); setSelected([]); }, [space]);
+  // 목록이 바뀌면(폴더·찾기) 고른 것을 비운다 — 보이지 않는 파일을 보내지 않게
+  useEffect(() => { setSelected([]); }, [query, folder, refreshKey]);
   const spaceParam = space !== 'personal' ? `?space=${space}` : '';
   // 기관 자료함은 기관 전체 관리자만 담는다(서버가 다시 본다) — 못 읽었으면 막아 둔다
   const canAdd = space === 'personal' || page?.canAdd === true;
@@ -131,23 +137,79 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
   // 다른 자료함으로 복사·옮기기(0296) — 복사는 볼 수 있으면, 옮기기는 이 자리에서 바꿀 수 있을 때만(서버가 다시 본다)
   const canChange = (f: LibraryFile) => (space === 'organization' ? page?.canManage === true : f.mine || page?.canManage === true);
   const targets = transferTargets(space, page?.canAddTo);
-  const openTransfer = (f: LibraryFile) => {
+  const openTransfer = (what: TransferWhat) => {
     if (!targets.length) return;
     setError(null);
     setNotice(null);
-    setTransfer({ file: f, to: targets[0], mode: 'copy', folder: f.folder });
+    const files = page?.files ?? [];
+    // 옮기기를 고를 수 있는가 — 서버가 파일마다 다시 본다
+    const canMove = what.kind === 'file' ? canChange(what.file)
+      : what.kind === 'files' ? what.ids.every((id) => { const f = files.find((x) => x.id === id); return !!f && canChange(f); })
+        : space === 'personal' || page?.canManage === true;
+    setTransfer({ what, to: targets[0], mode: 'copy', folder: what.kind === 'file' ? what.file.folder : '', canMove });
   };
+  const toggleTransfer = (what: TransferWhat, open: boolean) => (open ? setTransfer(null) : openTransfer(what));
   const sendTransfer = () => action.run('transfer', async () => {
     if (!transfer) return;
-    const { file, to, mode, folder: target } = transfer;
-    const r = await api<{ file: LibraryFile; warning: string | null }>(`/api/my-library/${encodeURIComponent(file.id)}`, {
-      method: 'POST', json: { space, to, mode, folder: target.trim() },
+    const { what, to, mode, folder: target } = transfer;
+    const verb = mode === 'move' ? '옮겼습니다' : '복사했습니다';
+    if (what.kind === 'file') {
+      const r = await api<{ file: LibraryFile; warning: string | null }>(`/api/my-library/${encodeURIComponent(what.file.id)}`, {
+        method: 'POST', json: { space, to, mode, folder: target.trim() },
+      });
+      if (!r.ok) { setError(r.error.message); return; }
+      setError(r.data.warning);
+      setTransfer(null);
+      await done(`'${what.file.file_name}'을(를) ${LIBRARY_SPACE_LABEL[to]} ${folderLabel(r.data.file.folder)}(으)로 ${verb}.`);
+      return;
+    }
+    // 여러 파일·폴더째(0298) — 보내기 전에 서버가 권한·상한을 한꺼번에 보고, 도중 실패한 파일은 목록으로 돌려준다
+    const r = await api<BatchResult>('/api/my-library/transfer', {
+      method: 'POST',
+      json: what.kind === 'files' ? { space, to, mode, folder: target.trim(), ids: what.ids } : { space, to, mode, folder: target.trim(), fromFolder: what.folder },
     });
     if (!r.ok) { setError(r.error.message); return; }
-    setError(r.data.warning);
+    const problems = [
+      ...r.data.failed.map((x) => `'${x.file_name}': ${x.message}`),
+      ...r.data.warnings,
+    ];
+    setError(problems.length ? `보내지 못했거나 확인할 파일 ${problems.length}개 — ${problems.slice(0, 5).join(' · ')}${problems.length > 5 ? ' …' : ''}` : null);
     setTransfer(null);
-    await done(`'${file.file_name}'을(를) ${LIBRARY_SPACE_LABEL[to]} ${folderLabel(r.data.file.folder)}(으)로 ${mode === 'move' ? '옮겼습니다' : '복사했습니다'}.`);
+    setSelected([]);
+    if (what.kind === 'folder' && mode === 'move') setFolder(null);
+    await done(`${what.kind === 'folder' ? `'${folderLabel(what.folder)}' 폴더의 ` : ''}파일 ${r.data.sent}개를 ${LIBRARY_SPACE_LABEL[to]}(으)로 ${verb}.`);
   });
+  const transferForm = (t: TransferDraft, title: string) => (
+    <div>
+      <form aria-label={title} className="flex flex-wrap items-end gap-3 text-[14px]"
+        onSubmit={(e) => { e.preventDefault(); void sendTransfer(); }}>
+        <label className="flex flex-col gap-1">
+          <span className="text-[13px] text-slate-500">보낼 곳</span>
+          <select value={t.to} onChange={(e) => setTransfer({ ...t, to: e.target.value as LibrarySpace })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5">
+            {targets.map((s) => <option key={s} value={s}>{LIBRARY_SPACE_LABEL[s]}</option>)}
+          </select>
+        </label>
+        <fieldset className="flex items-center gap-3">
+          <legend className="sr-only">방식</legend>
+          <label className="flex items-center gap-1"><input type="radio" name="transfer-mode" checked={t.mode === 'copy'} onChange={() => setTransfer({ ...t, mode: 'copy' })} /> 복사(여기에도 남김)</label>
+          <label className={`flex items-center gap-1 ${t.canMove ? '' : 'text-slate-400'}`} title={t.canMove ? undefined : '옮기기는 그 파일을 바꿀 수 있는 사람만 합니다'}>
+            <input type="radio" name="transfer-mode" disabled={!t.canMove} checked={t.mode === 'move'} onChange={() => setTransfer({ ...t, mode: 'move' })} /> 옮기기(여기서는 지움)
+          </label>
+        </fieldset>
+        <label className="flex flex-col gap-1">
+          <span className="text-[13px] text-slate-500">{t.what.kind === 'folder' ? '받는 폴더(그 아래에 이 폴더째 — 비우면 맨 위)' : `폴더(비우면 ${LIBRARY_UNFILED_LABEL} — / 로 ${LIBRARY_FOLDER_DEPTH}단계까지)`}</span>
+          <input value={t.folder} onChange={(e) => setTransfer({ ...t, folder: e.target.value })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5" />
+        </label>
+        <button type="submit" disabled={busy} className="rounded-lg bg-ws-accent px-3 py-1.5 font-semibold text-white disabled:opacity-50">
+          {action.running === 'transfer' ? '보내는 중…' : t.mode === 'move' ? '옮기기' : '복사하기'}
+        </button>
+        <button type="button" disabled={busy} onClick={() => setTransfer(null)} className="text-slate-600 underline disabled:opacity-50">취소</button>
+      </form>
+      {t.to !== 'personal' && <p className="mt-2 text-[13px] text-slate-500">{t.to === 'organization' ? '기관 직원 모두가' : '지금 부서 사람이 모두'} 보고 내려받게 됩니다.</p>}
+    </div>
+  );
+  const shownIds = (page?.files ?? []).map((f) => f.id);
+  const allSelected = shownIds.length > 0 && shownIds.every((id) => selected.includes(id));
 
   // 폴더째 이름 바꾸기·옮기기(0294) — 고른 폴더와 그 아래를 새 경로로. 부서 자료함은 관리자, 기관 자료함은 기관 전체 관리자(canManage)
   const moveFolder = (from: string) => action.run(`folder:${from}`, async () => {
@@ -198,6 +260,25 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
           {action.running === `folder:${folder}` ? '옮기는 중…' : `'${folderLabel(folder)}' 폴더 이름 바꾸기·옮기기`}
         </button>
       )}
+      {folder && targets.length > 0 && (
+        <button type="button" disabled={busy} aria-expanded={transfer?.what.kind === 'folder'}
+          onClick={() => toggleTransfer({ kind: 'folder', folder }, transfer?.what.kind === 'folder')}
+          className="mb-3 ml-3 text-[13px] text-slate-600 underline disabled:opacity-50">{`'${folderLabel(folder)}' 폴더째 다른 자료함으로`}</button>
+      )}
+      {selected.length > 0 && targets.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 text-[14px]">
+          <span className="text-slate-600">{selected.length}개 고름</span>
+          <button type="button" disabled={busy} aria-expanded={transfer?.what.kind === 'files'}
+            onClick={() => toggleTransfer({ kind: 'files', ids: selected, names: (page?.files ?? []).filter((f) => selected.includes(f.id)).map((f) => f.file_name) }, transfer?.what.kind === 'files')}
+            className="text-slate-600 underline disabled:opacity-50">고른 파일 다른 자료함으로</button>
+          <button type="button" disabled={busy} onClick={() => setSelected([])} className="text-slate-500 underline disabled:opacity-50">고르기 풀기</button>
+        </div>
+      )}
+      {transfer && transfer.what.kind !== 'file' && (
+        <div className="mb-3 rounded-lg border border-[#DCE3EC] bg-slate-50 px-4 py-3">
+          {transferForm(transfer, transfer.what.kind === 'folder' ? `'${folderLabel(transfer.what.folder)}' 폴더째 다른 자료함으로` : `고른 파일 ${transfer.what.ids.length}개를 다른 자료함으로`)}
+        </div>
+      )}
       <ErrorNote message={error} />
       {notice && <p role="status" className="mb-3 text-[13px] text-ws-accent-text">{notice}</p>}
       <Card className="p-0 overflow-x-auto">
@@ -209,6 +290,12 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
           <table className="w-full min-w-[720px] text-left text-[15px]">
             <thead className="border-b border-[#DCE3EC] text-[13px] text-slate-500">
               <tr>
+                {targets.length > 0 && (
+                  <th scope="col" className="w-10 pl-5 py-3 font-medium">
+                    <input type="checkbox" aria-label="이 목록의 파일 모두 고르기" checked={allSelected} disabled={busy}
+                      onChange={(e) => setSelected(e.target.checked ? shownIds : [])} />
+                  </th>
+                )}
                 <th scope="col" className="px-5 py-3 font-medium">파일</th>
                 <th scope="col" className="px-5 py-3 font-medium">폴더</th>
                 <th scope="col" className="px-5 py-3 font-medium">{isSharedLibrarySpace(space) ? '담은 사람' : '담은 곳'}</th>
@@ -220,6 +307,12 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
               {(page?.files ?? []).map((f) => (
                 <Fragment key={f.id}>
                 <tr className="border-b border-[#DCE3EC] last:border-0">
+                  {targets.length > 0 && (
+                    <td className="w-10 pl-5 py-3">
+                      <input type="checkbox" aria-label={`'${f.file_name}' 고르기`} checked={selected.includes(f.id)} disabled={busy}
+                        onChange={(e) => setSelected(e.target.checked ? [...selected, f.id] : selected.filter((id) => id !== f.id))} />
+                    </td>
+                  )}
                   <td className="px-5 py-3">
                     <span className="mr-2 rounded border border-[#DCE3EC] px-1.5 py-0.5 text-[12px] font-semibold">{fileBadge(f.file_name)}</span>
                     {f.file_name} <span className="text-[13px] text-slate-500">{formatBytes(f.size_bytes)}</span>
@@ -230,7 +323,8 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
                   <td className="whitespace-nowrap px-5 py-3 text-right text-[14px]">
                     <a href={`/api/my-library/${encodeURIComponent(f.id)}/original`} className="rounded-lg border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">내려받기</a>
                     {targets.length > 0 && (
-                      <button type="button" disabled={busy} aria-expanded={transfer?.file.id === f.id} onClick={() => (transfer?.file.id === f.id ? setTransfer(null) : openTransfer(f))}
+                      <button type="button" disabled={busy} aria-expanded={transfer?.what.kind === 'file' && transfer.what.file.id === f.id}
+                        onClick={() => toggleTransfer({ kind: 'file', file: f }, transfer?.what.kind === 'file' && transfer.what.file.id === f.id)}
                         className="ml-2 text-slate-600 underline disabled:opacity-50">다른 자료함으로</button>
                     )}
                     {/* 부서 자료함에서 남이 담은 파일은 관리자만, 기관 자료함은 기관 전체 관리자만 바꾼다(서버가 다시 본다) */}
@@ -241,34 +335,10 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
                     </>}
                   </td>
                 </tr>
-                {transfer?.file.id === f.id && (
+                {transfer?.what.kind === 'file' && transfer.what.file.id === f.id && (
                   <tr className="border-b border-[#DCE3EC] bg-slate-50">
-                    <td colSpan={5} className="px-5 py-3">
-                      <form aria-label={`'${f.file_name}'을(를) 다른 자료함으로`} className="flex flex-wrap items-end gap-3 text-[14px]"
-                        onSubmit={(e) => { e.preventDefault(); void sendTransfer(); }}>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[13px] text-slate-500">보낼 곳</span>
-                          <select value={transfer.to} onChange={(e) => setTransfer({ ...transfer, to: e.target.value as LibrarySpace })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5">
-                            {targets.map((s) => <option key={s} value={s}>{LIBRARY_SPACE_LABEL[s]}</option>)}
-                          </select>
-                        </label>
-                        <fieldset className="flex items-center gap-3">
-                          <legend className="sr-only">방식</legend>
-                          <label className="flex items-center gap-1"><input type="radio" name="transfer-mode" checked={transfer.mode === 'copy'} onChange={() => setTransfer({ ...transfer, mode: 'copy' })} /> 복사(여기에도 남김)</label>
-                          <label className={`flex items-center gap-1 ${canChange(f) ? '' : 'text-slate-400'}`} title={canChange(f) ? undefined : '옮기기는 이 파일을 바꿀 수 있는 사람만 합니다'}>
-                            <input type="radio" name="transfer-mode" disabled={!canChange(f)} checked={transfer.mode === 'move'} onChange={() => setTransfer({ ...transfer, mode: 'move' })} /> 옮기기(여기서는 지움)
-                          </label>
-                        </fieldset>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-[13px] text-slate-500">폴더(비우면 {LIBRARY_UNFILED_LABEL} — / 로 {LIBRARY_FOLDER_DEPTH}단계까지)</span>
-                          <input value={transfer.folder} onChange={(e) => setTransfer({ ...transfer, folder: e.target.value })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5" />
-                        </label>
-                        <button type="submit" disabled={busy} className="rounded-lg bg-ws-accent px-3 py-1.5 font-semibold text-white disabled:opacity-50">
-                          {action.running === 'transfer' ? '보내는 중…' : transfer.mode === 'move' ? '옮기기' : '복사하기'}
-                        </button>
-                        <button type="button" disabled={busy} onClick={() => setTransfer(null)} className="text-slate-600 underline disabled:opacity-50">취소</button>
-                      </form>
-                      {transfer.to !== 'personal' && <p className="mt-2 text-[13px] text-slate-500">{transfer.to === 'organization' ? '기관 직원 모두가' : '지금 부서 사람이 모두'} 보고 내려받게 됩니다.</p>}
+                    <td colSpan={targets.length > 0 ? 6 : 5} className="px-5 py-3">
+                      {transferForm(transfer, `'${f.file_name}'을(를) 다른 자료함으로`)}
                     </td>
                   </tr>
                 )}

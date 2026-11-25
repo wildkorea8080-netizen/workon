@@ -17,7 +17,7 @@ import { fileNamePattern, normalizeFileQuery } from '@/lib/file-search';
 import { attachmentExtension } from '@/lib/attachments/limits';
 import { logSystem } from '@/lib/logger';
 import {
-  cleanFolderName, cleanLibraryFileName, sortFolders, parseLibrarySpace, isSharedLibrarySpace, subtreeFolders, planFolderMove, LIBRARY_SPACE_LABEL,
+  cleanFolderName, cleanLibraryFileName, sortFolders, parseLibrarySpace, isSharedLibrarySpace, subtreeFolders, planFolderMove, transferFolderPath, LIBRARY_SPACE_LABEL,
   LIBRARY_MAX_BYTES, LIBRARY_MAX_FOLDERS, LIBRARY_PAGE, libraryMaxFiles,
   type LibraryFile, type LibraryFolder, type LibrarySource, type LibrarySpace,
 } from '@/lib/my-library-spec';
@@ -109,6 +109,8 @@ export interface LibraryIo {
   update(actor: LibraryActor, space: LibrarySpace, id: string, patch: Record<string, unknown>): Promise<Record<string, unknown> | null>;
   /** 지우기 — 지운 수. 실패면 던진다 */
   remove(actor: LibraryActor, space: LibrarySpace, id: string): Promise<number>;
+  /** (0298) 이 자리에서 볼 수 있는 여러 행(경로 포함) — `ids` 또는 `folders`, `limit`개까지. DB 오류면 던진다 */
+  findRows?(actor: LibraryActor, space: LibrarySpace, opts: { ids?: string[]; folders?: string[]; limit: number }): Promise<Row[]>;
   /** 폴더 값이 `from`인 이 자리의 행을 모두 `to`로(0294) — 바꾼 수. 실패면 던진다 */
   setFolder?(actor: LibraryActor, space: LibrarySpace, from: string, to: string): Promise<number>;
 }
@@ -387,6 +389,21 @@ export async function transferLibraryFile(
     return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[to]}의 폴더는 ${LIBRARY_MAX_FOLDERS}개까지입니다. 있는 폴더를 고르세요.` };
   }
 
+  const sent = await sendRow(actor, row, key, { from, to, mode, folder }, io, newId);
+  return sent.ok ? { ok: true, file: sent.file, mode, to, ...(sent.warning ? { warning: sent.warning } : {}) } : sent;
+}
+
+/**
+ * 한 행 보내기(0296·0298 공용) — 권한·자리 상한은 부른 쪽이 이미 봤다. 새 사본 → 새 행 → (옮기기면) 원래 행 → 원래 사본
+ */
+async function sendRow(
+  actor: LibraryActor,
+  row: Row,
+  key: string,
+  { from, to, mode, folder }: { from: LibrarySpace; to: LibrarySpace; mode: LibraryTransferMode; folder: string },
+  io: LibraryIo,
+  newId: () => string,
+): Promise<{ ok: true; file: LibraryFile; warning?: string } | Failure> {
   const newKey = newId();
   const path = libraryPath(to, actor, newKey, row.file_name);
   const copied = await io.copyObject(row.storage_path, path);
@@ -411,7 +428,7 @@ export async function transferLibraryFile(
     return { ok: false, status: 503, message: '파일을 지금 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   }
   const file = toLibraryFile(inserted, actor.userId);
-  if (mode === 'copy') return { ok: true, file, mode, to };
+  if (mode === 'copy') return { ok: true, file };
 
   // 옮기기 — 원래 행을 지운 뒤 원래 사본
   let removed: number;
@@ -419,7 +436,7 @@ export async function transferLibraryFile(
     removed = await io.remove(actor, from, key);
   } catch {
     return {
-      ok: true, file, mode, to,
+      ok: true, file,
       warning: `${LIBRARY_SPACE_LABEL[to]}에 담았지만 ${LIBRARY_SPACE_LABEL[from]}에서는 지우지 못했습니다 — 두 곳에 있습니다. ${LIBRARY_SPACE_LABEL[from]}에서 지워 주세요.`,
     };
   }
@@ -430,7 +447,107 @@ export async function transferLibraryFile(
       orgId: actor.organizationId,
     });
   }
-  return { ok: true, file, mode, to };
+  return { ok: true, file };
+}
+
+/** 한 번에 보내는 파일 수(0298) */
+export const LIBRARY_TRANSFER_MAX = 50;
+
+export type LibraryBatchResult = {
+  ok: true; mode: LibraryTransferMode; to: LibrarySpace; sent: number;
+  /** 보내지 못한 파일(이름·까닭) — 앞의 것은 보냈다 */
+  failed: { id: string; file_name: string; message: string }[];
+  /** 두 곳에 남은 파일 등 */
+  warnings: string[];
+};
+
+/**
+ * 여러 파일·폴더째 다른 자료함으로 복사·옮기기(0298, 마이그레이션 없음) — `ids`(50개까지) 또는 `fromFolder`(그 폴더와 그 아래, 50개까지).
+ * 모든 파일을 먼저 읽고 **보내기 전에** 권한(옮기기면 모두 바꿀 수 있어야)·받는 자리 개수·폴더 수를 한꺼번에 본다 — 하나라도 안 되면 아무것도 보내지 않는다.
+ * 폴더째면 폴더 이름과 그 아래 구조를 받는 폴더 아래에 그대로 둔다(`예산/2026` → 받는 폴더 `공유` 아래 `공유/예산/2026`, 3단계 안에서).
+ * 보내는 도중 실패한 파일은 건너뛰고 이어 간다(실패 목록으로 알림 — 보낸 것은 되돌리지 않는다)
+ */
+export async function transferLibraryFiles(
+  actor: LibraryActor,
+  input: { space?: unknown; to?: unknown; folder?: unknown; mode?: unknown; ids?: unknown; fromFolder?: unknown },
+  io: LibraryIo = libraryIo(),
+  newId: () => string = randomUUID,
+): Promise<LibraryBatchResult | Failure> {
+  const from = spaceOf(input.space);
+  if (!from) return { ok: false, status: 400, message: BAD_SPACE };
+  const to = spaceOf(input.to);
+  if (!to) return { ok: false, status: 400, message: '보낼 자료함(to)은 personal·department·organization 중 하나로 적어 주세요.' };
+  if (from === to) return { ok: false, status: 400, message: '같은 자료함 안에서는 폴더 옮기기를 쓰세요.' };
+  const mode = input.mode === 'copy' || input.mode === 'move' ? input.mode : null;
+  if (!mode) return { ok: false, status: 400, message: 'mode는 copy(복사)나 move(옮기기)로 적어 주세요.' };
+  const target = cleanFolderName(input.folder);
+  if (target === null) return { ok: false, status: 400, message: LIBRARY_FOLDER_RULE };
+  const byIds = input.ids !== undefined && input.ids !== null;
+  const byFolder = input.fromFolder !== undefined && input.fromFolder !== null;
+  if (byIds === byFolder) return { ok: false, status: 400, message: '보낼 파일(ids)이나 폴더(fromFolder) 가운데 하나만 보내 주세요.' };
+  let ids: string[] = [];
+  let fromFolder: string | null = null;
+  if (byIds) {
+    if (!Array.isArray(input.ids) || input.ids.length === 0) return { ok: false, status: 400, message: '보낼 파일을 하나 이상 골라 주세요.' };
+    if (input.ids.length > LIBRARY_TRANSFER_MAX) return { ok: false, status: 400, message: `한 번에 ${LIBRARY_TRANSFER_MAX}개까지 보낼 수 있습니다.` };
+    if (input.ids.some((v) => typeof v !== 'string' || !UUID.test(v))) return { ok: false, status: 404, message: LIBRARY_NOT_FOUND };
+    ids = [...new Set((input.ids as string[]).map((v) => v.toLowerCase()))];
+  } else {
+    fromFolder = cleanFolderName(input.fromFolder);
+    if (fromFolder === null || fromFolder === '') return { ok: false, status: 400, message: '보낼 폴더를 골라 주세요(미분류는 파일을 골라 보내세요).' };
+  }
+  if (!canAddToLibrary(to, actor)) return { ok: false, status: 403, message: LIBRARY_ORG_ONLY };
+  if (!io.findRows) return { ok: false, status: 503, message: LIBRARY_RETRY };
+
+  let rows: Row[];
+  let values: string[];
+  let sourceValues: string[] = [];
+  try {
+    if (fromFolder !== null) sourceValues = await io.folderValues(actor, from);
+    const folders = fromFolder !== null ? subtreeFolders(sourceValues, fromFolder) : null;
+    [rows, values] = await Promise.all([
+      io.findRows(actor, from, folders ? { folders, limit: LIBRARY_TRANSFER_MAX + 1 } : { ids, limit: LIBRARY_TRANSFER_MAX + 1 }),
+      io.folderValues(actor, to),
+    ]);
+  } catch {
+    return { ok: false, status: 503, message: LIBRARY_RETRY };
+  }
+  if (byIds && rows.length !== ids.length) return { ok: false, status: 404, message: `${LIBRARY_NOT_FOUND}(${ids.length - rows.length}개)` };
+  if (!rows.length) return { ok: false, status: 404, message: '그 폴더에 담긴 파일이 없습니다.' };
+  if (rows.length > LIBRARY_TRANSFER_MAX) return { ok: false, status: 400, message: `폴더 안 파일이 ${LIBRARY_TRANSFER_MAX}개를 넘습니다 — 아래 폴더로 나눠 보내 주세요.` };
+  if (mode === 'move') {
+    const locked = rows.filter((r) => !canChangeLibraryRow(from, r, actor));
+    if (locked.length) {
+      const denied = noChange(from);
+      return { ...denied, message: `${denied.message} (옮길 수 없는 파일 ${locked.length}개 — 복사는 됩니다)` };
+    }
+  }
+  // 파일마다 받는 폴더 — 폴더째면 구조를 그대로
+  const plan: { row: Row; folder: string }[] = [];
+  for (const row of rows) {
+    const own = typeof row.folder === 'string' ? row.folder : '';
+    const folder = fromFolder !== null ? transferFolderPath(fromFolder, own, target) : target;
+    if (folder === null) return { ok: false, status: 400, message: `받는 폴더 아래에 두면 ${LIBRARY_FOLDER_RULE}` };
+    plan.push({ row, folder });
+  }
+  const max = libraryMaxFiles(to);
+  if (values.length + plan.length > max) {
+    return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[to]}에 ${max - values.length}개만 더 담을 수 있습니다(${plan.length}개를 보내려 함).` };
+  }
+  const after = new Set([...values, ...plan.map((x) => x.folder)].filter((v) => v !== ''));
+  if (after.size > LIBRARY_MAX_FOLDERS) return { ok: false, status: 409, message: `보내면 ${LIBRARY_SPACE_LABEL[to]}의 폴더가 ${LIBRARY_MAX_FOLDERS}개를 넘습니다.` };
+
+  const failed: LibraryBatchResult['failed'] = [];
+  const warnings: string[] = [];
+  let sent = 0;
+  for (const { row, folder } of plan) {
+    const key = String(row.id ?? '').toLowerCase();
+    const r = await sendRow(actor, row, key, { from, to, mode, folder }, io, newId);
+    if (!r.ok) { failed.push({ id: key, file_name: row.file_name, message: r.message }); continue; }
+    sent += 1;
+    if (r.warning) warnings.push(`'${row.file_name}': ${r.warning}`);
+  }
+  return { ok: true, mode, to, sent, failed, warnings };
 }
 
 /**
@@ -538,6 +655,15 @@ export function libraryIo(): LibraryIo {
       const { data, error } = await scoped(table().delete().eq('id', id), actor, space).select('id');
       if (error) throw new Error(`my_library_files: ${error.message}`);
       return ((data ?? []) as unknown[]).length;
+    },
+    async findRows(actor, space, { ids, folders, limit }) {
+      let q = scoped(table().select(`${COLUMNS}, storage_path`), actor, space).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
+      if (ids) q = q.in('id', ids);
+      if (folders) q = q.in('folder', folders);
+      const { data, error } = await q;
+      if (error) throw new Error(`my_library_files: ${error.message}`);
+      return ((data ?? []) as (Record<string, unknown> & { storage_path?: unknown; file_name?: unknown; user_id?: unknown })[])
+        .filter((r) => typeof r.storage_path === 'string' && typeof r.file_name === 'string' && typeof r.user_id === 'string') as Row[];
     },
     async setFolder(actor, space, from, to) {
       const { data, error } = await scoped(table().update({ folder: to, updated_at: new Date().toISOString() }).eq('folder', from), actor, space).select('id');

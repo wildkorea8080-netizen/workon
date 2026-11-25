@@ -172,6 +172,7 @@ describe('잇기', () => {
     const ui = readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8');
     expect(ui).toContain("method: 'POST', json: { space, to, mode, folder: target.trim() }");
     expect(ui).toContain('transferTargets(space, page?.canAddTo)');
-    expect(ui).toContain('disabled={!canChange(f)}');
+    expect(ui).toContain('disabled={!t.canMove}'); // 0298 — 공용 폼, 한 파일이면 canChange(what.file)
+    expect(ui).toContain("what.kind === 'file' ? canChange(what.file)");
   });
 });

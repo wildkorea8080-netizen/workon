@@ -131,6 +131,7 @@ export const API_ROUTES: readonly string[] = [
   'models',
   'my-library',
   'my-library/folders',
+  'my-library/transfer',
   'my-library/[id]',
   'my-library/[id]/original',
   'my/password',

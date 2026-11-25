@@ -113,6 +113,17 @@ export function subtreeFolders(values: string[], folder: string): string[] {
 }
 
 /**
+ * 폴더째 다른 자료함으로(0298) — `fromFolder` 아래 `folder`에 있던 파일을 받는 폴더 `target` 아래 어디에 둘지.
+ * 보낸 폴더의 이름(마지막 단계)과 그 아래 구조를 그대로: `예산`·`예산/2026` → `공유/예산`·`공유/예산/2026`. 3단계·30자를 넘으면 null
+ */
+export function transferFolderPath(fromFolder: string, folder: string, target: string): string | null {
+  if (folder !== fromFolder && !folder.startsWith(`${fromFolder}/`)) return null;
+  const leaf = fromFolder.split('/').pop() ?? fromFolder;
+  const rest = folder.slice(fromFolder.length);
+  return cleanFolderName(target ? `${target}/${leaf}${rest}` : `${leaf}${rest}`);
+}
+
+/**
  * 폴더째 옮기기(0294) — `from`과 그 아래 경로를 `to` 아래로 바꾼 새 경로. 고른 폴더 값들(values) 가운데 바뀌는 것만 [옛, 새]로.
  * 자기 아래로 옮기기·3단계 넘김·한 단계 30자 넘김이면 까닭(거절)
  */
