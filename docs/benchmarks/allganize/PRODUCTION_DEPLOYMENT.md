@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-26(새벽): SSO sid 로그아웃·예약 시간대/5분 단위·앱 되돌아가기와 이어 실행·자료함 내용 채우기(0301~0306) — 0118~0120 운영 적용
+
+- 코드 배포 `dpl_5jaZxxUht9yYVK9oMZpiP15ULXmh`(커밋 `0c785ee`, 2026-11-26 00:03 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `2bb0c1a`(밤 기록), `13b5d60` 기능 — 기관 SSO back-channel 로그아웃이 sid만 와도 받음(로그인 때 sid → 직원 `org_sso_sessions`, 0118)(0301), 앱 예약의 시간대(자주 쓰는 18개 + IANA 정식 이름, 서머타임)·5분 단위 시각(0119)(0302·0305), 앱 갈래의 되돌아가기(1~3번·한 실행 3번, 되돌아온 까닭을 참고 자료로)(0303), 자료함 내용 글을 5분 실행기가 사본에서 다시 읽어 채움(`content_checked_at`, 0120)(0304), 되돌아간 실행의 이어 실행(0306). `0c785ee` 문서. 가지 Preview(`workon-79bmwluno`, `dpl_F8QHL9CM9qvHX8jGcsRPj5k3u4nE`) Ready 뒤 `main`. 배포 전 전체 시험 460파일 5,317개 통과·tsc 0(이 PC는 WSL을 꺼야 메모리가 남는다 — 사용자 승인).
+- 되돌릴 때는 직전 `dpl_4NQdKrM94aaw65tx1poU25tBj5jW`(d0c5516)로 promote — 0118~0120은 표·칸 추가와 예약 분 CHECK 넓힘이라 옛 코드도 돈다(옛 코드는 time_zone·content_checked_at을 모른다 — 기본값으로 돈다).
+- 배포 전 운영 확인(읽기만): 마지막 적용 0117, `org_sso_sessions`·`time_zone`·`content_checked_at` 없음, 분 CHECK `(0, 30)`, 예약 행 0·자료함 행 0, RLS 꺼진 표 0. **0118~0120을 코드보다 먼저 적용**(`npm run db:migrate`, 3건 OK) → 다시 읽어 표(RLS 켜짐)·칸 둘·분 CHECK 5분 단위·시간대 꼴 CHECK 있음, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/apps/schedules`·`/api/my-library` 인증 없이 401, `POST /api/sso/backchannel-logout` 틀린 토큰 400. 실행기 호출 00:06~00:10 KST 모두 200(heartbeat 00:10 — 자료함 내용 채우기가 함께 돈다), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: SSO sid 로그아웃을 실제 계정 서비스로 해 보지 않았다(운영에 SSO 설정 행이 없다). 예약 시간대·5분 단위 화면, 앱 되돌아가기의 실제 모델 실행·빌더 화면을 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-25(밤): 자료함 파일 내용으로 찾기(0300) — 0117 운영 적용
 
 - 코드 배포 `dpl_4NQdKrM94aaw65tx1poU25tBj5jW`(커밋 `d0c5516`, 2026-11-25 21:04 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `0e6fc95`(저녁 기록), `56932be` 기능 — 담을 때 파일을 글로 읽어(첨부는 읽어 둔 내용, 만든 파일은 원본을 다시 읽음 — 스캔 PDF는 NODA로 보내지 않음) 앞 20,000자를 `content_text`에 두고, 자료함 찾기는 이름 + 내용을 이은 `search_text`(생성 칸)를 `ilike`로, 내용에서 맞으면 맞은 자리 앞뒤만 보임, 보내면 내용 글도 함께 감(0117). `d0c5516` 문서. 가지 Preview(`workon-bq6ki42q6`, `dpl_9gFb85iuUqtuXFqR9S7LEssnRx6a`) Ready 뒤 `main`. 배포 전 전체 시험 454파일 5,263개 통과·tsc 0.
