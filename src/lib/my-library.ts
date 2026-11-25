@@ -19,7 +19,8 @@ import { logSystem } from '@/lib/logger';
 import {
   cleanFolderName, cleanLibraryFileName, sortFolders, parseLibrarySpace, isSharedLibrarySpace, subtreeFolders, planFolderMove, transferFolderPath, LIBRARY_SPACE_LABEL,
   LIBRARY_MAX_BYTES, LIBRARY_MAX_FOLDERS, LIBRARY_PAGE, libraryMaxFiles,
-  type LibraryFile, type LibraryFolder, type LibrarySource, type LibrarySpace,
+  samePlace, libraryPlaceLabel,
+  type LibraryFile, type LibraryFolder, type LibrarySource, type LibrarySpace, type LibraryShare,
 } from '@/lib/my-library-spec';
 
 export * from '@/lib/my-library-spec';
@@ -31,7 +32,13 @@ const COLUMNS = 'id, file_name, folder, size_bytes, source, created_at, user_id'
  * 요청자 — 부서 자료함은 이 부서, 관리자면 남이 담은 부서 파일도 고치고 지운다.
  * 기관 자료함(0112)은 기관 전체 관리자(`managesWholeOrganization`)만 담고 고친다 — 없으면 아닌 것으로
  */
-export type LibraryActor = { userId: string; organizationId: string; departmentId: string; isAdmin: boolean; managesWholeOrganization?: boolean };
+export type LibraryActor = {
+  userId: string; organizationId: string; departmentId: string; isAdmin: boolean; managesWholeOrganization?: boolean;
+  /** (0116) 내가 든 공유 자료함 — 라우트가 `loadLibraryShares`로 채운다. 없으면 공유 자료함은 하나도 못 연다 */
+  shares?: LibraryShare[];
+  /** (0116) 이번 요청이 다루는 공유 자료함 — `placeActor`만 정한다(내가 든 것인지 본 뒤) */
+  shareId?: string | null;
+};
 type Failure = { ok: false; status: number; message: string };
 type Row = Record<string, unknown> & { storage_path: string; file_name: string; user_id: string };
 
@@ -40,13 +47,27 @@ export const LIBRARY_RETRY = '자료함을 지금 읽지 못했습니다. 잠시
 export const LIBRARY_NOT_YOURS = '부서 자료함의 파일은 담은 사람이나 관리자만 바꾸거나 지울 수 있습니다.';
 export const LIBRARY_FOLDER_RULE = '폴더는 / 로 나눠 3단계까지, 한 단계 30자까지입니다(\\ 와 " 는 쓸 수 없습니다).';
 export const LIBRARY_ORG_ONLY = '기관 자료함은 기관 전체 관리자(최상위 부서 소속)만 담고 바꾸고 지웁니다.';
+export const LIBRARY_SHARE_NOT_FOUND = '그 공유 자료함을 찾을 수 없습니다(지금 소속 부서가 든 공유 자료함만 열 수 있습니다).';
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * (0116) 이 요청이 다룰 자료함의 요청자 — 공유 자료함이면 `share`가 내가 든 것일 때만(아니면 404), 그 밖의 자리는 공유 자료함 없음
+ */
+export function placeActor(actor: LibraryActor, space: LibrarySpace, share: unknown): { ok: true; actor: LibraryActor } | Failure {
+  if (space !== 'shared') return { ok: true, actor: { ...actor, shareId: null } };
+  const id = typeof share === 'string' && UUID.test(share) ? share.toLowerCase() : null;
+  if (!id || !(actor.shares ?? []).some((s) => s.id.toLowerCase() === id)) return { ok: false, status: 404, message: LIBRARY_SHARE_NOT_FOUND };
+  return { ok: true, actor: { ...actor, shareId: id } };
+}
 const SOURCE_NOT_FOUND = '담을 파일을 찾을 수 없습니다.';
-const BAD_SPACE = 'space는 personal(내 자료함)·department(부서 자료함)·organization(기관 자료함) 중 하나로 적어 주세요.';
+const BAD_SPACE = 'space는 personal(내 자료함)·department(부서 자료함)·organization(기관 자료함)·shared(공유 자료함 — share와 함께) 중 하나로 적어 주세요.';
+const BAD_TO = '보낼 자료함(to)은 personal·department·organization·shared(toShare와 함께) 중 하나로 적어 주세요.';
 
 /** 저장소 경로 — 서버가 정한다 */
-export function libraryPath(space: LibrarySpace, actor: Pick<LibraryActor, 'organizationId' | 'userId' | 'departmentId'>, id: string, fileName: string): string {
+export function libraryPath(space: LibrarySpace, actor: Pick<LibraryActor, 'organizationId' | 'userId' | 'departmentId' | 'shareId'>, id: string, fileName: string): string {
   const ext = attachmentExtension(fileName) ?? 'bin';
   if (space === 'organization') return `my-library/${actor.organizationId}/o/${id}.${ext}`;
+  if (space === 'shared') return `my-library/${actor.organizationId}/s/${actor.shareId ?? NIL_UUID}/${id}.${ext}`;
   return space === 'department'
     ? `my-library/${actor.organizationId}/d/${actor.departmentId}/${id}.${ext}`
     : `my-library/${actor.organizationId}/${actor.userId}/${id}.${ext}`;
@@ -86,7 +107,10 @@ export function canAddToLibrary(space: LibrarySpace, actor: LibraryActor): boole
 }
 
 function noChange(space: LibrarySpace): Failure {
-  return { ok: false, status: 403, message: space === 'organization' ? LIBRARY_ORG_ONLY : LIBRARY_NOT_YOURS };
+  return {
+    ok: false, status: 403,
+    message: space === 'organization' ? LIBRARY_ORG_ONLY : space === 'shared' ? '공유 자료함의 파일은 담은 사람이나 관리자만 바꾸거나 지울 수 있습니다.' : LIBRARY_NOT_YOURS,
+  };
 }
 
 /** 저장소·DB에 닿는 일 — 시험이 바꿔 끼운다 */
@@ -111,6 +135,8 @@ export interface LibraryIo {
   remove(actor: LibraryActor, space: LibrarySpace, id: string): Promise<number>;
   /** (0298) 이 자리에서 볼 수 있는 여러 행(경로 포함) — `ids` 또는 `folders`, `limit`개까지. DB 오류면 던진다 */
   findRows?(actor: LibraryActor, space: LibrarySpace, opts: { ids?: string[]; folders?: string[]; limit: number }): Promise<Row[]>;
+  /** (0116) 지금 내 부서가 든 공유 자료함의 한 행(경로 포함) — 다시 붙이기·내려받기용. 없으면 null, DB 오류면 던진다 */
+  findSharedRow?(actor: LibraryActor, id: string): Promise<Row | null>;
   /** 폴더 값이 `from`인 이 자리의 행을 모두 `to`로(0294) — 바꾼 수. 실패면 던진다 */
   setFolder?(actor: LibraryActor, space: LibrarySpace, from: string, to: string): Promise<number>;
 }
@@ -122,11 +148,14 @@ function spaceOf(raw: unknown): LibrarySpace | null {
 /** 자료함 목록 — 고른 자리·폴더(null = 전체)·이름 찾기·쪽 넘기기, 폴더 목록과 전체 수를 함께 */
 export async function listLibrary(
   actor: LibraryActor,
-  input: { space?: unknown; folder?: unknown; q?: unknown; cursor?: unknown },
+  input: { space?: unknown; share?: unknown; folder?: unknown; q?: unknown; cursor?: unknown },
   io: LibraryIo = libraryIo(),
-): Promise<{ ok: true; data: { space: LibrarySpace; files: LibraryFile[]; next: string | null; folders: LibraryFolder[]; total: number; limit: number; canManage: boolean; canAdd: boolean; canAddTo: Record<LibrarySpace, boolean> } } | Failure> {
+): Promise<{ ok: true; data: { space: LibrarySpace; share: string | null; shares: LibraryShare[]; files: LibraryFile[]; next: string | null; folders: LibraryFolder[]; total: number; limit: number; canManage: boolean; canAdd: boolean; canAddTo: Record<LibrarySpace, boolean> } } | Failure> {
   const space = spaceOf(input.space);
   if (!space) return { ok: false, status: 400, message: BAD_SPACE };
+  const placed = placeActor(actor, space, input.share);
+  if (!placed.ok) return placed;
+  actor = placed.actor;
   let folder: string | null = null;
   if (input.folder !== undefined && input.folder !== null) {
     folder = cleanFolderName(input.folder);
@@ -152,6 +181,9 @@ export async function listLibrary(
       ok: true,
       data: {
         space,
+        share: actor.shareId ?? null,
+        // 내가 든 공유 자료함(0116) — 화면이 탭과 보낼 곳을 만든다
+        shares: actor.shares ?? [],
         files,
         next: rows.length > LIBRARY_PAGE && last ? encodeHistoryCursor(last.created_at, last.id) : null,
         folders: folderCounts(values),
@@ -162,7 +194,7 @@ export async function listLibrary(
         // 이 자리에 담을 수 있는가(기관 자료함은 기관 전체 관리자만)
         canAdd: canAddToLibrary(space, actor),
         // 자리마다 담을 수 있는가 — 다른 자료함으로 복사·옮기기(0296)가 고를 곳을 보인다
-        canAddTo: { personal: canAddToLibrary('personal', actor), department: canAddToLibrary('department', actor), organization: canAddToLibrary('organization', actor) },
+        canAddTo: { personal: canAddToLibrary('personal', actor), department: canAddToLibrary('department', actor), organization: canAddToLibrary('organization', actor), shared: true },
       },
     };
   } catch {
@@ -176,7 +208,7 @@ export async function listLibrary(
  */
 export async function saveToLibrary(
   actor: LibraryActor,
-  input: { kind?: unknown; id?: unknown; folder?: unknown; space?: unknown },
+  input: { kind?: unknown; id?: unknown; folder?: unknown; space?: unknown; share?: unknown },
   io: LibraryIo = libraryIo(),
   newId: () => string = randomUUID,
 ): Promise<{ ok: true; file: LibraryFile } | Failure> {
@@ -185,6 +217,9 @@ export async function saveToLibrary(
   }
   const space = spaceOf(input.space);
   if (!space) return { ok: false, status: 400, message: BAD_SPACE };
+  const placed = placeActor(actor, space, input.share);
+  if (!placed.ok) return placed;
+  actor = placed.actor;
   if (!canAddToLibrary(space, actor)) return { ok: false, status: 403, message: LIBRARY_ORG_ONLY };
   const folder = cleanFolderName(input.folder);
   if (folder === null) return { ok: false, status: 400, message: LIBRARY_FOLDER_RULE };
@@ -203,7 +238,7 @@ export async function saveToLibrary(
   }
   const max = libraryMaxFiles(space);
   if (values.length >= max) {
-    return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[space]}이 가득 찼습니다(${max}개). 쓰지 않는 파일을 지운 뒤 담아 주세요.` };
+    return { ok: false, status: 409, message: `${libraryPlaceLabel({ space, share: actor.shareId }, actor.shares)}이 가득 찼습니다(${max}개). 쓰지 않는 파일을 지운 뒤 담아 주세요.` };
   }
   const folders = new Set(values.filter((v) => v !== ''));
   if (folder !== '' && !folders.has(folder) && folders.size >= LIBRARY_MAX_FOLDERS) {
@@ -222,6 +257,7 @@ export async function saveToLibrary(
       organization_id: actor.organizationId,
       space,
       department_id: space === 'department' ? actor.departmentId : null,
+      share_id: space === 'shared' ? actor.shareId : null,
       folder,
       file_name: source.file_name,
       size_bytes: source.size_bytes,
@@ -239,11 +275,14 @@ export async function saveToLibrary(
 export async function updateLibraryFile(
   actor: LibraryActor,
   id: string,
-  input: { file_name?: unknown; folder?: unknown; space?: unknown },
+  input: { file_name?: unknown; folder?: unknown; space?: unknown; share?: unknown },
   io: LibraryIo = libraryIo(),
 ): Promise<{ ok: true; file: LibraryFile } | Failure> {
   const space = spaceOf(input.space);
   if (!space) return { ok: false, status: 400, message: BAD_SPACE };
+  const placed = placeActor(actor, space, input.share);
+  if (!placed.ok) return placed;
+  actor = placed.actor;
   if (!UUID.test(id)) return { ok: false, status: 404, message: LIBRARY_NOT_FOUND };
   if (input.file_name === undefined && input.folder === undefined) return { ok: false, status: 400, message: '바꿀 이름이나 폴더를 보내 주세요.' };
   let row: Row | null;
@@ -281,9 +320,12 @@ export async function updateLibraryFile(
 }
 
 /** 지우기 — 사본 먼저(없음은 지운 것), 그다음 행. 사본을 못 지우면 행을 남긴다(다시 지울 수 있게). 부서 자료함은 담은 사람·관리자만 */
-export async function deleteLibraryFile(actor: LibraryActor, id: string, spaceInput: unknown, io: LibraryIo = libraryIo()): Promise<{ ok: true } | Failure> {
+export async function deleteLibraryFile(actor: LibraryActor, id: string, spaceInput: unknown, io: LibraryIo = libraryIo(), shareInput?: unknown): Promise<{ ok: true } | Failure> {
   const space = spaceOf(spaceInput);
   if (!space) return { ok: false, status: 400, message: BAD_SPACE };
+  const placed = placeActor(actor, space, shareInput);
+  if (!placed.ok) return placed;
+  actor = placed.actor;
   if (!UUID.test(id)) return { ok: false, status: 404, message: LIBRARY_NOT_FOUND };
   let row: Row | null;
   try {
@@ -309,13 +351,16 @@ export async function deleteLibraryFile(actor: LibraryActor, id: string, spaceIn
  */
 export async function moveLibraryFolder(
   actor: LibraryActor,
-  input: { space?: unknown; from?: unknown; to?: unknown },
+  input: { space?: unknown; share?: unknown; from?: unknown; to?: unknown },
   io: LibraryIo = libraryIo(),
 ): Promise<{ ok: true; moved: number; folders: number } | Failure> {
   const space = spaceOf(input.space);
   if (!space) return { ok: false, status: 400, message: BAD_SPACE };
-  const allowed = space === 'personal' || (space === 'department' ? actor.isAdmin : actor.managesWholeOrganization === true);
-  if (!allowed) return { ok: false, status: 403, message: space === 'organization' ? LIBRARY_ORG_ONLY : '부서 자료함의 폴더는 관리자만 폴더째 옮깁니다(남이 담은 파일도 함께 옮겨지므로).' };
+  const placed = placeActor(actor, space, input.share);
+  if (!placed.ok) return placed;
+  actor = placed.actor;
+  const allowed = space === 'personal' || (space === 'organization' ? actor.managesWholeOrganization === true : actor.isAdmin);
+  if (!allowed) return { ok: false, status: 403, message: space === 'organization' ? LIBRARY_ORG_ONLY : `${LIBRARY_SPACE_LABEL[space]}의 폴더는 관리자만 폴더째 옮깁니다(남이 담은 파일도 함께 옮겨지므로).` };
   const from = cleanFolderName(input.from);
   const to = cleanFolderName(input.to);
   if (from === null || to === null) return { ok: false, status: 400, message: LIBRARY_FOLDER_RULE };
@@ -354,15 +399,23 @@ export type LibraryTransferMode = 'copy' | 'move';
 export async function transferLibraryFile(
   actor: LibraryActor,
   id: string,
-  input: { space?: unknown; to?: unknown; folder?: unknown; mode?: unknown },
+  input: { space?: unknown; share?: unknown; to?: unknown; toShare?: unknown; folder?: unknown; mode?: unknown },
   io: LibraryIo = libraryIo(),
   newId: () => string = randomUUID,
 ): Promise<{ ok: true; file: LibraryFile; mode: LibraryTransferMode; to: LibrarySpace; warning?: string } | Failure> {
   const from = spaceOf(input.space);
   if (!from) return { ok: false, status: 400, message: BAD_SPACE };
   const to = spaceOf(input.to);
-  if (!to) return { ok: false, status: 400, message: '보낼 자료함(to)은 personal·department·organization 중 하나로 적어 주세요.' };
-  if (from === to) return { ok: false, status: 400, message: '같은 자료함 안에서는 폴더 옮기기를 쓰세요.' };
+  if (!to) return { ok: false, status: 400, message: BAD_TO };
+  if (samePlace({ space: from, share: typeof input.share === 'string' ? input.share : null }, { space: to, share: typeof input.toShare === 'string' ? input.toShare : null })) {
+    return { ok: false, status: 400, message: '같은 자료함 안에서는 폴더 옮기기를 쓰세요.' };
+  }
+  const fromPlaced = placeActor(actor, from, input.share);
+  if (!fromPlaced.ok) return fromPlaced;
+  const toPlaced = placeActor(actor, to, input.toShare);
+  if (!toPlaced.ok) return toPlaced;
+  const fromActor = fromPlaced.actor;
+  const toActor = toPlaced.actor;
   const mode = input.mode === 'copy' || input.mode === 'move' ? input.mode : null;
   if (!mode) return { ok: false, status: 400, message: 'mode는 copy(복사)나 move(옮기기)로 적어 주세요.' };
   if (!UUID.test(id)) return { ok: false, status: 404, message: LIBRARY_NOT_FOUND };
@@ -374,22 +427,23 @@ export async function transferLibraryFile(
   let row: Row | null;
   let values: string[];
   try {
-    [row, values] = await Promise.all([io.findRow(actor, from, key), io.folderValues(actor, to)]);
+    [row, values] = await Promise.all([io.findRow(fromActor, from, key), io.folderValues(toActor, to)]);
   } catch {
     return { ok: false, status: 503, message: LIBRARY_RETRY };
   }
   if (!row) return { ok: false, status: 404, message: LIBRARY_NOT_FOUND };
-  if (mode === 'move' && !canChangeLibraryRow(from, row, actor)) return noChange(from);
+  if (mode === 'move' && !canChangeLibraryRow(from, row, fromActor)) return noChange(from);
   const max = libraryMaxFiles(to);
+  const toLabel = libraryPlaceLabel({ space: to, share: toActor.shareId }, actor.shares);
   if (values.length >= max) {
-    return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[to]}이 가득 찼습니다(${max}개). 쓰지 않는 파일을 지운 뒤 다시 해 주세요.` };
+    return { ok: false, status: 409, message: `${toLabel}이 가득 찼습니다(${max}개). 쓰지 않는 파일을 지운 뒤 다시 해 주세요.` };
   }
   const folders = new Set(values.filter((v) => v !== ''));
   if (folder !== '' && !folders.has(folder) && folders.size >= LIBRARY_MAX_FOLDERS) {
-    return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[to]}의 폴더는 ${LIBRARY_MAX_FOLDERS}개까지입니다. 있는 폴더를 고르세요.` };
+    return { ok: false, status: 409, message: `${toLabel}의 폴더는 ${LIBRARY_MAX_FOLDERS}개까지입니다. 있는 폴더를 고르세요.` };
   }
 
-  const sent = await sendRow(actor, row, key, { from, to, mode, folder }, io, newId);
+  const sent = await sendRow({ fromActor, toActor }, row, key, { from, to, mode, folder }, io, newId);
   return sent.ok ? { ok: true, file: sent.file, mode, to, ...(sent.warning ? { warning: sent.warning } : {}) } : sent;
 }
 
@@ -397,13 +451,14 @@ export async function transferLibraryFile(
  * 한 행 보내기(0296·0298 공용) — 권한·자리 상한은 부른 쪽이 이미 봤다. 새 사본 → 새 행 → (옮기기면) 원래 행 → 원래 사본
  */
 async function sendRow(
-  actor: LibraryActor,
+  { fromActor, toActor }: { fromActor: LibraryActor; toActor: LibraryActor },
   row: Row,
   key: string,
   { from, to, mode, folder }: { from: LibrarySpace; to: LibrarySpace; mode: LibraryTransferMode; folder: string },
   io: LibraryIo,
   newId: () => string,
 ): Promise<{ ok: true; file: LibraryFile; warning?: string } | Failure> {
+  const actor = toActor;
   const newKey = newId();
   const path = libraryPath(to, actor, newKey, row.file_name);
   const copied = await io.copyObject(row.storage_path, path);
@@ -417,6 +472,7 @@ async function sendRow(
       organization_id: actor.organizationId,
       space: to,
       department_id: to === 'department' ? actor.departmentId : null,
+      share_id: to === 'shared' ? actor.shareId : null,
       folder,
       file_name: row.file_name,
       size_bytes: Number(row.size_bytes ?? 0),
@@ -433,11 +489,11 @@ async function sendRow(
   // 옮기기 — 원래 행을 지운 뒤 원래 사본
   let removed: number;
   try {
-    removed = await io.remove(actor, from, key);
+    removed = await io.remove(fromActor, from, key);
   } catch {
     return {
       ok: true, file,
-      warning: `${LIBRARY_SPACE_LABEL[to]}에 담았지만 ${LIBRARY_SPACE_LABEL[from]}에서는 지우지 못했습니다 — 두 곳에 있습니다. ${LIBRARY_SPACE_LABEL[from]}에서 지워 주세요.`,
+      warning: `${libraryPlaceLabel({ space: to, share: toActor.shareId }, actor.shares)}에 담았지만 ${libraryPlaceLabel({ space: from, share: fromActor.shareId }, actor.shares)}에서는 지우지 못했습니다 — 두 곳에 있습니다. 원래 자리에서 지워 주세요.`,
     };
   }
   if (removed > 0 && (await io.removeObject(row.storage_path)) === 'error') {
@@ -469,15 +525,23 @@ export type LibraryBatchResult = {
  */
 export async function transferLibraryFiles(
   actor: LibraryActor,
-  input: { space?: unknown; to?: unknown; folder?: unknown; mode?: unknown; ids?: unknown; fromFolder?: unknown },
+  input: { space?: unknown; share?: unknown; to?: unknown; toShare?: unknown; folder?: unknown; mode?: unknown; ids?: unknown; fromFolder?: unknown },
   io: LibraryIo = libraryIo(),
   newId: () => string = randomUUID,
 ): Promise<LibraryBatchResult | Failure> {
   const from = spaceOf(input.space);
   if (!from) return { ok: false, status: 400, message: BAD_SPACE };
   const to = spaceOf(input.to);
-  if (!to) return { ok: false, status: 400, message: '보낼 자료함(to)은 personal·department·organization 중 하나로 적어 주세요.' };
-  if (from === to) return { ok: false, status: 400, message: '같은 자료함 안에서는 폴더 옮기기를 쓰세요.' };
+  if (!to) return { ok: false, status: 400, message: BAD_TO };
+  if (samePlace({ space: from, share: typeof input.share === 'string' ? input.share : null }, { space: to, share: typeof input.toShare === 'string' ? input.toShare : null })) {
+    return { ok: false, status: 400, message: '같은 자료함 안에서는 폴더 옮기기를 쓰세요.' };
+  }
+  const fromPlaced = placeActor(actor, from, input.share);
+  if (!fromPlaced.ok) return fromPlaced;
+  const toPlaced = placeActor(actor, to, input.toShare);
+  if (!toPlaced.ok) return toPlaced;
+  const fromActor = fromPlaced.actor;
+  const toActor = toPlaced.actor;
   const mode = input.mode === 'copy' || input.mode === 'move' ? input.mode : null;
   if (!mode) return { ok: false, status: 400, message: 'mode는 copy(복사)나 move(옮기기)로 적어 주세요.' };
   const target = cleanFolderName(input.folder);
@@ -503,11 +567,11 @@ export async function transferLibraryFiles(
   let values: string[];
   let sourceValues: string[] = [];
   try {
-    if (fromFolder !== null) sourceValues = await io.folderValues(actor, from);
+    if (fromFolder !== null) sourceValues = await io.folderValues(fromActor, from);
     const folders = fromFolder !== null ? subtreeFolders(sourceValues, fromFolder) : null;
     [rows, values] = await Promise.all([
-      io.findRows(actor, from, folders ? { folders, limit: LIBRARY_TRANSFER_MAX + 1 } : { ids, limit: LIBRARY_TRANSFER_MAX + 1 }),
-      io.folderValues(actor, to),
+      io.findRows(fromActor, from, folders ? { folders, limit: LIBRARY_TRANSFER_MAX + 1 } : { ids, limit: LIBRARY_TRANSFER_MAX + 1 }),
+      io.folderValues(toActor, to),
     ]);
   } catch {
     return { ok: false, status: 503, message: LIBRARY_RETRY };
@@ -516,7 +580,7 @@ export async function transferLibraryFiles(
   if (!rows.length) return { ok: false, status: 404, message: '그 폴더에 담긴 파일이 없습니다.' };
   if (rows.length > LIBRARY_TRANSFER_MAX) return { ok: false, status: 400, message: `폴더 안 파일이 ${LIBRARY_TRANSFER_MAX}개를 넘습니다 — 아래 폴더로 나눠 보내 주세요.` };
   if (mode === 'move') {
-    const locked = rows.filter((r) => !canChangeLibraryRow(from, r, actor));
+    const locked = rows.filter((r) => !canChangeLibraryRow(from, r, fromActor));
     if (locked.length) {
       const denied = noChange(from);
       return { ...denied, message: `${denied.message} (옮길 수 없는 파일 ${locked.length}개 — 복사는 됩니다)` };
@@ -531,18 +595,19 @@ export async function transferLibraryFiles(
     plan.push({ row, folder });
   }
   const max = libraryMaxFiles(to);
+  const toLabel = libraryPlaceLabel({ space: to, share: toActor.shareId }, actor.shares);
   if (values.length + plan.length > max) {
-    return { ok: false, status: 409, message: `${LIBRARY_SPACE_LABEL[to]}에 ${max - values.length}개만 더 담을 수 있습니다(${plan.length}개를 보내려 함).` };
+    return { ok: false, status: 409, message: `${toLabel}에 ${max - values.length}개만 더 담을 수 있습니다(${plan.length}개를 보내려 함).` };
   }
   const after = new Set([...values, ...plan.map((x) => x.folder)].filter((v) => v !== ''));
-  if (after.size > LIBRARY_MAX_FOLDERS) return { ok: false, status: 409, message: `보내면 ${LIBRARY_SPACE_LABEL[to]}의 폴더가 ${LIBRARY_MAX_FOLDERS}개를 넘습니다.` };
+  if (after.size > LIBRARY_MAX_FOLDERS) return { ok: false, status: 409, message: `보내면 ${toLabel}의 폴더가 ${LIBRARY_MAX_FOLDERS}개를 넘습니다.` };
 
   const failed: LibraryBatchResult['failed'] = [];
   const warnings: string[] = [];
   let sent = 0;
   for (const { row, folder } of plan) {
     const key = String(row.id ?? '').toLowerCase();
-    const r = await sendRow(actor, row, key, { from, to, mode, folder }, io, newId);
+    const r = await sendRow({ fromActor, toActor }, row, key, { from, to, mode, folder }, io, newId);
     if (!r.ok) { failed.push({ id: key, file_name: row.file_name, message: r.message }); continue; }
     sent += 1;
     if (r.warning) warnings.push(`'${row.file_name}': ${r.warning}`);
@@ -557,8 +622,26 @@ export async function transferLibraryFiles(
 export async function findLibraryOriginal(actor: LibraryActor, id: string, io: LibraryIo = libraryIo()): Promise<{ storage_path: string; file_name: string } | null> {
   if (!UUID.test(id)) return null;
   const key = id.toLowerCase();
-  const row = (await io.findRow(actor, 'personal', key)) ?? (await io.findRow(actor, 'department', key)) ?? (await io.findRow(actor, 'organization', key));
+  const row = (await io.findRow(actor, 'personal', key)) ?? (await io.findRow(actor, 'department', key)) ?? (await io.findRow(actor, 'organization', key))
+    // (0116) 지금 내 부서가 든 공유 자료함의 행
+    ?? (io.findSharedRow ? await io.findSharedRow(actor, key) : null);
   return row ? { storage_path: row.storage_path, file_name: row.file_name } : null;
+}
+
+// ── 공유 자료함(0116) ─────────────────────────────────────────────────────
+
+/** 지금 이 부서가 든 이 기관의 공유 자료함 — 이름 순. 부서가 없으면 빈 목록, 못 읽으면 던진다 */
+export async function loadLibraryShares(organizationId: string, departmentId: string | null | undefined): Promise<LibraryShare[]> {
+  if (!departmentId) return [];
+  const { data: links, error } = await supabaseAdmin.from('library_share_departments').select('share_id').eq('department_id', departmentId);
+  if (error) throw new Error(`library_share_departments: ${error.message}`);
+  const ids = [...new Set(((links ?? []) as { share_id: string }[]).map((l) => l.share_id))];
+  if (!ids.length) return [];
+  const { data, error: shareError } = await supabaseAdmin.from('library_shares').select('id, name').in('id', ids).eq('organization_id', organizationId);
+  if (shareError) throw new Error(`library_shares: ${shareError.message}`);
+  return ((data ?? []) as { id: string; name: string }[])
+    .map((s) => ({ id: s.id, name: s.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 }
 
 // ── 탈퇴 처리 ────────────────────────────────────────────────────────────
@@ -586,6 +669,9 @@ export function libraryIo(): LibraryIo {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scoped = (q: any, actor: LibraryActor, space: LibrarySpace) => (space === 'organization'
     ? q.eq('space', 'organization').eq('organization_id', actor.organizationId)
+    : space === 'shared'
+      // (0116) 고른 공유 자료함 — placeActor가 내가 든 것인지 본 id만, 없으면 아무 행도 안 맞는 id
+      ? q.eq('space', 'shared').eq('share_id', actor.shareId ?? NIL_UUID).eq('organization_id', actor.organizationId)
     : space === 'department'
       ? q.eq('space', 'department').eq('department_id', actor.departmentId).eq('organization_id', actor.organizationId)
       : q.eq('space', 'personal').eq('user_id', actor.userId).eq('organization_id', actor.organizationId));
@@ -664,6 +750,15 @@ export function libraryIo(): LibraryIo {
       if (error) throw new Error(`my_library_files: ${error.message}`);
       return ((data ?? []) as (Record<string, unknown> & { storage_path?: unknown; file_name?: unknown; user_id?: unknown })[])
         .filter((r) => typeof r.storage_path === 'string' && typeof r.file_name === 'string' && typeof r.user_id === 'string') as Row[];
+    },
+    async findSharedRow(actor, id) {
+      const shares = await loadLibraryShares(actor.organizationId, actor.departmentId);
+      if (!shares.length) return null;
+      const { data, error } = await table().select(`${COLUMNS}, storage_path`).eq('id', id).eq('space', 'shared')
+        .in('share_id', shares.map((s) => s.id)).eq('organization_id', actor.organizationId).maybeSingle();
+      if (error) throw new Error(`my_library_files: ${error.message}`);
+      const row = data as (Record<string, unknown> & { storage_path?: unknown; file_name?: unknown; user_id?: unknown }) | null;
+      return row && typeof row.storage_path === 'string' && typeof row.file_name === 'string' && typeof row.user_id === 'string' ? (row as Row) : null;
     },
     async setFolder(actor, space, from, to) {
       const { data, error } = await scoped(table().update({ folder: to, updated_at: new Date().toISOString() }).eq('folder', from), actor, space).select('id');

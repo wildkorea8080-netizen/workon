@@ -294,6 +294,7 @@ const HANDLED_ELSEWHERE = new Map<string, string>([
   ['invitations', '수락된 초대만 막는다 — 기다리는 초대는 부서와 함께 지워도 된다(링크가 못 쓰게 될 뿐)'],
   ['forbidden_words', '그 부서(와 하위)에만 걸리는 설정이라 부서와 함께 지운다'],
   ['report_templates', '옛 보고서 템플릿(읽기 전용) — 부서와 함께 지운다'],
+  ['library_share_departments', '공유 자료함(0116)의 부서 목록 한 줄 — 부서를 지우면 그 줄만 빠진다(공유 자료함·파일은 남고 다른 부서가 그대로 쓴다)'],
 ]);
 
 const url = process.env.WORK_TEST_DATABASE_URL;

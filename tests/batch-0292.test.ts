@@ -135,7 +135,7 @@ describe('DB 조건', () => {
 
 describe('잇기', () => {
   it('라우트가 기관 전체 관리자 여부를 넘기고, 화면에 기관 자료함 탭', () => {
-    for (const f of ['src/app/api/my-library/route.ts', 'src/app/api/my-library/[id]/route.ts']) {
+    for (const f of ['src/lib/my-library-actor.ts']) {
       expect(readFileSync(f, 'utf8')).toContain('managesWholeOrganization: actor.managesWholeOrganization');
     }
     expect(readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8')).toContain('LIBRARY_SPACES.map');

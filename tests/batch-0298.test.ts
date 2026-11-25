@@ -145,10 +145,10 @@ describe('잇기', () => {
     const route = readFileSync('src/app/api/my-library/transfer/route.ts', 'utf8');
     expect(route).toContain('transferLibraryFiles(');
     expect(route).toContain('ids: body.ids, fromFolder: body.fromFolder');
+    expect(route).toContain('share: body.share, to: body.to, toShare: body.toShare');
     const ui = readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8');
     expect(ui).toContain("api<BatchResult>('/api/my-library/transfer'");
-    expect(ui).toContain("{ space, to, mode, folder: target.trim(), ids: what.ids }");
-    expect(ui).toContain("{ space, to, mode, folder: target.trim(), fromFolder: what.folder }");
+    expect(ui).toContain("...(what.kind === 'files' ? { ids: what.ids } : { fromFolder: what.folder })");
     expect(ui).toContain('useEffect(() => { setSelected([]); }, [query, folder, refreshKey]);');
   });
 });

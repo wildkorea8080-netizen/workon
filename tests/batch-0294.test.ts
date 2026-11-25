@@ -100,7 +100,7 @@ describe('잇기', () => {
   it('라우트·등록·화면 단추', () => {
     const route = readFileSync('src/app/api/my-library/folders/route.ts', 'utf8');
     expect(route).toContain('export async function PATCH');
-    expect(route).toContain('managesWholeOrganization: actor.managesWholeOrganization');
+    expect(route).toContain('libraryActorOr(await getServerAuthSession())'); // 0299 — 요청자(공유 자료함 포함)는 도우미가
     expect(API_ROUTES.indexOf('my-library/folders')).toBeLessThan(API_ROUTES.indexOf('my-library/[id]'));
     const lib = readFileSync('src/lib/my-library.ts', 'utf8');
     expect(lib).toContain(".update({ folder: to, updated_at: new Date().toISOString() }).eq('folder', from), actor, space)");

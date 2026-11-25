@@ -154,12 +154,12 @@ describe('보낼 곳 고르기', () => {
   it('목록 응답의 canAddTo — 기관 자료함은 기관 전체 관리자만', async () => {
     const { io } = fakeIo();
     const page = { ...io, page: async () => [], userNames: async () => new Map() } as unknown as LibraryIo;
-    expect(await listLibrary(staff, { space: 'personal' }, page)).toMatchObject({ ok: true, data: { canAddTo: { personal: true, department: true, organization: false } } });
-    expect(await listLibrary(orgAdmin, { space: 'personal' }, page)).toMatchObject({ ok: true, data: { canAddTo: { personal: true, department: true, organization: true } } });
+    expect(await listLibrary(staff, { space: 'personal' }, page)).toMatchObject({ ok: true, data: { canAddTo: { personal: true, department: true, organization: false, shared: true } } });
+    expect(await listLibrary(orgAdmin, { space: 'personal' }, page)).toMatchObject({ ok: true, data: { canAddTo: { personal: true, department: true, organization: true, shared: true } } });
   });
   it('transferTargets — 지금 자리는 빼고, 담을 수 있는 곳만, 못 읽었으면 기관 자료함은 뺀다', () => {
-    expect(transferTargets('department', { personal: true, department: true, organization: false })).toEqual(['personal']);
-    expect(transferTargets('personal', { personal: true, department: true, organization: true })).toEqual(['department', 'organization']);
+    expect(transferTargets('department', { personal: true, department: true, organization: false, shared: true })).toEqual(['personal']);
+    expect(transferTargets('personal', { personal: true, department: true, organization: true, shared: true })).toEqual(['department', 'organization']);
     expect(transferTargets('organization', undefined)).toEqual(['personal', 'department']);
     expect(transferTargets('personal', undefined)).toEqual(['department']);
   });
@@ -168,10 +168,10 @@ describe('보낼 곳 고르기', () => {
 describe('잇기', () => {
   it('라우트 POST가 transferLibraryFile로, 화면이 그 길을 부른다', () => {
     const route = readFileSync('src/app/api/my-library/[id]/route.ts', 'utf8');
-    expect(route).toMatch(/export async function POST[\s\S]*transferLibraryFile\(actor, params\.id, \{ space: body\.space, to: body\.to, folder: body\.folder, mode: body\.mode \}\)/);
+    expect(route).toMatch(/export async function POST[\s\S]*transferLibraryFile\(actor, params\.id, \{ space: body\.space, share: body\.share, to: body\.to, toShare: body\.toShare, folder: body\.folder, mode: body\.mode \}\)/);
     const ui = readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8');
-    expect(ui).toContain("method: 'POST', json: { space, to, mode, folder: target.trim() }");
-    expect(ui).toContain('transferTargets(space, page?.canAddTo)');
+    expect(ui).toContain("method: 'POST', json: { ...placeBody, to: to.space, toShare: to.share ?? undefined, mode, folder: target.trim() }");
+    expect(ui).toContain('transferPlaces(here, page?.canAddTo, shares)'); // 0299 — 공유 자료함도 보낼 곳
     expect(ui).toContain('disabled={!t.canMove}'); // 0298 — 공용 폼, 한 파일이면 canChange(what.file)
     expect(ui).toContain("what.kind === 'file' ? canChange(what.file)");
   });

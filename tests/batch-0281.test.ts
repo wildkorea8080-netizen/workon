@@ -199,9 +199,11 @@ describe('잇기', () => {
     for (const f of ['src/app/api/my-library/route.ts', 'src/app/api/my-library/[id]/route.ts', 'src/app/api/my-library/[id]/original/route.ts']) {
       const src = readFileSync(f, 'utf8');
       expect(src).toContain('getServerAuthSession()');
-      expect(src).toContain('actorScopeOr503');
+      // 0299 — 목록·고치기 라우트는 자료함 요청자 도우미(libraryActorOr)가 소속을 본다
+      expect(src).toMatch(/actorScopeOr503|libraryActorOr\(await getServerAuthSession\(\)\)/);
       expect(src).not.toContain('request.json()');
     }
+    expect(readFileSync('src/lib/my-library-actor.ts', 'utf8')).toContain('actorScopeOr503(session)');
   });
 });
 

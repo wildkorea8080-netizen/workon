@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { ReusableFile } from '@/lib/attachments/reuse-types';
-import { folderLabel, folderTree, type LibraryFile, type LibraryFolder } from '@/lib/my-library-spec';
+import { folderLabel, folderTree, type LibraryFile, type LibraryFolder, type LibraryShare } from '@/lib/my-library-spec';
 
 /** 바이트 → 읽기 쉬운 크기 */
 function sizeLabel(bytes: number): string {
@@ -25,7 +25,10 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
   const [open, setOpen] = useState(false);
   // 'recent' = 최근 90일 지난 파일, 'library' = 내 자료함(0103)
   // 'department' = 부서 자료함(0106), 'organization' = 기관 자료함(0112)
-  const [tab, setTab] = useState<'recent' | 'library' | 'department' | 'organization'>('recent');
+  // 'shared:{id}' = 내가 든 공유 자료함(0116)
+  const [tab, setTab] = useState<string>('recent');
+  const [shares, setShares] = useState<LibraryShare[]>([]);
+  const [sharesUnread, setSharesUnread] = useState(false);
   const [folder, setFolder] = useState<string | null>(null);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [files, setFiles] = useState<ReusableFile[] | null>(null);
@@ -39,9 +42,10 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
     const library = tab !== 'recent';
     const params = new URLSearchParams();
     if (tab === 'department' || tab === 'organization') params.set('space', tab);
+    if (tab.startsWith('shared:')) { params.set('space', 'shared'); params.set('share', tab.slice(7)); }
     if (folder !== null) params.set('folder', folder);
     const url = library ? `/api/my-library${params.toString() ? `?${params.toString()}` : ''}` : '/api/attachments/reusable';
-    const failText = library ? `${tab === 'organization' ? '기관' : tab === 'department' ? '부서' : '내'} 자료함을 불러오지 못했습니다.` : '지난 파일을 불러오지 못했습니다.';
+    const failText = library ? `${tab === 'organization' ? '기관' : tab === 'department' ? '부서' : tab.startsWith('shared:') ? '공유' : '내'} 자료함을 불러오지 못했습니다.` : '지난 파일을 불러오지 못했습니다.';
     void fetch(url)
       .then(async (res) => {
         const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: unknown; error?: { message?: string } } | null;
@@ -62,6 +66,20 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
   }, [open, tab, folder]);
   // 자료함을 바꾸면 폴더 고르기를 처음으로
   useEffect(() => { setFolder(null); setFolders([]); }, [tab]);
+  // 내가 든 공유 자료함(0116) — 열 때마다 다시 받는다. 못 읽으면 탭 없이 그렇다고 알린다(든 곳이 없는 것과 가른다)
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void fetch('/api/my-library/shares')
+      .then(async (res) => {
+        const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: unknown } | null;
+        if (!live) return;
+        if (res.ok && body?.ok && Array.isArray(body.data)) { setShares(body.data as LibraryShare[]); setSharesUnread(false); }
+        else setSharesUnread(true);
+      })
+      .catch(() => live && setSharesUnread(true));
+    return () => { live = false; };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,14 +104,19 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
       {open && (
         <div role="dialog" aria-label="지난 파일" className={`absolute ${placement === 'down' ? 'top-10' : 'bottom-10'} left-0 z-30 w-80 max-w-[85vw] rounded-xl border border-slate-200 bg-white p-2 shadow-xl`}>
           <div className="flex items-center justify-between px-2 py-1">
-            <div role="tablist" aria-label="고를 곳" className="flex gap-1">
+            <div role="tablist" aria-label="고를 곳" className="flex flex-wrap gap-1">
               <button type="button" role="tab" aria-selected={tab === 'recent'} onClick={() => setTab('recent')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'recent' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>최근 90일</button>
               <button type="button" role="tab" aria-selected={tab === 'library'} onClick={() => setTab('library')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'library' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>내 자료함</button>
               <button type="button" role="tab" aria-selected={tab === 'department'} onClick={() => setTab('department')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'department' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>부서 자료함</button>
               <button type="button" role="tab" aria-selected={tab === 'organization'} onClick={() => setTab('organization')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'organization' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>기관 자료함</button>
+              {shares.map((s) => (
+                <button key={s.id} type="button" role="tab" aria-selected={tab === `shared:${s.id}`} onClick={() => setTab(`shared:${s.id}`)} title={`공유 자료함 '${s.name}'`}
+                  className={`max-w-[6rem] truncate rounded px-1.5 py-0.5 text-xs font-semibold ${tab === `shared:${s.id}` ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>{s.name}</button>
+              ))}
             </div>
             <button type="button" onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-700">닫기</button>
           </div>
+          {sharesUnread && <p className="px-2 pb-1 text-[11px] text-slate-500">공유 자료함 목록을 지금 불러오지 못했습니다.</p>}
           {tab !== 'recent' && folders.length > 0 && (
             <div role="group" aria-label="폴더" className="flex flex-wrap gap-1 px-2 pb-1">
               <button type="button" aria-pressed={folder === null} onClick={() => setFolder(null)} className={`rounded-full border px-2 py-0.5 text-[11px] ${folder === null ? 'border-ws-accent text-ws-accent-text' : 'border-slate-200 text-slate-500'}`}>전체</button>
@@ -108,7 +131,7 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
           ) : files === null ? (
             <p role="status" className="px-2 py-3 text-xs text-slate-500">불러오는 중…</p>
           ) : files.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-slate-500">{tab === 'recent' ? '다시 붙일 파일이 없습니다.' : `${tab === 'department' ? '부서' : '내'} 자료함에 담은 파일이 없습니다. 결과물 화면에서 담을 수 있습니다.`}</p>
+            <p className="px-2 py-3 text-xs text-slate-500">{tab === 'recent' ? '다시 붙일 파일이 없습니다.' : `${tab === 'department' ? '부서' : tab === 'organization' ? '기관' : tab.startsWith('shared:') ? '공유' : '내'} 자료함에 담은 파일이 없습니다. 결과물 화면에서 담을 수 있습니다.`}</p>
           ) : (
             <ul className="max-h-64 overflow-y-auto">
               {files.map((f) => (

@@ -9,19 +9,60 @@ export const LIBRARY_MAX_FILES = 300;
 export const LIBRARY_MAX_DEPARTMENT_FILES = 500;
 /** 한 기관의 기관 자료함 파일 수(0112) */
 export const LIBRARY_MAX_ORGANIZATION_FILES = 1000;
+/** 공유 자료함 하나의 파일 수(0116) */
+export const LIBRARY_MAX_SHARE_FILES = 500;
+/** 기관마다 공유 자료함 수·한 공유 자료함의 부서 수·이름 글자 수(0116) */
+export const LIBRARY_MAX_SHARES = 50;
+export const LIBRARY_SHARE_MAX_DEPARTMENTS = 50;
+export const LIBRARY_SHARE_NAME_MAX = 40;
 
 /**
  * 자리 — personal(내 자료함, 담은 사람만) · department(부서 자료함, 지금 부서 사람이 함께) ·
- * organization(기관 자료함, 같은 기관 직원 누구나 보고 기관 전체 관리자만 담고 고침 — 0112)
+ * organization(기관 자료함, 같은 기관 직원 누구나 보고 기관 전체 관리자만 담고 고침 — 0112) ·
+ * shared(공유 자료함, 기관 전체 관리자가 고른 부서들의 사람이 함께 — 0116, 어느 공유 자료함인지는 `share`로 따로)
  */
-export type LibrarySpace = 'personal' | 'department' | 'organization';
+export type LibrarySpace = 'personal' | 'department' | 'organization' | 'shared';
+/** 늘 있는 탭 셋 — 공유 자료함은 내가 든 것만 그 뒤에 */
 export const LIBRARY_SPACES: readonly LibrarySpace[] = ['personal', 'department', 'organization'];
-export const LIBRARY_SPACE_LABEL: Record<LibrarySpace, string> = { personal: '내 자료함', department: '부서 자료함', organization: '기관 자료함' };
+export const LIBRARY_SPACE_LABEL: Record<LibrarySpace, string> = { personal: '내 자료함', department: '부서 자료함', organization: '기관 자료함', shared: '공유 자료함' };
+
+/** 내가 든 공유 자료함(0116) — 이름과 id만 */
+export type LibraryShare = { id: string; name: string };
+/** 자료함 한 곳 — 공유 자료함이면 어느 것인지 */
+export type LibraryPlace = { space: LibrarySpace; share?: string | null };
 
 /** 자리 읽기 — 없으면 내 자료함, 그 밖의 값은 null(거절) */
 export function parseLibrarySpace(raw: unknown): LibrarySpace | null {
   if (raw === undefined || raw === null || raw === '' || raw === 'personal') return 'personal';
-  return raw === 'department' || raw === 'organization' ? raw : null;
+  return raw === 'department' || raw === 'organization' || raw === 'shared' ? raw : null;
+}
+
+/** 자료함 이름 — 공유 자료함은 그 이름(모르면 '공유 자료함') */
+export function libraryPlaceLabel(place: LibraryPlace, shares?: LibraryShare[] | null): string {
+  if (place.space !== 'shared') return LIBRARY_SPACE_LABEL[place.space];
+  const name = shares?.find((s) => s.id === place.share)?.name;
+  return name ? `공유 자료함 '${name}'` : LIBRARY_SPACE_LABEL.shared;
+}
+
+/** 같은 자료함인가 */
+export function samePlace(a: LibraryPlace, b: LibraryPlace): boolean {
+  return a.space === b.space && (a.space !== 'shared' || (a.share ?? '').toLowerCase() === (b.share ?? '').toLowerCase());
+}
+
+/**
+ * 이 자료함에서 복사·옮겨 보낼 수 있는 다른 자료함(0296·0299) — 늘 있는 셋(목록 응답 canAddTo, 못 읽었으면 기관 자료함 빼고)과 내가 든 공유 자료함, 지금 자료함은 뺀다
+ */
+export function transferPlaces(current: LibraryPlace, canAddTo: Record<LibrarySpace, boolean> | undefined, shares: LibraryShare[] | null | undefined): LibraryPlace[] {
+  const base: LibraryPlace[] = LIBRARY_SPACES.filter((s) => (canAddTo ? canAddTo[s] === true : s !== 'organization')).map((space) => ({ space }));
+  const shared: LibraryPlace[] = (shares ?? []).map((s) => ({ space: 'shared' as const, share: s.id }));
+  return [...base, ...shared].filter((p) => !samePlace(p, current));
+}
+
+/** 공유 자료함 이름 다듬기(0116) — NFC·제어/보이지 않는 글자 빼기·공백 하나로, 1~40자. 아니면 null */
+export function cleanShareName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const name = raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\s+/g, ' ').trim();
+  return name && Array.from(name).length <= LIBRARY_SHARE_NAME_MAX ? name : null;
 }
 
 /** 자리마다 담을 수 있는 수 */
@@ -31,7 +72,7 @@ export function transferTargets(space: LibrarySpace, canAddTo: Record<LibrarySpa
 }
 
 export function libraryMaxFiles(space: LibrarySpace): number {
-  return space === 'organization' ? LIBRARY_MAX_ORGANIZATION_FILES : space === 'department' ? LIBRARY_MAX_DEPARTMENT_FILES : LIBRARY_MAX_FILES;
+  return space === 'organization' ? LIBRARY_MAX_ORGANIZATION_FILES : space === 'department' ? LIBRARY_MAX_DEPARTMENT_FILES : space === 'shared' ? LIBRARY_MAX_SHARE_FILES : LIBRARY_MAX_FILES;
 }
 
 /** 함께 쓰는 자리인가(담은 사람 이름을 보인다) */

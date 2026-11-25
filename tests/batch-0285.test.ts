@@ -123,9 +123,9 @@ describe('잇기', () => {
     expect(picker).toContain("if (tab === 'department' || tab === 'organization') params.set('space', tab);"); // 0112 — 기관 자료함 탭도 같은 길
     const section = readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8');
     expect(section).toContain("(space === 'organization' ? page?.canManage === true : f.mine || page?.canManage === true)"); expect(section).toContain('{canChange(f) && <>'); // 0112 — 기관 자료함은 기관 전체 관리자만
-    expect(readFileSync('src/app/files/page.tsx', 'utf8')).toContain('saveSpace={librarySpace}');
-    for (const f of ['src/app/api/my-library/route.ts', 'src/app/api/my-library/[id]/route.ts', 'src/app/api/my-library/[id]/original/route.ts']) {
-      expect(readFileSync(f, 'utf8')).toContain('departmentId: actor.departmentId, isAdmin: actor.isAdmin');
+    expect(readFileSync('src/app/files/page.tsx', 'utf8')).toContain('savePlace={libraryPlace}'); // 0299 — 공유 자료함도 고른 자리로
+    for (const f of ['src/lib/my-library-actor.ts', 'src/app/api/my-library/[id]/original/route.ts']) {
+      expect(readFileSync(f, 'utf8')).toContain('departmentId: actor.departmentId,');
     }
   });
 });
