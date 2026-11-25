@@ -9,7 +9,7 @@ import { useInFlight } from '@/lib/use-in-flight';
 import { uploadAttachment } from '@/lib/attachments/upload-client';
 import { ATTACHMENT_ACCEPT } from '@/lib/attachments/limits';
 import {
-  folderLabel, folderTree, isSharedLibrarySpace, libraryPlaceLabel, transferPlaces, LIBRARY_FOLDER_DEPTH, LIBRARY_SOURCE_LABEL, LIBRARY_SPACES, LIBRARY_UNFILED_LABEL,
+  folderLabel, folderTree, isSharedLibrarySpace, LIBRARY_CONTENT_SEARCH_NOTE, libraryPlaceLabel, transferPlaces, LIBRARY_FOLDER_DEPTH, LIBRARY_SOURCE_LABEL, LIBRARY_SPACES, LIBRARY_UNFILED_LABEL,
   type LibraryFile, type LibraryFolder, type LibraryPlace, type LibraryShare, type LibrarySpace,
 } from '@/lib/my-library-spec';
 
@@ -303,10 +303,11 @@ export default function MyLibrarySection({ query, refreshKey, space, share = nul
       )}
       <ErrorNote message={error} />
       {notice && <p role="status" className="mb-3 text-[13px] text-ws-accent-text">{notice}</p>}
+      {query && <p className="mb-2 text-[13px] text-slate-500">{LIBRARY_CONTENT_SEARCH_NOTE}</p>}
       <Card className="p-0 overflow-x-auto">
         {(unread && !page) || (page && page.files.length === 0) ? (
           <div className="p-6 text-[15px] text-slate-600">
-            {unread && !page ? emptyListText(true, '', `${hereLabel}을`) : query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : folder !== null ? '이 폴더(와 그 아래 폴더)에 담은 파일이 없습니다.' : canAdd ? `아직 담은 파일이 없습니다. 위 ‘파일 올려 담기’나 아래 목록의 ‘${hereLabel}에 담기’로 담으세요.` : '아직 기관 전체 관리자가 담은 파일이 없습니다.'}
+            {unread && !page ? emptyListText(true, '', `${hereLabel}을`) : query ? `'${query}'이(가) 이름이나 내용에 든 파일이 없습니다.` : folder !== null ? '이 폴더(와 그 아래 폴더)에 담은 파일이 없습니다.' : canAdd ? `아직 담은 파일이 없습니다. 위 ‘파일 올려 담기’나 아래 목록의 ‘${hereLabel}에 담기’로 담으세요.` : '아직 기관 전체 관리자가 담은 파일이 없습니다.'}
           </div>
         ) : (
           <table className="w-full min-w-[720px] text-left text-[15px]">
@@ -338,6 +339,11 @@ export default function MyLibrarySection({ query, refreshKey, space, share = nul
                   <td className="px-5 py-3">
                     <span className="mr-2 rounded border border-[#DCE3EC] px-1.5 py-0.5 text-[12px] font-semibold">{fileBadge(f.file_name)}</span>
                     {f.file_name} <span className="text-[13px] text-slate-500">{formatBytes(f.size_bytes)}</span>
+                    {f.snippet && (
+                      <p className="mt-1 max-w-[36rem] text-[13px] leading-5 text-slate-500">
+                        <span className="sr-only">내용에서 찾음: </span>{f.snippet.before}<mark className="rounded bg-amber-100 px-0.5 text-slate-800">{f.snippet.hit}</mark>{f.snippet.after}
+                      </p>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-slate-600">{folderLabel(f.folder)}</td>
                   <td className="px-5 py-3 text-slate-600">{isSharedLibrarySpace(space) ? (f.mine ? '나' : f.added_by ?? '—') : LIBRARY_SOURCE_LABEL[f.source]}</td>

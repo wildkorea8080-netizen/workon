@@ -112,7 +112,7 @@ describe('화면', () => {
     expect(page).toContain("import type { MyGeneratedFile } from '@/lib/my-generated-files';");
     expect(page).not.toMatch(/^import (?!type ).*my-generated-files/m);
     // 이름 찾기 — '더 보기'는 건 글로 이어 읽고, 늦게 온 옛 응답은 버린다
-    expect(page).toContain('aria-label="파일 이름으로 내 파일 찾기"');
+    expect(page).toContain('aria-label="파일 이름·자료함 내용으로 내 파일 찾기"');
     expect(page).toContain("if (query) params.set('q', query);");
     expect(page).toContain('if (seq !== latest.current) return;');
   });

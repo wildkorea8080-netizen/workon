@@ -109,6 +109,50 @@ export interface LibraryFile {
   mine: boolean;
   /** 담은 사람 이름 — 부서·기관 자료함에서만(못 읽으면 null) */
   added_by?: string | null;
+  /** (0117) 찾기 글이 내용에서 맞은 자리 앞뒤 — 이름에서 맞았거나 찾지 않았으면 없음 */
+  snippet?: LibrarySnippet | null;
+}
+
+/** (0117) 내용에서 맞은 자리 — 화면이 `hit`만 칠한다 */
+export interface LibrarySnippet { before: string; hit: string; after: string }
+
+/** (0117) 내용 찾기로 담아 두는 글 상한(글자) — DB CHECK와 같다 */
+export const LIBRARY_CONTENT_MAX = 20_000;
+/** 화면 안내 */
+export const LIBRARY_CONTENT_SEARCH_NOTE = `이름과 담은 파일의 내용(앞 ${LIBRARY_CONTENT_MAX.toLocaleString('ko-KR')}자)에서 찾습니다. 스캔 PDF·읽지 못한 파일과 2026-11-25 전에 담은 파일은 이름으로만 찾힙니다.`;
+
+/**
+ * (0117) 담을 때 읽은 글 → 찾기용 글. 제어·서식 글자를 빼고 공백을 하나로 접어 앞 20,000자(코드 포인트 — DB char_length와 같은 셈).
+ * 남는 글이 없으면 null(이름으로만 찾힘)
+ */
+export function libraryContentText(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  const chars = Array.from(s);
+  return chars.length > LIBRARY_CONTENT_MAX ? chars.slice(0, LIBRARY_CONTENT_MAX).join('').trim() : s;
+}
+
+/**
+ * (0117) 내용에서 찾기 글이 처음 맞은 자리의 앞 30자·뒤 60자(대소문자 무시, NFC). 이름에서 맞았으면(이름이 품으면) null —
+ * 이름이 이미 보인다. 맞은 자리가 없거나 찾기 글이 비면 null
+ */
+export function librarySnippet(content: unknown, fileName: string, query: string | null): LibrarySnippet | null {
+  if (typeof content !== 'string' || !content || !query) return null;
+  const needle = query.normalize('NFC').toLowerCase();
+  if (!needle || fileName.normalize('NFC').toLowerCase().includes(needle)) return null;
+  const text = content.normalize('NFC');
+  const lower = text.toLowerCase();
+  // 소문자로 바꿔 길이가 달라지는 글자(드묾)가 있으면 자리를 믿지 못한다 — 앞에서부터 맞대 본다
+  const at = lower.length === text.length ? lower.indexOf(needle) : -1;
+  if (at < 0) return null;
+  const start = Math.max(0, at - 30);
+  const end = Math.min(text.length, at + needle.length + 60);
+  return {
+    before: (start > 0 ? '…' : '') + text.slice(start, at),
+    hit: text.slice(at, at + needle.length),
+    after: text.slice(at + needle.length, end) + (end < text.length ? '…' : ''),
+  };
 }
 
 export interface LibraryFolder {

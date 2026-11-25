@@ -43,7 +43,7 @@ export default function FilesPage() {
       <div className="mx-auto max-w-6xl px-4 py-8 md:px-8">
         <PageTitle title="결과물" subtitle="업무 작업·AI 대화에서 만들고 올린 내 파일입니다." />
         <form role="search" aria-label="내 파일 찾기" className="mb-6 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setQuery(normalizeFileQuery(draft) ?? ''); }}>
-          <input aria-label="파일 이름으로 내 파일 찾기" value={draft} maxLength={MY_FILES_QUERY_MAX} onChange={(e) => setDraft(e.target.value)} placeholder="파일 이름으로 찾기 — 내 자료함·업무 결과물·대화에서 만든 파일·대화에 올린 파일"
+          <input aria-label="파일 이름·자료함 내용으로 내 파일 찾기" value={draft} maxLength={MY_FILES_QUERY_MAX} onChange={(e) => setDraft(e.target.value)} placeholder="파일 이름으로 찾기(내 자료함은 내용도) — 내 자료함·업무 결과물·대화에서 만든 파일·대화에 올린 파일"
             className="min-w-[260px] flex-1 rounded-lg border border-[#DCE3EC] px-3 py-2 text-[15px]" />
           <button type="submit" className="rounded-lg border border-[#DCE3EC] px-4 py-2 text-[15px]">찾기</button>
           {query && <button type="button" onClick={() => { setDraft(''); setQuery(''); }} className="px-2 text-[14px] text-slate-500">전체 보기</button>}

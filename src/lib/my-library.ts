@@ -19,7 +19,7 @@ import { logSystem } from '@/lib/logger';
 import {
   cleanFolderName, cleanLibraryFileName, sortFolders, parseLibrarySpace, isSharedLibrarySpace, subtreeFolders, planFolderMove, transferFolderPath, LIBRARY_SPACE_LABEL,
   LIBRARY_MAX_BYTES, LIBRARY_MAX_FOLDERS, LIBRARY_PAGE, libraryMaxFiles,
-  samePlace, libraryPlaceLabel,
+  samePlace, libraryPlaceLabel, libraryContentText, librarySnippet,
   type LibraryFile, type LibraryFolder, type LibrarySource, type LibrarySpace, type LibraryShare,
 } from '@/lib/my-library-spec';
 
@@ -27,6 +27,8 @@ export * from '@/lib/my-library-spec';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COLUMNS = 'id, file_name, folder, size_bytes, source, created_at, user_id';
+/** 한 행을 다룰 때(보내기·원본) — 경로와 내용 글(0117, 보낼 때 함께 간다) */
+const ROW_COLUMNS = `${COLUMNS}, storage_path, content_text`;
 
 /**
  * 요청자 — 부서 자료함은 이 부서, 관리자면 남이 담은 부서 파일도 고치고 지운다.
@@ -116,7 +118,12 @@ function noChange(space: LibrarySpace): Failure {
 /** 저장소·DB에 닿는 일 — 시험이 바꿔 끼운다 */
 export interface LibraryIo {
   /** 담을 원본 — 요청자의 것만(첨부는 읽힌 것만). 없으면 null, DB 오류면 던진다 */
-  findSource(userId: string, kind: LibrarySource, id: string): Promise<{ storage_path: string; file_name: string; size_bytes: number } | null>;
+  findSource(userId: string, kind: LibrarySource, id: string): Promise<{ storage_path: string; file_name: string; size_bytes: number; extract_path?: string | null } | null>;
+  /**
+   * (0117) 담을 파일의 글 — 첨부는 읽어 둔 내용, 만든 파일은 원본을 다시 읽음(스캔 PDF는 NODA로 보내지 않음). 못 읽으면 null(던지지 않음 —
+   * 내용 찾기만 빠지고 담기는 그대로)
+   */
+  readContent?(userId: string, kind: LibrarySource, id: string, source: { storage_path: string; file_name: string; extract_path?: string | null }): Promise<string | null>;
   /** 이 자리의 모든 행의 폴더 값 — DB 오류면 던진다 */
   folderValues(actor: LibraryActor, space: LibrarySpace): Promise<string[]>;
   /** 한 쪽 — DB 오류면 던진다. `folders`가 있으면 그 폴더들(고른 폴더와 그 아래 — 0113), 없으면 `folder` 하나(null = 전체) */
@@ -175,7 +182,12 @@ export async function listLibrary(
     const names = isSharedLibrarySpace(space)
       ? await io.userNames([...new Set(shown.map((r) => String(r.user_id ?? '')).filter(Boolean))])
       : undefined;
-    const files = shown.map((r) => toLibraryFile(r, actor.userId, names));
+    const files = shown.map((r) => {
+      const file = toLibraryFile(r, actor.userId, names);
+      // 내용에서 맞았으면 그 자리 앞뒤(0117) — 내용 글 자체는 내보내지 않는다
+      const snippet = query ? librarySnippet(r.content_text, file.file_name, query) : null;
+      return snippet ? { ...file, snippet } : file;
+    });
     const last = files[files.length - 1];
     return {
       ok: true,
@@ -247,7 +259,12 @@ export async function saveToLibrary(
 
   const id = newId();
   const path = libraryPath(space, actor, id, source.file_name);
-  const copied = await io.copyObject(source.storage_path, path);
+  const kind: LibrarySource = input.kind;
+  // 사본 만들기와 함께 글로 읽어 둔다(0117) — 못 읽으면 내용 찾기만 빠진다
+  const [copied, content] = await Promise.all([
+    io.copyObject(source.storage_path, path),
+    io.readContent ? io.readContent(actor.userId, kind, (input.id as string).toLowerCase(), source).catch(() => null) : Promise.resolve(null),
+  ]);
   if (copied === 'missing') return { ok: false, status: 404, message: '원본 파일이 더 남아 있지 않습니다.' };
   if (copied === 'error') return { ok: false, status: 503, message: '파일을 지금 담지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   try {
@@ -263,6 +280,7 @@ export async function saveToLibrary(
       size_bytes: source.size_bytes,
       storage_path: path,
       source: input.kind,
+      content_text: libraryContentText(content),
     });
     return { ok: true, file: toLibraryFile(row, actor.userId) };
   } catch {
@@ -478,6 +496,8 @@ async function sendRow(
       size_bytes: Number(row.size_bytes ?? 0),
       storage_path: path,
       source: row.source === 'generated' ? 'generated' : 'attachment',
+      // 내용 글도 함께 간다(0117) — 다시 읽지 않는다
+      content_text: libraryContentText(row.content_text),
     });
   } catch {
     await io.removeObject(path);
@@ -679,14 +699,29 @@ export function libraryIo(): LibraryIo {
   return {
     async findSource(userId, kind, id) {
       const query = kind === 'attachment'
-        ? supabaseAdmin.from('chat_attachments').select('storage_path, file_name, size_bytes').eq('id', id).eq('user_id', userId).eq('status', 'ready')
+        ? supabaseAdmin.from('chat_attachments').select('storage_path, file_name, size_bytes, extract_path').eq('id', id).eq('user_id', userId).eq('status', 'ready')
         : supabaseAdmin.from('generated_files').select('storage_path, file_name, size_bytes').eq('id', id).eq('user_id', userId);
       const { data, error } = await query.maybeSingle();
       if (error) throw new Error(`library source: ${error.message}`);
-      const row = data as { storage_path?: unknown; file_name?: unknown; size_bytes?: unknown } | null;
+      const row = data as { storage_path?: unknown; file_name?: unknown; size_bytes?: unknown; extract_path?: unknown } | null;
       return row && typeof row.storage_path === 'string' && typeof row.file_name === 'string'
-        ? { storage_path: row.storage_path, file_name: row.file_name, size_bytes: Number(row.size_bytes ?? 0) }
+        ? { storage_path: row.storage_path, file_name: row.file_name, size_bytes: Number(row.size_bytes ?? 0), extract_path: typeof row.extract_path === 'string' ? row.extract_path : null }
         : null;
+    },
+    async readContent(userId, kind, id, source) {
+      try {
+        if (kind === 'attachment') {
+          // 첨부는 확인 때 읽어 둔 내용(주인 자리 경로인지 loadExtract가 다시 본다)
+          const { loadExtract } = await import('@/lib/attachments/store');
+          const extract = await loadExtract({ id, user_id: userId, storage_path: source.storage_path, extract_path: source.extract_path ?? null });
+          return extract?.text ?? null;
+        }
+        const { readOriginalText } = await import('@/lib/source-original');
+        const read = await readOriginalText(source.storage_path, source.file_name);
+        return read.ok ? read.text : null;
+      } catch {
+        return null;
+      }
     },
     async folderValues(actor, space) {
       const { data, error } = await scoped(table().select('folder'), actor, space).limit(libraryMaxFiles(space) + 50);
@@ -694,17 +729,18 @@ export function libraryIo(): LibraryIo {
       return ((data ?? []) as { folder: string | null }[]).map((r) => r.folder ?? '');
     },
     async page(actor, space, { folder, folders, query, cursor }) {
-      let q = scoped(table().select(COLUMNS), actor, space).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(LIBRARY_PAGE + 1);
+      // 찾을 때만 내용 글을 읽어 맞은 자리를 뽑는다(0117) — 찾기는 이름 + 내용을 이은 search_text(생성 칸)
+      let q = scoped(table().select(query ? `${COLUMNS}, content_text` : COLUMNS), actor, space).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(LIBRARY_PAGE + 1);
       if (folders?.length) q = q.in('folder', folders);
       else if (folder !== null) q = q.eq('folder', folder);
-      if (query) q = q.ilike('file_name', fileNamePattern(query));
+      if (query) q = q.ilike('search_text', fileNamePattern(query));
       if (cursor) q = q.or(`created_at.lt.${cursor.at},and(created_at.eq.${cursor.at},id.lt.${cursor.id})`);
       const { data, error } = await q;
       if (error) throw new Error(`my_library_files: ${error.message}`);
       return (data ?? []) as unknown as Record<string, unknown>[];
     },
     async findRow(actor, space, id) {
-      const { data, error } = await scoped(table().select(`${COLUMNS}, storage_path`).eq('id', id), actor, space).maybeSingle();
+      const { data, error } = await scoped(table().select(ROW_COLUMNS).eq('id', id), actor, space).maybeSingle();
       if (error) throw new Error(`my_library_files: ${error.message}`);
       const row = data as (Record<string, unknown> & { storage_path?: unknown; file_name?: unknown; user_id?: unknown }) | null;
       return row && typeof row.storage_path === 'string' && typeof row.file_name === 'string' && typeof row.user_id === 'string' ? (row as Row) : null;
@@ -743,7 +779,7 @@ export function libraryIo(): LibraryIo {
       return ((data ?? []) as unknown[]).length;
     },
     async findRows(actor, space, { ids, folders, limit }) {
-      let q = scoped(table().select(`${COLUMNS}, storage_path`), actor, space).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
+      let q = scoped(table().select(ROW_COLUMNS), actor, space).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
       if (ids) q = q.in('id', ids);
       if (folders) q = q.in('folder', folders);
       const { data, error } = await q;
@@ -754,7 +790,7 @@ export function libraryIo(): LibraryIo {
     async findSharedRow(actor, id) {
       const shares = await loadLibraryShares(actor.organizationId, actor.departmentId);
       if (!shares.length) return null;
-      const { data, error } = await table().select(`${COLUMNS}, storage_path`).eq('id', id).eq('space', 'shared')
+      const { data, error } = await table().select(ROW_COLUMNS).eq('id', id).eq('space', 'shared')
         .in('share_id', shares.map((s) => s.id)).eq('organization_id', actor.organizationId).maybeSingle();
       if (error) throw new Error(`my_library_files: ${error.message}`);
       const row = data as (Record<string, unknown> & { storage_path?: unknown; file_name?: unknown; user_id?: unknown }) | null;
