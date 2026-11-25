@@ -16,7 +16,7 @@ async function actorOf(session: Awaited<ReturnType<typeof getServerAuthSession>>
   const actor = await actorScopeOr503(session);
   if (actor instanceof Response) return actor;
   if (!actor?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
-  return { userId: actor.userId, organizationId: actor.organizationId, departmentId: actor.departmentId, isAdmin: actor.isAdmin };
+  return { userId: actor.userId, organizationId: actor.organizationId, departmentId: actor.departmentId, isAdmin: actor.isAdmin, managesWholeOrganization: actor.managesWholeOrganization };
 }
 
 /** 내 자료함(2026-11-24, 0103)·부서 자료함(0106, `?space=department` — 지금 내 부서의 파일). 내 자료함은 내 것만. `?folder=`(빈 글 = 미분류)·`?q=` 이름 찾기·`?cursor=` 쪽 넘기기. 저장소 경로는 싣지 않는다 */

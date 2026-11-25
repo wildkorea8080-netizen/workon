@@ -33,6 +33,7 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/signup', '가입 자체가 비인증 행위'],
   ['/sso/[slug]/start', '기관 SSO 시작(0107) — 로그인 전이라 공개. 켜진 기관의 계정 서비스로 보낼 뿐 계정·세션을 만들지 않는다'],
   ['/sso/callback', '기관 SSO 돌아옴(0107) — 로그인 전이라 공개. 서명한 상태 쿠키·state·id_token 서명·nonce가 자격이고, 이 기관에 이미 등록된 직원만 들인다'],
+  ['/sso/backchannel-logout', '기관 SSO back-channel 로그아웃(0114) — 계정 서비스가 서버끼리 보낸다. 그 기관 설정의 발급자·클라이언트 ID로 서명한 logout_token이 자격이고, 로그아웃 시각만 적는다(세션을 만들지 않음)'],
   ['/signup/invite-info', '초대 토큰으로 기관을 확인한다'],
   ['/register', '가입 자체가 비인증 행위'],
   ['/register/validate-token', '초대 토큰 검증'],

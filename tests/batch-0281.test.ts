@@ -48,7 +48,7 @@ describe('다듬기 규칙', () => {
     expect(cleanFolderName(' 예산​  자료 ')).toBe('예산 자료');
     expect(cleanFolderName('가'.repeat(30))).toBe('가'.repeat(30));
     expect(cleanFolderName('가'.repeat(31))).toBeNull();
-    expect(cleanFolderName('예산/2026')).toBeNull();
+    expect(cleanFolderName('예산/2026/서식/1분기')).toBeNull(); // 0113 — 3단계까지
     expect(cleanFolderName(3)).toBeNull();
   });
   it('파일 이름 — 확장자는 그대로여야 한다', () => {
@@ -92,7 +92,7 @@ describe('담기', () => {
     // 있는 폴더·미분류에는 담긴다
     expect((await saveToLibrary(actor, { kind: 'generated', id: ID, folder: '폴더3' }, fakeIo({ folderValues: async () => many }).io)).ok).toBe(true);
     expect((await saveToLibrary(actor, { kind: 'generated', id: ID }, fakeIo({ folderValues: async () => many }).io)).ok).toBe(true);
-    expect(await saveToLibrary(actor, { kind: 'generated', id: ID, folder: 'a/b' }, fakeIo().io)).toMatchObject({ ok: false, status: 400 });
+    expect(await saveToLibrary(actor, { kind: 'generated', id: ID, folder: 'a/b/c/d' }, fakeIo().io)).toMatchObject({ ok: false, status: 400 });
   });
   it('원본이 없으면 404, 복사 실패는 503, 행을 못 넣으면 사본을 지운다', async () => {
     expect(await saveToLibrary(actor, { kind: 'generated', id: ID }, fakeIo({ copyObject: async () => 'missing' }).io)).toMatchObject({ ok: false, status: 404 });
@@ -121,7 +121,7 @@ describe('목록', () => {
     expect(calls.page[0][1]).toBe('personal');
     expect(calls.page[0][2]).toMatchObject({ folder: null });
     expect(await listLibrary(actor, { cursor: 'zzz' }, fakeIo().io)).toMatchObject({ ok: false, status: 400 });
-    expect(await listLibrary(actor, { folder: 'a/b' }, fakeIo().io)).toMatchObject({ ok: false, status: 400 });
+    expect(await listLibrary(actor, { folder: 'a/b/c/d' }, fakeIo().io)).toMatchObject({ ok: false, status: 400 });
     expect(await listLibrary(actor, {}, fakeIo({ page: async () => { throw new Error('db'); } }).io)).toMatchObject({ ok: false, status: 503 });
   });
 });
@@ -161,8 +161,8 @@ describe('고치기·지우기·원본', () => {
     // 자리 조건(scoped)이 내 자료함은 담은 사람·기관, 부서 자료함은 지금 부서·기관을 건다
     expect(io).toContain(".eq('space', 'personal').eq('user_id', actor.userId).eq('organization_id', actor.organizationId)");
     expect(io).toContain(".eq('space', 'department').eq('department_id', actor.departmentId).eq('organization_id', actor.organizationId)");
-    // 넣기 말고 다섯(폴더 값·쪽·한 행·고치기·지우기) 모두 그 조건으로
-    expect(io.split('scoped(').length - 1).toBe(5);
+    // 넣기 말고 여섯(폴더 값·쪽·한 행·고치기·지우기·폴더째 옮기기 0294) 모두 그 조건으로
+    expect(io.split('scoped(').length - 1).toBe(6);
   });
 });
 
@@ -231,7 +231,7 @@ describe.skipIf(!dbUrl)('0103 — 내 자료함 표(시험 DB)', () => {
           [user.id, org.id, v.folder, v.file_name, v.size_bytes, v.storage_path, v.source]);
       };
       await insert({});
-      for (const bad of [{ folder: '가'.repeat(31) }, { storage_path: 'generated/x.xlsx' }, { source: 'upload' }, { size_bytes: 0 }, { file_name: '' }]) {
+      for (const bad of [{ folder: '가'.repeat(101) } /* 0113 — 폴더 경로는 100자까지 */, { storage_path: 'generated/x.xlsx' }, { source: 'upload' }, { size_bytes: 0 }, { file_name: '' }]) {
         await db.query('SAVEPOINT s');
         await expect(insert(bad)).rejects.toThrow();
         await db.query('ROLLBACK TO SAVEPOINT s');

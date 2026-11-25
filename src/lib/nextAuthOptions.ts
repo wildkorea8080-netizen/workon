@@ -147,6 +147,8 @@ export const authOptions: AuthOptions = {
         session.user.id = token.id as string;
         session.user.role = token.role as 'ADMIN' | 'USER';
         session.user.departmentId = token.departmentId ?? null;
+        // 기관 계정(SSO)으로 들어온 로그인 — 로그아웃할 때 계정 서비스에서도 로그아웃할지 보는 데 쓴다(0111)
+        if (token.sso === true) session.user.sso = true;
         if (token.isImpersonating) {
           session.user.isImpersonating   = true;
           session.user.impersonatedBy    = token.impersonatedBy as string;

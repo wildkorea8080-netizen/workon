@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
+import { signOutEverywhere } from '@/lib/sso-logout-client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ChatInterface from '@/components/chat/ChatInterface';
@@ -251,7 +252,7 @@ export default function ChatHome({ workspace = false }: { workspace?: boolean } 
           로그인은 되었지만 부서가 등록되어 있지 않습니다. 관리자에게 부서 할당을 요청해주세요.
         </p>
         <button
-          onClick={() => signOut({ callbackUrl: '/' })}
+          onClick={() => void signOutEverywhere('/', session.user.sso)}
           className="px-4 py-2.5 bg-slate-800 text-white text-sm font-medium rounded-xl"
         >
           로그아웃

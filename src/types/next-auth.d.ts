@@ -13,6 +13,8 @@ declare module 'next-auth' {
       impersonateOrgId?: string;
       impersonateOrgName?: string;
       impersonateLogId?: string;
+      /** 기관 계정(SSO, 0107)으로 들어온 로그인 */
+      sso?: boolean;
     };
   }
 
@@ -36,5 +38,7 @@ declare module 'next-auth/jwt' {
     impersonateLogId?: string;
     /** 로그인한 때(ms, 2026-11-16) — 세션을 다시 쓸 때 바뀌는 iat 대신 비밀번호 바꾼 때와 맞댄다 */
     authAt?: number;
+    /** 기관 계정(SSO, 0107)으로 들어온 로그인 */
+    sso?: boolean;
   }
 }

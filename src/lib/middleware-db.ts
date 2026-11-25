@@ -181,7 +181,7 @@ export function superTokenSub(token: string): string | null {
  * - 'error': 못 읽음
  */
 export type UserStatus =
-  | { kind: 'active'; role: string | null; departmentId: string | null; passwordChangedAt?: number | null; mustChangePassword?: boolean }
+  | { kind: 'active'; role: string | null; departmentId: string | null; passwordChangedAt?: number | null; mustChangePassword?: boolean; /** (0114) 계정 서비스가 알린 기관 계정 로그아웃 시각(ms) */ ssoLogoutAt?: number | null }
   | { kind: 'inactive' }
   | { kind: 'error' };
 
@@ -189,22 +189,23 @@ export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: Fe
   if (typeof sub !== 'string' || !UUID.test(sub)) return { kind: 'inactive' };
   if (!cfg) return { kind: 'error' };
   try {
-    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change`, { headers: headers(cfg) });
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change,sso_logout_at`, { headers: headers(cfg) });
     if (!res.ok) return { kind: 'error' };
-    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null; password_must_change?: boolean | null }[];
+    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null; password_must_change?: boolean | null; sso_logout_at?: string | null }[];
     if (!Array.isArray(rows)) return { kind: 'error' };
     const row = rows[0];
     if (!row || row.is_active === false || row.deleted_at) return { kind: 'inactive' };
     // 로그인이 토큰에 싣는 역할과 같은 규칙(sign-in-user.ts — 대소문자·빈 값은 USER)
     return { kind: 'active', role: String(row.role ?? 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: typeof row.department_id === 'string' ? row.department_id : null,
       passwordChangedAt: row.password_changed_at ? Date.parse(row.password_changed_at) || null : null,
-      mustChangePassword: row.password_must_change === true };
+      mustChangePassword: row.password_must_change === true,
+      ssoLogoutAt: row.sso_logout_at ? Date.parse(row.sso_logout_at) || null : null };
   } catch {
     return { kind: 'error' };
   }
 }
 
-export type SessionVerdict = 'ok' | 'inactive' | 'changed' | 'password_changed' | 'must_change_password' | 'sso_only';
+export type SessionVerdict = 'ok' | 'inactive' | 'changed' | 'password_changed' | 'must_change_password' | 'sso_only' | 'sso_logged_out';
 
 /**
  * 부서의 기관이 'SSO 전용'(0109 — 켜진 SSO + sso_only)인가. 못 읽으면 'error'(칸이 없던 옛 DB도 — select가 거절됨)
@@ -286,6 +287,11 @@ export async function userSessionVerdict(
   if (status.passwordChangedAt) {
     const loginSec = typeof token.authAt === 'number' ? Math.floor(token.authAt / 1000) : typeof token.iat === 'number' ? token.iat : null;
     if (loginSec !== null && loginSec < Math.floor(status.passwordChangedAt / 1000)) return 'password_changed';
+  }
+  // 계정 서비스가 먼저 로그아웃했다(back-channel, 0114) — 그때나 그 전에 기관 계정으로 들어온 로그인만 끝낸다(비밀번호 로그인·대리 접근은 그대로)
+  if (status.ssoLogoutAt && token.sso === true && token.isImpersonating !== true) {
+    const loginSec = typeof token.authAt === 'number' ? Math.floor(token.authAt / 1000) : typeof token.iat === 'number' ? token.iat : null;
+    if (loginSec !== null && loginSec <= Math.floor(status.ssoLogoutAt / 1000)) return 'sso_logged_out';
   }
   // 임시 비밀번호(0093) — 본인이 바꾸기 전까지는 '비밀번호 바꾸기'만. 대리 접근(슈퍼관리자)은 그 관리자 대신 바꾸지 않으므로 묶지 않는다
   // 기관 SSO(0107)로 들어온 로그인도 묶지 않는다 — 비밀번호를 쓰지 않아 지금 비밀번호를 모른다(임시 비밀번호 로그인은 그대로 묶임)

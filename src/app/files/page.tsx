@@ -11,7 +11,7 @@ import { matchesFileQuery, normalizeFileQuery, MY_FILES_QUERY_MAX } from '@/lib/
 import { emptyListText } from '@/lib/ok-json';
 import { useInFlight } from '@/lib/use-in-flight';
 import MyLibrarySection, { askFolder } from '@/components/files/MyLibrarySection';
-import { LIBRARY_SPACE_LABEL, LIBRARY_UNFILED_LABEL, type LibraryFile, type LibrarySpace } from '@/lib/my-library-spec';
+import { folderLabel, LIBRARY_SPACE_LABEL, type LibraryFile, type LibrarySpace } from '@/lib/my-library-spec';
 
 /** 결과물 모음 — 볼 수 있는 작업의 파일만, 판별로. 내려받기는 그때마다 권한을 다시 본다 */
 export default function FilesPage() {
@@ -25,6 +25,8 @@ export default function FilesPage() {
   const [libraryKey, setLibraryKey] = useState(0);
   // 내 자료함 · 부서 자료함(0106) — 아래 목록의 '담기'도 고른 자리로
   const [librarySpace, setLibrarySpace] = useState<LibrarySpace>('personal');
+  // 고른 자료함에 담을 수 있는가(기관 자료함은 기관 전체 관리자만 — 0112)
+  const [libraryCanAdd, setLibraryCanAdd] = useState(true);
   useEffect(() => {
     api<ArtifactDto[]>('/api/work/files').then((r) => (r.ok ? setFiles(r.data) : setError(r.error.message)));
   }, []);
@@ -42,7 +44,7 @@ export default function FilesPage() {
           <button type="submit" className="rounded-lg border border-[#DCE3EC] px-4 py-2 text-[15px]">찾기</button>
           {query && <button type="button" onClick={() => { setDraft(''); setQuery(''); }} className="px-2 text-[14px] text-slate-500">전체 보기</button>}
         </form>
-        <MyLibrarySection query={query} refreshKey={libraryKey} space={librarySpace} onSpaceChange={setLibrarySpace} />
+        <MyLibrarySection query={query} refreshKey={libraryKey} space={librarySpace} onSpaceChange={(s) => { setLibrarySpace(s); setLibraryCanAdd(s === 'personal'); }} onCanAddChange={setLibraryCanAdd} />
         <h2 className="mb-1 mt-8 text-[17px] font-semibold text-slate-900">업무 결과물</h2>
         <p className="mb-3 text-[13px] text-slate-500">업무 작업에서 만든 파일입니다. 대화를 지워도 남습니다.</p>
         <ErrorNote message={error} />
@@ -94,6 +96,7 @@ export default function FilesPage() {
           downloadHref={(id) => `/api/files/${id}`}
           saveKind="generated"
           saveSpace={librarySpace}
+          canSave={libraryCanAdd}
           onSaved={() => setLibraryKey((k) => k + 1)}
         />
         <PagedFiles
@@ -106,6 +109,7 @@ export default function FilesPage() {
           downloadHref={(id) => `/api/attachments/${id}/original`}
           saveKind="attachment"
           saveSpace={librarySpace}
+          canSave={libraryCanAdd}
           onSaved={() => setLibraryKey((k) => k + 1)}
         />
       </div>
@@ -117,10 +121,12 @@ export default function FilesPage() {
  * 쪽으로 읽는 내 파일 목록 — '대화에서 만든 파일'(2026-11-07, 양식 채우기·표 합치기·앱 결과 내보내기)과 '대화에 올린 파일'(2026-11-08).
  * 내 것만, 50개씩. 찾기 글은 페이지 위 통합 찾기에서 받는다(바뀌면 처음부터 다시 읽는다)
  */
-function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyText, downloadHref, saveKind, saveSpace, onSaved }: {
+function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyText, downloadHref, saveKind, saveSpace, canSave, onSaved }: {
   query: string; endpoint: string; title: string; description: string; sourceHeader: string; emptyText: string; downloadHref: (id: string) => string;
   /** 내 자료함에 담을 때의 원본 종류(0103) */
   saveKind: 'generated' | 'attachment'; saveSpace: LibrarySpace; onSaved: () => void;
+  /** 고른 자료함에 담을 수 있는가(기관 자료함은 기관 전체 관리자만) — 아니면 '담기' 단추를 숨긴다 */
+  canSave: boolean;
 }) {
   const saving = useInFlight();
   const [saveNote, setSaveNote] = useState<string | null>(null);
@@ -128,7 +134,7 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
     const folder = askFolder(`'${f.file_name}'을(를) ${LIBRARY_SPACE_LABEL[saveSpace]}의 어느 폴더에 담을까요?`, '');
     if (folder === null) return;
     const r = await api<LibraryFile>('/api/my-library', { method: 'POST', json: { kind: saveKind, id: f.id, folder, space: saveSpace } });
-    setSaveNote(r.ok ? `'${r.data.file_name}'을(를) ${LIBRARY_SPACE_LABEL[saveSpace]} ${r.data.folder || LIBRARY_UNFILED_LABEL}에 담았습니다.` : r.error.message);
+    setSaveNote(r.ok ? `'${r.data.file_name}'을(를) ${LIBRARY_SPACE_LABEL[saveSpace]} ${folderLabel(r.data.folder)}에 담았습니다.` : r.error.message);
     if (r.ok) onSaved();
   });
   const [files, setFiles] = useState<MyGeneratedFile[] | null>(null);
@@ -196,9 +202,9 @@ function PagedFiles({ query, endpoint, title, description, sourceHeader, emptyTe
                     <a href={downloadHref(f.id)} className="rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px] hover:border-[#003087]">
                       내려받기
                     </a>
-                    <button type="button" disabled={saving.running !== null} onClick={() => void save(f)} className="ml-2 text-[14px] text-slate-600 underline disabled:opacity-50">
+                    {canSave && <button type="button" disabled={saving.running !== null} onClick={() => void save(f)} className="ml-2 text-[14px] text-slate-600 underline disabled:opacity-50">
                       {saving.running === f.id ? '담는 중…' : `${LIBRARY_SPACE_LABEL[saveSpace]}에 담기`}
-                    </button>
+                    </button>}
                   </td>
                 </tr>
               ))}

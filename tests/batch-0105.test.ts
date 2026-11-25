@@ -14,8 +14,8 @@ const reply = (body: unknown, ok = true) => vi.fn(async (_url: string, _init?: {
 describe('계정 상태 읽기', () => {
   it('서비스 키로 그 id 한 줄만, 역할은 로그인과 같은 규칙으로', async () => {
     const f = reply([{ role: 'admin', department_id: DEPT, is_active: true, deleted_at: null }]);
-    expect(await readUserStatus(cfg, SUB, f)).toEqual({ kind: 'active', role: 'ADMIN', departmentId: DEPT, passwordChangedAt: null, mustChangePassword: false });
-    expect(f.mock.calls[0][0]).toBe(`https://x.supabase.co/rest/v1/users?id=eq.${SUB}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change`);
+    expect(await readUserStatus(cfg, SUB, f)).toEqual({ kind: 'active', role: 'ADMIN', departmentId: DEPT, passwordChangedAt: null, mustChangePassword: false, ssoLogoutAt: null });
+    expect(f.mock.calls[0][0]).toBe(`https://x.supabase.co/rest/v1/users?id=eq.${SUB}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change,sso_logout_at`);
     expect(f.mock.calls[0][1]).toEqual({ headers: { apikey: 'k', Authorization: 'Bearer k' } });
     expect(await readUserStatus(cfg, SUB, reply([{ role: null, department_id: DEPT }]))).toMatchObject({ role: 'USER' });
   });
@@ -91,7 +91,7 @@ describe('연결(원본)', () => {
   it('끝난 세션 — 쿠키를 지우고 API는 401, 로그인 화면은 그대로, 그 밖은 로그인으로', () => {
     expect(mw).toContain('sessionCookieNames(req.cookies.getAll().map((c) => c.name))');
     expect(mw).toContain('{ status: 401 }');
-    expect(mw).toContain("url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : 'session_ended');");
+    expect(mw).toContain("url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : verdict === 'sso_logged_out' ? 'sso_logged_out' : 'session_ended');");
     expect(mw).toContain('SIGN_IN_PAGES.test(pathname)');
     const form = readFileSync('src/components/auth/LoginForm.tsx', 'utf8');
     expect(form).toContain("redirectError === 'session_changed'");

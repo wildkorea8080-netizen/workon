@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Card, ErrorNote } from '@/components/work/WorkShell';
 import { api, formatBytes, formatDateTime } from '@/lib/work/client';
 import { fileBadge } from '@/lib/file-badge';
@@ -9,15 +9,25 @@ import { useInFlight } from '@/lib/use-in-flight';
 import { uploadAttachment } from '@/lib/attachments/upload-client';
 import { ATTACHMENT_ACCEPT } from '@/lib/attachments/limits';
 import {
-  LIBRARY_SOURCE_LABEL, LIBRARY_SPACE_LABEL, LIBRARY_UNFILED_LABEL,
+  folderLabel, folderTree, isSharedLibrarySpace, transferTargets, LIBRARY_FOLDER_DEPTH, LIBRARY_SOURCE_LABEL, LIBRARY_SPACE_LABEL, LIBRARY_SPACES, LIBRARY_UNFILED_LABEL,
   type LibraryFile, type LibraryFolder, type LibrarySpace,
 } from '@/lib/my-library-spec';
 
-type Page = { space: LibrarySpace; files: LibraryFile[]; next: string | null; folders: LibraryFolder[]; total: number; limit: number; canManage: boolean };
+type Page = { space: LibrarySpace; files: LibraryFile[]; next: string | null; folders: LibraryFolder[]; total: number; limit: number; canManage: boolean; canAdd?: boolean; canAddTo?: Record<LibrarySpace, boolean> };
+type TransferMode = 'copy' | 'move';
+/** 다른 자료함으로 보내기(0296) — 고르는 중인 파일·보낼 곳·방식·폴더 */
+type TransferDraft = { file: LibraryFile; to: LibrarySpace; mode: TransferMode; folder: string };
+
+/** 자리마다 설명 — 누가 보고 누가 담는지 */
+const SPACE_NOTE: Record<LibrarySpace, string> = {
+  personal: '자주 쓰는 파일을 폴더로 모아 둡니다. 대화·입력형 앱의 ‘지난 파일’에서 다시 붙일 수 있고, 대화를 지워도 남습니다. 나만 봅니다.',
+  department: '우리 부서 사람이 함께 쓰는 파일입니다(지금 소속 부서만 — 상위·하위 부서는 따로). 누구나 담고 다시 붙일 수 있고, 이름·폴더 바꾸기와 지우기는 담은 사람이나 관리자만 합니다. 담은 사람이 부서를 옮기거나 퇴직해도 남습니다.',
+  organization: '기관 직원 모두가 함께 보는 파일입니다(공통 서식·기준 자료 등). 누구나 내려받고 대화·입력형 앱에 다시 붙일 수 있고, 담기·이름/폴더 바꾸기·지우기는 기관 전체 관리자만 합니다.',
+};
 
 /** 폴더 이름을 묻는다 — 취소면 null, 빈 글은 미분류 */
 export function askFolder(message: string, current: string): string | null {
-  const answer = window.prompt(`${message}\n(비우면 '${LIBRARY_UNFILED_LABEL}' — / 없이 30자까지)`, current);
+  const answer = window.prompt(`${message}\n(비우면 '${LIBRARY_UNFILED_LABEL}' — / 로 나눠 ${LIBRARY_FOLDER_DEPTH}단계까지, 예: 예산/2026)`, current);
   return answer === null ? null : answer.trim();
 }
 
@@ -25,10 +35,12 @@ export function askFolder(message: string, current: string): string | null {
  * 내 자료함(2026-11-24, 0103) — 자주 쓰는 파일을 폴더로 모아 두고 대화·입력형 앱의 '지난 파일'에서 다시 붙인다.
  * 사본이라 대화를 지워도 남는다. 내 것만 보인다(관리자도 못 본다)
  */
-export default function MyLibrarySection({ query, refreshKey, space, onSpaceChange }: {
+export default function MyLibrarySection({ query, refreshKey, space, onSpaceChange, onCanAddChange }: {
   query: string; refreshKey: number;
-  /** 내 자료함 · 부서 자료함(0106) — 결과물 화면의 '담기'도 이 자리로 담는다 */
+  /** 내 자료함 · 부서 자료함(0106) · 기관 자료함(0112) — 결과물 화면의 '담기'도 이 자리로 담는다 */
   space: LibrarySpace; onSpaceChange: (space: LibrarySpace) => void;
+  /** 이 자리에 담을 수 있는가(기관 자료함은 기관 전체 관리자만) — 결과물 화면의 '담기' 단추를 숨긴다 */
+  onCanAddChange?: (canAdd: boolean) => void;
 }) {
   const [page, setPage] = useState<Page | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
@@ -38,12 +50,13 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
   const [loading, setLoading] = useState(false);
   const latest = useRef(0);
   const action = useInFlight();
+  const [transfer, setTransfer] = useState<TransferDraft | null>(null);
 
   const load = async (cursor: string | null) => {
     const seq = ++latest.current;
     setLoading(true);
     const params = new URLSearchParams();
-    if (space === 'department') params.set('space', 'department');
+    if (space !== 'personal') params.set('space', space);
     if (folder !== null) params.set('folder', folder);
     if (query) params.set('q', query);
     if (cursor) params.set('cursor', cursor);
@@ -58,12 +71,15 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
     setError(null);
     setUnread(false);
     setPage((prev) => (cursor && prev ? { ...r.data, files: [...prev.files, ...r.data.files] } : r.data));
+    onCanAddChange?.(r.data.canAdd !== false);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(null); }, [query, folder, refreshKey, space]);
   // 자리를 바꾸면 폴더 고르기를 처음으로(다른 자리의 폴더 이름은 뜻이 없다)
-  useEffect(() => { setFolder(null); setNotice(null); }, [space]);
-  const spaceParam = space === 'department' ? '?space=department' : '';
+  useEffect(() => { setFolder(null); setNotice(null); setTransfer(null); }, [space]);
+  const spaceParam = space !== 'personal' ? `?space=${space}` : '';
+  // 기관 자료함은 기관 전체 관리자만 담는다(서버가 다시 본다) — 못 읽었으면 막아 둔다
+  const canAdd = space === 'personal' || page?.canAdd === true;
 
   const done = async (message: string) => { setNotice(message); await load(null); };
 
@@ -80,7 +96,7 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
       if (staged.status !== 'ready') { setError(staged.error ?? '파일을 읽지 못해 담지 않았습니다.'); return; }
       const saved = await api<LibraryFile>('/api/my-library', { method: 'POST', json: { kind: 'attachment', id: staged.id, folder: target, space } });
       if (!saved.ok) { setError(saved.error.message); return; }
-      await done(`'${saved.data.file_name}'을(를) ${LIBRARY_SPACE_LABEL[space]} ${saved.data.folder || LIBRARY_UNFILED_LABEL}에 담았습니다.`);
+      await done(`'${saved.data.file_name}'을(를) ${LIBRARY_SPACE_LABEL[space]} ${folderLabel(saved.data.folder)}에 담았습니다.`);
     } finally {
       void fetch(`/api/attachments/${encodeURIComponent(staged.id)}`, { method: 'DELETE' }).catch(() => {});
     }
@@ -101,23 +117,56 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
     const r = await api<LibraryFile>(`/api/my-library/${encodeURIComponent(f.id)}`, { method: 'PATCH', json: { folder: target, space } });
     if (!r.ok) { setError(r.error.message); return; }
     setError(null);
-    await done(`'${r.data.file_name}'을(를) ${r.data.folder || LIBRARY_UNFILED_LABEL}(으)로 옮겼습니다.`);
+    await done(`'${r.data.file_name}'을(를) ${folderLabel(r.data.folder)}(으)로 옮겼습니다.`);
   });
 
   const remove = (f: LibraryFile) => action.run(`remove:${f.id}`, async () => {
-    if (!window.confirm(`'${f.file_name}'을(를) ${LIBRARY_SPACE_LABEL[space]}에서 지웁니다. 되돌릴 수 없습니다${space === 'department' ? '(부서 사람 모두에게서 사라집니다' : '('}이 파일을 붙여 보낸 대화는 그대로입니다).`)) return;
+    if (!window.confirm(`'${f.file_name}'을(를) ${LIBRARY_SPACE_LABEL[space]}에서 지웁니다. 되돌릴 수 없습니다${space === 'organization' ? '(기관 직원 모두에게서 사라집니다' : space === 'department' ? '(부서 사람 모두에게서 사라집니다' : '('}이 파일을 붙여 보낸 대화는 그대로입니다).`)) return;
     const r = await api<{ id: string }>(`/api/my-library/${encodeURIComponent(f.id)}${spaceParam}`, { method: 'DELETE' });
     if (!r.ok) { setError(r.error.message); return; }
     setError(null);
     await done(`'${f.file_name}'을(를) 지웠습니다.`);
   });
 
-  const folders = page?.folders ?? [];
+  // 다른 자료함으로 복사·옮기기(0296) — 복사는 볼 수 있으면, 옮기기는 이 자리에서 바꿀 수 있을 때만(서버가 다시 본다)
+  const canChange = (f: LibraryFile) => (space === 'organization' ? page?.canManage === true : f.mine || page?.canManage === true);
+  const targets = transferTargets(space, page?.canAddTo);
+  const openTransfer = (f: LibraryFile) => {
+    if (!targets.length) return;
+    setError(null);
+    setNotice(null);
+    setTransfer({ file: f, to: targets[0], mode: 'copy', folder: f.folder });
+  };
+  const sendTransfer = () => action.run('transfer', async () => {
+    if (!transfer) return;
+    const { file, to, mode, folder: target } = transfer;
+    const r = await api<{ file: LibraryFile; warning: string | null }>(`/api/my-library/${encodeURIComponent(file.id)}`, {
+      method: 'POST', json: { space, to, mode, folder: target.trim() },
+    });
+    if (!r.ok) { setError(r.error.message); return; }
+    setError(r.data.warning);
+    setTransfer(null);
+    await done(`'${file.file_name}'을(를) ${LIBRARY_SPACE_LABEL[to]} ${folderLabel(r.data.file.folder)}(으)로 ${mode === 'move' ? '옮겼습니다' : '복사했습니다'}.`);
+  });
+
+  // 폴더째 이름 바꾸기·옮기기(0294) — 고른 폴더와 그 아래를 새 경로로. 부서 자료함은 관리자, 기관 자료함은 기관 전체 관리자(canManage)
+  const moveFolder = (from: string) => action.run(`folder:${from}`, async () => {
+    const to = askFolder(`'${folderLabel(from)}' 폴더(와 그 아래 폴더)를 옮길 새 경로`, from);
+    if (to === null || to === from) return;
+    const r = await api<{ moved: number; folders: number }>('/api/my-library/folders', { method: 'PATCH', json: { space, from, to } });
+    if (!r.ok) { setError(r.error.message); return; }
+    setError(null);
+    setFolder(null);
+    await done(`'${folderLabel(from)}'을(를) '${folderLabel(to)}'(으)로 옮겼습니다(파일 ${r.data.moved}개).`);
+  });
+
+  // 폴더 나무(0113) — 윗단계 폴더도 보이고 수는 그 아래까지 합친다. 고르면 그 아래 폴더의 파일도 함께 보인다
+  const folders = folderTree(page?.folders ?? []);
   const busy = action.running !== null;
   return (
     <section aria-label="자료함" className="mt-8">
       <div role="tablist" aria-label="자료함 고르기" className="mb-3 flex gap-2">
-        {(['personal', 'department'] as const).map((s) => (
+        {LIBRARY_SPACES.map((s) => (
           <button key={s} type="button" role="tab" aria-selected={space === s} onClick={() => onSpaceChange(s)}
             className={`rounded-lg px-3 py-1.5 text-[15px] font-semibold ${space === s ? 'bg-ws-accent/10 text-ws-accent-text' : 'text-slate-500 hover:text-slate-800'}`}>{LIBRARY_SPACE_LABEL[s]}</button>
         ))}
@@ -125,33 +174,36 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-[17px] font-semibold text-slate-900">{LIBRARY_SPACE_LABEL[space]}</h2>
-          <p className="mt-1 text-[13px] text-slate-500">{space === 'department'
-            ? '우리 부서 사람이 함께 쓰는 파일입니다(지금 소속 부서만 — 상위·하위 부서는 따로). 누구나 담고 다시 붙일 수 있고, 이름·폴더 바꾸기와 지우기는 담은 사람이나 관리자만 합니다. 담은 사람이 부서를 옮기거나 퇴직해도 남습니다.'
-            : '자주 쓰는 파일을 폴더로 모아 둡니다. 대화·입력형 앱의 ‘지난 파일’에서 다시 붙일 수 있고, 대화를 지워도 남습니다. 나만 봅니다.'}</p>
+          <p className="mt-1 text-[13px] text-slate-500">{SPACE_NOTE[space]}</p>
         </div>
-        <label className={`rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px] ${busy ? 'opacity-50' : 'cursor-pointer hover:border-[#003087]'}`}>
+        {canAdd && <label className={`rounded-lg border border-[#DCE3EC] px-3 py-1.5 text-[14px] ${busy ? 'opacity-50' : 'cursor-pointer hover:border-[#003087]'}`}>
           {action.running === 'upload' ? '올리는 중…' : '파일 올려 담기'}
           <input type="file" aria-label={`${LIBRARY_SPACE_LABEL[space]}에 파일 올리기`} accept={ATTACHMENT_ACCEPT} disabled={busy} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void upload(file); }} />
-        </label>
+        </label>}
       </div>
       {page && <p className="mt-2 text-[13px] text-slate-500">{page.total} / {page.limit}개</p>}
       <div role="group" aria-label="폴더" className="mt-3 mb-3 flex flex-wrap gap-2">
         <button type="button" aria-pressed={folder === null} onClick={() => setFolder(null)}
           className={`rounded-full border px-3 py-1 text-[13px] ${folder === null ? 'border-ws-accent bg-ws-accent/10 text-ws-accent-text' : 'border-[#DCE3EC] text-slate-600'}`}>전체</button>
         {folders.map((f) => (
-          <button key={f.name || '__unfiled'} type="button" aria-pressed={folder === f.name} onClick={() => setFolder(f.name)}
-            className={`rounded-full border px-3 py-1 text-[13px] ${folder === f.name ? 'border-ws-accent bg-ws-accent/10 text-ws-accent-text' : 'border-[#DCE3EC] text-slate-600'}`}>
-            {f.name || LIBRARY_UNFILED_LABEL} <span className="text-slate-400">{f.count}</span>
+          <button key={f.path || '__unfiled'} type="button" aria-pressed={folder === f.path} onClick={() => setFolder(f.path)} title={folderLabel(f.path)}
+            className={`rounded-full border px-3 py-1 text-[13px] ${folder === f.path ? 'border-ws-accent bg-ws-accent/10 text-ws-accent-text' : 'border-[#DCE3EC] text-slate-600'}`}>
+            {folderLabel(f.path)} <span className="text-slate-400">{f.count}</span>
           </button>
         ))}
       </div>
+      {folder && (space === 'personal' || page?.canManage) && (
+        <button type="button" disabled={busy} onClick={() => void moveFolder(folder)} className="mb-3 text-[13px] text-slate-600 underline disabled:opacity-50">
+          {action.running === `folder:${folder}` ? '옮기는 중…' : `'${folderLabel(folder)}' 폴더 이름 바꾸기·옮기기`}
+        </button>
+      )}
       <ErrorNote message={error} />
       {notice && <p role="status" className="mb-3 text-[13px] text-ws-accent-text">{notice}</p>}
       <Card className="p-0 overflow-x-auto">
         {(unread && !page) || (page && page.files.length === 0) ? (
           <div className="p-6 text-[15px] text-slate-600">
-            {unread && !page ? emptyListText(true, '', `${LIBRARY_SPACE_LABEL[space]}을`) : query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : folder !== null ? '이 폴더에 담은 파일이 없습니다.' : `아직 담은 파일이 없습니다. 위 ‘파일 올려 담기’나 아래 목록의 ‘${LIBRARY_SPACE_LABEL[space]}에 담기’로 담으세요.`}
+            {unread && !page ? emptyListText(true, '', `${LIBRARY_SPACE_LABEL[space]}을`) : query ? `'${query}'이(가) 이름에 든 파일이 없습니다.` : folder !== null ? '이 폴더(와 그 아래 폴더)에 담은 파일이 없습니다.' : canAdd ? `아직 담은 파일이 없습니다. 위 ‘파일 올려 담기’나 아래 목록의 ‘${LIBRARY_SPACE_LABEL[space]}에 담기’로 담으세요.` : '아직 기관 전체 관리자가 담은 파일이 없습니다.'}
           </div>
         ) : (
           <table className="w-full min-w-[720px] text-left text-[15px]">
@@ -159,31 +211,68 @@ export default function MyLibrarySection({ query, refreshKey, space, onSpaceChan
               <tr>
                 <th scope="col" className="px-5 py-3 font-medium">파일</th>
                 <th scope="col" className="px-5 py-3 font-medium">폴더</th>
-                <th scope="col" className="px-5 py-3 font-medium">{space === 'department' ? '담은 사람' : '담은 곳'}</th>
+                <th scope="col" className="px-5 py-3 font-medium">{isSharedLibrarySpace(space) ? '담은 사람' : '담은 곳'}</th>
                 <th scope="col" className="px-5 py-3 font-medium">담은 때</th>
                 <th scope="col" className="px-5 py-3 font-medium"><span className="sr-only">조작</span></th>
               </tr>
             </thead>
             <tbody>
               {(page?.files ?? []).map((f) => (
-                <tr key={f.id} className="border-b border-[#DCE3EC] last:border-0">
+                <Fragment key={f.id}>
+                <tr className="border-b border-[#DCE3EC] last:border-0">
                   <td className="px-5 py-3">
                     <span className="mr-2 rounded border border-[#DCE3EC] px-1.5 py-0.5 text-[12px] font-semibold">{fileBadge(f.file_name)}</span>
                     {f.file_name} <span className="text-[13px] text-slate-500">{formatBytes(f.size_bytes)}</span>
                   </td>
-                  <td className="px-5 py-3 text-slate-600">{f.folder || LIBRARY_UNFILED_LABEL}</td>
-                  <td className="px-5 py-3 text-slate-600">{space === 'department' ? (f.mine ? '나' : f.added_by ?? '—') : LIBRARY_SOURCE_LABEL[f.source]}</td>
+                  <td className="px-5 py-3 text-slate-600">{folderLabel(f.folder)}</td>
+                  <td className="px-5 py-3 text-slate-600">{isSharedLibrarySpace(space) ? (f.mine ? '나' : f.added_by ?? '—') : LIBRARY_SOURCE_LABEL[f.source]}</td>
                   <td className="px-5 py-3 text-[14px] text-slate-500">{formatDateTime(f.created_at)}</td>
                   <td className="whitespace-nowrap px-5 py-3 text-right text-[14px]">
                     <a href={`/api/my-library/${encodeURIComponent(f.id)}/original`} className="rounded-lg border border-[#DCE3EC] px-3 py-1.5 hover:border-[#003087]">내려받기</a>
-                    {/* 부서 자료함에서 남이 담은 파일은 관리자만 바꾼다(서버가 다시 본다) */}
-                    {(f.mine || page?.canManage) && <>
+                    {targets.length > 0 && (
+                      <button type="button" disabled={busy} aria-expanded={transfer?.file.id === f.id} onClick={() => (transfer?.file.id === f.id ? setTransfer(null) : openTransfer(f))}
+                        className="ml-2 text-slate-600 underline disabled:opacity-50">다른 자료함으로</button>
+                    )}
+                    {/* 부서 자료함에서 남이 담은 파일은 관리자만, 기관 자료함은 기관 전체 관리자만 바꾼다(서버가 다시 본다) */}
+                    {canChange(f) && <>
                       <button type="button" disabled={busy} onClick={() => void rename(f)} className="ml-2 text-slate-600 underline disabled:opacity-50">이름</button>
                       <button type="button" disabled={busy} onClick={() => void move(f)} className="ml-2 text-slate-600 underline disabled:opacity-50">옮기기</button>
                       <button type="button" disabled={busy} onClick={() => void remove(f)} className="ml-2 text-red-600 underline disabled:opacity-50">지우기</button>
                     </>}
                   </td>
                 </tr>
+                {transfer?.file.id === f.id && (
+                  <tr className="border-b border-[#DCE3EC] bg-slate-50">
+                    <td colSpan={5} className="px-5 py-3">
+                      <form aria-label={`'${f.file_name}'을(를) 다른 자료함으로`} className="flex flex-wrap items-end gap-3 text-[14px]"
+                        onSubmit={(e) => { e.preventDefault(); void sendTransfer(); }}>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[13px] text-slate-500">보낼 곳</span>
+                          <select value={transfer.to} onChange={(e) => setTransfer({ ...transfer, to: e.target.value as LibrarySpace })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5">
+                            {targets.map((s) => <option key={s} value={s}>{LIBRARY_SPACE_LABEL[s]}</option>)}
+                          </select>
+                        </label>
+                        <fieldset className="flex items-center gap-3">
+                          <legend className="sr-only">방식</legend>
+                          <label className="flex items-center gap-1"><input type="radio" name="transfer-mode" checked={transfer.mode === 'copy'} onChange={() => setTransfer({ ...transfer, mode: 'copy' })} /> 복사(여기에도 남김)</label>
+                          <label className={`flex items-center gap-1 ${canChange(f) ? '' : 'text-slate-400'}`} title={canChange(f) ? undefined : '옮기기는 이 파일을 바꿀 수 있는 사람만 합니다'}>
+                            <input type="radio" name="transfer-mode" disabled={!canChange(f)} checked={transfer.mode === 'move'} onChange={() => setTransfer({ ...transfer, mode: 'move' })} /> 옮기기(여기서는 지움)
+                          </label>
+                        </fieldset>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-[13px] text-slate-500">폴더(비우면 {LIBRARY_UNFILED_LABEL} — / 로 {LIBRARY_FOLDER_DEPTH}단계까지)</span>
+                          <input value={transfer.folder} onChange={(e) => setTransfer({ ...transfer, folder: e.target.value })} className="rounded-lg border border-[#DCE3EC] px-2 py-1.5" />
+                        </label>
+                        <button type="submit" disabled={busy} className="rounded-lg bg-ws-accent px-3 py-1.5 font-semibold text-white disabled:opacity-50">
+                          {action.running === 'transfer' ? '보내는 중…' : transfer.mode === 'move' ? '옮기기' : '복사하기'}
+                        </button>
+                        <button type="button" disabled={busy} onClick={() => setTransfer(null)} className="text-slate-600 underline disabled:opacity-50">취소</button>
+                      </form>
+                      {transfer.to !== 'personal' && <p className="mt-2 text-[13px] text-slate-500">{transfer.to === 'organization' ? '기관 직원 모두가' : '지금 부서 사람이 모두'} 보고 내려받게 됩니다.</p>}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

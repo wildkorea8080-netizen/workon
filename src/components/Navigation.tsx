@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
+import { signOutEverywhere } from '@/lib/sso-logout-client';
 import { useBranding } from '@/lib/use-branding';
 
 export default function Navigation() {
@@ -34,7 +35,7 @@ export default function Navigation() {
           {isAuthenticated ? (
             <button
               type="button"
-              onClick={() => signOut({ callbackUrl: '/' })}
+              onClick={() => void signOutEverywhere('/', session?.user?.sso)}
               className="text-slate-600 hover:text-slate-900"
             >
               로그아웃

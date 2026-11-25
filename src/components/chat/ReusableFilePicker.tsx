@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { ReusableFile } from '@/lib/attachments/reuse-types';
-import { LIBRARY_UNFILED_LABEL, type LibraryFile, type LibraryFolder } from '@/lib/my-library-spec';
+import { folderLabel, folderTree, type LibraryFile, type LibraryFolder } from '@/lib/my-library-spec';
 
 /** 바이트 → 읽기 쉬운 크기 */
 function sizeLabel(bytes: number): string {
@@ -24,8 +24,8 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
 }) {
   const [open, setOpen] = useState(false);
   // 'recent' = 최근 90일 지난 파일, 'library' = 내 자료함(0103)
-  // 'department' = 부서 자료함(0106)
-  const [tab, setTab] = useState<'recent' | 'library' | 'department'>('recent');
+  // 'department' = 부서 자료함(0106), 'organization' = 기관 자료함(0112)
+  const [tab, setTab] = useState<'recent' | 'library' | 'department' | 'organization'>('recent');
   const [folder, setFolder] = useState<string | null>(null);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [files, setFiles] = useState<ReusableFile[] | null>(null);
@@ -38,10 +38,10 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
     setFiles(null);
     const library = tab !== 'recent';
     const params = new URLSearchParams();
-    if (tab === 'department') params.set('space', 'department');
+    if (tab === 'department' || tab === 'organization') params.set('space', tab);
     if (folder !== null) params.set('folder', folder);
     const url = library ? `/api/my-library${params.toString() ? `?${params.toString()}` : ''}` : '/api/attachments/reusable';
-    const failText = library ? `${tab === 'department' ? '부서' : '내'} 자료함을 불러오지 못했습니다.` : '지난 파일을 불러오지 못했습니다.';
+    const failText = library ? `${tab === 'organization' ? '기관' : tab === 'department' ? '부서' : '내'} 자료함을 불러오지 못했습니다.` : '지난 파일을 불러오지 못했습니다.';
     void fetch(url)
       .then(async (res) => {
         const body = (await res.json().catch(() => null)) as { ok?: boolean; data?: unknown; error?: { message?: string } } | null;
@@ -90,14 +90,16 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
               <button type="button" role="tab" aria-selected={tab === 'recent'} onClick={() => setTab('recent')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'recent' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>최근 90일</button>
               <button type="button" role="tab" aria-selected={tab === 'library'} onClick={() => setTab('library')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'library' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>내 자료함</button>
               <button type="button" role="tab" aria-selected={tab === 'department'} onClick={() => setTab('department')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'department' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>부서 자료함</button>
+              <button type="button" role="tab" aria-selected={tab === 'organization'} onClick={() => setTab('organization')} className={`rounded px-1.5 py-0.5 text-xs font-semibold ${tab === 'organization' ? 'bg-slate-100 text-slate-800' : 'text-slate-500'}`}>기관 자료함</button>
             </div>
             <button type="button" onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-700">닫기</button>
           </div>
           {tab !== 'recent' && folders.length > 0 && (
             <div role="group" aria-label="폴더" className="flex flex-wrap gap-1 px-2 pb-1">
               <button type="button" aria-pressed={folder === null} onClick={() => setFolder(null)} className={`rounded-full border px-2 py-0.5 text-[11px] ${folder === null ? 'border-ws-accent text-ws-accent-text' : 'border-slate-200 text-slate-500'}`}>전체</button>
-              {folders.map((f) => (
-                <button key={f.name || '__unfiled'} type="button" aria-pressed={folder === f.name} onClick={() => setFolder(f.name)} className={`rounded-full border px-2 py-0.5 text-[11px] ${folder === f.name ? 'border-ws-accent text-ws-accent-text' : 'border-slate-200 text-slate-500'}`}>{f.name || LIBRARY_UNFILED_LABEL}</button>
+              {/* 폴더 나무(0113) — 고르면 그 아래 폴더의 파일도 함께 */}
+              {folderTree(folders).map((f) => (
+                <button key={f.path || '__unfiled'} type="button" aria-pressed={folder === f.path} onClick={() => setFolder(f.path)} className={`rounded-full border px-2 py-0.5 text-[11px] ${folder === f.path ? 'border-ws-accent text-ws-accent-text' : 'border-slate-200 text-slate-500'}`}>{folderLabel(f.path)}</button>
               ))}
             </div>
           )}
@@ -118,7 +120,7 @@ export default function ReusableFilePicker({ disabled, onPick, placement = 'up',
                   >
                     <span className="min-w-0 truncate text-slate-800" title={f.file_name}>{f.file_name}</span>
                     <span className="flex-shrink-0 text-[11px] text-slate-400">
-                      {f.kind === 'library' ? (f.folder || LIBRARY_UNFILED_LABEL) : f.kind === 'generated' ? '만든 파일' : '첨부'} · {sizeLabel(f.size_bytes)} · {f.created_at.slice(5, 10).replace('-', '.')}
+                      {f.kind === 'library' ? folderLabel(f.folder ?? '') : f.kind === 'generated' ? '만든 파일' : '첨부'} · {sizeLabel(f.size_bytes)} · {f.created_at.slice(5, 10).replace('-', '.')}
                     </span>
                   </button>
                 </li>

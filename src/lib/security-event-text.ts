@@ -25,6 +25,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   org_sso_changed: '기관 SSO 설정 바꾸기(관리자)',
   user_role_changed: '직원 권한 바꾸기(관리자)',
   user_department_changed: '직원 부서 옮기기(관리자)',
+  user_department_synced: '직원 부서 맞추기(기관 SSO 그룹)',
+  sso_backchannel_logout: '기관 계정 로그아웃(계정 서비스에서 먼저)',
   user_budget_changed: '개인 월 한도 바꾸기(관리자)',
   user_invited: '직원 초대(관리자)',
   user_invite_canceled: '직원 초대 취소(관리자)',
@@ -137,6 +139,9 @@ export function securityDetailParts(details: unknown, nameOf: (userId: string) =
   }
 
   if (d.via === 'bulk_register') parts.push('일괄 등록으로');
+  // (0110) 기관 SSO 그룹 → 부서 맞추기 — 맞은 계정 서비스의 그룹 값
+  const ssoGroup = clean(d.sso_group, 60);
+  if (ssoGroup) parts.push(`계정 서비스 그룹: ${ssoGroup}`);
 
   // ── 접속 허용 IP·기관 정보 (2026-11-18) ──
   if ('from_ips' in d || 'to_ips' in d) {

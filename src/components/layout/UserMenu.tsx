@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { signOut, useSession } from 'next-auth/react';
+import { useSession } from 'next-auth/react';
+import { signOutEverywhere } from '@/lib/sso-logout-client';
 
 /**
  * 사용자 메뉴(이름 → 내 사용현황·관리자 포털·로그아웃) — 위쪽 머리 막대와 업무 틀 사이드바 아래(2026-11-06)가 함께 쓴다.
@@ -68,7 +69,7 @@ export default function UserMenu({ up = false, compact = false, wide = false }: 
           <button
             role="menuitem"
             type="button"
-            onClick={() => signOut({ callbackUrl: '/login' })}
+            onClick={() => void signOutEverywhere('/login', session?.user?.sso)}
             className="w-full px-4 py-2.5 text-left text-sm text-red-500 transition-colors hover:bg-red-50"
           >
             로그아웃

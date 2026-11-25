@@ -67,14 +67,14 @@ const SIGN_IN_PAGES = /^\/(login|signin|signup|register|forgot-password|reset-pa
 /** 끝난 직원 세션 — 쿠키를 지우고 API는 401, 화면은 로그인으로 */
 function endUserSession(req: NextRequest, pathname: string, verdict: SessionVerdict | 'impersonation'): NextResponse {
   const res = pathname.startsWith('/api')
-    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : verdict === 'password_changed' ? '비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해 주세요.' : verdict === 'sso_only' ? '이 기관은 직원 로그인을 기관 계정(SSO)으로만 받습니다. 기관 계정으로 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
+    ? NextResponse.json({ ok: false, error: { message: verdict === 'changed' ? '권한이나 소속이 바뀌었습니다. 다시 로그인해 주세요.' : verdict === 'password_changed' ? '비밀번호가 바뀌었습니다. 새 비밀번호로 다시 로그인해 주세요.' : verdict === 'sso_only' ? '이 기관은 직원 로그인을 기관 계정(SSO)으로만 받습니다. 기관 계정으로 다시 로그인해 주세요.' : verdict === 'sso_logged_out' ? '기관 계정에서 로그아웃되어 로그인이 끝났습니다. 다시 로그인해 주세요.' : '로그인이 끝났습니다. 다시 로그인해 주세요.' } }, { status: 401 })
     : SIGN_IN_PAGES.test(pathname)
       ? NextResponse.next()
       : (() => {
           const url = req.nextUrl.clone();
           url.pathname = '/login';
           url.search = '';
-          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : 'session_ended');
+          url.searchParams.set('error', verdict === 'changed' ? 'session_changed' : verdict === 'password_changed' ? 'password_changed' : verdict === 'sso_only' ? 'sso_only' : verdict === 'sso_logged_out' ? 'sso_logged_out' : 'session_ended');
           return NextResponse.redirect(url);
         })();
   for (const name of sessionCookieNames(req.cookies.getAll().map((c) => c.name))) {
@@ -142,6 +142,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith('/maintenance') ||
     pathname.startsWith('/api/super') ||
     pathname.startsWith('/api/system') ||
+    // 계정 서비스가 보내는 back-channel 로그아웃(0114) — 점검 중에도 받아 둬야 점검 뒤에 끝났어야 할 로그인이 남지 않는다
+    pathname === '/api/sso/backchannel-logout' ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/auth') ||
     PUBLIC_FILE.test(pathname);

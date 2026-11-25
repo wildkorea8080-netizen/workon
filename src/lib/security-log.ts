@@ -65,6 +65,9 @@ export type SecurityEventType =
   /** 기관 관리자가 직원의 권한 / 부서 / 개인 월 한도를 바꿈 (2026-11-18 — 그 전에는 어디에도 남지 않았다) */
   | 'user_role_changed'
   | 'user_department_changed'
+  /** 기관 계정(SSO)으로 로그인할 때 계정 서비스의 그룹에 맞춰 부서를 옮김 (0110) */
+  | 'user_department_synced'
+  | 'sso_backchannel_logout'
   | 'user_budget_changed'
   /** 기관 관리자가 직원을 초대함 / 초대를 취소함 (2026-11-18) */
   | 'user_invited'

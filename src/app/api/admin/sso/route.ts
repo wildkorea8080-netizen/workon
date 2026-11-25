@@ -5,7 +5,8 @@ import { readJsonObject, BAD_BODY_MESSAGE } from '@/lib/request-body';
 import { logSecurityEvent } from '@/lib/security-log';
 import { EncryptionKeyMissingError } from '@/lib/crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { appBaseUrl, configView, defaultSsoAdminIo, defaultSsoIo, parseSsoConfig, saveSsoConfig, SSO_CALLBACK_PATH } from '@/lib/org-sso';
+import { pagedRows } from '@/lib/paged-select';
+import { appBaseUrl, configView, defaultSsoAdminIo, defaultSsoIo, parseSsoConfig, saveSsoConfig, SSO_BACKCHANNEL_PATH, SSO_CALLBACK_PATH } from '@/lib/org-sso';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,14 @@ async function orgSlug(organizationId: string): Promise<string | null> {
   return (data as { slug: string | null } | null)?.slug ?? null;
 }
 
+/** 이 기관의 부서(그룹 → 부서 맞추기 고르기, 0110) — 못 읽으면 던진다 */
+async function orgDepartments(organizationId: string): Promise<{ id: string; name: string }[]> {
+  const read = await pagedRows<{ id: string; name: string }>((a, b, w) =>
+    supabaseAdmin.from('departments').select('id, name', w ? { count: 'exact' } : undefined).eq('organization_id', organizationId).order('name').order('id').range(a, b));
+  if (read.error || read.truncated) throw new Error('departments');
+  return read.data;
+}
+
 /** 기관 SSO 설정 보기(0107) — 관리자 누구나. 비밀값은 '있음'만, 계정 서비스에 등록할 돌아올 주소·로그인 주소를 함께 */
 export async function GET() {
   const session = await getServerAuthSession();
@@ -27,13 +36,15 @@ export async function GET() {
   if (scope instanceof Response) return scope;
   if (!scope?.organizationId) return jsonError('소속 기관을 확인할 수 없습니다.', 403);
   try {
-    const [row, slug] = await Promise.all([defaultSsoIo().loadConfig(scope.organizationId), orgSlug(scope.organizationId)]);
+    const [row, slug, departments] = await Promise.all([defaultSsoIo().loadConfig(scope.organizationId), orgSlug(scope.organizationId), orgDepartments(scope.organizationId)]);
     return NextResponse.json({
       ok: true,
       data: {
         config: configView(row),
         redirectUri: `${appBaseUrl()}${SSO_CALLBACK_PATH}`,
+        backchannelUri: `${appBaseUrl()}${SSO_BACKCHANNEL_PATH}`,
         loginPath: slug ? `/signin/${slug}` : null,
+        departments,
         canManage: scope.managesWholeOrganization && !session.user.isImpersonating,
       },
     });
@@ -58,13 +69,20 @@ export async function PUT(request: NextRequest) {
   const parsed = parseSsoConfig(body);
   if (!parsed.ok) return jsonError(parsed.message, 400);
   try {
+    // (0110) 그룹 → 부서의 부서는 이 기관 부서만
+    const mappedIds = [...new Set(parsed.value.groupMappings.map((m) => m.departmentId))];
+    if (mappedIds.length) {
+      const { data: found, error: deptError } = await supabaseAdmin.from('departments').select('id').in('id', mappedIds).eq('organization_id', scope.organizationId);
+      if (deptError) return jsonError('부서를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
+      if (((found ?? []) as { id: string }[]).length !== mappedIds.length) return jsonError('그룹 → 부서 목록에 이 기관의 부서가 아닌 것이 있습니다. 목록을 다시 골라 주세요.', 400);
+    }
     if (parsed.value.enabled && !(await orgSlug(scope.organizationId))) {
       return jsonError('기관 로그인 경로(slug)가 없어 켤 수 없습니다. 기관 정보에서 로그인 경로를 먼저 정해 주세요.', 400);
     }
     const saved = await saveSsoConfig(scope.organizationId, scope.userId, parsed.value, defaultSsoAdminIo());
     if (!saved.ok) return jsonError(saved.message, saved.status);
     if (saved.changed.length) {
-      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, sso_only: saved.view.ssoOnly, issuer: saved.view.issuer }, 'high');
+      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, sso_only: saved.view.ssoOnly, single_logout: saved.view.singleLogout, issuer: saved.view.issuer, group_claim: saved.view.groupClaim, group_mappings: saved.view.groupMappings.length }, 'high');
     }
     return NextResponse.json({ ok: true, data: { config: saved.view } });
   } catch (error) {

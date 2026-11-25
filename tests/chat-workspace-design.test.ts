@@ -131,7 +131,7 @@ describe('위쪽 막대 없이 사이드바 하나(2026-11-06 오후)', () => {
     expect(read('src/components/layout/Header.tsx')).toContain('<UserMenu />');
     expect(read('src/components/layout/Header.tsx')).not.toContain('signOut');
     const menu = read('src/components/layout/UserMenu.tsx');
-    expect(menu).toContain("signOut({ callbackUrl: '/login' })");
+    expect(menu).toContain("signOutEverywhere('/login', session?.user?.sso)"); // 0111 — 기관 SSO 함께 로그아웃을 거친다
     expect(menu).toContain("if (e.key === 'Escape') setOpen(false);");
     expect(menu).toContain("up ? 'bottom-full left-0 mb-2' : 'right-0 top-full mt-2'");
     expect(menu).toMatch(/isAdmin && <Link role="menuitem" href="\/admin"/);

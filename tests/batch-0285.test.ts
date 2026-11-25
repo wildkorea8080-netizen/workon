@@ -120,9 +120,9 @@ describe('잇기', () => {
   it('다시 붙이기가 요청자의 부서를 넘긴다, 화면·고르기에 부서 자료함', () => {
     expect(readFileSync('src/lib/attachments/reuse.ts', 'utf8')).toContain('departmentId: actor.departmentId, isAdmin: false');
     const picker = readFileSync('src/components/chat/ReusableFilePicker.tsx', 'utf8');
-    expect(picker).toContain("params.set('space', 'department')");
+    expect(picker).toContain("if (tab === 'department' || tab === 'organization') params.set('space', tab);"); // 0112 — 기관 자료함 탭도 같은 길
     const section = readFileSync('src/components/files/MyLibrarySection.tsx', 'utf8');
-    expect(section).toContain('(f.mine || page?.canManage)');
+    expect(section).toContain("(space === 'organization' ? page?.canManage === true : f.mine || page?.canManage === true)"); expect(section).toContain('{canChange(f) && <>'); // 0112 — 기관 자료함은 기관 전체 관리자만
     expect(readFileSync('src/app/files/page.tsx', 'utf8')).toContain('saveSpace={librarySpace}');
     for (const f of ['src/app/api/my-library/route.ts', 'src/app/api/my-library/[id]/route.ts', 'src/app/api/my-library/[id]/original/route.ts']) {
       expect(readFileSync(f, 'utf8')).toContain('departmentId: actor.departmentId, isAdmin: actor.isAdmin');
