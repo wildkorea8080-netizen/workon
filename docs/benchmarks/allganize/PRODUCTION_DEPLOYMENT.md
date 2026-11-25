@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-25(오후 2): 기관 SSO 그룹 → 관리자 역할(0297) — 0115 운영 적용
+
+- 코드 배포 `dpl_B5scAMybQM8wu8f7UQR4b6vPNjgJ`(커밋 `b7a533f`, 2026-11-25 15:59 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `e8b3bdb`(오후 기록), `e598b01` 기능 — 관리자로 들일 그룹 값이 클레임에 든 일반 직원을 기관 계정 로그인 때 관리자로 올리고, 이 길로 올린 관리자(`users.role_from_sso`)가 그룹에서 빠지면 내림(못 내리면 로그인을 막음), 손으로 권한을 바꾸면 표시를 지움(0115). `b7a533f` 문서. 가지 Preview(`workon-hia7xpojz`, `dpl_4H6DcUcYqZENaep13JDxgTzLFo3n`) Ready 뒤 `main`. 배포 전 전체 시험 451파일 5,222개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_5YEpesarmv15RQv5AVm2mn3KhAC6`(fbc9aa6)로 promote — 0115는 칸 추가라 옛 코드도 돈다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0114, `admin_groups`·`role_from_sso` 없음, SSO 설정 행 0, RLS 꺼진 표 0. **0115를 코드보다 먼저 적용**(`npm run db:migrate`, 1건 OK) → 다시 읽어 두 칸·`org_sso_providers_admin_groups_check`(20개·클레임 필요) 있음, `npm run db:drift` 어긋남 없음(표·뷰 64·칸 834·함수 33).
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, 관리자 SSO 설정 인증 없이 403, `/api/sso/{없는 경로}/start` → `/signin/…?error=sso_unavailable`, 상태 없는 `/api/sso/callback` → `/login?error=sso_expired`, back-channel 틀린 토큰 400. 실행기 호출 16:02~16:06 KST 모두 200(heartbeat 16:05), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 실제 계정 서비스의 그룹으로 관리자 올리기·내리기를 해 보지 않았다(운영에 SSO 설정 행이 아직 없다). SSO 설정 화면의 새 칸을 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-25(오후): 기관 SSO 그룹·함께 로그아웃·back-channel 로그아웃·자료함 확장(0290~0296) — 0110~0114 운영 적용
 
 - 코드 배포 `dpl_5YEpesarmv15RQv5AVm2mn3KhAC6`(커밋 `fbc9aa6`, 2026-11-25 15:27 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b2523fe`(아침 기록), `4972b73` 기능 — 기관 SSO 그룹 → 부서 맞추기(0110)(0290), 함께 로그아웃(RP-Initiated, 0111)(0291), 기관 자료함(0112)(0292), 자료함 여러 단계 폴더(0113)(0293)·폴더째 이름 바꾸기/옮기기(0294), 기관 SSO back-channel 로그아웃(0114 — `users.sso_logout_at`·`org_sso_subjects`, `POST /api/sso/backchannel-logout`)(0295), 자료함 사이 복사·옮기기(마이그레이션 없음)(0296). `fbc9aa6` 문서. 가지 Preview(`workon-mgkz2v219`, `dpl_DM1yseaZzgNzXhwEbsLEeqKf8U6q`) Ready 뒤 `main`. 배포 전 전체 시험 450파일 5,205개 통과·tsc 0.
