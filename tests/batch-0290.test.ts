@@ -105,7 +105,7 @@ describe('설정 저장·보기', () => {
     loadConfig: async () => before, now: () => 0, encrypt: (s: string) => s, publicHost: async () => true, fetch: fetch,
     upsert: async (r: Record<string, unknown>) => { upserts.push(r); return { ...row(), ...r } as SsoConfigRow; },
   });
-  const input = { issuer: ISSUER, clientId: 'c', clientSecret: null, emailDomains: [], enabled: false, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: 'groups', groupMappings: [{ value: '총무과', departmentId: D1 }], singleLogout: false };
+  const input = { issuer: ISSUER, clientId: 'c', clientSecret: null, emailDomains: [], enabled: false, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: 'groups', groupMappings: [{ value: '총무과', departmentId: D1 }], adminGroups: [], singleLogout: false };
   it('그룹 칸을 저장하고 바뀐 칸에 남긴다, 같은 값이면 남기지 않는다', async () => {
     const upserts: Record<string, unknown>[] = [];
     const r = await saveSsoConfig(ORG, 'admin', input, io(row(), upserts));

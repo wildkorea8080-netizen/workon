@@ -82,7 +82,7 @@ export async function PUT(request: NextRequest) {
     const saved = await saveSsoConfig(scope.organizationId, scope.userId, parsed.value, defaultSsoAdminIo());
     if (!saved.ok) return jsonError(saved.message, saved.status);
     if (saved.changed.length) {
-      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, sso_only: saved.view.ssoOnly, single_logout: saved.view.singleLogout, issuer: saved.view.issuer, group_claim: saved.view.groupClaim, group_mappings: saved.view.groupMappings.length }, 'high');
+      await logSecurityEvent(scope.departmentId, scope.userId, 'org_sso_changed', { changed: saved.changed, enabled: saved.view.enabled, sso_only: saved.view.ssoOnly, single_logout: saved.view.singleLogout, issuer: saved.view.issuer, group_claim: saved.view.groupClaim, group_mappings: saved.view.groupMappings.length, admin_groups: saved.view.adminGroups.length }, 'high');
     }
     return NextResponse.json({ ok: true, data: { config: saved.view } });
   } catch (error) {

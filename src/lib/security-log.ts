@@ -67,6 +67,8 @@ export type SecurityEventType =
   | 'user_department_changed'
   /** 기관 계정(SSO)으로 로그인할 때 계정 서비스의 그룹에 맞춰 부서를 옮김 (0110) */
   | 'user_department_synced'
+  /** 기관 계정(SSO)으로 로그인할 때 계정 서비스의 관리자 그룹에 맞춰 관리자로 올리거나 내림 (0115) */
+  | 'user_role_synced'
   | 'sso_backchannel_logout'
   | 'user_budget_changed'
   /** 기관 관리자가 직원을 초대함 / 초대를 취소함 (2026-11-18) */

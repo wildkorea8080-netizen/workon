@@ -152,6 +152,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
         );
       }
       update.role = role;
+      // 손으로 바꾸면 기관 SSO 그룹으로 올린 표시를 지운다(0115) — 그 뒤로는 그룹이 이 사람을 내리지 않는다
+      update.role_from_sso = false;
     }
 
     if (Object.keys(update).length === 0) {

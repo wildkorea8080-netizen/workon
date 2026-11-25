@@ -47,7 +47,7 @@ describe('설정', () => {
     expect(parseSsoConfig({ ...base, enabled: false, singleLogout: true })).toMatchObject({ ok: false });
     expect(parseSsoConfig({ ...base, enabled: true, singleLogout: 'yes' })).toMatchObject({ ok: false });
   });
-  const input = { issuer: ISSUER, clientId: 'client-1', clientSecret: null, emailDomains: [], enabled: true, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: null, groupMappings: [], singleLogout: true };
+  const input = { issuer: ISSUER, clientId: 'client-1', clientSecret: null, emailDomains: [], enabled: true, ssoOnly: false, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: null, groupMappings: [], adminGroups: [], singleLogout: true };
   const adminIo = (before: SsoConfigRow | null, f: typeof fetch, upserts: Record<string, unknown>[]) => ({
     loadConfig: async () => before, now: () => 0, encrypt: (s: string) => s, publicHost: async () => true, fetch: f,
     upsert: async (r: Record<string, unknown>) => { upserts.push(r); return { ...row(), ...r } as SsoConfigRow; },

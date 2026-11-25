@@ -26,6 +26,7 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   user_role_changed: '직원 권한 바꾸기(관리자)',
   user_department_changed: '직원 부서 옮기기(관리자)',
   user_department_synced: '직원 부서 맞추기(기관 SSO 그룹)',
+  user_role_synced: '관리자 권한 맞추기(기관 SSO 그룹)',
   sso_backchannel_logout: '기관 계정 로그아웃(계정 서비스에서 먼저)',
   user_budget_changed: '개인 월 한도 바꾸기(관리자)',
   user_invited: '직원 초대(관리자)',

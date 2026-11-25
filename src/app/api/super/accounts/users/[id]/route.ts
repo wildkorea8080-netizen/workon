@@ -32,6 +32,7 @@ export async function PATCH(
       if (!['ADMIN', 'USER'].includes(body.role))
         return NextResponse.json({ ok: false, error: '유효하지 않은 role' }, { status: 400 });
       update.role = body.role;
+      update.role_from_sso = false; // 손으로 바꾸면 기관 SSO 그룹 표시를 지운다(0115)
     }
 
     if (Object.keys(update).length === 0)

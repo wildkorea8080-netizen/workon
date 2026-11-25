@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { requestJson, serverErrorText } from '@/lib/ok-json';
 import { useInFlight } from '@/lib/use-in-flight';
-import { SSO_DEFAULT_LABEL, SSO_LABEL_MAX, SSO_MAX_DOMAINS, SSO_MAX_GROUP_MAPPINGS, type SsoConfigView, type SsoGroupMapping } from '@/lib/org-sso-spec';
+import { SSO_DEFAULT_LABEL, SSO_LABEL_MAX, SSO_MAX_DOMAINS, SSO_MAX_ADMIN_GROUPS, SSO_MAX_GROUP_MAPPINGS, type SsoConfigView, type SsoGroupMapping } from '@/lib/org-sso-spec';
 
 type Loaded = { config: SsoConfigView | null; redirectUri: string; backchannelUri?: string; loginPath: string | null; canManage: boolean; departments: { id: string; name: string }[] };
 
@@ -24,6 +24,7 @@ export default function OrgSsoPanel() {
   const [singleLogout, setSingleLogout] = useState(false);
   const [groupClaim, setGroupClaim] = useState('');
   const [mappings, setMappings] = useState<SsoGroupMapping[]>([]);
+  const [adminGroups, setAdminGroups] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const saving = useInFlight();
 
@@ -39,6 +40,7 @@ export default function OrgSsoPanel() {
     setSingleLogout(c?.singleLogout ?? false);
     setGroupClaim(c?.groupClaim ?? '');
     setMappings(c?.groupMappings ?? []);
+    setAdminGroups((c?.adminGroups ?? []).join('\n'));
     setSecret('');
   };
 
@@ -64,7 +66,7 @@ export default function OrgSsoPanel() {
     setMsg(null);
     const r = await requestJson('/api/admin/sso', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issuer, clientId, clientSecret: secret || undefined, emailDomains: domains, buttonLabel: label, enabled, ssoOnly: enabled && ssoOnly, singleLogout: enabled && singleLogout, groupClaim, groupMappings: mappings }),
+      body: JSON.stringify({ issuer, clientId, clientSecret: secret || undefined, emailDomains: domains, buttonLabel: label, enabled, ssoOnly: enabled && ssoOnly, singleLogout: enabled && singleLogout, groupClaim, groupMappings: mappings, adminGroups }),
     });
     if (!r.ok) { setMsg({ ok: false, text: serverErrorText(r.body, 'SSO 설정을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.') }); return; }
     fill({ ...loaded, config: (r.body as { data: { config: SsoConfigView } }).data.config });
@@ -166,6 +168,22 @@ export default function OrgSsoPanel() {
           <button type="button" disabled={disabled} onClick={() => setMappings([...mappings, { value: '', departmentId: '' }])}
             className="mt-2 text-sm font-medium text-[#003087] disabled:opacity-40">+ 그룹 더하기</button>
         )}
+      </div>
+      {/* 그룹 → 관리자 역할(0115) — 같은 클레임에 이 값이 든 일반 직원을 관리자로 */}
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-800">계정 서비스 그룹 → 관리자(선택)</h3>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          위 클레임에 아래 값(줄마다 하나, {SSO_MAX_ADMIN_GROUPS}개까지) 중 하나가 든 <b>일반 직원</b>을 기관 계정으로 로그인할 때 그 소속 부서의 <b>관리자</b>로 올립니다.
+          이렇게 올린 관리자가 그 그룹에서 빠진 채 다시 로그인하면 일반 직원으로 내립니다. 여기서 손으로 지정한 관리자는 그룹과 상관없이 그대로 둡니다.
+          목록을 비우면 아무도 올리거나 내리지 않습니다(이미 올린 관리자는 그대로).
+        </p>
+        <p className="mt-1 text-xs leading-5 text-red-600">
+          관리자는 그 부서와 하위 부서의 직원·문서·기록을 다룹니다(최상위 부서 소속이면 기관 전체). 계정 서비스의 이 그룹을 고칠 수 있는 사람이 곧 WORKON 관리자를 정하게 됩니다.
+        </p>
+        <label className="mt-2 block text-sm text-slate-700">관리자로 들일 그룹 값
+          <textarea value={adminGroups} onChange={(e) => setAdminGroups(e.target.value)} disabled={disabled} rows={3} placeholder="workon-admins"
+            className={field + ' font-mono'} />
+        </label>
       </div>
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-3 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.text}</p>}
       {loaded.canManage && (

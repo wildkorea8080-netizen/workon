@@ -86,7 +86,7 @@ describe('설정 입력', () => {
       fetch: (async () => new Response(JSON.stringify({ issuer: ISSUER, authorization_endpoint: `${ISSUER}/a`, token_endpoint: `${ISSUER}/t`, jwks_uri: `${ISSUER}/k` }), { status: 200 })) as unknown as typeof fetch,
       upsert: async (r: Record<string, unknown>) => { upserts.push(r); return { ...row(), ...r } as SsoConfigRow; },
     });
-    const input = { issuer: ISSUER, clientId: 'c', clientSecret: null, emailDomains: [], enabled: true, ssoOnly: true, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: null, groupMappings: [], singleLogout: false };
+    const input = { issuer: ISSUER, clientId: 'c', clientSecret: null, emailDomains: [], enabled: true, ssoOnly: true, buttonLabel: SSO_DEFAULT_LABEL, groupClaim: null, groupMappings: [], adminGroups: [], singleLogout: false };
     const r = await saveSsoConfig(ORG, 'admin', input, io(row()));
     expect(r).toMatchObject({ ok: true, changed: ['sso_only'], view: { ssoOnly: true } });
     expect(upserts[0]).toMatchObject({ sso_only: true });

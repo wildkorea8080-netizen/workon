@@ -8,6 +8,8 @@ export const SSO_MAX_DOMAINS = 10;
 export const SSO_MAX_GROUP_MAPPINGS = 100;
 export const SSO_GROUP_VALUE_MAX = 200;
 export const SSO_GROUP_CLAIM_MAX = 100;
+/** 관리자로 들일 그룹 값(0115) — 20개까지 */
+export const SSO_MAX_ADMIN_GROUPS = 20;
 
 /** 계정 서비스의 그룹(또는 부서) 값 하나 → WORKON 부서. 목록 순서가 곧 우선순위(위에서부터 처음 맞는 것) */
 export type SsoGroupMapping = { value: string; departmentId: string };
@@ -52,6 +54,8 @@ export interface SsoConfigView {
   /** 그룹 → 부서 맞추기(0110) — 부서를 정할 클레임 이름(없으면 맞추지 않음)과 목록 */
   groupClaim: string | null;
   groupMappings: SsoGroupMapping[];
+  /** 그룹 → 관리자 역할(0115) — 이 값이 클레임에 든 일반 직원을 관리자로(같은 클레임) */
+  adminGroups: string[];
   /** 로그아웃할 때 계정 서비스에서도 로그아웃(0111) */
   singleLogout: boolean;
   buttonLabel: string;
@@ -60,7 +64,7 @@ export interface SsoConfigView {
 
 export type SsoConfigInput = {
   issuer: string; clientId: string; clientSecret: string | null; emailDomains: string[]; enabled: boolean; ssoOnly: boolean; buttonLabel: string;
-  groupClaim: string | null; groupMappings: SsoGroupMapping[]; singleLogout: boolean;
+  groupClaim: string | null; groupMappings: SsoGroupMapping[]; adminGroups: string[]; singleLogout: boolean;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -95,6 +99,44 @@ export function groupDepartment(claims: Record<string, unknown>, claim: string |
     if (m && typeof m.value === 'string' && typeof m.departmentId === 'string' && have.has(groupKey(m.value))) return { value: m.value, departmentId: m.departmentId };
   }
   return null;
+}
+
+/**
+ * (0115) 관리자로 들일 그룹 중 클레임 값에 든 것 — 처음 맞는 값, 클레임·목록이 없거나 맞는 것이 없으면 null.
+ * 대소문자는 가리지 않는다(그룹 → 부서와 같은 맞대기)
+ */
+export function adminGroupMatch(claims: Record<string, unknown>, claim: string | null | undefined, groups: string[] | null | undefined): string | null {
+  if (!claim || !Array.isArray(groups) || groups.length === 0) return null;
+  const have = new Set(claimValues(claims, claim).map(groupKey));
+  if (have.size === 0) return null;
+  return groups.find((g) => typeof g === 'string' && g && have.has(groupKey(g))) ?? null;
+}
+
+/** 저장된 관리자 그룹 읽기(text[]) — 글이 아닌 값·빈 값은 버린다 */
+export function readAdminGroups(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(cleanGroupValue).filter(Boolean).slice(0, SSO_MAX_ADMIN_GROUPS);
+}
+
+/** 관리자 그룹 입력 검사 — 목록(또는 줄 나눈 글), 20개·한 값 200자·겹치지 않게. 쓰려면 클레임이 있어야 한다 */
+export function parseAdminGroups(raw: unknown, claim: string | null): { ok: true; groups: string[] } | { ok: false; message: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, groups: [] };
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/\r?\n/) : null;
+  if (!list) return { ok: false, message: '관리자로 들일 그룹은 목록으로 보내 주세요.' };
+  const groups: string[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    if (typeof item !== 'string' && typeof item !== 'number') return { ok: false, message: '관리자로 들일 그룹 값은 글로 적어 주세요.' };
+    const value = cleanGroupValue(item);
+    if (!value) continue;
+    if (Array.from(value).length > SSO_GROUP_VALUE_MAX) return { ok: false, message: `관리자로 들일 그룹 값은 ${SSO_GROUP_VALUE_MAX}자까지입니다.` };
+    if (seen.has(groupKey(value))) continue;
+    seen.add(groupKey(value));
+    groups.push(value);
+  }
+  if (groups.length > SSO_MAX_ADMIN_GROUPS) return { ok: false, message: `관리자로 들일 그룹은 ${SSO_MAX_ADMIN_GROUPS}개까지입니다.` };
+  if (groups.length && !claim) return { ok: false, message: '관리자로 들일 그룹을 쓰려면 그룹을 읽을 클레임 이름(예: groups)을 적어 주세요.' };
+  return { ok: true, groups };
 }
 
 /** 저장된 목록 읽기(jsonb) — 꼴이 틀린 줄은 버린다 */
@@ -175,11 +217,13 @@ export function parseSsoConfig(raw: unknown): { ok: true; value: SsoConfigInput 
   if (Array.from(label).length > SSO_LABEL_MAX) return { ok: false, message: `단추 글은 ${SSO_LABEL_MAX}자까지입니다.` };
   const group = parseGroupMapping(b.groupClaim, b.groupMappings);
   if (!group.ok) return group;
+  const admin = parseAdminGroups(b.adminGroups, group.claim);
+  if (!admin.ok) return admin;
   return {
     ok: true,
     value: {
       issuer, clientId, clientSecret, emailDomains, enabled: b.enabled === true, ssoOnly: b.ssoOnly === true, buttonLabel: label || SSO_DEFAULT_LABEL,
-      groupClaim: group.claim, groupMappings: group.mappings, singleLogout: b.singleLogout === true,
+      groupClaim: group.claim, groupMappings: group.mappings, adminGroups: admin.groups, singleLogout: b.singleLogout === true,
     },
   };
 }

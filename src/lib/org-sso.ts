@@ -30,7 +30,7 @@ import { isStoppedOrgStatus } from '@/lib/org-status';
 import { checkPublicHost } from '@/lib/apps/outbound/deliver';
 import { logSystem } from '@/lib/logger';
 import { logSecurityEvent } from '@/lib/security-log';
-import { groupDepartment, normalizeIssuer, readGroupMappings, SSO_DEFAULT_LABEL, type SsoConfigInput, type SsoConfigView, type SsoErrorCode } from '@/lib/org-sso-spec';
+import { adminGroupMatch, groupDepartment, normalizeIssuer, readAdminGroups, readGroupMappings, SSO_DEFAULT_LABEL, type SsoConfigInput, type SsoConfigView, type SsoErrorCode } from '@/lib/org-sso-spec';
 
 export * from '@/lib/org-sso-spec';
 
@@ -207,12 +207,16 @@ export type SsoConfigRow = {
   /** 0110 — 그룹 → 부서 맞추기(칸이 없던 옛 행은 undefined = 맞추지 않음) */
   group_claim?: string | null;
   group_mappings?: unknown;
+  /** 0115 — 그룹 → 관리자 역할(칸이 없던 옛 행은 undefined = 올리지 않음) */
+  admin_groups?: unknown;
   /** 0111 — 함께 로그아웃(칸이 없던 옛 행은 undefined = 끔) */
   single_logout?: boolean | null;
 };
 export type SsoUserRow = {
   id: string; email: string | null; full_name: string | null; role: string | null; department_id: string | null;
   is_active: boolean | null; deleted_at: string | null; is_super_admin: boolean | null;
+  /** (0115) 그룹 → 관리자 역할로 올린 관리자인가 — 이 사람만 그룹에서 빠지면 내린다 */
+  role_from_sso?: boolean | null;
 };
 export type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; /** 로그아웃 주소(선택 — 0111) */ end_session_endpoint: string | null };
 
@@ -233,6 +237,11 @@ export interface SsoIo {
    * 옮겼으면 true, 그 사이 바뀌어 옮기지 않았으면 false, 못 읽거나 못 쓰면(또는 다른 기관 부서면) 던진다. 없으면 맞추지 않는다
    */
   syncDepartment?(a: { userId: string; organizationId: string; from: string; to: string; group: string }): Promise<boolean>;
+  /**
+   * (0115) 그룹 → 관리자 역할 — `to: 'ADMIN'`은 일반 직원을 올리고(표시 참), `to: 'USER'`는 이 길로 올린 관리자만 내린다(표시 거짓).
+   * 바꿨으면 true, 그 사이 바뀌어 안 바꿨으면 false, 못 쓰면 던진다. 없으면 바꾸지 않는다
+   */
+  syncRole?(a: { userId: string; organizationId: string; departmentId: string; to: 'ADMIN' | 'USER'; group: string | null }): Promise<boolean>;
   /** (0114) 계정 서비스의 사용자 번호(sub) → 이 직원 — back-channel 로그아웃이 sub만 보내므로. 못 쓰면 던진다(로그인은 그대로) */
   rememberSubject?(a: { organizationId: string; issuer: string; subject: string; userId: string }): Promise<void>;
   now(): number;
@@ -367,17 +376,41 @@ export async function finishSso(
       await io.record('login_rejected', email, who);
       return { redirect: failTo(st.slug, 'sso_dormant') };
     }
+    // (0115) 그룹 → 관리자 역할 — 목록이 있을 때만. 이 길로 올린 관리자가 그룹에서 빠졌으면 먼저 내린다(못 내리면 들이지 않는다 —
+    // 관리자 권한을 거둘 사람을 관리자로 들이지 않게). 손으로 지정한 관리자는 건드리지 않는다
+    let role = decision.role;
+    const adminGroups = readAdminGroups(config.admin_groups);
+    const adminMatch = adminGroupMatch(checked.claims, config.group_claim, adminGroups);
+    if (adminGroups.length && role === 'ADMIN' && user.role_from_sso === true && !adminMatch) {
+      try {
+        if (!io.syncRole) throw new SsoError('sso_unavailable', 'role_sync_missing');
+        if (await io.syncRole({ userId: user.id, organizationId: org.id, departmentId: decision.departmentId, to: 'USER', group: null })) role = 'USER';
+        else throw new SsoError('sso_unavailable', 'role_changed');
+      } catch (error) {
+        await reportFailure('role_sync', error, org.id);
+        await io.record('login_rejected', email, who);
+        return { redirect: failTo(st.slug, 'sso_unavailable') };
+      }
+    }
     // (0110) 그룹 → 부서 맞추기 — 일반 직원만, 맞는 그룹이 있고 지금 부서와 다를 때. 실패해도 소속 그대로 들인다
     let departmentId = decision.departmentId;
     const mapped = groupDepartment(checked.claims, config.group_claim, readGroupMappings(config.group_mappings));
-    if (mapped && decision.role === 'USER' && mapped.departmentId !== departmentId.toLowerCase() && io.syncDepartment) {
+    if (mapped && role === 'USER' && mapped.departmentId !== departmentId.toLowerCase() && io.syncDepartment) {
       try {
         if (await io.syncDepartment({ userId: user.id, organizationId: org.id, from: departmentId, to: mapped.departmentId, group: mapped.value })) departmentId = mapped.departmentId;
       } catch (error) {
         await reportFailure('group_sync', error, org.id);
       }
     }
-    const session = await io.mintSession({ id: user.id, email: user.email ?? email, name: decision.name, role: decision.role, departmentId });
+    // (0115) 관리자 그룹에 든 일반 직원은 관리자로(옮긴 부서에서). 못 올리면 일반 직원으로 들인다
+    if (adminMatch && role === 'USER' && io.syncRole) {
+      try {
+        if (await io.syncRole({ userId: user.id, organizationId: org.id, departmentId, to: 'ADMIN', group: adminMatch })) role = 'ADMIN';
+      } catch (error) {
+        await reportFailure('role_sync', error, org.id);
+      }
+    }
+    const session = await io.mintSession({ id: user.id, email: user.email ?? email, name: decision.name, role, departmentId });
     // (0114) back-channel 로그아웃이 sub만 보내므로 sub → 직원을 적어 둔다. 못 적으면 그 로그아웃만 못 받는다(로그인은 그대로)
     const subject = checked.claims.sub;
     if (io.rememberSubject && typeof subject === 'string' && subject && subject.length <= 255) {
@@ -414,6 +447,7 @@ export function configView(row: SsoConfigRow | null): SsoConfigView | null {
     ssoOnly: row.enabled && row.sso_only === true,
     groupClaim: row.group_claim ?? null,
     groupMappings: readGroupMappings(row.group_mappings),
+    adminGroups: readAdminGroups(row.admin_groups),
     singleLogout: row.enabled && row.single_logout === true,
     buttonLabel: row.button_label || SSO_DEFAULT_LABEL,
     updatedAt: row.updated_at,
@@ -458,6 +492,7 @@ export async function saveSsoConfig(
   if ((before?.single_logout === true) !== singleLogout) changed.push('single_logout');
   if ((before?.group_claim ?? null) !== input.groupClaim) changed.push('group_claim');
   if (JSON.stringify(readGroupMappings(before?.group_mappings)) !== JSON.stringify(input.groupMappings)) changed.push('group_mappings');
+  if (JSON.stringify(readAdminGroups(before?.admin_groups)) !== JSON.stringify(input.adminGroups)) changed.push('admin_groups');
   const row = await io.upsert({
     organization_id: organizationId,
     issuer: input.issuer,
@@ -468,6 +503,7 @@ export async function saveSsoConfig(
     sso_only: ssoOnly,
     group_claim: input.groupClaim,
     group_mappings: input.groupMappings,
+    admin_groups: input.adminGroups,
     single_logout: singleLogout,
     button_label: input.buttonLabel === SSO_DEFAULT_LABEL ? null : input.buttonLabel,
     updated_by: userId,
@@ -668,7 +704,7 @@ export function appBaseUrl(): string {
   return (NEXTAUTH_URL ?? '').replace(/\/+$/, '');
 }
 
-export const SSO_CONFIG_COLUMNS = 'organization_id, issuer, client_id, client_secret_encrypted, email_domains, enabled, sso_only, group_claim, group_mappings, single_logout, button_label, updated_at';
+export const SSO_CONFIG_COLUMNS = 'organization_id, issuer, client_id, client_secret_encrypted, email_domains, enabled, sso_only, group_claim, group_mappings, admin_groups, single_logout, button_label, updated_at';
 
 /** 접속 기록에 남길 요청 주소·브라우저 — 라우트가 넘긴다 */
 export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null } = { ip: null, userAgent: null }): SsoIo {
@@ -691,7 +727,7 @@ export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null
     async findUser(email, organizationId) {
       const pattern = email.replace(/[\\%_]/g, (c) => `\\${c}`);
       const { data, error } = await supabaseAdmin.from('users')
-        .select('id, email, full_name, role, department_id, is_active, deleted_at, is_super_admin')
+        .select('id, email, full_name, role, department_id, is_active, deleted_at, is_super_admin, role_from_sso')
         .ilike('email', pattern).limit(2);
       if (error) throw new SsoError('sso_unavailable', 'user_read');
       const rows = (data ?? []) as SsoUserRow[];
@@ -725,6 +761,25 @@ export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null
         { onConflict: 'organization_id,issuer,subject' },
       );
       if (error) throw new SsoError('sso_unavailable', 'subject_write');
+    },
+    async syncRole({ userId, organizationId, departmentId, to, group }) {
+      // 올리기는 일반 직원만, 내리기는 이 길로 올린 관리자만 — 조건부로(그 사이 손으로 바꿨으면 바꾸지 않음)
+      let q = supabaseAdmin.from('users')
+        .update({ role: to, role_from_sso: to === 'ADMIN' })
+        .eq('id', userId).eq('department_id', departmentId).is('deleted_at', null).eq('is_active', true).eq('is_super_admin', false);
+      q = to === 'ADMIN' ? q.eq('role', 'USER') : q.eq('role', 'ADMIN').eq('role_from_sso', true);
+      const { data, error } = await q.select('id');
+      if (error) throw new SsoError('sso_unavailable', 'role_write');
+      if (!data || data.length === 0) return false;
+      await logSecurityEvent(departmentId, userId, 'user_role_synced', {
+        target_user_id: userId,
+        from_role: to === 'ADMIN' ? 'USER' : 'ADMIN',
+        to_role: to,
+        via: 'sso_group',
+        ...(group ? { sso_group: group.slice(0, 200) } : {}),
+        organization_id: organizationId,
+      }, 'high');
+      return true;
     },
     async syncDepartment({ userId, organizationId, from, to, group }) {
       const { data: depts, error: deptError } = await supabaseAdmin.from('departments').select('id, name, organization_id').in('id', [from, to]);
