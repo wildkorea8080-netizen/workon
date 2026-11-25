@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-25(오후 3): 여러 파일·폴더째 다른 자료함으로(0298) — 마이그레이션 없음
+
+- 코드 배포 `dpl_8dCgA7r6GEuNVu2pUWmW34pBHmX3`(커밋 `e4be05d`, 2026-11-25 16:28 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `273aefd`(오후 2 기록), `9c94223` 기능 — `POST /api/my-library/transfer { ids | fromFolder }`(50개까지, 보내기 전에 권한·받는 자리 개수·폴더 수를 한꺼번에 봄, 폴더째면 구조 그대로, 도중 실패는 건너뛰고 목록으로), 자료함 화면 고르기 칸·고른 파일/폴더째 보내기. `e4be05d` 문서. 가지 Preview(`dpl_CRBM4jxhrVZVupwPME9Y1j56qsTb`) Ready 뒤 `main`. 배포 전 전체 시험 452파일 5,233개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_B5scAMybQM8wu8f7UQR4b6vPNjgJ`(b7a533f)로 promote.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0115, 적용할 마이그레이션 없음, 자료함 칸·CHECK(폴더 100자·자리 셋) 그대로, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/my-library`·`POST /api/my-library/transfer`·`POST /api/my-library/{uuid}` 인증 없이 401, `GET /api/my-library/transfer` 405. 실행기 호출 16:31~16:35 KST 모두 200(heartbeat 16:35), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 고르기·폴더째 보내기를 브라우저로 눌러 보지 않았다(운영 자료함에 아직 파일이 없다).
+
 ## 2026-11-25(오후 2): 기관 SSO 그룹 → 관리자 역할(0297) — 0115 운영 적용
 
 - 코드 배포 `dpl_B5scAMybQM8wu8f7UQR4b6vPNjgJ`(커밋 `b7a533f`, 2026-11-25 15:59 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `e8b3bdb`(오후 기록), `e598b01` 기능 — 관리자로 들일 그룹 값이 클레임에 든 일반 직원을 기관 계정 로그인 때 관리자로 올리고, 이 길로 올린 관리자(`users.role_from_sso`)가 그룹에서 빠지면 내림(못 내리면 로그인을 막음), 손으로 권한을 바꾸면 표시를 지움(0115). `b7a533f` 문서. 가지 Preview(`workon-hia7xpojz`, `dpl_4H6DcUcYqZENaep13JDxgTzLFo3n`) Ready 뒤 `main`. 배포 전 전체 시험 451파일 5,222개 통과·tsc 0.
