@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-25(저녁): 여러 부서만 골라 함께 쓰는 공유 자료함(0299) — 0116 운영 적용
+
+- 코드 배포 `dpl_EwBwqn2YRBjjTVxBt1khfAq8vQYd`(커밋 `c75306c`, 2026-11-25 20:32 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `e67009d`(오후 3 기록), `deaab48` 기능 — 기관 전체 관리자가 '기관 정보' 공유 자료함 칸에서 이름·부서(1~50곳)를 골라 만들고(`/api/admin/library-shares`, 보안 로그 `library_share_changed`), 지금 소속 부서가 든 직원이 결과물 화면·'지난 파일'의 공유 자료함 탭으로 담고 다시 붙이고 다른 자료함과 주고받음(`share_id`, 요청마다 든 공유 자료함을 읽어 못 읽으면 503·고른 것이 밖이면 404). `c75306c` 문서. 가지 Preview(`workon-87jpxvak8`, `dpl_4aJYpyZs6QQvJgAmg9WrNGkXUFqz`) Ready 뒤 `main`. 배포 전 전체 시험 453파일 5,252개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_8dCgA7r6GEuNVu2pUWmW34pBHmX3`(e4be05d)로 promote — 0116은 표·칸 추가와 자리 CHECK 넓힘이라 옛 코드도 돈다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0115, `share_id`·`library_shares`·`library_share_departments` 없음, 자료함 행 0, RLS 꺼진 표 0. **0116을 코드보다 먼저 적용**(`npm run db:migrate`, 1건 OK) → 다시 읽어 표 둘(RLS 켜짐)·`my_library_files.share_id` 있음, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/my-library`·`/api/my-library/shares`·`/api/my-library?space=shared&share=…` 인증 없이 401, `/api/admin/library-shares` 인증 없이 403. 실행기 호출 20:35~20:39 KST 모두 200(heartbeat 20:35), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 공유 자료함 만들기·탭·담기·보내기를 브라우저로 눌러 보지 않았다(운영에 공유 자료함·자료함 파일이 아직 없다).
+
 ## 2026-11-25(오후 3): 여러 파일·폴더째 다른 자료함으로(0298) — 마이그레이션 없음
 
 - 코드 배포 `dpl_8dCgA7r6GEuNVu2pUWmW34pBHmX3`(커밋 `e4be05d`, 2026-11-25 16:28 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `273aefd`(오후 2 기록), `9c94223` 기능 — `POST /api/my-library/transfer { ids | fromFolder }`(50개까지, 보내기 전에 권한·받는 자리 개수·폴더 수를 한꺼번에 봄, 폴더째면 구조 그대로, 도중 실패는 건너뛰고 목록으로), 자료함 화면 고르기 칸·고른 파일/폴더째 보내기. `e4be05d` 문서. 가지 Preview(`dpl_CRBM4jxhrVZVupwPME9Y1j56qsTb`) Ready 뒤 `main`. 배포 전 전체 시험 452파일 5,233개 통과·tsc 0.
