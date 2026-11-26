@@ -88,6 +88,20 @@ describe('CSV', () => {
   it('잘린 표는 그렇다고 적는다', () => {
     expect(appRunOverviewCsv(summarizeAppRuns([], [], true), '')).toContain('최근 30일,실행이 많아 최근 실행만 셈');
   });
+  it('라우트 처리기의 첫 인자는 선택 인자가 아니다(Next 빌드가 거절 — tsc는 못 봄)', async () => {
+    const { readdirSync, statSync } = await import('fs');
+    const { join } = await import('path');
+    const bad: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (name === 'route.ts' && /export async function (GET|POST|PUT|PATCH|DELETE)\(\s*\w+\?\s*:/.test(readFileSync(p, 'utf8'))) bad.push(p);
+      }
+    };
+    walk('src/app/api');
+    expect(bad).toEqual([]);
+  });
   it('화면 — 기간 칸·CSV 단추·늦은 응답 버리기', () => {
     const ui = readFileSync('src/components/admin/AppRunOverview.tsx', 'utf8');
     expect(ui).toContain('aria-label="실행 현황 시작일"');

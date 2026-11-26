@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({
   session: 'admin' as 'admin' | 'user' | null,
@@ -35,7 +36,8 @@ vi.mock('@/lib/supabaseAdmin', () => ({
 
 import { runState, summarizeAppRuns, type OverviewApp, type OverviewRun } from '@/lib/apps/run-overview';
 import { AppRunOverviewTable } from '@/components/admin/AppRunOverview';
-import { GET } from '@/app/api/admin/app-overview/route';
+import { GET as getRoute } from '@/app/api/admin/app-overview/route';
+const GET = () => getRoute(new NextRequest('https://workon.test/api/admin/app-overview'));
 
 beforeEach(() => { state.session = 'admin'; state.actor = true; state.results = {}; state.calls = []; });
 
