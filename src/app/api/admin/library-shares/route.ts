@@ -39,7 +39,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, data: { shares: listed.shares, departments, canManage: scope.managesWholeOrganization && !session.user.isImpersonating } });
 }
 
-/** 공유 자료함 만들기 — `{ name, departmentIds }`. 기관 전체 관리자만, 대리 접근 중 403. 보안 로그 medium */
+/** 공유 자료함 만들기 — `{ name, departmentIds, includeDescendants? }`(0132). 기관 전체 관리자만, 대리 접근 중 403. 보안 로그 medium */
 export async function POST(request: NextRequest) {
   const session = await getServerAuthSession();
   if (!session?.user?.id || !isAdminSession(session)) return jsonError('관리자 권한이 필요합니다.', 403);
@@ -52,6 +52,6 @@ export async function POST(request: NextRequest) {
   if (!body) return jsonError(BAD_BODY_MESSAGE, 400);
   const result = await createShare(scope.organizationId, scope.userId, body);
   if (!result.ok) return jsonError(result.message, result.status);
-  await logSecurityEvent(scope.departmentId, scope.userId, 'library_share_changed', { action: 'created', share_id: result.share.id, name: result.share.name, departments: result.share.departmentIds.length }, 'medium');
+  await logSecurityEvent(scope.departmentId, scope.userId, 'library_share_changed', { action: 'created', share_id: result.share.id, name: result.share.name, departments: result.share.departmentIds.length, ...(result.share.includeDescendants ? { include_descendants: true } : {}) }, 'medium');
   return NextResponse.json({ ok: true, data: result.share }, { status: 201 });
 }

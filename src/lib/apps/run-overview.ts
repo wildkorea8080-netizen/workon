@@ -1,4 +1,5 @@
 import { appStepsCompleted } from './pipeline';
+import { csvLine as csvLineOf } from '@/lib/csv-cell';
 
 /**
  * 관리자용 입력형 앱 실행 현황 — 최근 30일, 앱마다 실행 수·결과 상태·자주 멈춘 단계.
@@ -51,6 +52,9 @@ export interface AppRunRow extends AppRunCounts {
 
 export interface AppRunOverview {
   days: number;
+  /** 센 기간(한국 날짜, 끝 날 포함 — 2026-11-26) — 없으면 최근 30일 */
+  from?: string;
+  to?: string;
   apps: AppRunRow[];
   /** 개인 앱 묶음 — 이름·실행한 사람 없음 */
   personal: AppRunCounts & { apps: number };
@@ -104,4 +108,22 @@ export function summarizeAppRuns(apps: OverviewApp[], runs: OverviewRun[], trunc
   // 중단이 많은 앱을 먼저, 같으면 실행이 많은 순, 이름 순
   list.sort((a, b) => b.interrupted - a.interrupted || b.runs - a.runs || a.name.localeCompare(b.name));
   return { days: OVERVIEW_DAYS, apps: list, personal, truncated };
+}
+
+/**
+ * 실행 현황 CSV(2026-11-26) — 화면 표와 같은 칸(앱·부서·실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계·마지막 중단 KST).
+ * 개인 앱은 이름 없이 한 줄. 앱 이름은 직원이 정한 글이라 `csvLine`으로(수식 주입 막음), 앞에 BOM
+ */
+export function appRunOverviewCsv(data: AppRunOverview, bom: string): string {
+  const kst = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 16).replace('T', ' ') : '');
+  const lines = [csvLineOf(['기간', data.from && data.to ? `${data.from} ~ ${data.to}` : `최근 ${data.days}일`, data.truncated ? '실행이 많아 최근 실행만 셈' : ''])];
+  lines.push(csvLineOf(['앱', '부서', '실행', '완료', '중단', '확인 필요', '응답 없음', '자주 멈춘 단계', '마지막 중단(KST)']));
+  for (const a of data.apps) {
+    lines.push(csvLineOf([a.name, a.departmentName ?? '', a.runs, a.saved, a.interrupted, a.uncertain, a.noResponse, a.failedSteps.map((s) => `${s.name}(${s.count})`).join(', '), kst(a.lastInterruptedAt)]));
+  }
+  if (data.personal.apps > 0) {
+    const p = data.personal;
+    lines.push(csvLineOf([`개인 앱 ${p.apps}개(이름 비공개)`, '', p.runs, p.saved, p.interrupted, p.uncertain, p.noResponse, '', '']));
+  }
+  return bom + lines.join('\r\n') + '\r\n';
 }

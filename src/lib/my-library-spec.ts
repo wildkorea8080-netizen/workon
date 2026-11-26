@@ -59,6 +59,29 @@ export function transferPlaces(current: LibraryPlace, canAddTo: Record<LibrarySp
 }
 
 /** 공유 자료함 이름 다듬기(0116) — NFC·제어/보이지 않는 글자 빼기·공백 하나로, 1~40자. 아니면 null */
+/**
+ * 공유 자료함 중 이 부서 직원이 든 것(0116·0132) — 고른 부서가 지금 내 부서이거나, '하위 부서도 함께'(0132)를 켠 공유 자료함이
+ * 내 상위 부서를 골랐을 때. `lineage`는 내 부서 + 상위 부서(`getVisibleDepartmentIds`), `links`는 그 부서들의 공유 자료함 줄
+ */
+export function memberShareIds(
+  links: { share_id: string; department_id: string }[],
+  shares: { id: string; include_descendants?: boolean | null }[],
+  departmentId: string,
+  lineage: string[]
+): Set<string> {
+  const mine = departmentId.toLowerCase();
+  const up = new Set(lineage.map((d) => d.toLowerCase()));
+  const byId = new Map(shares.map((s) => [s.id.toLowerCase(), s]));
+  const out = new Set<string>();
+  for (const l of links) {
+    const share = byId.get(l.share_id.toLowerCase());
+    if (!share) continue;
+    const dept = l.department_id.toLowerCase();
+    if (dept === mine || (share.include_descendants === true && up.has(dept))) out.add(share.id.toLowerCase());
+  }
+  return out;
+}
+
 export function cleanShareName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const name = raw.normalize('NFC').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\s+/g, ' ').trim();

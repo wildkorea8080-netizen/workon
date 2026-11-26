@@ -5,13 +5,13 @@ import { requestJson, serverErrorText } from '@/lib/ok-json';
 import { useInFlight } from '@/lib/use-in-flight';
 import { LIBRARY_MAX_SHARE_FILES, LIBRARY_MAX_SHARES, LIBRARY_SHARE_MAX_DEPARTMENTS, LIBRARY_SHARE_NAME_MAX } from '@/lib/my-library-spec';
 
-type Share = { id: string; name: string; departmentIds: string[]; files: number | null; created_at: string };
+type Share = { id: string; name: string; departmentIds: string[]; files: number | null; created_at: string; includeDescendants?: boolean };
 type Loaded = { shares: Share[]; departments: { id: string; name: string }[]; canManage: boolean };
-type Draft = { id: string | null; name: string; departmentIds: string[] };
+type Draft = { id: string | null; name: string; departmentIds: string[]; includeDescendants: boolean };
 
 /**
  * 공유 자료함(2026-11-25, 0116) — 기관 전체 관리자가 이름과 함께 쓸 부서를 골라 만든다. 그 부서에 지금 소속된 직원이
- * 결과물 화면·'지난 파일'에서 공유 자료함 탭으로 함께 담고 다시 붙인다(하위 부서는 따로 고른다). 관리자는 누구나 본다
+ * 결과물 화면·'지난 파일'에서 공유 자료함 탭으로 함께 담고 다시 붙인다('하위 부서도 함께'를 켜면 그 아래 부서 직원도 — 0132). 관리자는 누구나 본다
  */
 export default function LibrarySharesPanel() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -37,7 +37,7 @@ export default function LibrarySharesPanel() {
   const save = () => action.run('save', async () => {
     if (!draft) return;
     setMsg(null);
-    const body = JSON.stringify({ name: draft.name, departmentIds: draft.departmentIds });
+    const body = JSON.stringify({ name: draft.name, departmentIds: draft.departmentIds, includeDescendants: draft.includeDescendants });
     const r = draft.id
       ? await requestJson(`/api/admin/library-shares/${encodeURIComponent(draft.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
       : await requestJson('/api/admin/library-shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
@@ -80,7 +80,7 @@ export default function LibrarySharesPanel() {
       <h2 className="text-base font-semibold text-slate-900">공유 자료함</h2>
       <p className="mt-1 text-xs leading-5 text-slate-500">
         여러 부서가 함께 쓰는 자료함입니다. 고른 부서에 지금 소속된 직원이 결과물 화면과 대화·입력형 앱의 ‘지난 파일’에서 함께 담고 다시 붙입니다
-        (하위 부서는 따로 골라야 합니다). 이름·폴더 바꾸기와 지우기는 담은 사람이나 관리자만 합니다. 기관마다 {LIBRARY_MAX_SHARES}개, 한 곳에 부서 {LIBRARY_SHARE_MAX_DEPARTMENTS}곳·파일 {LIBRARY_MAX_SHARE_FILES}개까지.
+        (‘하위 부서도 함께’를 켜면 고른 부서 아래 부서의 직원도 함께 씁니다 — 끄면 하위 부서는 따로 골라야 합니다). 이름·폴더 바꾸기와 지우기는 담은 사람이나 관리자만 합니다. 기관마다 {LIBRARY_MAX_SHARES}개, 한 곳에 부서 {LIBRARY_SHARE_MAX_DEPARTMENTS}곳·파일 {LIBRARY_MAX_SHARE_FILES}개까지.
         부서를 빼면 그 부서 사람은 더 보지 못하고 파일은 남습니다. 파일이 남은 공유 자료함은 지우지 않습니다.
       </p>
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-3 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.text}</p>}
@@ -93,11 +93,11 @@ export default function LibrarySharesPanel() {
               <div className="min-w-0">
                 <span className="font-medium text-slate-800">{s.name}</span>
                 <span className="ml-2 text-xs text-slate-500">파일 {s.files === null ? '(세지 못함)' : `${s.files}개`}</span>
-                <p className="text-xs text-slate-500">{s.departmentIds.length ? s.departmentIds.map(deptName).join(', ') : '(부서 없음 — 아무도 못 봅니다)'}</p>
+                <p className="text-xs text-slate-500">{s.departmentIds.length ? s.departmentIds.map(deptName).join(', ') : '(부서 없음 — 아무도 못 봅니다)'}{s.departmentIds.length && s.includeDescendants ? ' · 하위 부서 포함' : ''}</p>
               </div>
               {loaded.canManage && (
                 <div className="flex gap-3 text-xs">
-                  <button type="button" disabled={busy} onClick={() => { setMsg(null); setDraft({ id: s.id, name: s.name, departmentIds: s.departmentIds }); }} className="text-slate-600 underline disabled:opacity-40">고치기</button>
+                  <button type="button" disabled={busy} onClick={() => { setMsg(null); setDraft({ id: s.id, name: s.name, departmentIds: s.departmentIds, includeDescendants: s.includeDescendants === true }); }} className="text-slate-600 underline disabled:opacity-40">고치기</button>
                   <button type="button" disabled={busy} onClick={() => void remove(s)} className="text-red-600 underline disabled:opacity-40">{action.running === `remove:${s.id}` ? '지우는 중…' : '지우기'}</button>
                 </div>
               )}
@@ -106,7 +106,7 @@ export default function LibrarySharesPanel() {
         </ul>
       )}
       {loaded.canManage && !draft && loaded.shares.length < LIBRARY_MAX_SHARES && (
-        <button type="button" disabled={busy} onClick={() => { setMsg(null); setDraft({ id: null, name: '', departmentIds: [] }); }}
+        <button type="button" disabled={busy} onClick={() => { setMsg(null); setDraft({ id: null, name: '', departmentIds: [], includeDescendants: false }); }}
           className="mt-3 text-sm font-medium text-[#003087] disabled:opacity-40">+ 공유 자료함 만들기</button>
       )}
       {!loaded.canManage && <p className="mt-3 text-xs text-slate-500">만들고 고치는 일은 기관 전체 관리자(최상위 부서 소속)만 합니다.</p>}
@@ -127,6 +127,10 @@ export default function LibrarySharesPanel() {
               ))}
             </div>
           </fieldset>
+          <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={draft.includeDescendants} onChange={(e) => setDraft({ ...draft, includeDescendants: e.target.checked })} />
+            하위 부서도 함께 — 고른 부서 아래 부서(몇 단계든)의 직원도 쓴다
+          </label>
           <div className="mt-3 flex gap-3">
             <button type="submit" disabled={busy || !draft.name.trim() || draft.departmentIds.length === 0}
               className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{action.running === 'save' ? '저장 중…' : '저장'}</button>

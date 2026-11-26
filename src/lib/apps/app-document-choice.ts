@@ -1,5 +1,5 @@
 // src/lib/apps/app-document-choice.ts
-// 예약(0062)·외부 연동(0063)이 저장하는 '문서함에서 고른 문서' — 만들 때 검사와 실행 때 읽을 문서 행. 예약 만들기·연동 만들기·두 실행기가 함께 쓴다.
+// 예약(0062)·외부 연동(0063)·일괄 실행(0131)이 저장하는 '문서함에서 고른 문서' — 만들 때 검사와 실행 때 읽을 문서 행. 예약 만들기·연동 만들기·두 실행기가 함께 쓴다.
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import type { ActorScope } from '@/lib/agent-permissions';
 import { APP_MAX_FILES, type AppDefinition } from '@/lib/apps/definition';
@@ -13,7 +13,7 @@ import { LIBRARY_DOCUMENT_COLUMNS, parseLibraryIds, selectableLibraryDocuments, 
 export function appDocumentChoice(
   attachments: AppDefinition['attachments'],
   raw: unknown,
-  noun: '예약' | '연동',
+  noun: '예약' | '연동' | '일괄 실행',
   fileCount = 0
 ): { ok: true; ids: string[] } | { ok: false; message: string } {
   const ids = parseLibraryIds(raw);

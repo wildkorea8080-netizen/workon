@@ -62,7 +62,8 @@ describe('답변 평가 요약', () => {
 describe('앱 실행 현황', () => {
   it('관리자 화면과 같은 읽기 함수(기관·키 범위 부서)', async () => {
     expect(await appRunsReport(ctx, NOW)).toMatchObject({ data: { days: 30, apps: [] } });
-    expect(runs.loadAppRunOverview).toHaveBeenCalledWith('o1', ['d1', 'd2'], NOW);
+    // 기간을 비우면 최근 30일(한국 날짜) — 2026-11-26부터 기간을 함께 넘긴다
+    expect(runs.loadAppRunOverview).toHaveBeenCalledWith('o1', ['d1', 'd2'], NOW, expect.objectContaining({ fromIso: expect.stringMatching(/T00:00:00\+09:00$/) }));
   });
 });
 
@@ -87,7 +88,7 @@ describe('예산 소진 현황', () => {
 describe('연결(원본)', () => {
   it('관리자 앱 실행 현황 라우트도 같은 읽기 함수를 쓴다', () => {
     const route = readFileSync('src/app/api/admin/app-overview/route.ts', 'utf8');
-    expect(route).toContain('loadAppRunOverview(actor.organizationId, actor.managedDepartmentIds)');
+    expect(route).toContain('loadAppRunOverview(actor.organizationId, actor.managedDepartmentIds, Date.now(), period)');
     expect(route).not.toContain("rpc('app_run_states'");
   });
   it('0086은 호출 기록 CHECK만 넓힌다', () => {

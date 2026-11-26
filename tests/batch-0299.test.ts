@@ -161,6 +161,7 @@ describe('공유 자료함 관리', () => {
       orgDepartments: async (_o, ids) => ids,
       insert: async (r) => { log.push(`insert:${r.name}`); return { id: SHARE_B, name: r.name, created_at: 'y' }; },
       rename: async (_o, id, name) => { log.push(`rename:${id}:${name}`); return true; },
+      setIncludeDescendants: async (_o, id, v) => { log.push(`descendants:${id}:${v}`); return true; },
       setDepartments: async (id, ids) => { log.push(`set:${id}:${ids.length}`); },
       remove: async (_o, id) => { log.push(`remove:${id}`); return true; },
       ...over,

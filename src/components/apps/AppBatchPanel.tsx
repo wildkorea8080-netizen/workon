@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { renderAppInput, type AppDefinition } from '@/lib/apps/definition';
+import { APP_MAX_FILES, renderAppInput, type AppDefinition } from '@/lib/apps/definition';
 import { estimateAppCalls } from '@/lib/apps/call-estimate';
 import {
   BATCH_EXPECT_HEADERS, BATCH_FILE_ROWS_MISMATCH, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_NAME_MAX, BATCH_ROWS_CEILING, BATCH_STATUS_LABELS, batchAgreementSummary, pairRowsWithFiles, parseBatchTable, type BatchView,
@@ -22,7 +22,7 @@ import { uploadAttachment } from '@/lib/attachments/upload-client';
 const kst = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'short' }) : '—');
 
 /** 붙인 표를 미리 보기 — 줄마다 앱 규칙(서버와 같은 `renderAppInput`)으로 검사하고, 많으면 AI 호출 수를 더한다 */
-export function previewBatch(definition: AppDefinition, text: string): { ok: true; rows: Record<string, string>[]; expects: string[]; maxCalls: number } | { ok: false; errors: string[] } {
+export function previewBatch(definition: AppDefinition, text: string, documentCount = 0): { ok: true; rows: Record<string, string>[]; expects: string[]; maxCalls: number } | { ok: false; errors: string[] } {
   const parsed = parseBatchTable(text, definition.fields);
   if (!parsed.ok) return parsed;
   const errors: string[] = [];
@@ -30,7 +30,7 @@ export function previewBatch(definition: AppDefinition, text: string): { ok: tru
   parsed.rows.forEach((row, i) => {
     const checked = renderAppInput(definition, row);
     if (!checked.ok) errors.push(`${i + 1}번째 줄: ${checked.message}`);
-    else maxCalls += estimateAppCalls(definition, checked.inputs, 0).max;
+    else maxCalls += estimateAppCalls(definition, checked.inputs, documentCount).max;
   });
   return errors.length ? { ok: false, errors: errors.slice(0, 10) } : { ok: true, rows: parsed.rows, expects: parsed.expects, maxCalls };
 }
@@ -39,8 +39,9 @@ export function previewBatch(definition: AppDefinition, text: string): { ok: tru
  * 파일마다 한 건(2026-11-10) 미리 보기 — 표가 비면 모든 파일에 빈 입력 한 줄, 표는 한 줄(모든 파일에 같은 입력)이거나 파일 수와 같은 줄.
  * 줄마다 앱 규칙으로 검사하고, 파일 하나씩 붙인 실행의 많으면 AI 호출 수를 더한다
  */
-export function previewFileBatch(definition: AppDefinition, text: string, fileCount: number): { ok: true; rows: Record<string, string>[]; expects: string[]; maxCalls: number } | { ok: false; errors: string[] } {
+export function previewFileBatch(definition: AppDefinition, text: string, fileCount: number, documentCount = 0): { ok: true; rows: Record<string, string>[]; expects: string[]; maxCalls: number } | { ok: false; errors: string[] } {
   if (fileCount < 1) return { ok: false, errors: ['파일을 하나 이상 올려 주세요.'] };
+  if (1 + documentCount > APP_MAX_FILES) return { ok: false, errors: [BATCH_FILE_DOCUMENTS_TOO_MANY] };
   let rows: Record<string, string>[] = [{}];
   let expects: string[] = [''];
   if (text.trim()) {
@@ -59,7 +60,14 @@ export function previewFileBatch(definition: AppDefinition, text: string, fileCo
   });
   if (errors.length) return { ok: false, errors: errors.slice(0, 10) };
   const paired = pairRowsWithFiles(checked, fileCount)!;
-  return { ok: true, rows, expects, maxCalls: paired.reduce((sum, inputs) => sum + estimateAppCalls(definition, inputs, 1).max, 0) };
+  return { ok: true, rows, expects, maxCalls: paired.reduce((sum, inputs) => sum + estimateAppCalls(definition, inputs, 1 + documentCount).max, 0) };
+}
+
+/** 파일마다 한 건은 실행마다 파일 하나 + 고른 문서 — 합쳐 앱 파일 상한까지 */
+export const BATCH_FILE_DOCUMENTS_TOO_MANY = `파일마다 한 건은 줄마다 파일 하나에 문서함 문서를 ${APP_MAX_FILES - 1}개까지 함께 씁니다 — 위 '참고 파일'에서 고른 문서를 줄여 주세요.`;
+/** 고른 문서함 문서를 줄마다 함께 쓴다는 안내(0131) */
+export function batchDocumentsNote(count: number): string {
+  return `문서함에서 고른 문서 ${count}개를 줄마다 함께 씁니다 — 실행할 때마다 지금 근거 판으로 읽고(시행일이 지난 새 판이 있으면 새 판), 문서가 지워지면 일괄 실행을 멈춥니다. 문서는 위 '참고 파일'에서 바꿉니다.`;
 }
 
 type BatchUpload = { key: string; name: string; state: 'uploading' | 'ready' | 'failed'; id?: string; message?: string };
@@ -74,7 +82,7 @@ export function batchCreatedNotice(lines: number): string {
   return `일괄 실행을 만들었습니다(${lines}줄). 약 5분 안에 차례로 실행됩니다 — 같은 내용으로 다시 만들지 마세요.`;
 }
 
-export default function AppBatchPanel({ agentId, agentName, definition, disabled }: { agentId: string; agentName: string; definition: AppDefinition; disabled?: boolean }) {
+export default function AppBatchPanel({ agentId, agentName, definition, disabled, documentIds = [] }: { agentId: string; agentName: string; definition: AppDefinition; disabled?: boolean; /** 실행 화면에서 문서함에서 고른 문서(0131) — 줄마다 함께 쓴다 */ documentIds?: string[] }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [name, setName] = useState('');
@@ -91,15 +99,17 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
   /** 줄별 결과·사람 판정(0126)을 펼친 묶음 */
   const [itemsOpen, setItemsOpen] = useState<string | null>(null);
   const acceptsFiles = Boolean(definition.attachments);
-  const filesOnly = Boolean(definition.attachments?.required);
-  const [mode, setMode] = useState<'table' | 'files'>(filesOnly ? 'files' : 'table');
+  // 파일 필수 앱도 문서함 문서를 고르면 표로 여러 건(0131)
+  const filesOnly = Boolean(definition.attachments?.required) && !documentIds.length;
+  const [modeChoice, setMode] = useState<'table' | 'files'>(definition.attachments?.required ? 'files' : 'table');
+  const mode: 'table' | 'files' = filesOnly ? 'files' : modeChoice;
   const [uploads, setUploads] = useState<BatchUpload[]>([]);
   const readyIds = uploads.filter((u) => u.state === 'ready' && u.id).map((u) => u.id!);
   const uploading = uploads.some((u) => u.state === 'uploading');
   const preview = useMemo(() => {
-    if (mode === 'files') return uploads.length ? previewFileBatch(definition, text, readyIds.length) : null;
-    return text.trim() ? previewBatch(definition, text) : null;
-  }, [definition, text, mode, uploads.length, readyIds.length]);
+    if (mode === 'files') return uploads.length ? previewFileBatch(definition, text, readyIds.length, documentIds.length) : null;
+    return text.trim() ? previewBatch(definition, text, documentIds.length) : null;
+  }, [definition, text, mode, uploads.length, readyIds.length, documentIds.length]);
 
   const load = useCallback(async () => {
     try {
@@ -123,7 +133,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
     try {
       // 기대 핵심어 칸이 있을 때만 싣는다(0088 — 줄마다 결과에 핵심어가 모두 있는지 실행기가 잰다)
       const withExpect = preview.expects.some(Boolean);
-      const payload = { agent_id: agentId, name: name.trim() || undefined, rows: preview.rows, ...(withExpect ? { expects: preview.expects, ...(judge ? { judge: true } : {}) } : {}), ...(mode === 'files' ? { attachment_ids: readyIds } : {}) };
+      const payload = { agent_id: agentId, name: name.trim() || undefined, rows: preview.rows, ...(withExpect ? { expects: preview.expects, ...(judge ? { judge: true } : {}) } : {}), ...(mode === 'files' ? { attachment_ids: readyIds } : {}), ...(documentIds.length ? { document_ids: documentIds } : {}) };
       const res = await fetch('/api/apps/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) { setError(body?.error?.message ?? '일괄 실행을 만들지 못했습니다.'); setErrors(body?.error?.details?.errors ?? []); }
@@ -184,6 +194,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
               <label className="flex items-center gap-1"><input type="radio" checked={mode === 'files'} onChange={() => setMode('files')} />파일마다 한 건</label>
             </div>
           )}
+          {documentIds.length > 0 && <p role="note" aria-label="일괄 실행 문서" className="rounded-lg bg-teal-50 p-2 text-xs leading-5 text-teal-900">{batchDocumentsNote(documentIds.length)}</p>}
           {mode === 'table' ? (
             <p className="text-xs leading-5 text-slate-500">
               엑셀에서 표를 복사해 붙이거나 CSV 파일을 고르세요. <strong>첫 줄은 입력 항목 이름</strong>({definition.fields.map((f) => f.label).join(', ')})이고 아래로 한 줄에 한 건, {BATCH_MAX_ROWS}줄까지입니다(기관 관리자가 상한을 늘렸으면 {BATCH_ROWS_CEILING}줄까지).
@@ -235,7 +246,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
                 <li key={b.id} className="rounded-lg border border-slate-200 p-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium">{b.name}</span>
-                    <span className={b.status === 'running' ? 'text-ws-accent-text' : b.status === 'stopped' ? 'text-red-700' : 'text-slate-600'}>{BATCH_STATUS_LABELS[b.status]} · 완료 {b.done}/{b.total}{b.failed ? ` · 실패 ${b.failed}` : ''}{b.skipped ? ` · 건너뜀 ${b.skipped}` : ''}{b.expectChecked ? ` · 핵심어 맞음 ${b.expectPassed ?? 0}/${b.expectChecked}` : ''}{batchJudgeSummary(b)}{batchAgreementSummary(b.agreement)}</span>
+                    <span className={b.status === 'running' ? 'text-ws-accent-text' : b.status === 'stopped' ? 'text-red-700' : 'text-slate-600'}>{BATCH_STATUS_LABELS[b.status]} · 완료 {b.done}/{b.total}{b.failed ? ` · 실패 ${b.failed}` : ''}{b.skipped ? ` · 건너뜀 ${b.skipped}` : ''}{b.documentCount ? ` · 문서 ${b.documentCount}개` : ''}{b.expectChecked ? ` · 핵심어 맞음 ${b.expectPassed ?? 0}/${b.expectChecked}` : ''}{batchJudgeSummary(b)}{batchAgreementSummary(b.agreement)}</span>
                   </div>
                   <p className="mt-1 text-slate-500">{kst(b.createdAt)}{b.finishedAt ? ` ~ ${kst(b.finishedAt)}` : ''}{b.stopReason ? ` — ${b.stopReason}` : ''}</p>
                   <div className="mt-1 flex gap-3">

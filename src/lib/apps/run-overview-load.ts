@@ -8,8 +8,11 @@ export class AppRunOverviewError extends Error {
   constructor(public readonly userMessage: string, detail: string) { super(detail); }
 }
 
-/** 기관·부서 범위의 입력형 앱 실행 현황(최근 30일). 읽지 못하면 `AppRunOverviewError`(화면에 보일 안내 포함) */
-export async function loadAppRunOverview(organizationId: string, departmentIds: string[], nowMs = Date.now()): Promise<AppRunOverview> {
+/** 센 기간 — 한국 날짜(끝 날 포함)와 그 시작·다음 날 0시(KST). `feedbackPeriod`가 만든다(비우면 최근 30일, 1년까지) */
+export type AppRunPeriod = { from: string; to: string; fromIso: string; toIso: string };
+
+/** 기관·부서 범위의 입력형 앱 실행 현황(기간을 주지 않으면 최근 30일). 읽지 못하면 `AppRunOverviewError`(화면에 보일 안내 포함) */
+export async function loadAppRunOverview(organizationId: string, departmentIds: string[], nowMs = Date.now(), period?: AppRunPeriod): Promise<AppRunOverview> {
   const { data: agents, error: agentError } = await supabaseAdmin
     .from('agents')
     .select('id, name, tier, department_id')
@@ -29,21 +32,24 @@ export async function loadAppRunOverview(organizationId: string, departmentIds: 
   if (deptError) throw new AppRunOverviewError('부서 정보를 불러오지 못했습니다.', `departments: ${deptError.message}`);
   const deptName = new Map(((departments ?? []) as Array<{ id: string; name: string }>).map((d) => [d.id, d.name]));
   const apps: OverviewApp[] = rows.map((a) => ({ id: a.id, name: a.name, tier: a.tier, departmentName: deptName.get(a.department_id) ?? null }));
-  if (!apps.length) return summarizeAppRuns([], []);
+  const withPeriod = (o: AppRunOverview): AppRunOverview => (period ? { ...o, from: period.from, to: period.to, days: Math.round((Date.parse(period.toIso) - Date.parse(period.fromIso)) / 86400_000) } : o);
+  if (!apps.length) return withPeriod(summarizeAppRuns([], []));
 
-  const since = new Date(nowMs - OVERVIEW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  // 단계 이름·상태만 돌려주는 DB 함수(0046) — app_steps의 중간 결과 글은 서버로도 내려오지 않는다
-  const { data: runs, error: runError } = await supabaseAdmin.rpc('app_run_states', {
+  const since = period ? period.fromIso : new Date(nowMs - OVERVIEW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const until = period ? period.toIso : new Date(nowMs + 60_000).toISOString();
+  // 단계 이름·상태만 돌려주는 DB 함수(0046·0133 — 끝 시각까지 DB에서 건다: 앱에서 거르면 기간 뒤 실행이 읽기 상한을 먼저 채운다)
+  const { data: runs, error: runError } = await supabaseAdmin.rpc('app_run_states_between', {
     p_agent_ids: apps.map((a) => a.id),
     p_since: since,
+    p_until: until,
     p_limit: MAX_OVERVIEW_RUNS + 1,
   });
-  if (runError) throw new AppRunOverviewError('앱 실행 기록을 불러오지 못했습니다.', `app_run_states: ${runError.message}`);
+  if (runError) throw new AppRunOverviewError('앱 실행 기록을 불러오지 못했습니다.', `app_run_states_between: ${runError.message}`);
   const list: OverviewRun[] = ((runs ?? []) as Array<{ agent_id: string; created_at: string; has_answer: boolean; steps: unknown }>).map((r) => ({
     agent_id: r.agent_id,
     created_at: r.created_at,
     messages: r.has_answer ? [{ app_steps: r.steps ?? undefined }] : [],
   }));
   const truncated = list.length > MAX_OVERVIEW_RUNS;
-  return summarizeAppRuns(apps, list.slice(0, MAX_OVERVIEW_RUNS), truncated);
+  return withPeriod(summarizeAppRuns(apps, list.slice(0, MAX_OVERVIEW_RUNS), truncated));
 }

@@ -32,6 +32,7 @@ export const API_ROUTES: readonly string[] = [
   'admin/app-overview',
   'admin/audit-logs',
   'admin/budget',
+  'admin/budget-alerts',
   'admin/bulk-register',
   'admin/common-documents',
   'admin/common-documents/[id]/cited-by',

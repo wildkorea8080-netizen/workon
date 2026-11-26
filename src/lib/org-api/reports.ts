@@ -106,9 +106,11 @@ export async function feedbackSummaryReport(ctx: OrgApiContext, params: { from: 
   return { data: { from: period.from, to: period.to, ...summary } };
 }
 
-/** 입력형 앱 실행 현황(최근 30일) — 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름. 입력·결과·실행한 사람 없음, 개인 앱은 이름 없이 한 묶음 */
-export async function appRunsReport(ctx: OrgApiContext, nowMs = Date.now()): Promise<Out> {
-  return { data: await loadAppRunOverview(ctx.organizationId, ctx.departmentIds, nowMs) };
+/** 입력형 앱 실행 현황 — `?from=&to=`(한국 날짜, 끝 날 포함, 비우면 최근 30일, 1년까지 — 2026-11-26). 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름. 입력·결과·실행한 사람 없음, 개인 앱은 이름 없이 한 묶음 */
+export async function appRunsReport(ctx: OrgApiContext, nowMs = Date.now(), params: { from: string | null; to: string | null } = { from: null, to: null }): Promise<Out> {
+  const period = feedbackPeriod(params.from, params.to, new Date(nowMs));
+  if (!period) return { status: 400, message: '기간은 2026-11-01처럼 적고, 1년 안으로 정해 주세요.' };
+  return { data: await loadAppRunOverview(ctx.organizationId, ctx.departmentIds, nowMs, period) };
 }
 
 /**

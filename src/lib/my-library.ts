@@ -16,10 +16,11 @@ import { decodeHistoryCursor, encodeHistoryCursor } from '@/lib/apps/history';
 import { fileNamePattern, normalizeFileQuery } from '@/lib/file-search';
 import { attachmentExtension } from '@/lib/attachments/limits';
 import { logSystem } from '@/lib/logger';
+import { getVisibleDepartmentIds } from '@/lib/department-scope';
 import {
   cleanFolderName, cleanLibraryFileName, sortFolders, parseLibrarySpace, isSharedLibrarySpace, subtreeFolders, planFolderMove, transferFolderPath, LIBRARY_SPACE_LABEL,
   LIBRARY_MAX_BYTES, LIBRARY_MAX_FOLDERS, LIBRARY_PAGE, libraryMaxFiles,
-  samePlace, libraryPlaceLabel, libraryContentText, librarySnippet,
+  samePlace, libraryPlaceLabel, libraryContentText, librarySnippet, memberShareIds,
   type LibraryFile, type LibraryFolder, type LibrarySource, type LibrarySpace, type LibraryShare,
 } from '@/lib/my-library-spec';
 
@@ -653,16 +654,24 @@ export async function findLibraryOriginal(actor: LibraryActor, id: string, io: L
 
 // ── 공유 자료함(0116) ─────────────────────────────────────────────────────
 
-/** 지금 이 부서가 든 이 기관의 공유 자료함 — 이름 순. 부서가 없으면 빈 목록, 못 읽으면 던진다 */
+/**
+ * 지금 이 부서가 든 이 기관의 공유 자료함 — 이름 순. 고른 부서가 내 부서이거나, '하위 부서도 함께'(0132)를 켠 공유 자료함이 내 상위 부서를 골랐을 때.
+ * 부서가 없으면 빈 목록, 못 읽으면 던진다(부서 계통도 — 상위 부서를 못 읽어 하위 직원이 조용히 빠지지 않게)
+ */
 export async function loadLibraryShares(organizationId: string, departmentId: string | null | undefined): Promise<LibraryShare[]> {
   if (!departmentId) return [];
-  const { data: links, error } = await supabaseAdmin.from('library_share_departments').select('share_id').eq('department_id', departmentId);
+  const lineage = await getVisibleDepartmentIds(departmentId);
+  const { data: links, error } = await supabaseAdmin.from('library_share_departments').select('share_id, department_id').in('department_id', lineage.length ? lineage : [departmentId]);
   if (error) throw new Error(`library_share_departments: ${error.message}`);
-  const ids = [...new Set(((links ?? []) as { share_id: string }[]).map((l) => l.share_id))];
+  const rows = (links ?? []) as { share_id: string; department_id: string }[];
+  const ids = [...new Set(rows.map((l) => l.share_id))];
   if (!ids.length) return [];
-  const { data, error: shareError } = await supabaseAdmin.from('library_shares').select('id, name').in('id', ids).eq('organization_id', organizationId);
+  const { data, error: shareError } = await supabaseAdmin.from('library_shares').select('id, name, include_descendants').in('id', ids).eq('organization_id', organizationId);
   if (shareError) throw new Error(`library_shares: ${shareError.message}`);
-  return ((data ?? []) as { id: string; name: string }[])
+  const shares = (data ?? []) as { id: string; name: string; include_descendants?: boolean | null }[];
+  const member = memberShareIds(rows, shares, departmentId, lineage);
+  return shares
+    .filter((s) => member.has(s.id.toLowerCase()))
     .map((s) => ({ id: s.id, name: s.name }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 }

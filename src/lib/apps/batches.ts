@@ -8,6 +8,7 @@
 //   앱 변경·권한·계정·부서·한도 문제는 묶음을 멈추고(남은 줄은 건너뜀), 줄의 입력 문제는 그 줄만 실패, 모델 오류는 한 번 더 해 본다.
 //   묶음을 마치거나 멈추면(그 조건부 갱신을 한 쪽만) 만든 직원에게 메일 한 통(줄 수·멈춘 이유·보내기 전 확인 수 — 입력·결과 글 없음, 2026-11-10).
 //   직원이 그만둔 묶음은 알리지 않는다.
+// - 문서함에서 고른 문서(2026-11-26, 0131): 묶음에 id로 두고 줄마다 지금 근거 판으로 읽어 함께 실행한다(예약 0062와 같은 `currentEditionIds`, 쓸 판이 없으면 묶음 멈춤).
 // - 파일마다 한 건(2026-11-10, 0079): 직원이 올린 읽힌 첨부(10개까지)를 줄마다 하나씩 사본(`app-batch-files/…`)으로 복사해 두고,
 //   실행기가 그 줄을 돌릴 때 사본을 새 첨부로 다시 붙인다(예약의 올린 파일과 같은 길). 표는 한 줄(모든 파일에 같은 입력)이거나 파일 수와 같은 줄.
 //   원본 첨부는 복사한 뒤 묘비로 지운다(보내지 않은 첨부 상한을 빨리 돌려줌). 사본은 묶음이 끝나면(마침·멈춤·그만둠) 지운다.
@@ -31,12 +32,14 @@ import { safeText } from '@/lib/xlsx-export';
 import { OUTBOUND_STATUS_LABELS, type OutboundStatus } from './outbound/spec';
 import {
   BATCH_FILES_NOT_ALLOWED, BATCH_FILES_UNSUPPORTED, BATCH_FILE_ROWS_MISMATCH, BATCH_ITEM_STATUS_LABELS, BATCH_MAX_ATTEMPTS, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_MAX_RUNNING, BATCH_ROWS_CEILING,
-  BATCH_APP_VERSION_CHANGED, BATCH_EXPECT_MAX, BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, expectMissing, expectVerdict, normalizeBatchName, normalizeExpect,
+  BATCH_APP_VERSION_CHANGED, BATCH_DOCUMENTS_GONE_STATUS, BATCH_DOCUMENTS_UNAVAILABLE, BATCH_EXPECT_MAX, BATCH_FILES_OR_DOCUMENTS, BATCH_STALE_MS, BATCH_TITLE_PREFIX, batchFileOf, batchFilePath, expectMissing, expectVerdict, normalizeBatchName, normalizeExpect,
   pairRowsWithFiles, parseBatchAttachmentIds, BATCH_JUDGE_NEEDS_EXPECT, isBatchJudgeGrade, judgeVerdict, BATCH_JUDGE_LABELS, BATCH_HUMAN_ONLY_DONE, batchAgreement,
   type BatchFile, type BatchJudgeGrade, type BatchItemStatus, type BatchItemView, type BatchStatus, type BatchView,
 } from './batch-spec';
 import { copyAttachmentsTo, defaultScheduleFileIo, discardAttachments, removeScheduleFileObjects, type ScheduleFileIo } from './schedule-files';
 import { readBatchLimit } from './batch-limit';
+import { CHOSEN_DOCUMENTS_UNAVAILABLE, agentDocumentRows, appDocumentChoice, verifyChosenDocuments } from './app-document-choice';
+import { currentEditionIds, type LibraryDocumentRow } from './library-documents';
 import { pagedRows } from '@/lib/paged-select';
 import { BATCH_JUDGE_NO_TIME, judgeBatchResult, type BatchJudgeResult } from './batch-judge';
 
@@ -50,7 +53,7 @@ export function idChunks<T>(ids: T[], size = BATCH_IN_CHUNK): T[][] {
 
 type Fail = { ok: false; status: number; message: string };
 
-const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_at, finished_at, judge';
+const BATCH_COLUMNS = 'id, agent_id, name, status, total, stop_reason, created_at, finished_at, judge, document_ids';
 
 type AgentRow = AgentAccessInfo & { name: string; app_definition: unknown; agent_type: string | null };
 
@@ -65,7 +68,7 @@ async function loadApp(agentId: string): Promise<AgentRow | null | 'unread'> {
 /** 만들기 — 줄마다 앱 규칙으로 다시 검사(첫 오류 10개를 줄 번호와 함께), 실행 중 3개 상한 */
 export async function createBatch(actor: ActorScope, body: unknown, opts: { source?: 'webhook'; appVersion?: number; webhookId?: string } = {}): Promise<{ ok: true; batch: BatchView } | Fail | { ok: false; status: 400; message: string; errors: string[] }> {
   if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
-  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown; expects?: unknown; judge?: unknown };
+  const b = (body && typeof body === 'object' ? body : {}) as { agent_id?: unknown; name?: unknown; rows?: unknown; attachment_ids?: unknown; expects?: unknown; judge?: unknown; document_ids?: unknown };
   const agent = typeof b.agent_id === 'string' ? await loadApp(b.agent_id) : null;
   if (agent === 'unread') return { ok: false, status: 503, message: '앱을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if (!agent || agent.agent_type === 'link' || !canUseAgent(agent, actor)) return { ok: false, status: 404, message: '앱을 찾을 수 없습니다.' };
@@ -76,7 +79,12 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   if (!attachmentIds) return { ok: false, status: 400, message: `파일은 ${BATCH_MAX_FILES}개까지 올려 주세요.` };
   const fileMode = attachmentIds.length > 0;
   if (fileMode && !definition.value.attachments) return { ok: false, status: 400, message: BATCH_FILES_NOT_ALLOWED };
-  if (!fileMode && definition.value.attachments?.required) return { ok: false, status: 400, message: BATCH_FILES_UNSUPPORTED };
+  // 문서함에서 고른 문서(0131) — 모든 줄이 함께 쓴다. 파일마다 한 건이면 줄마다 파일 하나를 더해 3개까지. 비동기 연동 묶음은 고르지 않는다
+  const docChoice = appDocumentChoice(definition.value.attachments, b.document_ids, '일괄 실행', fileMode ? 1 : 0);
+  if (!docChoice.ok) return { ok: false, status: 400, message: docChoice.message };
+  const documentIds = docChoice.ids;
+  if (documentIds.length && opts.source === 'webhook') return { ok: false, status: 400, message: '비동기 연동 실행에는 문서함 문서를 고를 수 없습니다.' };
+  if (!fileMode && definition.value.attachments?.required && !documentIds.length) return { ok: false, status: 400, message: definition.value.attachments.library ? BATCH_FILES_OR_DOCUMENTS : BATCH_FILES_UNSUPPORTED };
   if (!Array.isArray(b.rows) || !b.rows.length) return { ok: false, status: 400, message: '실행할 줄이 없습니다.' };
   if (b.rows.length > BATCH_ROWS_CEILING) return { ok: false, status: 400, message: `한 번에 ${BATCH_ROWS_CEILING}줄까지 실행합니다.` };
   if (fileMode && !pairRowsWithFiles(b.rows, attachmentIds.length)) return { ok: false, status: 400, message: BATCH_FILE_ROWS_MISMATCH };
@@ -113,6 +121,10 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   const { count, error: countError } = await supabaseAdmin.from('app_batches').select('id', { count: 'exact', head: true }).eq('user_id', actor.userId).eq('status', 'running');
   if (countError) return { ok: false, status: 503, message: '일괄 실행을 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   if ((count ?? 0) >= BATCH_MAX_RUNNING) return { ok: false, status: 409, message: `실행 중인 일괄 실행은 ${BATCH_MAX_RUNNING}개까지입니다. 끝나거나 그만둔 뒤 다시 만들어 주세요.` };
+  // 고른 문서가 지금 이 사람이 고를 수 있는 문서인지(예약·연동과 같은 검사) — 못 읽으면 만들지 않는다
+  const verified = await verifyChosenDocuments(agent.id, actor, documentIds);
+  if (verified === 'error') return { ok: false, status: 503, message: '문서함 문서를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
+  if (verified === 'unavailable') return { ok: false, status: 400, message: CHOSEN_DOCUMENTS_UNAVAILABLE };
   // 파일마다 한 건 — 직원의 읽힌 첨부(요청자의 것·ready만)를 줄마다 사본으로
   let files: BatchFile[] = [];
   if (fileMode) {
@@ -131,6 +143,7 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
     ...(opts.source ? { source: opts.source } : {}),
     ...(opts.source === 'webhook' && opts.webhookId ? { webhook_id: opts.webhookId } : {}),
     ...(judge ? { judge: true } : {}),
+    ...(documentIds.length ? { document_ids: documentIds } : {}),
   }).select(BATCH_COLUMNS).single();
   if (error || !batch) return failCreate();
   const { error: itemError } = await supabaseAdmin.from('app_batch_items').insert(inputs.map((row, i) => ({ batch_id: batch.id, position: i + 1, inputs: row, ...(files[i] ? { file: files[i] } : {}), ...(rowExpects[i] ? { expect: rowExpects[i] } : {}) })));
@@ -143,11 +156,12 @@ export async function createBatch(actor: ActorScope, body: unknown, opts: { sour
   return { ok: true, batch: batchView(batch as BatchRowView, agent.name, { done: 0, failed: 0, skipped: 0, pending: inputs.length }) };
 }
 
-type BatchRowView = { id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; created_at: string; finished_at: string | null; judge?: boolean | null };
+type BatchRowView = { id: string; agent_id: string; name: string; status: BatchStatus; total: number; stop_reason: string | null; created_at: string; finished_at: string | null; judge?: boolean | null; document_ids?: string[] | null };
 type Counts = { done: number; failed: number; skipped: number; pending: number; expectChecked?: number; expectPassed?: number; judgeCorrect?: number; judgePartial?: number; judgeIncorrect?: number; judgeErrors?: number; agreement?: BatchView['agreement'] };
 const batchView = (r: BatchRowView, agentName: string | null, c: Counts): BatchView => ({
   id: r.id, agentId: r.agent_id, agentName, name: r.name, status: r.status, total: r.total, ...c, stopReason: r.stop_reason, createdAt: r.created_at, finishedAt: r.finished_at,
   ...(r.judge ? { judge: true } : {}),
+  ...(r.document_ids?.length ? { documentCount: r.document_ids.length } : {}),
 });
 
 /** 줄 하나의 AI 채점을 수에 더한다 — 등급이 있으면 그 등급, 이유만 있으면 못 한 것 */
@@ -306,7 +320,17 @@ export async function retryUnfinished(actor: ActorScope, batchId: string): Promi
   const tableRows = rows.filter((r) => r.file === null || r.file === undefined);
   const skippedFiles = rows.length - tableRows.length;
   if (!tableRows.length) return { ok: false, status: 409, message: skippedFiles ? '파일마다 한 건의 줄은 파일을 다시 올려 새로 실행해 주세요(사본은 일괄 실행이 끝날 때 지웠습니다).' : '다시 실행할 줄(실패·건너뜀)이 없습니다.' };
-  const created = await createBatch(actor, { agent_id: batch.agent_id, name: `${batch.name.slice(0, 74)} 다시`, rows: tableRows.map((r) => r.inputs ?? {}), ...(tableRows.some((r) => r.expect) ? { expects: tableRows.map((r) => r.expect ?? ''), ...(batch.judge ? { judge: true } : {}) } : {}) });
+  // 고른 문서(0131) — 지금 근거 판으로 옮겨 새 묶음에. 쓸 판이 없으면 새로 고르게 한다
+  let documentIds: string[] = [];
+  if (batch.document_ids?.length) {
+    if (!actor.organizationId) return { ok: false, status: 403, message: '소속 기관을 확인할 수 없습니다.' };
+    let rows: LibraryDocumentRow[];
+    try { rows = await agentDocumentRows(batch.agent_id, actor.organizationId); } catch { return { ok: false, status: 503, message: '문서함 문서를 지금 확인하지 못했습니다. 잠시 뒤 다시 시도해 주세요.' }; }
+    const resolved = currentEditionIds(batch.document_ids, rows, batch.agent_id);
+    if (!resolved.ok) return { ok: false, status: 409, message: '고른 문서함 문서를 더 쓸 수 없습니다(지워졌거나 근거로 쓸 판이 없음) — 문서를 다시 골라 새로 만들어 주세요.' };
+    documentIds = resolved.ids;
+  }
+  const created = await createBatch(actor, { agent_id: batch.agent_id, name: `${batch.name.slice(0, 74)} 다시`, rows: tableRows.map((r) => r.inputs ?? {}), ...(documentIds.length ? { document_ids: documentIds } : {}), ...(tableRows.some((r) => r.expect) ? { expects: tableRows.map((r) => r.expect ?? ''), ...(batch.judge ? { judge: true } : {}) } : {}) });
   if (!created.ok) return created;
   return { ok: true, batch: created.batch, skippedFiles };
 }
@@ -324,7 +348,7 @@ export async function removeBatchFiles(batchId: string): Promise<void> {
 
 // ── 실행기 ─────────────────────────────────────────────────────────
 
-export interface BatchRunRow { id: string; organization_id: string; department_id: string; user_id: string; agent_id: string; app_version: number; status: BatchStatus; webhook_id?: string | null; judge?: boolean | null }
+export interface BatchRunRow { id: string; organization_id: string; department_id: string; user_id: string; agent_id: string; app_version: number; status: BatchStatus; webhook_id?: string | null; judge?: boolean | null; document_ids?: string[] | null }
 export interface BatchItemRun { id: string; batch_id: string; position: number; inputs: Record<string, string>; status: 'pending' | 'running'; attempts: number; claimed_at: string | null; batch: BatchRunRow; file?: unknown; expect?: string | null }
 export type ItemPatch = { status: 'done' | 'failed' | 'skipped' | 'pending'; attempts: number; error: string | null; conversation_id?: string | null; message_id?: string | null; expect_missing?: string[] | null; judge_grade?: BatchJudgeGrade | null; judge_reason?: string | null };
 /** 비동기 연동 묶음(0087)의 줄이 끝났을 때 그 연동의 '마지막 결과' — 기다리는 호출의 `finish`와 같은 칸 */
@@ -405,6 +429,7 @@ const stopReasonFor = (outcome: RunAsOutcome): string | null => {
   if (outcome.kind === 'department_changed') return '소속 부서가 바뀌어 멈췄습니다 — 새로 만들어 주세요.';
   if (outcome.kind !== 'rejected') return null;
   if (outcome.status === 409) return '앱 설정이 바뀌어 멈췄습니다 — 지금 앱으로 새로 만들어 주세요.';
+  if (outcome.status === BATCH_DOCUMENTS_GONE_STATUS) return BATCH_DOCUMENTS_UNAVAILABLE;
   if (outcome.status === 403 || outcome.status === 404) return '앱을 더 쓸 수 없어 멈췄습니다.';
   if (outcome.status === 429) return `사용 한도에 걸려 멈췄습니다 — ${outcome.message}`.slice(0, 300);
   return null;
@@ -511,7 +536,7 @@ export function batchDeps(): BatchDeps {
   return {
     now: () => Date.now(),
     async openItems(staleIso, limit) {
-      const { data: batches, error } = await supabaseAdmin.from('app_batches').select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id, judge')
+      const { data: batches, error } = await supabaseAdmin.from('app_batches').select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id, judge, document_ids')
         .eq('status', 'running').order('created_at', { ascending: true }).limit(20);
       if (error) return null;
       const byId = new Map(((batches ?? []) as BatchRunRow[]).map((b) => [b.id, b]));
@@ -573,6 +598,8 @@ export function batchDeps(): BatchDeps {
 export interface BatchRunIo {
   files: ScheduleFileIo;
   runAs(input: Parameters<typeof runAppAs>[0]): Promise<RunAsOutcome>;
+  /** 그 비서의 문서 행(0131 — 고른 문서의 지금 판). 없으면 `agentDocumentRows` */
+  documentsOf?(agentId: string, organizationId: string): Promise<LibraryDocumentRow[]>;
 }
 const defaultBatchRunIo = (): BatchRunIo => ({ files: defaultScheduleFileIo, runAs: (input) => runAppAs(input, BATCH_TITLE_PREFIX, defaultRunAsIo()) });
 
@@ -582,7 +609,16 @@ const defaultBatchRunIo = (): BatchRunIo => ({ files: defaultScheduleFileIo, run
  */
 export async function runBatchItem(item: BatchItemRun, deadlineAt: number, io: BatchRunIo = defaultBatchRunIo()): Promise<RunAsOutcome> {
   const actor = { userId: item.batch.user_id, departmentId: item.batch.department_id, organizationId: item.batch.organization_id };
-  const base = { userId: actor.userId, departmentId: actor.departmentId, agentId: item.batch.agent_id, appVersion: item.batch.app_version, inputs: item.inputs, deadlineAt };
+  // 고른 문서(0131) — 줄마다 지금 근거 판으로(시행일이 지나면 새 판). 못 읽으면 그 줄만 다시 해 보고, 쓸 판이 없으면 묶음을 멈춘다
+  let documentIds: string[] | undefined;
+  if (item.batch.document_ids?.length) {
+    let rows: LibraryDocumentRow[];
+    try { rows = await (io.documentsOf ?? agentDocumentRows)(item.batch.agent_id, actor.organizationId); } catch { return { kind: 'failed', error: '문서함 문서를 지금 읽지 못했습니다(잠시 뒤 다시).', conversationId: null }; }
+    const resolved = currentEditionIds(item.batch.document_ids, rows, item.batch.agent_id);
+    if (!resolved.ok) return { kind: 'rejected', status: BATCH_DOCUMENTS_GONE_STATUS, message: BATCH_DOCUMENTS_UNAVAILABLE };
+    documentIds = resolved.ids;
+  }
+  const base = { userId: actor.userId, departmentId: actor.departmentId, agentId: item.batch.agent_id, appVersion: item.batch.app_version, inputs: item.inputs, deadlineAt, ...(documentIds ? { documentIds } : {}) };
   if (item.file === undefined || item.file === null) return io.runAs(base);
   const file = batchFileOf(item.file);
   if (!file) return { kind: 'rejected', status: 400, message: '이 줄의 파일 정보를 읽지 못했습니다.' };

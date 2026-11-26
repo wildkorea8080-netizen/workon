@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { requestJson, serverErrorText } from '@/lib/ok-json';
+import { latestGate } from '@/lib/latest-request';
 import type { AppRunOverview as Overview } from '@/lib/apps/run-overview';
 
 const kst = (iso: string) => new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
@@ -60,22 +62,59 @@ export function AppRunOverviewTable({ data }: { data: Overview }) {
   );
 }
 
+export const APP_RUN_OVERVIEW_UNREAD = '앱 실행 현황을 불러오지 못했습니다.';
+
+/** 기간(2026-11-26) — 비우면 최근 30일. 고른 기간을 다시 읽는 동안 앞 표를 지우고, 늦게 온 앞 응답은 버린다 */
 export default function AppRunOverview() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    fetch('/api/admin/app-overview')
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (!active) return;
-        if (!res.ok || !body?.ok) setError(body?.error?.message ?? '앱 실행 현황을 불러오지 못했습니다.');
-        else setData(body.data as Overview);
-      })
-      .catch(() => { if (active) setError('앱 실행 현황을 불러오지 못했습니다.'); });
-    return () => { active = false; };
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const gate = useRef(latestGate());
+  const query = (f: string, t: string) => {
+    const q = new URLSearchParams();
+    if (f) q.set('from', f);
+    if (t) q.set('to', t);
+    return q;
+  };
+  const load = useCallback(async (f: string, t: string) => {
+    const ticket = gate.current.begin();
+    setData(null); setError(null);
+    const r = await requestJson(`/api/admin/app-overview?${query(f, t)}`);
+    if (!gate.current.isLatest(ticket)) return;
+    if (!r.ok) setError(serverErrorText(r.body, APP_RUN_OVERVIEW_UNREAD));
+    else setData((r.body as { data: Overview }).data);
   }, []);
-  if (error) return <p role="alert" className="text-sm text-red-700">{error}</p>;
-  if (!data) return <p role="status" className="text-sm text-slate-500">불러오는 중…</p>;
-  return <AppRunOverviewTable data={data} />;
+  useEffect(() => { void load('', ''); }, [load]);
+  async function downloadCsv() {
+    setCsvError(null);
+    const q = query(from, to);
+    q.set('format', 'csv');
+    try {
+      const res = await fetch(`/api/admin/app-overview?${q}`);
+      if (!res.ok) { setCsvError(serverErrorText(await res.json().catch(() => null), 'CSV를 만들지 못했습니다.')); return; }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `앱 실행 현황 ${data?.from ?? ''}~${data?.to ?? ''}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { setCsvError('CSV를 만들지 못했습니다.'); }
+  }
+  return (
+    <div className="space-y-3">
+      <form className="flex flex-wrap items-end gap-2 text-xs" onSubmit={(e) => { e.preventDefault(); void load(from, to); }}>
+        <label className="flex flex-col gap-1 text-slate-600">시작일<input type="date" aria-label="실행 현황 시작일" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
+        <label className="flex flex-col gap-1 text-slate-600">끝 날<input type="date" aria-label="실행 현황 끝 날" value={to} onChange={(e) => setTo(e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
+        <button type="submit" className="rounded bg-slate-800 px-3 py-1.5 font-semibold text-white">조회</button>
+        <button type="button" disabled={!data} onClick={() => void downloadCsv()} className="rounded border border-slate-300 px-3 py-1.5 text-slate-700 disabled:opacity-40">CSV 내려받기</button>
+        <span className="text-slate-500">{data?.from && data?.to ? `${data.from} ~ ${data.to}(한국 날짜, 끝 날 포함)` : '비우면 최근 30일 · 1년까지'}</span>
+      </form>
+      {csvError && <p role="alert" className="text-sm text-red-700">{csvError}</p>}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p>
+        : !data ? <p role="status" className="text-sm text-slate-500">불러오는 중…</p>
+        : <AppRunOverviewTable data={data} />}
+    </div>
+  );
 }

@@ -124,7 +124,7 @@ describe('관리자 API', () => {
     expect(state.calls).toContainEqual(['agents', 'in', 'department_id', ['dept', 'sub']]);
     expect(state.calls).toContainEqual(['agents', 'is', 'deleted_at', null]);
     const rpc = state.calls.find((c) => c[0] === 'rpc')!;
-    expect(rpc[1]).toBe('app_run_states');
+    expect(rpc[1]).toBe('app_run_states_between');
     expect(rpc[2]).toMatchObject({ p_agent_ids: ['a'], p_limit: 2001 });
     expect(state.calls.some((c) => c[0] === 'conversations' || c[0] === 'messages')).toBe(false);
   });

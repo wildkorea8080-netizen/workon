@@ -7,13 +7,19 @@ import { cleanShareName, LIBRARY_MAX_SHARES, LIBRARY_SHARE_MAX_DEPARTMENTS } fro
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Failure = { ok: false; status: number; message: string };
 
-export type ShareView = { id: string; name: string; departmentIds: string[]; files: number | null; created_at: string };
+export type ShareView = { id: string; name: string; departmentIds: string[]; files: number | null; created_at: string; /** 고른 부서의 하위 부서 직원도 함께(0132) */ includeDescendants: boolean };
+type ShareRow = { id: string; name: string; created_at: string; include_descendants?: boolean | null };
 export const SHARE_NOT_FOUND = '그 공유 자료함을 찾을 수 없습니다.';
 export const SHARE_RETRY = '공유 자료함을 지금 읽지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
 
 /** 입력 검사 — 만들기는 이름·부서 둘 다, 고치기는 보낸 것만. 부서는 겹치지 않게 1~50곳 */
-export function parseShareInput(raw: Record<string, unknown>, partial: boolean): { ok: true; name?: string; departmentIds?: string[] } | Failure {
-  const out: { name?: string; departmentIds?: string[] } = {};
+export function parseShareInput(raw: Record<string, unknown>, partial: boolean): { ok: true; name?: string; departmentIds?: string[]; includeDescendants?: boolean } | Failure {
+  const out: { name?: string; departmentIds?: string[]; includeDescendants?: boolean } = {};
+  // 하위 부서도 함께(0132) — 참·거짓만, 보내지 않으면 만들 때는 꺼짐·고칠 때는 그대로
+  if (raw.includeDescendants !== undefined) {
+    if (typeof raw.includeDescendants !== 'boolean') return { ok: false, status: 400, message: "'하위 부서도 함께'는 켜거나 끄는 값(true·false)으로 보내 주세요." };
+    out.includeDescendants = raw.includeDescendants;
+  }
   if (!partial || raw.name !== undefined) {
     const name = cleanShareName(raw.name);
     if (!name) return { ok: false, status: 400, message: '공유 자료함 이름을 1~40자로 적어 주세요.' };
@@ -27,19 +33,21 @@ export function parseShareInput(raw: Record<string, unknown>, partial: boolean):
     if (ids.length > LIBRARY_SHARE_MAX_DEPARTMENTS) return { ok: false, status: 400, message: `부서는 ${LIBRARY_SHARE_MAX_DEPARTMENTS}곳까지 고를 수 있습니다.` };
     out.departmentIds = ids;
   }
-  if (partial && out.name === undefined && out.departmentIds === undefined) return { ok: false, status: 400, message: '바꿀 이름이나 부서를 보내 주세요.' };
+  if (partial && out.name === undefined && out.departmentIds === undefined && out.includeDescendants === undefined) return { ok: false, status: 400, message: '바꿀 이름이나 부서를 보내 주세요.' };
   return { ok: true, ...out };
 }
 
 /** DB에 닿는 일 — 시험이 바꿔 끼운다. 모두 못 읽거나 못 쓰면 던진다 */
 export interface SharesDb {
-  list(organizationId: string): Promise<{ id: string; name: string; created_at: string }[]>;
+  list(organizationId: string): Promise<ShareRow[]>;
   departmentsOf(shareIds: string[]): Promise<{ share_id: string; department_id: string }[]>;
   /** 공유 자료함마다 파일 수 */
   fileCounts(shareIds: string[]): Promise<Map<string, number>>;
   /** 이 기관의 부서 중 고른 것 — 있는 id만 */
   orgDepartments(organizationId: string, ids: string[]): Promise<string[]>;
-  insert(row: { organization_id: string; name: string; created_by: string }): Promise<{ id: string; name: string; created_at: string }>;
+  insert(row: { organization_id: string; name: string; created_by: string; include_descendants: boolean }): Promise<ShareRow>;
+  /** 하위 부서도 함께(0132) */
+  setIncludeDescendants(organizationId: string, id: string, value: boolean): Promise<boolean>;
   rename(organizationId: string, id: string, name: string): Promise<boolean>;
   /** 부서 목록을 통째로 바꾼다 */
   setDepartments(shareId: string, departmentIds: string[]): Promise<void>;
@@ -59,6 +67,7 @@ export async function listShares(organizationId: string, db: SharesDb = sharesDb
       id: r.id, name: r.name, created_at: r.created_at,
       departmentIds: links.filter((l) => l.share_id === r.id).map((l) => l.department_id),
       files: counts ? counts.get(r.id) ?? 0 : null,
+      includeDescendants: r.include_descendants === true,
     })).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     return { ok: true, shares };
   } catch {
@@ -80,9 +89,10 @@ export async function createShare(organizationId: string, userId: string, raw: R
     if (existing.length >= LIBRARY_MAX_SHARES) return { ok: false, status: 409, message: `공유 자료함은 기관마다 ${LIBRARY_MAX_SHARES}개까지입니다.` };
     const bad = await checkDepartments(organizationId, input.departmentIds!, db);
     if (bad) return bad;
-    let row: { id: string; name: string; created_at: string };
+    let row: ShareRow;
+    const includeDescendants = input.includeDescendants === true;
     try {
-      row = await db.insert({ organization_id: organizationId, name: input.name!, created_by: userId });
+      row = await db.insert({ organization_id: organizationId, name: input.name!, created_by: userId, include_descendants: includeDescendants });
     } catch (e) {
       if (isUnique(e)) return { ok: false, status: 409, message: '같은 이름의 공유 자료함이 이미 있습니다.' };
       throw e;
@@ -94,7 +104,7 @@ export async function createShare(organizationId: string, userId: string, raw: R
       await db.remove(organizationId, row.id).catch(() => false);
       return { ok: false, status: 503, message: '공유 자료함을 지금 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
     }
-    return { ok: true, share: { ...row, departmentIds: input.departmentIds!, files: 0 } };
+    return { ok: true, share: { id: row.id, name: row.name, created_at: row.created_at, departmentIds: input.departmentIds!, files: 0, includeDescendants } };
   } catch {
     return { ok: false, status: 503, message: '공유 자료함을 지금 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.' };
   }
@@ -125,6 +135,10 @@ export async function updateShare(organizationId: string, id: string, raw: Recor
     if (input.departmentIds) {
       await db.setDepartments(existing.id, input.departmentIds);
       changed.push('departments');
+    }
+    if (input.includeDescendants !== undefined && input.includeDescendants !== (existing.include_descendants === true)) {
+      if (!(await db.setIncludeDescendants(organizationId, existing.id, input.includeDescendants))) return { ok: false, status: 404, message: SHARE_NOT_FOUND };
+      changed.push(input.includeDescendants ? 'include_descendants_on' : 'include_descendants_off');
     }
     return { ok: true, changed };
   } catch {
@@ -157,9 +171,9 @@ export async function deleteShare(organizationId: string, id: string, db: Shares
 export function sharesDb(): SharesDb {
   return {
     async list(organizationId) {
-      const { data, error } = await supabaseAdmin.from('library_shares').select('id, name, created_at').eq('organization_id', organizationId).limit(LIBRARY_MAX_SHARES + 10);
+      const { data, error } = await supabaseAdmin.from('library_shares').select('id, name, created_at, include_descendants').eq('organization_id', organizationId).limit(LIBRARY_MAX_SHARES + 10);
       if (error) throw error;
-      return (data ?? []) as { id: string; name: string; created_at: string }[];
+      return (data ?? []) as ShareRow[];
     },
     async departmentsOf(shareIds) {
       if (!shareIds.length) return [];
@@ -182,9 +196,14 @@ export function sharesDb(): SharesDb {
       return ((data ?? []) as { id: string }[]).map((d) => d.id);
     },
     async insert(row) {
-      const { data, error } = await supabaseAdmin.from('library_shares').insert(row).select('id, name, created_at').single();
+      const { data, error } = await supabaseAdmin.from('library_shares').insert(row).select('id, name, created_at, include_descendants').single();
       if (error) throw error;
-      return data as { id: string; name: string; created_at: string };
+      return data as ShareRow;
+    },
+    async setIncludeDescendants(organizationId, id, value) {
+      const { data, error } = await supabaseAdmin.from('library_shares').update({ include_descendants: value, updated_at: new Date().toISOString() }).eq('id', id).eq('organization_id', organizationId).select('id');
+      if (error) throw error;
+      return ((data ?? []) as unknown[]).length > 0;
     },
     async rename(organizationId, id, name) {
       const { data, error } = await supabaseAdmin.from('library_shares').update({ name, updated_at: new Date().toISOString() }).eq('id', id).eq('organization_id', organizationId).select('id');

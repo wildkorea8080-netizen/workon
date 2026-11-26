@@ -23,6 +23,12 @@ export const BATCH_TITLE_PREFIX = '[일괄] ';
 /** 연동이 박아 둔 앱 판과 지금 판이 다를 때(비동기 연동 0087) — 기다리는 연동의 409와 같은 뜻 */
 export const BATCH_APP_VERSION_CHANGED = '앱 설정이 바뀌어 이 연동으로는 실행할 수 없습니다.';
 export const BATCH_FILES_UNSUPPORTED = "파일 첨부가 꼭 필요한 앱은 '파일마다 한 건'으로 일괄 실행해 주세요.";
+/** 문서함 고르기를 허용한 앱(2026-11-26, 0131) — 고른 문서로도 파일 필수를 채운다 */
+export const BATCH_FILES_OR_DOCUMENTS = "파일 첨부가 꼭 필요한 앱은 '파일마다 한 건'으로 하거나, 문서함에서 문서를 골라 일괄 실행해 주세요.";
+/** 줄을 실행할 때 고른 문서함 문서에 쓸 판이 없다(지워짐·지난 판만) — 남은 줄도 같으므로 묶음을 멈춘다(0131) */
+export const BATCH_DOCUMENTS_UNAVAILABLE = '고른 문서함 문서를 더 쓸 수 없어 멈췄습니다(지워졌거나 근거로 쓸 판이 없음) — 문서를 다시 골라 새로 만들어 주세요.';
+/** 문서함 문서를 못 읽은 것을 실행기 거절로 알릴 때의 상태 — 앱 실행은 410을 쓰지 않는다(묶음 멈춤 판정 `stopReasonFor`가 가름) */
+export const BATCH_DOCUMENTS_GONE_STATUS = 410;
 /** 파일마다 한 건(2026-11-10) — 한 번에 올릴 파일 수. 직원의 '보내지 않은 첨부' 상한(20)을 실행 때 다시 붙일 몫까지 남기려고 10 */
 export const BATCH_MAX_FILES = 10;
 export const BATCH_FILE_PREFIX = 'app-batch-files';
@@ -154,6 +160,8 @@ export interface BatchView {
   judge?: boolean; judgeCorrect?: number; judgePartial?: number; judgeIncorrect?: number; judgeErrors?: number;
   /** 사람 판정(0126)과 AI 채점의 맞대기 — 사람 판정이 없으면 없음 */
   agreement?: RagEvalJudgeAgreement;
+  /** 문서함에서 고른 문서 수(0131) — 줄마다 함께 쓴다. 없으면 없음 */
+  documentCount?: number;
 }
 export interface BatchItemView {
   position: number; status: BatchItemStatus; error: string | null; conversationId: string | null; inputs: Record<string, string>;

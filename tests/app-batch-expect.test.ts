@@ -157,7 +157,7 @@ describe('목록·엑셀·연결', () => {
     expect(lib).toContain("expects: tableRows.map((r) => r.expect ?? '')");
     expect(lib).toContain("select('id, batch_id, status, expect_missing, judge_grade, judge_reason, human_grade'"); // 쪽 읽기(0123)·AI 채점(0125)
     expect(lib).toContain("select('id, batch_id, position, inputs, status, attempts, claimed_at, file, expect')");
-    expect(lib).toContain("select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id, judge')");
+    expect(lib).toContain("select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id, judge, document_ids')");
     expect(lib).toContain("'기대 핵심어는 줄마다 하나씩(줄 수와 같게) 보내 주세요.'");
     const panel = readFileSync('src/components/apps/AppBatchPanel.tsx', 'utf8');
     expect(panel).toContain('...(withExpect ? { expects: preview.expects, ...(judge ? { judge: true } : {}) } : {})');
