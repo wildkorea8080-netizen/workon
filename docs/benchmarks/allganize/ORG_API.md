@@ -10,7 +10,7 @@
 | `/api/v1/adoption-report/departments?month=YYYY-MM` | `adoption` | 부서별 도입 현황(`adoption_by_department` — 부서마다 자기 부서 기록만) |
 | `/api/v1/usage-summary?by=agent\|department&from=YYYY-MM-DD&to=YYYY-MM-DD` | `usage` | 비서별·부서별 이용통계(`usage_summary` — 횟수·토큰·원가·모델·활동). 기간은 한국 날짜, 비우면 최근 30일, 366일까지 |
 | `/api/v1/feedback-summary?from=YYYY-MM-DD&to=YYYY-MM-DD` | `usage` | (2026-11-11, 0086) 답변 평가 요약 — 관리자 통계 '답변 평가'와 같은 `loadFeedbackSummary`: 전체·비서별 도움됨·아쉬움·도움됨 비율·이유 수·줄인 시간(자기 신고, 분)·고른 답 수. 기간 규칙은 관리자 화면과 같다(비우면 최근 30일, 1년까지, 없는 날짜 400) |
-| `/api/v1/app-runs` | `usage` | (2026-11-11, 0086) 입력형 앱 실행 현황(최근 30일) — 관리자 통계와 같은 `loadAppRunOverview`(0046 `app_run_states`): 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름·마지막 중단 시각. 개인 앱은 이름 없이 한 묶음 |
+| `/api/v1/app-runs` | `usage` | (2026-11-11, 0086) 입력형 앱 실행 현황(`?from=&to=` 한국 날짜·끝 날 포함, 비우면 최근 30일·1년까지, 틀리면 400 — 2026-11-26) — 관리자 통계와 같은 `loadAppRunOverview`(0133 `app_run_states_between` — 끝 시각까지 DB에서): 앱마다 실행·완료·중단·확인 필요·응답 없음·자주 멈춘 단계 이름·마지막 중단 시각. 개인 앱은 이름 없이 한 묶음 |
 | `/api/v1/documents?status=&agent=&limit=&cursor=` | `documents` | (2026-11-23, 0099) **문서함 목록** — 아래 '문서함 목록' 절 |
 | `POST /api/v1/documents/upload-url` · `POST /api/v1/documents` | `documents_write` | (2026-11-24, 0100) **문서 올리기·새 판 올리기** — 아래 '문서 올리기' 절 |
 | `POST /api/v1/chat` | `chat` | (2026-11-24, 0101) **비서에게 묻기** — 아래 '비서에게 묻기' 절. 이 끝점만 **글(답·근거 발췌)을 밖으로 낸다** |
