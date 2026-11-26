@@ -102,7 +102,7 @@ describe('② 더 띄우기', () => {
     const route = read('src/app/api/cron/app-schedules/route.ts');
     expect(route).toContain('workerSecretRejection(request)');
     expect(route).toContain('pendingBatchRows().then((pending) => dispatchBatchLanes({ baseUrl: laneBaseUrl(APP_URL), authorization: header, lanes: batchExtraLanes(pending) }))');
-    expect(route).toMatch(/Promise\.all\(\[[\s\S]*runDueBatchItems\(batchDeps\(\)\)[\s\S]*lanes,\s*\]\)/);
+    expect(route).toMatch(/Promise\.all\(\[[\s\S]*runDueBatchItems\(batchDeps\(\)\)[\s\S]*\r?\n {4}lanes,\r?\n[\s\S]*\]\);/);
     expect(route).not.toMatch(/request\.url|headers\.get\('host'\)/);
   });
 });

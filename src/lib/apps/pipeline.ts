@@ -27,6 +27,8 @@ export type AppExternalLookupRunner = (query: string, endpoint: string | undefin
 export type AppDocSearchRunner = (query: string, agent?: string, tags?: string[]) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
 /** 웹 검색 조회(2026-11-26) — 실행기가 이번 턴의 기관 스위치·앱 능력·모델로 AI 웹 검색을 부른다(`app-web-lookup.ts`). `gap` = 웹에서 근거를 찾지 못함 */
 export type AppWebSearchRunner = (query: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
+/** 데이터 표 계산 조회(2026-11-26) — 질문 하나로 계산한 결과 글·쓴 표 파일(문서 원본 주소), 계산하지 못했으면 gap */
+export type AppDataTableRunner = (query: string) => Promise<{ content: string; sources: AppStepSource[]; isError?: boolean; gap?: boolean }>;
 export const APP_LOOKUP_SOURCES_MAX = 10;
 
 /**
@@ -39,6 +41,7 @@ export function appLookupRunner(
   docSearch?: AppDocSearchRunner,
   externalLookup?: AppExternalLookupRunner,
   webSearch?: AppWebSearchRunner,
+  dataTable?: AppDataTableRunner,
 ): AppLookupRunner {
   return async (tool, query, article, agent, tags, external) => {
     const spec = APP_LOOKUP_TOOLS[tool];
@@ -53,6 +56,11 @@ export function appLookupRunner(
     if (spec.capability === 'web_search') {
       if (!webSearch) return { content: '이 실행에서는 웹 검색을 쓸 수 없습니다.', sources: [], isError: true };
       return webSearch(query);
+    }
+    // 데이터 표 계산(2026-11-26) — 이 앱 비서의 table_merge.agent_documents(부르는 쪽이 다시 본다)
+    if (spec.capability === 'table_merge') {
+      if (!dataTable) return { content: '이 실행에서는 데이터 표 계산을 쓸 수 없습니다.', sources: [], isError: true };
+      return dataTable(query);
     }
     if (spec.capability === 'doc_search') {
       if (!docSearch || (!agent && !ctx.capabilities.doc_search)) return { content: '이 앱 비서에 문서 찾기가 꺼져 있습니다. 앱 설정을 다시 저장하거나 관리자에게 문의하세요.', sources: [], isError: true };
@@ -280,6 +288,8 @@ export async function runAppIntermediateSteps(args: {
       record.kind = 'lookup'; record.query = query; if (article) record.article = article; else delete record.article;
       if (each) record.queries = queries; else delete record.queries;
       const docLookup = APP_LOOKUP_TOOLS[lookup.tool].capability === 'doc_search';
+      // 데이터 표 계산(2026-11-26)의 출처도 문서 원본 주소(쓴 표 파일)
+      const docLinks = docLookup || APP_LOOKUP_TOOLS[lookup.tool].capability === 'table_merge';
       // 근거가 없을 수 있는 조회(문서 찾기·웹 검색, 2026-11-26) — 못 찾으면 멈추지 않고 정보 공백으로
       const gapLookup = Boolean(APP_LOOKUP_TOOLS[lookup.tool].capability);
       if (docLookup) record.docSearch = true; else delete record.docSearch;
@@ -290,7 +300,7 @@ export async function runAppIntermediateSteps(args: {
       if (article === null) throw new AppInputError(`${args.steps[index].name}: 조문 번호는 15 또는 제15조처럼 숫자로 입력해 주세요.`);
       if (!args.lookup) throw new AppInputError(`${args.steps[index].name}: 이 실행에서는 공공 데이터 조회를 쓸 수 없습니다.`);
       // 공공 데이터는 바깥 링크(http·https)만, 기관 연동 시스템은 https만, 문서 찾기는 문서 원본 주소만
-      const linkOk = (url: string) => (docLookup ? APP_DOC_SOURCE_PATH.test(url) : APP_LOOKUP_TOOLS[lookup.tool].external ? /^https:\/\//.test(url) : /^https?:\/\//.test(url));
+      const linkOk = (url: string) => (docLinks ? APP_DOC_SOURCE_PATH.test(url) : APP_LOOKUP_TOOLS[lookup.tool].external ? /^https:\/\//.test(url) : /^https?:\/\//.test(url));
       const found: Array<{ query: string; content: string }> = []; const sources: AppStepSource[] = []; const gapQueries: string[] = [];
       const many = () => found.length > 1;
       const render = () => found.map((f, i) => (many() ? `[조회 ${i + 1}] ${f.query}\n${f.content}` : f.content)).join('\n\n');

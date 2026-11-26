@@ -205,7 +205,7 @@ export async function prepareTurn(
   if (libraryIds.length && (!appStepInputs || !definition.value?.attachments?.library || conversation_id)) return reject('이 앱은 문서함에서 문서를 고를 수 없습니다.', 400);
   if (body.resume_message_id !== undefined) {
     if (typeof body.resume_message_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.resume_message_id) || !appStepInputs || !definition.value?.steps?.length || conversation_id) return reject('입력형 앱의 중단 기록을 선택해 새 실행으로 이어 주세요.', 400);
-    if (!isInputOnlyRun(Object.keys(agent.capabilities ?? {}), (Array.isArray(attachment_ids) ? attachment_ids.length : 0) + libraryIds.length) || attachedImages.length) return reject('자료·도구가 연결된 앱은 근거가 바뀔 수 있으므로 새로 실행해 주세요.', 409);
+    if (!isInputOnlyRun(agent.capabilities ?? {}, (Array.isArray(attachment_ids) ? attachment_ids.length : 0) + libraryIds.length) || attachedImages.length) return reject('자료·도구가 연결된 앱은 근거가 바뀔 수 있으므로 새로 실행해 주세요.', 409);
     const { data: saved, error: resumeError } = await supabaseAdmin.from('messages').select('id,agent_version,source_references,conversation:conversations!inner(user_id,agent_id)').eq('id', body.resume_message_id).eq('role', 'assistant').eq('conversation.user_id', actor.userId).eq('conversation.agent_id', agent_id).maybeSingle();
     if (resumeError) return reject('중단 기록을 확인하지 못했습니다.', 503);
     const owner = Array.isArray(saved?.conversation) ? saved.conversation[0] : saved?.conversation;

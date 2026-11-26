@@ -5,9 +5,10 @@ import type { AppStepRecord, AppStepSource } from './pipeline';
  * 이어 실행에서 다시 쓰는 조회 단계(2026-11-09) — 조회 단계로 남긴다(그래야 다음 단계에 '조회 자료'로 가고, 문서 찾기는 정보 공백이 이어진다).
  * 저장된 출처는 믿지 않고 꼴(공공 데이터는 http·https, 문서 찾기는 문서 원본 주소)만 다시 거른다
  */
-function reusedLookup(saved: Record<string, unknown>, docSearch: boolean): Partial<AppStepRecord> {
+function reusedLookup(saved: Record<string, unknown>, docSearch: boolean, dataTable = false): Partial<AppStepRecord> {
   if (saved.kind !== 'lookup') return {};
-  const ok = (url: unknown) => typeof url === 'string' && (docSearch ? APP_DOC_SOURCE_PATH.test(url) : /^https?:\/\//.test(url));
+  // 데이터 표 계산(2026-11-26)의 출처도 문서 원본 주소
+  const ok = (url: unknown) => typeof url === 'string' && (docSearch || dataTable ? APP_DOC_SOURCE_PATH.test(url) : /^https?:\/\//.test(url));
   const sources: AppStepSource[] = Array.isArray(saved.sources)
     ? saved.sources.filter((s): s is { title?: unknown; url: string } => Boolean(s) && typeof s === 'object' && ok((s as { url?: unknown }).url)).slice(0, 10).map((s) => ({ title: String(s.title ?? '').slice(0, 200), url: s.url }))
     : [];
@@ -97,7 +98,7 @@ export function restoreAppSteps(definition: AppDefinition, references: Record<st
       // 기록의 갈래가 지금 정의·입력으로 고를 갈래와 다르면(갈래를 고쳤거나 없앴음) 다른 지시로 만든 결과라 재사용하지 않는다
       const branch = chooseBranch(step, judged)?.name;
       if ((typeof saved.branch === 'string' ? saved.branch : undefined) !== branch) return fail('단계의 갈래가 기록과 다릅니다. 새로 실행해 주세요.');
-      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...loopState(saved as Record<string, unknown>, false), ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}), ...(step.lookup ? reusedLookup(saved as Record<string, unknown>, APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search') : {}) }); completed++;
+      records.push({ name: step.name, status: 'completed', output: saved.output, reused: true, ...loopState(saved as Record<string, unknown>, false), ...(branch ? { branch } : {}), ...(step.repeat && typeof saved.repeated === 'number' ? { repeated: saved.repeated, ...(saved.repeatedFiles === true ? { repeatedFiles: true as const } : {}) } : {}), ...(step.lookup ? reusedLookup(saved as Record<string, unknown>, APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search', APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'table_merge') : {}) }); completed++;
       const target = branchJumpIndex(index, step.branches?.find(b => b.name === branch), steps.length);
       if (target !== null) skipUntil = Math.max(skipUntil, target);
     } else if (!failed && saved.status === 'skipped') {
@@ -126,8 +127,11 @@ const ATTACHMENT_ONLY_CAPABILITIES: ReadonlySet<string> = new Set(['file_read', 
  * 켜진 능력이 첨부 읽기뿐이고 이번 실행에 파일이 없을 때만 참. 문서 찾기·공공 데이터 같은 능력은 근거가 바뀔 수 있어 거짓.
  * 사진은 `image` 능력이 켜진 비서만 받으므로(그 밖은 prepare가 거절) 능력 조건이 사진도 막는다.
  */
-export function isInputOnlyRun(capabilityIds: readonly string[], attachmentCount: number): boolean {
-  return attachmentCount === 0 && capabilityIds.every(id => ATTACHMENT_ONLY_CAPABILITIES.has(id));
+export function isInputOnlyRun(capabilities: readonly string[] | object, attachmentCount: number): boolean {
+  const ids = Array.isArray(capabilities) ? capabilities : Object.keys(capabilities);
+  // 비서 문서함의 표 파일로 계산(2026-11-26)하면 근거가 문서함에 기대므로 입력만 쓰는 실행이 아니다
+  const dataFiles = !Array.isArray(capabilities) && (capabilities as { table_merge?: { agent_documents?: unknown } }).table_merge?.agent_documents === true;
+  return attachmentCount === 0 && !dataFiles && ids.every(id => ATTACHMENT_ONLY_CAPABILITIES.has(id));
 }
 
 /**

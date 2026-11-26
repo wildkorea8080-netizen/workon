@@ -1,7 +1,7 @@
 // src/lib/agent-patch.ts
 import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabilities/settings';
-import { appLookupConnectors, appUsesDocSearchLookup, appUsesWebSearchLookup, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
+import { appLookupConnectors, appUsesDataTableLookup, appUsesDocSearchLookup, appUsesWebSearchLookup, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
 
 /**
  * 비서 수정 요청을 두 갈래로 나눈다.
@@ -114,6 +114,10 @@ export function splitAgentBody(
     // 웹 검색 조회(2026-11-26)는 앱의 웹 검색 능력이 켜져 있어야 돈다(기관 스위치는 실행 때 본다)
     if (appUsesWebSearchLookup(result.settings.app_definition) && !result.settings.capabilities.web_search) {
       return fail('웹 검색 단계를 쓰려면 앱 능력의 웹 검색을 켜 주세요.');
+    }
+    // 데이터 표 계산(2026-11-26)은 앱의 '문서함의 표 파일로도 계산'이 켜져 있어야 돈다
+    if (appUsesDataTableLookup(result.settings.app_definition) && result.settings.capabilities.table_merge?.agent_documents !== true) {
+      return fail("데이터 표 계산 단계를 쓰려면 앱 능력의 표 합치기에서 '문서함의 표 파일로도 계산'을 켜 주세요.");
     }
   }
 

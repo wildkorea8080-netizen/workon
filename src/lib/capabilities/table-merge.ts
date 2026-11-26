@@ -82,7 +82,7 @@ export interface TableMergeDeps {
 const FILTER_OPS = ['=', '!=', '>', '>=', '<', '<=', 'contains'] as const;
 const AGG_FNS = ['sum', 'count', 'avg', 'min', 'max'] as const;
 
-class InputError extends Error {}
+export class InputError extends Error {}
 
 function bad(path: string, what: string): never {
   throw new InputError(`지시 형식이 올바르지 않습니다: ${path}${what}`);
@@ -125,7 +125,7 @@ function record<T>(v: unknown, path: string, item: (x: unknown, p: string) => T)
   return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, item(x, `${path}.${k}`)]));
 }
 
-function parseSpec(raw: unknown): CombineSpec {
+export function parseSpec(raw: unknown): CombineSpec {
   if (!isObject(raw)) bad('spec', '이 없습니다.');
   only(raw, 'spec', ['sources', 'filter', 'group_by', 'aggregate', 'sort', 'add_source_column', 'total_row']);
 
@@ -296,7 +296,7 @@ function lineageLines(lineage: Lineage): string[] {
 }
 
 /** 결과 글과 보여 준 숫자. 표는 READ_TABLE_CHARS에서 멈춘다 — 넓은 표는 30행도 수십만 자가 된다 */
-function renderResult(
+export function renderResult(
   columns: ResultColumn[],
   rows: ResultValue[][],
   total: ResultValue[] | null,
@@ -342,7 +342,7 @@ function renderResult(
 
 // ── 능력 ────────────────────────────────────────────────────
 
-const SPEC_SCHEMA = {
+export const SPEC_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['sources'],

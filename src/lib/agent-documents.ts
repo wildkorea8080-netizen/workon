@@ -4,6 +4,7 @@ import { pagedRows } from '@/lib/paged-select';
 import { logSystem } from '@/lib/logger';
 import { noda, nodaErrorFields, nodaTenant, type NodaClient } from '@/lib/noda';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
+import { removeDataExtracts } from '@/lib/capabilities/agent-data-files';
 
 /**
  * 지운 비서의 참고 문서 치우기(`softDeleteAgent`가 부른다).
@@ -33,6 +34,8 @@ export interface AgentDocumentsDeps {
     deleteRows(ids: string[]): Promise<boolean>;
     markDeleting(ids: string[]): Promise<boolean>;
     removeFileIfUnused(path: string): Promise<void>;
+    /** 비서 데이터 파일로 읽어 둔 표(2026-11-26) — 던지지 않는다 */
+    removeDataExtracts?(ids: string[]): Promise<void>;
   };
   noda: Pick<NodaClient, 'deleteTenant'>;
   log: (p: Parameters<typeof logSystem>[0]) => Promise<void>;
@@ -120,6 +123,8 @@ export async function removeAgentDocuments(
     return { removed: 0, kept: keptIds.length, nodaCleared };
   }
 
+  // 읽어 둔 표(2026-11-26)는 문서 id마다 하나 — 행을 지웠으니 함께 지운다
+  await (deps.store.removeDataExtracts ?? removeDataExtracts)(toDelete.map((r) => r.id)).catch(() => {});
   // 같은 파일을 다른 비서의 문서가 함께 쓰고 있으면 도우미가 남겨 둔다
   const paths = [...new Set(toDelete.map((r) => r.storage_path).filter((p): p is string => Boolean(p)))];
   for (const path of paths) {

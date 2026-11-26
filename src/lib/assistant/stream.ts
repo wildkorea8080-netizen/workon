@@ -21,6 +21,7 @@ import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type N
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
 import { appDocSearchRunner } from '@/lib/apps/app-doc-lookup';
 import { appWebSearchRunner } from '@/lib/apps/app-web-lookup';
+import { appDataTableRunner } from '@/lib/apps/app-data-lookup';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { callExternalLookup } from '@/lib/apps/outbound/lookup';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
@@ -55,6 +56,8 @@ export interface StreamTurnDeps {
   enqueueOutbound?: typeof enqueueOutbound;
   /** 앱의 기관 연동 시스템 조회 단계(0102)가 부르는 곳 — 기본은 `callExternalLookup`. 시험이 바꿔 끼운다 */
   externalLookup?: typeof callExternalLookup;
+  /** 데이터 표 계산 조회(2026-11-26)의 목록·표·모델 — 시험이 바꿔 끼운다 */
+  dataTableDeps?: Partial<import('@/lib/apps/app-data-lookup').AppDataLookupDeps>;
   /** 사용량 예약 풀기(0122) — 시험이 바꿔 끼운다 */
   reservationIo?: ReservationIo;
 }
@@ -415,7 +418,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
   let result: LoopResult;
   const appRecords: AppStepRecord[] = turn.appResumeRecords?.map(record => ({ ...record })) ?? (turn.appSteps ?? []).map(step => ({ name: step.name, status: 'pending' }));
   // 고른 문서도 원자료다 — 이어 실행은 원자료가 바뀌지 않는 입력만 실행에서(문서가 바뀌면 같은 결과가 아니다)
-  const savedInputs = isInputOnlyRun(Object.keys(turn.ctx.capabilities), turn.ctx.attachments.length + (turn.appDocuments?.length ?? 0)) ? turn.appStepInputs : undefined;
+  const savedInputs = isInputOnlyRun(turn.ctx.capabilities, turn.ctx.attachments.length + (turn.appDocuments?.length ?? 0)) ? turn.appStepInputs : undefined;
   const updateStep = (index: number) => send({ event: 'app_step', data: { index, total: appRecords.length, step: { ...appRecords[index] } } });
   // 모델을 한 번 더 부르기 전마다 기관 한도·모델 정책을 다시 본다 — 긴 첨부 추리기와 중간 단계가 같은 검사를 쓴다
   const guard = async () => {
@@ -447,7 +450,9 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
         // 기관 연동 시스템 조회(0102) — 이 턴의 기관·앱으로, 승인된 곳인지는 부를 때마다 다시 본다
         (query, endpoint, action) => (deps.externalLookup ?? callExternalLookup)({ organizationId: turn.ctx.organizationId, agentId: turn.ctx.agentId, appName: turn.appName ?? '앱', appVersion: turn.ctx.agentVersion }, { endpointId: endpoint, action, query }),
         // 웹 검색 조회(2026-11-26) — 기관 스위치(대화 준비가 읽음)·앱 능력·모델을 부를 때마다 보고, 쓴 토큰·검색 횟수를 이 실행의 사용량에
-        appWebSearchRunner({ ctx: turn.ctx, model: turn.modelId, usage: progress.usage, guard })),
+        appWebSearchRunner({ ctx: turn.ctx, model: turn.modelId, usage: progress.usage, guard }),
+        // 데이터 표 계산(2026-11-26) — 이 앱 비서 문서함의 표 파일로, AI는 지시만·숫자는 엔진. 쓴 토큰은 이 실행의 사용량에
+        appDataTableRunner({ ctx: turn.ctx, model: turn.modelId, usage: progress.usage, guard, ...(deps.dataTableDeps ? { deps: deps.dataTableDeps } : {}) })),
     }) : null;
     result = await runToolLoop(
       {

@@ -12,6 +12,7 @@ import { autoIndexDeps } from '@/lib/document-references-db';
 import { budgetAlertDeps, quickBudgetAlertDue, runBudgetAlerts } from '@/lib/budget-alerts';
 import { criticalAlertDeps, runCriticalAlert } from '@/lib/critical-alert';
 import { fillLibraryContent, libraryFillDeps } from '@/lib/library-content-fill';
+import { dataPrefillDeps, prefillDataExtracts } from '@/lib/capabilities/agent-data-files';
 
 export const dynamic = 'force-dynamic';
 // 실행 하나가 단계 3개 + 최종 답까지 수 분 걸릴 수 있다 — 실행기의 시간 예산(180초)보다 길게
@@ -38,7 +39,8 @@ export async function GET(request: Request) {
   // 자료함 내용 글 채우기(2026-11-25, 0120) — 내용을 아직 확인하지 않은 자료함 파일 두 개씩(사본 읽기만, 모델 없음). 던지지 않는다
   // 일괄 실행 전용 실행기 더 띄우기(2026-11-26) — 기다리는 줄이 많으면 `/api/cron/app-batches`를 1~3번 더 불러 나란히(못 세거나 못 띄우면 이 실행기 몫만)
   const lanes = pendingBatchRows().then((pending) => dispatchBatchLanes({ baseUrl: laneBaseUrl(APP_URL), authorization: header, lanes: batchExtraLanes(pending) })).catch(() => null);
-  const [outbound, batches, result, notices, references, budget, critical, library, batchLanes] = await Promise.all([
+  // 비서 데이터 파일 미리 읽어 두기(2026-11-26) — 아직 읽어 두지 않은 표 파일 두 개씩(원본 읽기만, 모델 없음). 던지지 않는다
+  const [outbound, batches, result, notices, references, budget, critical, library, batchLanes, dataFiles] = await Promise.all([
     dispatchDueDeliveries(outboundDeps(), { limit: 20, budgetMs: 60_000 }),
     runDueBatchItems(batchDeps()),
     runDueSchedules(scheduleDeps()),
@@ -49,8 +51,9 @@ export async function GET(request: Request) {
     runCriticalAlert(criticalAlertDeps()).catch(() => null),
     libraryFillDeps().then(fillLibraryContent).catch(() => null),
     lanes,
+    prefillDataExtracts(dataPrefillDeps()).catch(() => null),
   ]);
-  return NextResponse.json({ ok: true, data: { ...result, outbound, batches, batchLanes, notices, references, budget, critical, library } });
+  return NextResponse.json({ ok: true, data: { ...result, outbound, batches, batchLanes, notices, references, budget, critical, library, dataFiles } });
 }
 
 /** pg_cron `net.http_post`는 POST로 부른다 — 같은 자격·같은 일 */

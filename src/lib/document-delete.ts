@@ -8,6 +8,7 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { recordAgentEvent } from '@/lib/agent-store';
 import { removeStorageFileIfUnused } from '@/lib/document-files';
+import { removeDataExtracts } from '@/lib/capabilities/agent-data-files';
 import { noda, nodaTenant } from '@/lib/noda';
 import { logSystem } from '@/lib/logger';
 
@@ -73,6 +74,8 @@ export async function deleteAgentDocument(
   // 여러 비서에 한 번에 올린 문서는 저장소 파일 하나를 함께 쓴다.
   // 다른 행이 남아 있거나 세지 못하면 파일을 지우지 않는다.
   if (doc.storage_path) await removeStorageFileIfUnused(doc.storage_path);
+  // 비서 데이터 파일로 읽어 둔 표(2026-11-26) — 문서 id로 하나뿐이라 함께 지운다(없으면 그만, 던지지 않음)
+  await removeDataExtracts([doc.id]);
 
   if (doc.agent_id) {
     await recordAgentEvent(doc.agent_id, 'document_removed', actorUserId, { file_name: doc.file_name, ...(via ? { via } : {}) });
