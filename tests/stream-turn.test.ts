@@ -855,3 +855,26 @@ describe('앱 실행의 사용량 예약(0122)', () => {
     expect(r.release).not.toHaveBeenCalled();
   });
 });
+
+describe('앱 결과를 여러 곳에 보내기(2026-11-26)', () => {
+  const ep = (n: number) => `0000000${n}-0000-4000-8000-000000000000`;
+  it('첫 보낼 곳과 더 보낼 곳마다 보내기 기록 하나 — 동작은 곳마다, 첫 곳과 같은 곳은 한 번만', async () => {
+    setLlmAdapterForTests(adapter());
+    const enqueueOutbound = vi.fn(async () => 'queued' as const);
+    await run(turn({
+      appStepInputs: { topic: 'x' }, isNewConversation: false,
+      appDeliverEndpointId: ep(1), appDeliverAction: 'draft',
+      appDeliverMore: [{ endpointId: ep(2), action: 'notify' }, { endpointId: ep(1) }, { endpointId: ep(3) }],
+    }), undefined, { enqueueOutbound });
+    const calls = enqueueOutbound.mock.calls.map((c) => (c as unknown as [{ endpointId: string; action?: string; messageId: string }])[0]);
+    expect(calls.map((c) => [c.endpointId, c.action ?? null])).toEqual([[ep(1), 'draft'], [ep(2), 'notify'], [ep(3), null]]);
+    expect(new Set(calls.map((c) => c.messageId)).size).toBe(1);
+  });
+  it('첫 보낼 곳이 없거나 시험 판 실행이면 더 보낼 곳도 넣지 않는다', async () => {
+    setLlmAdapterForTests(adapter());
+    const enqueueOutbound = vi.fn(async () => 'queued' as const);
+    await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverMore: [{ endpointId: ep(2) }] }), undefined, { enqueueOutbound });
+    await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverEndpointId: ep(1), appDeliverMore: [{ endpointId: ep(2) }], appDraftSavedAt: '2026-11-26T00:00:00Z' }), undefined, { enqueueOutbound });
+    expect(enqueueOutbound).not.toHaveBeenCalled();
+  });
+});

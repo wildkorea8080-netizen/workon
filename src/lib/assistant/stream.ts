@@ -487,7 +487,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
         await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
           userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',
           chunks: turn.chunks, links: [], files: [], attachments: [], agentVersion: turn.ctx.agentVersion,
-          documentsSkipped: turn.documentsSkipped, docTags: turn.docTags, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appDraftSavedAt: turn.appDraftSavedAt, appMaterial, appDocuments: turn.appDocuments }));
+          documentsSkipped: turn.documentsSkipped, docTags: turn.docTags, basisDate: turn.basisDate, appSteps: appRecords, appInputs: savedInputs, appResumeFrom: turn.appResumeFrom, appDraftSavedAt: turn.appDraftSavedAt, appMaterial, appDocuments: turn.appDocuments }));
       } catch { /* A failed persistence call must not suppress the SSE error or usage log. */ }
     }
     // 원문(결제 상태·키 오류 등)은 운영 기록에만 남기고 직원에게는 할 일을 알려 주는 안내만 보낸다.
@@ -557,12 +557,18 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
       numberCheck,
       documentsSkipped: turn.documentsSkipped,
       docTags: turn.docTags,
+      basisDate: turn.basisDate,
       verify,
     })
   );
   // 앱 결과 보내기(0076) — 끝까지 마친 실행만, 저장된 답변을 보낼 차례에 넣는다(보내기는 앱 예약 실행기가 5분마다). 실패해도 답에는 영향 없음
   if (shouldDeliver({ endpointId: turn.appDeliverEndpointId, draft: Boolean(turn.appDraftSavedAt), saved: !saveError, text: result.text, steps: appRecords })) {
     await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(turn.appDeliverAction ? { action: turn.appDeliverAction } : {}) });
+    // 더 보낼 곳(2026-11-26) — 곳마다 보내기 기록 하나(사람 확인·다시 보내기·알림은 곳마다 따로). 하나가 실패해도 나머지는 넣는다
+    for (const more of turn.appDeliverMore ?? []) {
+      if (more.endpointId === turn.appDeliverEndpointId) continue;
+      await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: more.endpointId, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(more.action ? { action: more.action } : {}) });
+    }
   }
   if (saveError) {
     // 답변은 이미 흘러갔으므로 요청을 실패시킬 수 없다. 저장 실패는 알린다 —

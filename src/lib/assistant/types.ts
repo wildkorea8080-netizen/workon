@@ -41,6 +41,8 @@ export interface PreparedTurn {
   appDeliverEndpointId?: string;
   /** 보낼 곳의 동작 키(0081) */
   appDeliverAction?: string;
+  /** 같은 결과를 더 보낼 곳(2026-11-26, 앱 정의 `deliverMore`) — 곳마다 동작 */
+  appDeliverMore?: Array<{ endpointId: string; action?: string }>;
   /** 긴 첨부를 나눠 읽을 조각(`appAttachmentMaterial`) — 실행기가 조각마다 추린 뒤 사용자 메시지에 덧붙인다 */
   appMaterialPieces?: { pieces: string[]; chars: number };
   /** 이번 실행의 원자료 파일 이름(올린 파일 다음 문서함에서 고른 문서, 원자료 자리와 같은 순서) — 파일마다 반복 단계가 쓴다(2026-11-07) */
@@ -68,6 +70,8 @@ export interface PreparedTurn {
   documentsSkipped: boolean;
   /** '문서 좁히기'로 고른 태그로 찾은 턴 — 답변 행 `source_references.doc_tags`(2026-11-23) */
   docTags?: string[];
+  /** 적용 기준일로 찾은 턴 — 답변 행 `source_references.basis_date`(2026-11-26) */
+  basisDate?: string;
   /** 문서 찾기에서 유사도 하한으로 뺀 조각 수(NODA `dropped`). NODA를 부르지 않았으면 null. 사용 기록 `details.doc_dropped` */
   docDropped: number | null;
   /** NODA 답변 검증에 보낼 근거(`PrepareResult.verifySources`). 비었으면 검증하지 않는다 */

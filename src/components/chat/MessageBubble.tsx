@@ -14,6 +14,7 @@ import type { RetrievedChunk } from '@/lib/db';
 import { formatFileSize } from '@/lib/file-size';
 import { NUMBER_CHECK_NOTE } from '@/lib/assistant/number-check';
 import { docTagsNote } from '@/lib/chat-doc-tags';
+import { basisDateNote } from '@/lib/chat-basis-date';
 import { NUMBER_RECHECK_NOTE, type RecheckedNumber } from '@/lib/assistant/number-research';
 
 interface ToolLink {
@@ -47,6 +48,8 @@ interface MessageBubbleProps {
   documentsSkipped?: boolean;
   /** '문서 좁히기'로 고른 태그로 찾은 답(2026-11-23) — 말풍선 위에 작게 */
   docTags?: string[];
+  /** 적용 기준일로 찾은 답(2026-11-26) */
+  basisDate?: string;
   /** 말풍선 위 작은 이름표(예: '근거로 고쳐 쓴 답', 2026-11-08) */
   badge?: string;
   /** 참고 문서를 불러오지 못해 거절된 안내 — 오류가 아니라 안내로 그리고 단추를 붙인다 */
@@ -62,7 +65,7 @@ interface MessageBubbleProps {
 
 export default function MessageBubble({
   role, content, imagePreviews, attachments, sources, links, files, numberCheck, numberRechecked,
-  documentsSkipped, docTags, badge, refusal, refusalDisabled, onRetry, onSkipDocuments, onOpenSource, error,
+  documentsSkipped, docTags, basisDate, badge, refusal, refusalDisabled, onRetry, onSkipDocuments, onOpenSource, error,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = role === 'user';
@@ -96,6 +99,9 @@ export default function MessageBubble({
         )}
         {!isUser && !error && !documentsSkipped && docTags && docTags.length > 0 && (
           <span className="mb-1 text-[11px] text-slate-500">{docTagsNote(docTags)}</span>
+        )}
+        {!isUser && !error && !documentsSkipped && basisDate && (
+          <span className="mb-1 text-[11px] text-slate-500">{basisDateNote(basisDate)}</span>
         )}
         {!isUser && !error && badge && (
           <span className="mb-1 text-[11px] font-semibold text-ws-accent-text">{badge}</span>

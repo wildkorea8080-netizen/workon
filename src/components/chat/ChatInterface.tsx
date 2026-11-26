@@ -9,6 +9,7 @@ import { fetchConversation, loadStep, prevAfterDiscard } from '@/lib/conversatio
 import SourcePanel from './SourcePanel';
 import { PendingFileChips, ConversationAttachments } from './AttachmentChips';
 import DocTagFilter from './DocTagFilter';
+import { isBasisDate } from '@/lib/chat-basis-date';
 import { useFileAttachments } from './useFileAttachments';
 import ReusableFilePicker from './ReusableFilePicker';
 import AnswerFeedback from './AnswerFeedback';
@@ -66,6 +67,8 @@ interface Message {
   documentsSkipped?: boolean;
   /** '문서 좁히기'로 고른 태그로 찾은 답(2026-11-23) */
   docTags?: string[];
+  /** 적용 기준일로 찾은 답(2026-11-26) */
+  basisDate?: string;
   /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
   refusal?: boolean;
   error?: string;
@@ -85,6 +88,8 @@ interface TurnRequest {
   attachmentIds: string[];
   /** '문서 좁히기'로 고른 태그 — 거절 뒤 '다시 묻기'도 같은 태그로 */
   docTags: string[];
+  /** 적용 기준일(2026-11-26) — 비면 오늘 기준 */
+  basisDate: string;
 }
 
 /** 서버 거절 코드 — 문서 보관소(NODA)를 부르지 못했다 */
@@ -171,6 +176,8 @@ export default function ChatInterface({
   // '문서 좁히기'(2026-11-23) — 문서 찾기가 켜진 비서만. 다른 비서로 바꾸면 비운다(아래 effect)
   const canFilterDocs = selectedAgent.capabilities !== undefined && hasDocSearch(selectedAgent.capabilities);
   const [docTags, setDocTags] = useState<string[]>([]);
+  // 적용 기준일(2026-11-26) — 비면 오늘. 그날 시행 중인 판으로 찾는다
+  const [basisDate, setBasisDate] = useState('');
   useEffect(() => { setDocTags([]); }, [selectedAgent.id]);
   // 보낼 때마다 올려 대화의 첨부 목록을 다시 불러오게 한다
   const [attachmentsRefresh, setAttachmentsRefresh] = useState(0);
@@ -260,6 +267,7 @@ export default function ChatInterface({
                 number_check?: { unverified?: string[]; rechecked?: unknown };
                 documents_skipped?: boolean;
                 doc_tags?: unknown;
+                basis_date?: unknown;
                 revision?: unknown;
                 app_draft?: unknown;
               };
@@ -291,6 +299,7 @@ export default function ChatInterface({
               docTags: m.role === 'assistant' && Array.isArray(m.source_references?.doc_tags) && m.source_references.doc_tags.every((t) => typeof t === 'string') && m.source_references.doc_tags.length
                 ? (m.source_references.doc_tags as string[])
                 : undefined,
+              basisDate: m.role === 'assistant' && isBasisDate(m.source_references?.basis_date) ? m.source_references.basis_date : undefined,
               revision: m.role === 'assistant' ? readRevision(m.source_references?.revision) : undefined,
             })
           )
@@ -421,6 +430,7 @@ export default function ChatInterface({
         images,
         attachmentIds: fileIds,
         docTags: canFilterDocs ? docTags : [],
+        basisDate: canFilterDocs && isBasisDate(basisDate) ? basisDate : '',
       },
       sentChips,
       false,
@@ -465,6 +475,7 @@ export default function ChatInterface({
           attachment_ids: req.attachmentIds.length > 0 ? req.attachmentIds : undefined,
           skip_documents: skipDocuments ? true : undefined,
           doc_tags: !skipDocuments && req.docTags.length > 0 ? req.docTags : undefined,
+          basis_date: !skipDocuments && req.basisDate ? req.basisDate : undefined,
         }),
       });
 
@@ -516,6 +527,7 @@ export default function ChatInterface({
             files: collectedFiles.length ? [...collectedFiles] : undefined,
             documentsSkipped: skipped,
             docTags: !skipped && req.docTags.length ? [...req.docTags] : undefined,
+            basisDate: !skipped && req.basisDate ? req.basisDate : undefined,
           },
         ]);
       };
@@ -783,6 +795,7 @@ export default function ChatInterface({
               numberRechecked={msg.numberRechecked}
               documentsSkipped={msg.documentsSkipped}
               docTags={msg.docTags}
+              basisDate={msg.basisDate}
               badge={msg.appDraft ? APP_DRAFT_BADGE : undefined}
               refusal={msg.refusal}
               refusalDisabled={isLoading}
@@ -872,6 +885,13 @@ export default function ChatInterface({
           <ConversationAttachments conversationId={conversationId} refreshKey={attachmentsRefresh} />
         )}
         {canFilterDocs && <DocTagFilter key={selectedAgent.id} agentId={selectedAgent.id} value={docTags} onChange={setDocTags} disabled={isLoading} />}
+        {canFilterDocs && (
+          <label className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span>적용 기준일</span>
+            <input type="date" aria-label="적용 기준일" value={basisDate} min="1948-01-01" max="2100-12-31" disabled={isLoading} onChange={(e) => setBasisDate(e.target.value)} className="rounded border border-slate-300 px-1 py-0.5" />
+            {basisDate ? <button type="button" onClick={() => setBasisDate('')} className="underline">오늘 기준으로</button> : <span className="text-slate-400">비우면 오늘 시행 중인 판으로 찾습니다</span>}
+          </label>
+        )}
         <PendingFileChips chips={fileAttach.chips} onRemove={fileAttach.remove} />
 
         {pendingImages.length > 0 && (

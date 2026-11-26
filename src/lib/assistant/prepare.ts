@@ -1,6 +1,7 @@
 // src/lib/assistant/prepare.ts
 import type { Session } from 'next-auth';
 import { parseChatDocTags } from '@/lib/chat-doc-tags';
+import { parseChatBasisDate } from '@/lib/chat-basis-date';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { isStorageNotFound } from '@/lib/storage-error';
 import { ACTOR_SCOPE_UNAVAILABLE_MESSAGE, getActorScope, isActorScopeReadError } from '@/lib/actor-scope';
@@ -125,6 +126,10 @@ export async function prepareTurn(
   const docTagsParsed = parseChatDocTags(body.doc_tags);
   if (!docTagsParsed.ok) return reject(docTagsParsed.message, 400);
   const docTags = skipDocuments ? [] : docTagsParsed.tags;
+  // 적용 기준일(2026-11-26) — 그날 시행 중인 판으로 찾는다. 꼴이 틀리면 거절
+  const basisParsed = parseChatBasisDate(body.basis_date);
+  if (!basisParsed.ok) return reject(basisParsed.message, 400);
+  const basisDate = skipDocuments ? null : basisParsed.date;
 
   if (typeof agent_id !== 'string' || !agent_id) return reject('에이전트 ID는 필수입니다.', 400);
   if (typeof rawMessage !== 'string' || !rawMessage.trim()) return reject('메시지는 필수입니다.', 400);
@@ -290,7 +295,7 @@ export async function prepareTurn(
       : undefined;
   for (const cap of capabilities) {
     if (!cap.preflight) continue;
-    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments, previousQuestion, ...(docTags.length ? { docTags } : {}) });
+    const result = await cap.preflight({ organizationId: actor.organizationId, agentId: agent_id, message, skipDocuments, previousQuestion, ...(docTags.length ? { docTags } : {}), ...(basisDate ? { basisDate } : {}) });
     if (!result.ok) return reject(result.message, result.status, { code: result.code });
     if (result.carry !== undefined) preflight[cap.id] = result.carry;
   }
@@ -458,7 +463,7 @@ export async function prepareTurn(
       ...(body.app_inputs !== undefined ? { appName: agent.name } : {}),
       appStepInputs,
       ...(appLookupAgents.length ? { appLookupAgents } : {}),
-      ...(appStepInputs && !appDraftSavedAt && definition.value?.deliverEndpointId ? { appDeliverEndpointId: definition.value.deliverEndpointId, ...(definition.value.deliverAction ? { appDeliverAction: definition.value.deliverAction } : {}) } : {}),
+      ...(appStepInputs && !appDraftSavedAt && definition.value?.deliverEndpointId ? { appDeliverEndpointId: definition.value.deliverEndpointId, ...(definition.value.deliverAction ? { appDeliverAction: definition.value.deliverAction } : {}), ...(definition.value.deliverMore?.length ? { appDeliverMore: definition.value.deliverMore } : {}) } : {}),
       appMaterialPieces,
       ...(appFileNames?.length ? { appFileNames } : {}),
       ...(libraryRefs.length ? { appDocuments: libraryRefs } : {}),
@@ -477,6 +482,7 @@ export async function prepareTurn(
       chunks,
       documentsSkipped: prepared.some((p) => p.documentsSkipped === true),
       docTags: prepared.find((p) => p.docTags?.length)?.docTags,
+      basisDate: prepared.find((p) => p.basisDate)?.basisDate,
       docDropped: dropped ?? null,
       verifySources,
       verifyTenant,

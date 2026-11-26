@@ -38,7 +38,7 @@ describe('내용 글 다듬기·맞은 자리', () => {
     // 한 글자가 둘(서로게이트 짝)인 글도 글자 수로 센다 — DB char_length와 같다
     const emoji = libraryContentText('😀'.repeat(LIBRARY_CONTENT_MAX + 1))!;
     expect(Array.from(emoji)).toHaveLength(LIBRARY_CONTENT_MAX);
-    expect(LIBRARY_CONTENT_MAX).toBe(20_000);
+    expect(LIBRARY_CONTENT_MAX).toBe(100_000); // 0127(2026-11-26)에 20,000자에서 넓힘
   });
   it('librarySnippet — 내용에서 처음 맞은 자리 앞 30자·뒤 60자, 대소문자 무시, 이름에서 맞으면 null', () => {
     const content = `${'가'.repeat(40)} 국외 출장 여비는 Travel Rule에 따른다 ${'나'.repeat(80)}`;
@@ -54,7 +54,7 @@ describe('내용 글 다듬기·맞은 자리', () => {
     expect(librarySnippet('짧은 글 여비', 'a.hwpx', '여비')).toEqual({ before: '짧은 글 ', hit: '여비', after: '' });
   });
   it('화면 안내는 상한과 이름으로만 찾히는 경우를 밝힌다', () => {
-    expect(LIBRARY_CONTENT_SEARCH_NOTE).toContain('20,000자');
+    expect(LIBRARY_CONTENT_SEARCH_NOTE).toContain('100,000자');
     expect(LIBRARY_CONTENT_SEARCH_NOTE).toContain('이름으로만');
   });
 });
@@ -176,8 +176,9 @@ describe.skipIf(!dbUrl)('0117 — 자료함 내용 칸(시험 DB)', () => {
       expect(a.rows[0].search_text).toBe('서식.xlsx 국외 출장 여비 기준');
       const b = await file(null);
       expect(b.rows[0].search_text).toBe('서식.xlsx ');
-      await file('가'.repeat(20000));
-      for (const bad of ['', '가'.repeat(20001)]) {
+      // 0127이 CHECK를 100,000자로 넓혔다 — 시험 DB에는 둘 다 적용돼 있다
+      await file('가'.repeat(LIBRARY_CONTENT_MAX));
+      for (const bad of ['', '가'.repeat(LIBRARY_CONTENT_MAX + 1)]) {
         await db.query('SAVEPOINT s');
         await expect(file(bad)).rejects.toThrow(/check/i);
         await db.query('ROLLBACK TO SAVEPOINT s');

@@ -10,7 +10,9 @@ import { commonTenant, isOrgType } from '@/lib/org-types';
 import { getAccessScope } from '@/lib/department-scope';
 import { lawConnector } from '@/lib/connectors/law';
 import { logSystem } from '@/lib/logger';
-import { editionDayFor } from '@/lib/edition-dates';
+import { editionDayFor, kstToday } from '@/lib/edition-dates';
+import { readOriginalText } from '@/lib/source-original';
+import { pastEditionEvidence, type PastEditionDoc } from './past-editions';
 import type { RetrievedChunk } from '@/lib/db';
 import { sameLocalGovernment, type RawEvidence } from './evidence';
 import { parseLawSearch, pickArticles, splitArticles, type ProviderResult, type RegulationProviders } from './gather';
@@ -72,7 +74,7 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
   if (!agents.length) return { status: 'ok', items: [] };
   const { data: docRows, error: docErr } = await pagedRows<any>((a, b, w) => supabaseAdmin
     .from('documents')
-    .select('id, title, file_name, noda_status, replaces_id, effective_from, agent_id, organization_id, department_id, visibility', w ? { count: 'exact' } : undefined)
+    .select('id, title, file_name, storage_path, noda_status, replaces_id, effective_from, agent_id, organization_id, department_id, visibility', w ? { count: 'exact' } : undefined)
     .eq('organization_id', scope.organizationId)
     .in('agent_id', agents.map((x) => x.id))
     .order('id')
@@ -83,13 +85,25 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
     if (d.visibility !== 'organization' && !(d.visibility === 'department' && access.visibleDepartmentIds.includes(d.department_id))) continue;
     docsByAgent.set(d.agent_id, [...(docsByAgent.get(d.agent_id) ?? []), d]);
   }
+  // 과거 적용 기준일(2026-11-26) — 그날 시행 중이던 지난 판(NODA 사본을 지움)은 원본을 다시 읽어 질문 낱말이 든 문단을 근거로 더한다.
+  // 새 판의 근거는 아래 NODA 찾기 그대로('기준일 뒤' 판정도 그대로). 비서마다 판 사슬이 따로라 비서마다 고른다
+  const basis = typeof scope.basisDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(scope.basisDate.trim()) ? scope.basisDate.trim() : null;
+  const past: RawEvidence[] = [];
+  if (basis && basis < kstToday()) {
+    for (const a of agents) {
+      if (past.length >= 6) break;
+      const docs = (docsByAgent.get(a.id) ?? []) as unknown as PastEditionDoc[];
+      past.push(...(await pastEditionEvidence(docs, basis, query, readPastOriginal)));
+    }
+  }
   const vaults = agents
     .map((a) => ({ id: a.id, docs: docsByAgent.get(a.id) ?? [] }))
     .filter((a) => a.docs.some((d) => d.noda_status === 'ready'))
     .sort((x, y) => y.docs.length - x.docs.length)
     .slice(0, MAX_AGENT_VAULTS);
-  if (scope.agentId && !vaults.length) throw new Error('Selected document vault has no ready documents');
-  const items: RawEvidence[] = [];
+  if (scope.agentId && !vaults.length && !past.length) throw new Error('Selected document vault has no ready documents');
+  // 지난 판의 근거를 앞에 — 과거 기준일에 적용되던 판이다
+  const items: RawEvidence[] = [...past];
   const results = await Promise.all(vaults.map((v) => noda.getContext({ tenant: nodaTenant(v.id), query, budget: CONTEXT_BUDGET_AGENT_SHARED })));
   // 판은 적용 기준일로 고른다 — 미래 기준일이면 그날 시행될 새 판이 근거(대화는 언제나 오늘)
   const editionDay = editionDayFor(scope.basisDate);
@@ -106,6 +120,12 @@ async function orgDocuments(scope: { organizationId: string; departmentId: strin
     }
   });
   return { status: 'ok', items };
+}
+
+/** 지난 판 원본을 글로 — 못 읽으면(스캔·너무 큼·저장소) 건너뛴다 */
+async function readPastOriginal(storagePath: string, fileName: string): Promise<{ ok: true; text: string } | { ok: false }> {
+  const out = await readOriginalText(storagePath, fileName);
+  return out.ok ? { ok: true, text: out.text } : { ok: false };
 }
 
 async function common(scope: { organizationId: string }, query: string): Promise<ProviderResult> {

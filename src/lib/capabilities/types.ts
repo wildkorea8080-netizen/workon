@@ -54,6 +54,8 @@ export interface PreflightInput {
   previousQuestion?: string;
   /** 직원이 '문서 좁히기'로 고른 태그(요청 `doc_tags`, 2026-11-23) — 문서 찾기가 이 태그의 문서만 근거로 남긴다 */
   docTags?: string[];
+  /** 직원이 고른 적용 기준일(요청 `basis_date`, 2026-11-26) — 문서 찾기가 그날 시행 중인 판으로 근거를 고른다 */
+  basisDate?: string;
 }
 
 /**
@@ -73,6 +75,8 @@ export interface PrepareResult {
   documentsSkipped?: boolean;
   /** '문서 좁히기'로 거른 태그 — 답변 행 `source_references.doc_tags`(2026-11-23) */
   docTags?: string[];
+  /** 적용 기준일로 찾은 턴 — 답변 행 `source_references.basis_date`(2026-11-26) */
+  basisDate?: string;
   /**
    * NODA 답변 검증(`/verify`)에 보낼 이 턴의 근거 — `/context` `sources[]`를 **받은 순서 그대로** `{doc_id, chunk_id}`만.
    * 답의 `[n]`이 `sources[n-1]`을 가리키므로 순서가 바뀌면 안 된다. 형식이 깨진 원소가 하나라도 있으면 빈 배열.

@@ -14,9 +14,11 @@ import {
   type NodaSource,
 } from '@/lib/noda';
 import type { NodaStatus, RetrievedChunk } from '@/lib/db';
-import { kstToday, notCitableEditionIds } from '@/lib/edition-dates';
+import { editionDayFor, kstToday, notCitableEditionIds } from '@/lib/edition-dates';
 import { commonTenant, isOrgType, ORG_TYPE_KEYS, type OrgType } from '@/lib/org-types';
 import { docTagsNote } from '@/lib/chat-doc-tags';
+import { basisDatePromptLine } from '@/lib/chat-basis-date';
+import { pastEditionEvidence, type PastEditionDoc, type ReadOriginal } from '@/lib/work/workflows/regulations/past-editions';
 import type { Capability, PreflightResult, TurnContext } from './types';
 import {
   commonSourcesToChunks,
@@ -60,6 +62,8 @@ export interface AgentDocument {
   effective_from?: string | null;
   /** 사람이 붙인 태그(0060) — 대화의 '문서 좁히기'(2026-11-23)가 고른 태그로 근거를 거른다 */
   tags?: string[] | null;
+  /** 원본 경로 — 적용 기준일이 과거면 그날 시행 중이던 지난 판의 원본을 다시 읽는다(2026-11-26) */
+  storage_path?: string | null;
 }
 
 export interface DocSearchDeps {
@@ -82,6 +86,8 @@ export interface DocSearchDeps {
   deleteCommonOrphan(orgType: OrgType, filename: string): Promise<void>;
   /** 운영 기록(system_logs). 기본은 logSystem */
   log?: typeof logSystem;
+  /** 지난 판 원본을 글로(2026-11-26, 적용 기준일이 과거일 때만) — 못 읽으면 `{ ok: false }`. 없으면 지난 판을 찾지 않는다 */
+  readOriginal?: ReadOriginal;
 }
 
 const defaultDeps: DocSearchDeps = {
@@ -89,12 +95,17 @@ const defaultDeps: DocSearchDeps = {
     // 비서당 문서는 50개가 상한(MAX_AGENT_DOCUMENTS)이라 API 상한(1,000행)에 닿지 않는다 — 매 대화마다 도는 길이라 개수 조회 없이 한 번만
     const { data, error } = await supabaseAdmin
       .from('documents')
-      .select('id, title, file_name, noda_status, replaces_id, effective_from, tags')
+      .select('id, title, file_name, noda_status, replaces_id, effective_from, tags, storage_path')
       .eq('agent_id', agentId)
       .order('id')
       .limit(1000);
     if (error) throw new Error(error.message);
     return (data ?? []) as AgentDocument[];
+  },
+  async readOriginal(storagePath, fileName) {
+    const { readOriginalText } = await import('@/lib/source-original');
+    const out = await readOriginalText(storagePath, fileName);
+    return out.ok ? { ok: true, text: out.text } : { ok: false };
   },
   async fetchContext(agentId, query, budget) {
     // 보관함 이름은 서버가 비서 id로만 만든다
@@ -370,6 +381,10 @@ export function docSearchAddendum(input: {
   searchedCommon?: boolean;
   /** 직원이 '문서 좁히기'로 고른 태그(2026-11-23) — 그 태그의 문서에서만 찾았다고 모델에게 알린다 */
   docTags?: string[];
+  /** 적용 기준일(2026-11-26) — 그날 기준으로 답하게 한다 */
+  basisDate?: string;
+  /** 그날 시행 중이던 지난 판의 원문에서 찾은 묶음(번호는 위 묶음 뒤로 이어 매김) */
+  pastContext?: string | null;
 }): string | undefined {
   if (input.skipped) return SKIPPED.join('\n');
   const context = input.context?.trim() ?? '';
@@ -377,13 +392,18 @@ export function docSearchAddendum(input: {
   const withAgent = context !== '' && input.chunks.some((c) => c.scope !== 'common');
   const withCommon = commonContext !== '' && !!input.commonOrgType && input.chunks.some((c) => c.scope === 'common');
   const tagLine = input.docTags?.length ? `- ${docTagsNote(input.docTags)}(직원이 '문서 좁히기'로 골랐다).` : null;
-  if (withAgent || withCommon) {
+  const pastContext = input.pastContext?.trim() ?? '';
+  const withPast = pastContext !== '' && !!input.basisDate;
+  const basisLine = input.basisDate ? basisDatePromptLine(input.basisDate, withPast || input.basisDate < kstToday()) : null;
+  if (withAgent || withCommon || withPast) {
     return [
       ...(withAgent ? [AGENT_CONTEXT_HEAD, context, ''] : []),
       ...(withCommon ? [commonContextHead(input.commonOrgType as string), commonContext, ''] : []),
+      ...(withPast ? [pastContextHead(input.basisDate as string), pastContext, ''] : []),
       ...CITATION_RULES,
       ...(withCommon ? COMMON_CITATION_RULES : []),
       ...(tagLine ? [tagLine] : []),
+      ...(basisLine ? [basisLine] : []),
     ].join('\n');
   }
   if (input.hasDocuments) {
@@ -393,9 +413,15 @@ export function docSearchAddendum(input: {
     return [
       ...lines,
       ...(tagLine ? [tagLine, "- 고른 태그의 문서에서 찾지 못했다고 밝히고, '문서 좁히기'를 풀고 다시 물으면 모든 문서에서 찾는다고 안내하세요."] : []),
+      ...(basisLine ? [basisLine] : []),
     ].join('\n');
   }
   return undefined;
+}
+
+/** 지난 판 묶음의 머리 — 적용 기준일에 시행 중이던 판의 원문에서 낱말로 찾은 것(2026-11-26) */
+export function pastContextHead(basisDate: string): string {
+  return `참고 자료(지난 판 — ${basisDate}에 시행 중이던 판의 원문에서 질문 낱말로 찾은 문단):`;
 }
 
 /** preflight가 찾은 공통 보관함 결과 — 유형·그 유형의 행·`/context` 결과 */
@@ -407,7 +433,7 @@ interface CommonCarry {
 
 type DocSearchCarry =
   | { skipped: true }
-  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry; followUp?: true; docTags?: string[] };
+  | { skipped?: false; docs: AgentDocument[]; result?: NodaContextResult; common?: CommonCarry; followUp?: true; docTags?: string[]; basisDate?: string };
 
 /**
  * '문서 좁히기'(2026-11-23)에서 비서 보관함에 받는 예산(글자) — 찾은 뒤 태그로 걸러 남는 것이 줄어드니 평소의 두 배를 받는다.
@@ -436,10 +462,12 @@ async function matchedChunks(
   deps: DocSearchDeps,
   input: MatchInput,
   result: NodaContextResult,
-  docs: AgentDocument[]
+  docs: AgentDocument[],
+  /** 판을 고를 날(적용 기준일, 2026-11-26) — 없으면 오늘 */
+  editionDay?: string
 ): Promise<{ chunks: RetrievedChunk[]; mixed: boolean; superseded?: number }> {
   const log = deps.log ?? logSystem;
-  const match = sourcesToChunks(result.sources, docs, contextPassages(result.context));
+  const match = sourcesToChunks(result.sources, docs, contextPassages(result.context), editionDay);
   if (isCleanMatch(match)) return { chunks: match.chunks, mixed: false, superseded: match.superseded ?? 0 };
 
   const base = { agent_id: input.agentId, source_count: result.sources.length };
@@ -739,7 +767,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
     description: '이 비서에 연결한 문서에서 근거를 찾아 출처와 함께 답합니다.',
     isAvailable: () => true,
 
-    async preflight({ organizationId, agentId, message, skipDocuments, previousQuestion, docTags }) {
+    async preflight({ organizationId, agentId, message, skipDocuments, previousQuestion, docTags, basisDate }) {
       if (skipDocuments) return { ok: true, carry: { skipped: true } satisfies DocSearchCarry };
 
       // 비서 문서 행과 (기관 유형 → 그 유형의 공통 문서 행)을 함께 읽는다. 유형은 그 턴에 읽는다(설계 5.1)
@@ -854,6 +882,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
           docs,
           ...(followUp ? { followUp: true } : {}),
           ...(tags ? { docTags: tags } : {}),
+          ...(basisDate ? { basisDate } : {}),
           ...(result ? { result } : {}),
           ...(commonType && commonResult ? { common: { orgType: commonType, docs: commonDocs, result: commonResult } } : {}),
         } satisfies DocSearchCarry,
@@ -873,7 +902,10 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       if (!carry.result && !carry.common) return {};
 
       // 비서 근거는 S4 그대로(판정 R5·H)
-      const agentMatch = carry.result ? await matchedChunks(deps, ctx, carry.result, carry.docs) : { chunks: [], mixed: false };
+      // 적용 기준일(2026-11-26) — 미래면 그날 시행될 판, 과거·없으면 오늘의 판(`editionDayFor`). 과거면 아래에서 그날의 지난 판을 더한다
+      const basis = carry.basisDate ?? null;
+      const editionDay = basis ? editionDayFor(basis) : undefined;
+      const agentMatch = carry.result ? await matchedChunks(deps, ctx, carry.result, carry.docs, editionDay) : { chunks: [], mixed: false };
       const agentMatched = agentMatch.chunks;
 
       // 공통 근거 — 비서 조각이 하나라도 있으면 비서 묶음의 가장 큰 번호만큼 민다(설계 5.2).
@@ -891,12 +923,30 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
       const tagged = carry.docTags?.length ? carry.docTags : null;
       const agentChunks = mixed ? [] : tagged ? keepTaggedChunks(agentMatched, carry.docs, tagged) : agentMatched;
       const commonChunks = mixed ? [] : (common?.chunks ?? []);
-      const chunks = [...agentChunks, ...commonChunks];
+      const found = [...agentChunks, ...commonChunks];
+
+      // 과거 적용 기준일 — 그날 시행 중이던 지난 판(문서 보관소 사본을 지움)의 원본을 다시 읽어 질문 낱말이 든 문단을 근거로 더한다.
+      // 번호는 위 두 묶음의 가장 큰 번호 뒤로. 섞인 턴은 더하지 않고, '문서 좁히기'면 그 태그의 문서만
+      let pastChunks: RetrievedChunk[] = [];
+      if (basis && basis < kstToday() && !mixed && deps.readOriginal) {
+        const want = tagged ? new Set(tagged.map((t) => t.toLocaleLowerCase('ko'))) : null;
+        const pool = want ? carry.docs.filter((d) => (d.tags ?? []).some((t) => want.has(t.toLocaleLowerCase('ko')))) : carry.docs;
+        const items = await pastEditionEvidence(pool as PastEditionDoc[], basis, ctx.message, deps.readOriginal).catch(() => []);
+        const base = Math.max(0, carry.result ? maxCitationNumber(carry.result) : 0, common ? maxCitationNumber(common.shifted) : 0, ...found.map((c) => c.n ?? 0));
+        pastChunks = items.map((e, i) => ({
+          documentId: e.documentId as string, documentTitle: e.title, chunkIndex: found.length + i, n: base + i + 1, text: e.text, similarity: 0, section: e.location,
+          ...(e.effectiveDate ? { effectiveFrom: e.effectiveDate } : {}),
+        }));
+      }
+      const chunks = [...found, ...pastChunks];
 
       // `/verify`는 보관함 하나만 받는다(5.5) — 둘 다 근거가 있으면 부르지 않는다
       let verifySources: { doc_id: string; chunk_id: string }[] = [];
       let verifyTenant: string | undefined;
-      if (agentChunks.length > 0 && commonChunks.length === 0 && carry.result) {
+      // 지난 판 근거는 보관소 근거가 아니다 — 섞이면 검증을 부르지 않는다
+      if (pastChunks.length > 0) {
+        verifySources = [];
+      } else if (agentChunks.length > 0 && commonChunks.length === 0 && carry.result) {
         verifySources = verifySourcesOf(carry.result.sources);
       } else if (agentChunks.length === 0 && commonChunks.length > 0 && carry.common) {
         verifySources = verifySourcesOf(carry.common.result.sources);
@@ -912,7 +962,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
                 : carry.result.context
             )
           : null,
-        chunks,
+        chunks: found,
         hasDocuments: true,
         skipped: false,
         // 공통 쪽은 받아들인 조각의 블록만 싣는다 — 뺀 조각(지난 판 등)의 글이 모델에게 가지 않게(설계 실패 기준 2)
@@ -927,6 +977,8 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         commonOrgType: carry.common?.orgType ?? null,
         searchedCommon: carry.common !== undefined,
         ...(tagged ? { docTags: tagged } : {}),
+        ...(basis ? { basisDate: basis } : {}),
+        ...(pastChunks.length ? { pastContext: pastChunks.map((c) => `[${c.n}] ${c.documentTitle} · ${c.section}\n${c.text}`).join('\n\n') } : {}),
       });
       return {
         chunks,
@@ -934,6 +986,7 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
         verifySources,
         ...(verifyTenant ? { verifyTenant } : {}),
         ...(tagged ? { docTags: tagged } : {}),
+        ...(basis ? { basisDate: basis } : {}),
         // 앞 질문과 묶어 찾은 턴은 지금 질문과 관련 있을 때만 쓰라고 한 줄 더한다
         systemAddendum: carry.followUp && chunks.length > 0 && addendum ? `${addendum}\n${FOLLOW_UP_NOTE}` : addendum,
       };
