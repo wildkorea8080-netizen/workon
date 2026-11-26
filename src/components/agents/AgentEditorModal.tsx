@@ -21,9 +21,10 @@ import { parseWebDomains } from '@/lib/web-search-spec';
 import TemplatesPanel from './TemplatesPanel';
 import DocumentsPanel from './DocumentsPanel';
 import HistoryPanel from './HistoryPanel';
+import SharesPanel from './SharesPanel';
 
 type ModelOption = { id: string; label: string; note: string };
-type Tab = 'settings' | 'documents' | 'templates' | 'history';
+type Tab = 'settings' | 'documents' | 'templates' | 'history' | 'shares';
 
 const input =
   'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20';
@@ -236,6 +237,8 @@ export default function AgentEditorModal({
                 ['settings', '설정'],
                 ...(isLink ? [] : [['documents', '문서'], ['templates', '양식']]),
                 ['history', '변경 기록'],
+                // 나만의 비서 함께 쓰기(0128) — 주인만 바꾼다(서버가 다시 본다)
+                ...(agent?.tier === 'personal' && !agent.shared_with_me ? [['shares', '함께 쓰기']] : []),
               ] as [Tab, string][]
             ).map(([key, text]) => (
               <button
@@ -275,6 +278,8 @@ export default function AgentEditorModal({
             <TemplatesPanel agentId={agent.id} version={agent.version} onChanged={refreshAgent} />
           ) : tab === 'history' ? (
             <HistoryPanel agentId={agent.id} version={agent.version} onReverted={reloadAfterRevert} onStale={refreshAgent} />
+          ) : tab === 'shares' ? (
+            <SharesPanel agentId={agent.id} />
           ) : (
             <>
               <div className="grid grid-cols-[84px_1fr] gap-3">

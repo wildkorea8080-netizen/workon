@@ -29,12 +29,18 @@ export interface AgentAccessInfo {
   approval_status: string | null;
   version: number;
   approval_version: number | null;
+  /** 나만의 비서를 함께 쓰는 동료(0128, 2026-11-26) — 쓰기만. 이 칸을 읽지 않은 곳에서는 없음 = 주인만 */
+  shared_user_ids?: string[] | null;
+  /** 그중 함께 고치는 동료(0129) — 설정·문서·양식까지. 지우기·공유·올리기·신청은 주인만 */
+  shared_editor_ids?: string[] | null;
+  /** 함께 쓰는 부서(0130) — 그 부서와 하위 부서 사람 모두 쓰기만 */
+  shared_department_ids?: string[] | null;
 }
 
 /** loadAgentAccess가 select하는 칸. AgentAccessInfo와 함께 고친다. */
 export const AGENT_ACCESS_COLUMNS =
   'id, tier, department_id, organization_id, visibility, owner_id, created_by, ' +
-  'is_active, is_published, deleted_at, approval_status, version, approval_version';
+  'is_active, is_published, deleted_at, approval_status, version, approval_version, shared_user_ids, shared_editor_ids, shared_department_ids';
 
 export interface ActorScope {
   userId: string;
@@ -54,6 +60,28 @@ function sameOrganization(agent: AgentAccessInfo, actor: ActorScope): boolean {
   return Boolean(actor.organizationId) && agent.organization_id === actor.organizationId;
 }
 
+/** 나만의 비서를 함께 쓰는 동료인가(0128) — 주인은 아니다 */
+export function isSharedWith(agent: Pick<AgentAccessInfo, 'tier' | 'owner_id' | 'shared_user_ids'>, actor: Pick<ActorScope, 'userId'>): boolean {
+  if (agent.tier !== 'personal' || agent.owner_id === actor.userId) return false;
+  return (agent.shared_user_ids ?? []).some((id) => typeof id === 'string' && id.toLowerCase() === actor.userId.toLowerCase());
+}
+
+/**
+ * 나만의 비서를 부서로 함께 쓰는가(0130) — 고른 부서가 내 부서 계통(자기 + 상위)에 있으면 = 내가 그 부서이거나 그 하위
+ * (부서 비서를 하위 부서가 쓰는 것과 같은 방향). 주인은 아니다
+ */
+export function isSharedByDepartment(agent: Pick<AgentAccessInfo, 'tier' | 'owner_id' | 'shared_department_ids'>, actor: Pick<ActorScope, 'userId' | 'visibleDepartmentIds'>): boolean {
+  if (agent.tier !== 'personal' || agent.owner_id === actor.userId) return false;
+  const mine = new Set((actor.visibleDepartmentIds ?? []).map((d) => d.toLowerCase()));
+  return (agent.shared_department_ids ?? []).some((d) => typeof d === 'string' && mine.has(d.toLowerCase()));
+}
+
+/** 나만의 비서를 함께 고치는 동료인가(0129) — 함께 쓰는 사람 안에서만 */
+export function isSharedEditor(agent: Pick<AgentAccessInfo, 'tier' | 'owner_id' | 'shared_user_ids' | 'shared_editor_ids'>, actor: Pick<ActorScope, 'userId'>): boolean {
+  if (!isSharedWith(agent, actor)) return false;
+  return (agent.shared_editor_ids ?? []).some((id) => typeof id === 'string' && id.toLowerCase() === actor.userId.toLowerCase());
+}
+
 function managesAgentDepartment(agent: AgentAccessInfo, actor: ActorScope): boolean {
   return actor.isAdmin && actor.managedDepartmentIds.includes(agent.department_id);
 }
@@ -64,7 +92,8 @@ export function canEditAgent(agent: AgentAccessInfo, actor: ActorScope): boolean
 
   switch (agent.tier) {
     case 'personal':
-      return agent.owner_id === actor.userId;
+      // 주인 + 주인이 고른 함께 고치는 동료(0129)
+      return agent.owner_id === actor.userId || isSharedEditor(agent, actor);
     case 'department':
       // 주인 부서 소속만. 하위 부서 직원은 쓰기만 한다 — 상위 부서가 만든
       // 비서를 하위 부서 누구나 바꾸면 책임 소재가 흐려진다(결정 4).
@@ -82,7 +111,8 @@ export function canUseAgent(agent: AgentAccessInfo, actor: ActorScope): boolean 
 
   switch (agent.tier) {
     case 'personal':
-      return agent.owner_id === actor.userId;
+      // 주인 + 주인이 고른 같은 기관 동료(0128)·부서(0130) — 쓰기만, 고치기는 canEditAgent(주인·함께 고치는 사람)
+      return agent.owner_id === actor.userId || isSharedWith(agent, actor) || isSharedByDepartment(agent, actor);
     case 'department':
       // 주인 부서가 내 부서 계통(자기 + 상위)에 있으면 = 내가 주인 부서이거나 그 하위
       return actor.visibleDepartmentIds.includes(agent.department_id);
@@ -112,12 +142,15 @@ export function canDeleteAgent(agent: AgentAccessInfo, actor: ActorScope): boole
 }
 
 export function canPromoteToDepartment(agent: AgentAccessInfo, actor: ActorScope): boolean {
-  return agent.tier === 'personal' && canEditAgent(agent, actor);
+  // 주인만 — 함께 고치는 동료(0129)가 남의 비서를 부서에 내놓지 않게
+  return agent.tier === 'personal' && agent.owner_id === actor.userId && canEditAgent(agent, actor);
 }
 
 export function canRequestOfficial(agent: AgentAccessInfo, actor: ActorScope): boolean {
   if (agent.tier === 'official') return false;
   if (agent.approval_status === 'pending') return false;
+  // 나만의 비서의 공식 신청은 주인만(0129 — 함께 고치는 동료는 고치기까지)
+  if (agent.tier === 'personal' && agent.owner_id !== actor.userId) return false;
   return canEditAgent(agent, actor);
 }
 

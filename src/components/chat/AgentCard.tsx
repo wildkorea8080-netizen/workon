@@ -56,7 +56,8 @@ export default function AgentCard({
    * 내가 고칠 수 있는 비서인가 — 나만의 비서이거나 내 부서의 부서 비서. [편집]과
    * [공식 등록 신청]이 같은 조건을 쓴다. 신청은 서버가 소유자·부서원만 받는다.
    */
-  const canManage = agent.tier === 'personal' || agent.department_id === myDepartmentId;
+  // 함께 쓰는 비서(0128)는 쓰기만 — 고치기·신청·올리기는 주인만(서버도 다시 본다)
+  const canManage = (agent.tier === 'personal' && !agent.shared_with_me) || (agent.tier !== 'personal' && agent.department_id === myDepartmentId);
 
   return (
     <>
@@ -109,6 +110,9 @@ export default function AgentCard({
               </svg>
             )}
           </p>
+          {agent.shared_with_me && (
+            <p className="text-[11px] text-ws-accent-text mt-0.5">{agent.shared_can_edit ? '함께 고치기' : '함께 쓰기'}{agent.shared_by ? ` · ${agent.shared_by}님이 공유` : ''}</p>
+          )}
           {agent.description && (
             <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{agent.description}</p>
           )}
@@ -125,13 +129,13 @@ export default function AgentCard({
         {agent.tier !== 'official' && (
           <div onClick={e => e.stopPropagation()}>
             <div className="flex gap-1.5 mt-1">
-              {canManage && onEdit && (
+              {(canManage || (agent.shared_with_me && agent.shared_can_edit)) && onEdit && (
                 <button onClick={() => onEdit(agent)}
                   className="flex-1 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
                   편집
                 </button>
               )}
-              {agent.tier === 'personal' && (
+              {agent.tier === 'personal' && !agent.shared_with_me && (
                 <button
                   onClick={async () => {
                     if (!confirm('부서 비서로 올리면 부서원 누구나 함께 고치고 씁니다. 다시 나만의 비서로 되돌릴 수 없습니다. 올릴까요?')) return;

@@ -50,6 +50,15 @@ export type Agent = {
   color?: string;
   owner_id?: string | null;
   approval_status?: string | null;
+  /** 나만의 비서 함께 쓰기(0128) — 주인에게만 실린다(공유받은 사람에게는 빈 배열) */
+  shared_user_ids?: string[];
+  /** 동료가 나와 함께 쓰게 한 비서(목록 `?personal=true`만) — 고치기·지우기·올리기는 주인만 */
+  shared_with_me?: boolean;
+  /** 그 비서를 내가 함께 고치는가(0129) — 편집만, 지우기·올리기·신청은 주인만 */
+  shared_can_edit?: boolean;
+  shared_editor_ids?: string[];
+  /** 함께 쓰게 한 사람(주인) 이름 */
+  shared_by?: string | null;
   approval_note?: string | null;
   /** 누가 볼 수 있는가(권한). category와 달리 표시가 아니라 접근을 정한다. */
   visibility?: 'organization' | 'department';

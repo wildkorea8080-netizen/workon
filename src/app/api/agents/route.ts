@@ -6,8 +6,10 @@ import { getAccessScope, visibilityFilter } from '@/lib/department-scope';
 import { isAccessScopeReadError } from '@/lib/access-scope-error';
 import { splitAgentBody } from '@/lib/agent-patch';
 import { getActorScope } from '@/lib/actor-scope';
+import { actorScopeOr503 } from '@/lib/actor-scope-response';
 import { jsonError, knownIds, validateModelForOrganization } from '@/lib/agent-route-helpers';
 import { withoutAppDraft } from '@/lib/apps/draft';
+import { canUseAgent, isSharedByDepartment, isSharedEditor, isSharedWith, type AgentAccessInfo } from '@/lib/agent-permissions';
 import { writeUsageLog } from '@/lib/assistant/persist';
 
 /** 목록에는 시험 판(0053)을 싣지 않는다 — 고칠 수 없는 사람에게 배포 전 설정이 가지 않게(시험 판은 편집 창 GET /api/agents/[id]만) */
@@ -121,14 +123,35 @@ export async function GET(request: NextRequest) {
     }
 
     // 내 비서 탭 — 나만의 비서. 부서를 옮겨도 내 것이므로 부서로 거르지 않는다.
+    // 함께 쓰기(0128, 2026-11-26) — 동료가 나와 함께 쓰게 한 나만의 비서도(권한 판정으로 다시 거르고 `shared_with_me`·주인 이름을 단다)
     if (personalOnly) {
-      const { data: agents, error } = await supabaseAdmin
+      const me = session.user.id;
+      // 부서로 함께 쓰는 비서(0130) — 내 부서 계통(자기 + 상위)이 고른 부서에 든 것. 소속을 못 읽으면 503(빈 목록으로 꾸미지 않음)
+      const scope = await actorScopeOr503(session);
+      if (scope instanceof Response) return scope;
+      const depts = (scope?.visibleDepartmentIds ?? []).filter((d) => /^[0-9a-f-]{36}$/i.test(d));
+      const { data: rows, error } = await supabaseAdmin
         .from('agents')
         .select('*')
         .eq('tier', 'personal')
-        .eq('owner_id', session.user.id)
+        .or(`owner_id.eq.${me},shared_user_ids.cs.{${me}}${depts.length ? `,shared_department_ids.ov.{${depts.join(',')}}` : ''}`)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
+      let agents = rows as Array<Record<string, unknown>> | null;
+      if (!error && agents?.some((a) => a.owner_id !== me)) {
+        const actor = scope;
+        const shared = agents.filter((a) => a.owner_id !== me);
+        const ownerIds = [...new Set(shared.map((a) => a.owner_id).filter((v): v is string => typeof v === 'string'))];
+        const { data: owners } = ownerIds.length ? await supabaseAdmin.from('users').select('id, full_name').in('id', ownerIds) : { data: [] };
+        const ownerName = new Map(((owners ?? []) as Array<{ id: string; full_name: string | null }>).map((u) => [u.id, u.full_name]));
+        // 함께 쓰는 비서는 쓸 수 있을 때만(같은 기관·켜짐) — 소속이 없으면 내 것만
+        agents = agents.flatMap((a) => {
+          if (a.owner_id === me) return [a];
+          const info = a as unknown as AgentAccessInfo;
+          if (!actor || !(isSharedWith(info, actor) || isSharedByDepartment(info, actor)) || !canUseAgent(info, actor)) return [];
+          return [{ ...a, shared_with_me: true, shared_can_edit: isSharedEditor(info, actor), shared_by: ownerName.get(String(a.owner_id)) ?? null, shared_user_ids: [], shared_editor_ids: [], shared_department_ids: [] }];
+        });
+      }
 
       if (error) {
         return NextResponse.json(

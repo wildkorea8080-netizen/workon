@@ -65,6 +65,7 @@ export const API_ROUTES: readonly string[] = [
   'agents/[id]/history',
   'agents/[id]/promote',
   'agents/[id]/revert',
+  'agents/[id]/shares',
   'agents/[id]/templates',
   'agents/[id]/templates/[templateId]',
   'agents/favorite',

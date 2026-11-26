@@ -103,11 +103,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       const scopeError = await checkCapabilityScope(agent.tier, split.settings.capabilities, actor.departmentId);
       if (scopeError) return jsonError(scopeError, 403);
 
-      // 나만의 비서는 고치는 사람이 본인뿐이라 판 번호를 생략할 수 있다.
+      // 나만의 비서는 고치는 사람이 본인뿐이라 판 번호를 생략할 수 있다 — 함께 고치는 동료(0129)가 있으면 받는다.
       // 부서·공식 비서는 함께 고치므로 반드시 받는다.
       const rawBase = body.base_version;
       if (typeof rawBase === 'number') baseVersion = rawBase;
-      else if (agent.tier === 'personal') baseVersion = agent.version;
+      else if (agent.tier === 'personal' && !(agent.shared_editor_ids ?? []).length) baseVersion = agent.version;
       else return jsonError('base_version이 필요합니다. 화면을 새로고침한 뒤 다시 시도해 주세요.', 400);
     }
 

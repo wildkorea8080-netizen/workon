@@ -5,7 +5,7 @@
 //   /signin/{slug} '기관 계정으로 로그인' → GET /api/sso/{slug}/start
 //     → 발견 문서(issuer/.well-known/openid-configuration) → 인가 주소로 보냄(state·nonce·PKCE는 서명한 10분 쿠키에)
 //   계정 서비스 → GET /api/sso/callback?code&state
-//     → state 맞대기 → 토큰 교환(client_secret_post + code_verifier) → id_token 검증(서명은 jwks_uri의 공개키, iss·aud·azp·exp·iat·nonce)
+//     → state 맞대기 → 토큰 교환(client_secret_post 또는 _basic — 발견 문서로 고름 + code_verifier) → id_token 검증(서명은 jwks_uri의 공개키, iss·aud·azp·exp·iat·nonce)
 //     → 이메일로 **이 기관에 이미 등록된** 직원을 찾아 NextAuth 세션 쿠키(대리 접근과 같은 encode)를 만들어 '/'로.
 //
 // 지키는 것:
@@ -17,7 +17,7 @@
 // - 계정 서비스 주소는 https만, 부를 때마다 이름을 다시 풀어 내부망·특수 IP면 부르지 않는다(결과 보내기와 같은 담장), 8초.
 // - (0110) 그룹 → 부서 맞추기를 정해 두었으면 일반 직원(USER)의 소속을 id_token 클레임의 그룹에 맞춰 옮긴다(관리자는 그대로,
 //   맞는 그룹이 없거나 옮기지 못하면 소속 그대로 들어온다 — 로그인은 막지 않음).
-import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, verify as cryptoVerify, type JsonWebKey } from 'node:crypto';
+import { constants as cryptoConstants, createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, verify as cryptoVerify, type JsonWebKey } from 'node:crypto';
 import { encode } from 'next-auth/jwt';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { NEXTAUTH_SECRET, NEXTAUTH_URL } from '@/lib/config';
@@ -91,7 +91,19 @@ export function openState(raw: string | null | undefined, secret: string, nowMs:
 
 export type IdClaims = Record<string, unknown>;
 
-/** JWT 서명만 — RS256·ES256, kid가 맞는 공개키로(id_token·logout_token이 함께 쓴다). 맞으면 클레임 */
+/**
+ * 받는 서명 알고리즘(2026-11-26 — 예전엔 RS256·ES256만). RSA PKCS#1 v1.5(RS*)·RSA-PSS(PS* — 솔트는 해시 길이)·ECDSA(ES* — 곡선은 알고리즘마다 하나).
+ * `none`·HS*(대칭 — 클라이언트 비밀값으로 서명)는 받지 않는다
+ */
+export const SSO_JWT_ALGS = {
+  RS256: { kty: 'RSA', hash: 'sha256' }, RS384: { kty: 'RSA', hash: 'sha384' }, RS512: { kty: 'RSA', hash: 'sha512' },
+  PS256: { kty: 'RSA', hash: 'sha256', pss: true }, PS384: { kty: 'RSA', hash: 'sha384', pss: true }, PS512: { kty: 'RSA', hash: 'sha512', pss: true },
+  ES256: { kty: 'EC', hash: 'sha256', crv: 'P-256' }, ES384: { kty: 'EC', hash: 'sha384', crv: 'P-384' }, ES512: { kty: 'EC', hash: 'sha512', crv: 'P-521' },
+} as const satisfies Record<string, { kty: 'RSA' | 'EC'; hash: string; pss?: true; crv?: string }>;
+export type SsoJwtAlg = keyof typeof SSO_JWT_ALGS;
+const isSsoJwtAlg = (v: unknown): v is SsoJwtAlg => typeof v === 'string' && Object.prototype.hasOwnProperty.call(SSO_JWT_ALGS, v);
+
+/** JWT 서명만 — `SSO_JWT_ALGS`, kid가 맞는 공개키로(id_token·logout_token이 함께 쓴다). 맞으면 클레임 */
 function verifyJwtSignature(token: string, keys: JsonWebKey[]): { ok: true; claims: IdClaims } | { ok: false; reason: string } {
   const parts = token.split('.');
   if (parts.length !== 3) return { ok: false, reason: 'format' };
@@ -105,9 +117,10 @@ function verifyJwtSignature(token: string, keys: JsonWebKey[]): { ok: true; clai
   }
   if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return { ok: false, reason: 'format' };
   const alg = header.alg;
-  if (alg !== 'RS256' && alg !== 'ES256') return { ok: false, reason: 'alg' };
-  const kty = alg === 'RS256' ? 'RSA' : 'EC';
-  const candidates = keys.filter((k) => k && k.kty === kty && (k.use === undefined || k.use === 'sig')
+  if (!isSsoJwtAlg(alg)) return { ok: false, reason: 'alg' };
+  const spec: { kty: 'RSA' | 'EC'; hash: string; pss?: true; crv?: string } = SSO_JWT_ALGS[alg];
+  const candidates = keys.filter((k) => k && k.kty === spec.kty && (k.use === undefined || k.use === 'sig')
+    && (spec.crv === undefined || k.crv === spec.crv)
     && (typeof header.kid !== 'string' || k.kid === header.kid) && (k.alg === undefined || k.alg === alg));
   if (!candidates.length) return { ok: false, reason: 'no_key' };
   const data = Buffer.from(`${parts[0]}.${parts[1]}`);
@@ -115,9 +128,9 @@ function verifyJwtSignature(token: string, keys: JsonWebKey[]): { ok: true; clai
   const verified = candidates.some((jwk) => {
     try {
       const key = createPublicKey({ key: jwk, format: 'jwk' });
-      return alg === 'RS256'
-        ? cryptoVerify('sha256', data, key, sig)
-        : cryptoVerify('sha256', data, { key, dsaEncoding: 'ieee-p1363' }, sig);
+      if (spec.kty === 'EC') return cryptoVerify(spec.hash, data, { key, dsaEncoding: 'ieee-p1363' }, sig);
+      if (spec.pss) return cryptoVerify(spec.hash, data, { key, padding: cryptoConstants.RSA_PKCS1_PSS_PADDING, saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST }, sig);
+      return cryptoVerify(spec.hash, data, key, sig);
     } catch {
       return false;
     }
@@ -228,7 +241,31 @@ export type SsoUserRow = {
   /** (0115) 그룹 → 관리자 역할로 올린 관리자인가 — 이 사람만 그룹에서 빠지면 내린다 */
   role_from_sso?: boolean | null;
 };
-export type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; /** 로그아웃 주소(선택 — 0111) */ end_session_endpoint: string | null };
+export type SsoTokenAuth = 'client_secret_post' | 'client_secret_basic';
+export type Discovery = {
+  issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; /** 로그아웃 주소(선택 — 0111) */ end_session_endpoint: string | null;
+  /** 토큰 주소에 클라이언트 비밀값을 싣는 방식(2026-11-26) — 발견 문서가 알려 준 것 중 우리가 하는 것, 하나도 없으면 null */
+  token_auth: SsoTokenAuth | null;
+  /** 발견 문서가 알려 준 id_token 서명 알고리즘이 우리가 받는 것과 겹치는가(안 알려 주면 참) */
+  alg_supported: boolean;
+};
+
+/**
+ * 토큰 주소 인증 방식 고르기 — 발견 문서의 `token_endpoint_auth_methods_supported`에서 `client_secret_post`(예전부터 쓰던 것) → `client_secret_basic`
+ * (Okta 등의 기본) 순. 목록을 알려 주지 않으면 예전처럼 post(되던 계정 서비스를 바꾸지 않게). 둘 다 없으면 null(private_key_jwt 등만 받는 곳)
+ */
+export function pickTokenAuth(methods: unknown): SsoTokenAuth | null {
+  if (!Array.isArray(methods)) return 'client_secret_post';
+  if (methods.includes('client_secret_post')) return 'client_secret_post';
+  if (methods.includes('client_secret_basic')) return 'client_secret_basic';
+  return null;
+}
+
+/** client_secret_basic의 머리글 — RFC 6749 2.3.1: 아이디·비밀값을 각각 폼 인코딩한 뒤 `:`로 이어 base64 */
+export function basicAuthHeader(clientId: string, secret: string): string {
+  const enc = (s: string) => encodeURIComponent(s).replace(/%20/g, '+');
+  return `Basic ${Buffer.from(`${enc(clientId)}:${enc(secret)}`, 'utf8').toString('base64')}`;
+}
 
 export interface SsoIo {
   loadOrgBySlug(slug: string): Promise<{ id: string; slug: string; status: string | null } | null>;
@@ -288,7 +325,12 @@ export async function discover(issuer: string, io: SsoIo): Promise<Discovery> {
   }
   // 로그아웃 주소는 선택(Google처럼 없는 곳도 있다) — https가 아니면 없는 것으로
   const endSession = typeof doc.end_session_endpoint === 'string' && doc.end_session_endpoint.startsWith('https://') ? doc.end_session_endpoint : null;
-  return { issuer, authorization_endpoint: out.authorization_endpoint as string, token_endpoint: out.token_endpoint as string, jwks_uri: out.jwks_uri as string, end_session_endpoint: endSession };
+  const algs = doc.id_token_signing_alg_values_supported;
+  const algSupported = !Array.isArray(algs) || algs.some((a) => isSsoJwtAlg(a));
+  return {
+    issuer, authorization_endpoint: out.authorization_endpoint as string, token_endpoint: out.token_endpoint as string, jwks_uri: out.jwks_uri as string, end_session_endpoint: endSession,
+    token_auth: pickTokenAuth(doc.token_endpoint_auth_methods_supported), alg_supported: algSupported,
+  };
 }
 
 async function usableConfig(slug: string, io: SsoIo): Promise<{ org: { id: string; slug: string }; config: SsoConfigRow & { client_secret_encrypted: string } }> {
@@ -349,15 +391,22 @@ export async function finishSso(
     const issuer = normalizeIssuer(config.issuer);
     if (!issuer) throw new SsoError('sso_unavailable', 'issuer');
     const disc = await discover(issuer, io);
+    if (!disc.token_auth) throw new SsoError('sso_unavailable', 'token_auth');
+    const secretText = io.decrypt(config.client_secret_encrypted);
+    // 비밀값은 계정 서비스가 받는 방식으로(2026-11-26) — post면 몸에, basic이면 머리글에만(몸에 함께 싣지 않는다 — RFC 6749 2.3.1)
     const form = new URLSearchParams({
       grant_type: 'authorization_code',
       code: query.get('code')!,
       redirect_uri: `${appUrl}${SSO_CALLBACK_PATH}`,
       client_id: config.client_id,
-      client_secret: io.decrypt(config.client_secret_encrypted),
+      ...(disc.token_auth === 'client_secret_post' ? { client_secret: secretText } : {}),
       code_verifier: st.verifier,
     });
-    const tokens = await fetchJson(io, disc.token_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+    const tokens = await fetchJson(io, disc.token_endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(disc.token_auth === 'client_secret_basic' ? { Authorization: basicAuthHeader(config.client_id, secretText) } : {}) },
+      body: form.toString(),
+    });
     if (typeof tokens.id_token !== 'string') throw new SsoError('sso_unavailable', 'no_id_token');
     const jwks = await fetchJson(io, disc.jwks_uri);
     const keys = Array.isArray(jwks.keys) ? (jwks.keys as JsonWebKey[]) : [];
@@ -492,6 +541,13 @@ export async function saveSsoConfig(
   if (input.enabled) {
     try {
       const disc = await discover(input.issuer, io as unknown as SsoIo);
+      // (2026-11-26) 우리가 하는 토큰 주소 인증 방식·서명 알고리즘이 없으면 켜도 로그인이 안 된다 — 켜기 전에 알린다
+      if (!disc.token_auth) {
+        return { ok: false, status: 400, message: '이 계정 서비스는 토큰 주소에 client_secret_post·client_secret_basic을 받지 않아 연결할 수 없습니다(발견 문서의 token_endpoint_auth_methods_supported).' };
+      }
+      if (!disc.alg_supported) {
+        return { ok: false, status: 400, message: '이 계정 서비스의 id_token 서명 알고리즘(RS·PS·ES 256/384/512 밖)을 받지 못해 연결할 수 없습니다.' };
+      }
       // (0111) 함께 로그아웃은 계정 서비스가 로그아웃 주소를 알려 줄 때만
       if (input.singleLogout && !disc.end_session_endpoint) {
         return { ok: false, status: 400, message: '이 계정 서비스는 OIDC 발견 문서에 로그아웃 주소(end_session_endpoint)를 알려 주지 않아 함께 로그아웃을 켤 수 없습니다.' };

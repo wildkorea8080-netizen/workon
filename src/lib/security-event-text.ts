@@ -37,6 +37,7 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   org_access_ips_changed: '접속 허용 IP 바꾸기(관리자)',
   organization_updated: '기관 정보 바꾸기(관리자)',
   conversation_shared: '대화 공개 링크 만들기(직원)',
+  agent_shared: '나만의 비서 함께 쓰기 바꿈(직원)',
   conversation_unshared: '대화 공개 링크 중단(직원)',
   conversation_unshared_by_admin: '대화 공개 링크 중단(관리자)',
   conversation_share_org_disabled: '기관 대화 공개 링크 막기(관리자)',
