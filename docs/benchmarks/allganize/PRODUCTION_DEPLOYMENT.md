@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-26(밤): 나만의 비서 함께 쓰기·함께 고치기·부서로 함께 쓰기·기관 SSO 호환 넓히기(0321~0324) — 0128~0130 운영 적용
+
+- 코드 배포 `dpl_9ySE6kWk3skE1aeoGmgrLvoUaXNq`(커밋 `30627ef`, 2026-11-26 21:12 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `efb23c1`(저녁 기록), `ff3f78c` 기능 — 나만의 비서·앱을 같은 기관 동료에게 쓰기만 공유(0128)(0321), 줄마다 '함께 고치기'(0129, 지우기·공유·올리기·공식 신청은 주인만, 함께 고치는 비서는 저장에 판 번호)(0322), 부서와 하위 부서로 함께 쓰기(0130)(0323), 기관 SSO id_token·logout_token 서명 RS·PS·ES 256/384/512와 토큰 주소 `client_secret_basic`(발견 문서로 고름, 마이그레이션 없음)(0324). `30627ef` 문서. 가지 Preview(`workon-lcldpyyas`, `dpl_Hb5cuQpcsaHfHwKvv3WeHVs1yXjj`) Ready 뒤 `main`. 배포 전 전체 시험 478파일 5,518개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_5isz8i1AZcAXhaZaGwEYKBcz1fZc`(798829a)로 promote — 0128~0130은 칸 추가만이라 옛 코드도 돈다(공유 칸은 무시되어 공유받은 사람이 못 쓴다).
+- 배포 전 운영 확인(읽기만): 마지막 적용 0127, `agents.shared_*` 칸 없음, 비서 42개(나만의 비서 0), RLS 꺼진 표 0. **0128 → 0129 → 0130을 코드보다 먼저 적용**(`npm run db:migrate`, 3건 OK) → 다시 읽어 칸 셋(uuid[] NOT NULL 기본 '{}')·CHECK 셋(20명·20곳·고치는 사람 ⊂ 쓰는 사람)·GIN 색인 둘, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/agents?personal=true`·`GET`/`PUT /api/agents/{uuid}/shares` 인증 없이 401, `/api/agents/abc/shares` 404(id 꼴). 실행기 호출 21:14~21:18 KST 모두 200(heartbeat 21:15), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 함께 쓰기·함께 고치기·부서로 함께 쓰기를 실제 계정 둘로 해 보지 않았다(운영에 나만의 비서가 없다), 편집 창 '함께 쓰기' 탭은 브라우저로 눌러 보지 않았다. SSO 호환은 실제 계정 서비스(Okta·PS256 발급 서비스)로 로그인해 보지 않았다.
+
 ## 2026-11-26(저녁): 지난 판 원문 찾기·대화의 적용 기준일·결과 여러 곳에 보내기·자료함 내용 100,000자(0317~0320) — 0127 운영 적용
 
 - 코드 배포 `dpl_5isz8i1AZcAXhaZaGwEYKBcz1fZc`(커밋 `798829a`, 2026-11-26 19:02 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `116b49b`(오후 2 기록), `0e9a688` 기능 — 업무 규정 확인이 과거 기준일에 시행 중이던 지난 판의 원본을 다시 읽어 질문 낱말 문단을 근거로(0317), 앱 결과를 첫 보낼 곳 말고 2곳까지 더(`deliverMore`)(0318), 대화 입력창 '적용 기준일'(미래는 시행 예정 새 판, 과거는 그날의 지난 판 원문 문단까지)(0319), 자료함 내용 찾기 100,000자(0127)(0320). `798829a` 문서. 가지 Preview(`workon-6gh03073c`, `dpl_CCqadKMK354h2NWLXZa6VLyj6hsa`) Ready 뒤 `main`. 배포 전 전체 시험 474파일 5,489개 통과·tsc 0.
