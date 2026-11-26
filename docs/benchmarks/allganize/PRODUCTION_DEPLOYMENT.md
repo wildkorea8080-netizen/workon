@@ -5,6 +5,15 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-26(밤 2): 일괄 실행에 문서함 문서·공유 자료함 하위 부서·예산 알림 이력·앱 실행 현황 기간과 CSV(0325~0328) — 0131~0133 운영 적용
+
+- 코드 배포 `dpl_9f8A1dBWkA5JK8safVVuPVSNzJLN`(커밋 `fa181c0`, 2026-11-26 22:17 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `ab15a9d`(밤 기록), `77fcde2` 기능 — 앱 일괄 실행이 실행 화면에서 고른 문서함 문서를 모든 줄에 함께 쓰고 줄마다 지금 근거 판으로(0131)(0325), 공유 자료함 '하위 부서도 함께'(0132)(0326), 관리자 '기관 정보'의 예산 알림 이력(마이그레이션 없음)(0327), 관리자 '앱 실행 현황'의 기간 고르기·CSV와 기관 통계 API `app-runs`의 `?from=&to=`(0133 `app_run_states_between`)(0328). `c8460a1` 문서. `fa181c0` 고침.
+- **첫 가지 Preview(`dpl_8YhRNWyDwqpdTsvcH5CNrG4R8Hf5`)가 빌드 실패**: 앱 실행 현황 라우트가 `GET(request?: NextRequest)`로 첫 인자를 선택 인자로 두어 Next 타입 검사가 거절했다(`tsc`·시험은 통과). 첫 인자를 필수로 고치고, 라우트 처리기의 선택 첫 인자를 막는 시험(`tests/batch-0328.test.ts`)을 더해 `fa181c0`로 다시 올렸다 — Preview `dpl_4AjhnQKh7b3ugbSrsH1hY81ec4ib` Ready 뒤 `main`. 배포 전 전체 시험 482파일 5,543개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_9ySE6kWk3skE1aeoGmgrLvoUaXNq`(30627ef)로 promote — 0131·0132는 칸 추가, 0133은 새 함수라 옛 코드도 돈다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0130, 두 칸·새 함수 없음, 일괄 실행·공유 자료함 0행, RLS 꺼진 표 0. **0131 → 0132 → 0133을 코드보다 먼저 적용**(`npm run db:migrate`, 3건 OK) → 다시 읽어 `app_batches.document_ids`(uuid[] NOT NULL 기본 '{}')·3개 CHECK·`library_shares.include_descendants`(boolean NOT NULL 기본 false)·`app_run_states_between`(네 인자, anon 실행 권한 없음, 옛 `app_run_states`도 남음), RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/admin/app-overview?from=…`·`/api/apps/batches`·`/api/v1/app-runs` 인증 없이 401, `/api/admin/budget-alerts`·`/api/admin/library-shares` 인증 없이 403. 실행기 호출 22:19~22:23 KST 모두 200(heartbeat 22:20), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 운영에 일괄 실행·공유 자료함·예산 알림 기록이 없어 실제 데이터로 보지 않았다. 일괄 실행 문서함 문서·하위 부서 판정은 실제 계정으로 해 보지 않았다. 네 화면은 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-26(밤): 나만의 비서 함께 쓰기·함께 고치기·부서로 함께 쓰기·기관 SSO 호환 넓히기(0321~0324) — 0128~0130 운영 적용
 
 - 코드 배포 `dpl_9ySE6kWk3skE1aeoGmgrLvoUaXNq`(커밋 `30627ef`, 2026-11-26 21:12 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `efb23c1`(저녁 기록), `ff3f78c` 기능 — 나만의 비서·앱을 같은 기관 동료에게 쓰기만 공유(0128)(0321), 줄마다 '함께 고치기'(0129, 지우기·공유·올리기·공식 신청은 주인만, 함께 고치는 비서는 저장에 판 번호)(0322), 부서와 하위 부서로 함께 쓰기(0130)(0323), 기관 SSO id_token·logout_token 서명 RS·PS·ES 256/384/512와 토큰 주소 `client_secret_basic`(발견 문서로 고름, 마이그레이션 없음)(0324). `30627ef` 문서. 가지 Preview(`workon-lcldpyyas`, `dpl_Hb5cuQpcsaHfHwKvv3WeHVs1yXjj`) Ready 뒤 `main`. 배포 전 전체 시험 478파일 5,518개 통과·tsc 0.
