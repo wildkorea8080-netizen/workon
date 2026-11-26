@@ -11,7 +11,7 @@
 ## 흐름 (`src/lib/org-sso.ts`)
 
 - `GET /api/sso/{slug}/start` — 켜진 기관·정지/종료 아님을 보고 발견 문서(`{issuer}/.well-known/openid-configuration`, issuer가 설정과 같아야)를 읽어 인가 주소로 보낸다. state·nonce·PKCE verifier는 **서명한 10분 쿠키**(`wo_sso_state`, HMAC — NEXTAUTH_SECRET, `/api/sso`에만)에.
-- `GET /api/sso/callback` — 쿠키 서명·기한·state(같은 시간 비교) → 토큰 교환(인가 코드 + `code_verifier` + `client_secret_post`) → **id_token 검증**: RS256·ES256만, `jwks_uri`의 공개키(kid), `iss`(다듬어 같음)·`aud`(클라이언트 ID 포함, 여럿이면 `azp`)·`exp`(2분 여유)·`iat`·`nonce`. 상태 쿠키는 한 번 쓰면 지운다.
+- `GET /api/sso/callback` — 쿠키 서명·기한·state(같은 시간 비교) → 토큰 교환(인가 코드 + `code_verifier` + `client_secret_post` 또는 `client_secret_basic` — 아래 '호환 넓히기') → **id_token 검증**: RS·PS·ES 256/384/512(아래, 예전엔 RS256·ES256만), `jwks_uri`의 공개키(kid), `iss`(다듬어 같음)·`aud`(클라이언트 ID 포함, 여럿이면 `azp`)·`exp`(2분 여유)·`iat`·`nonce`. 상태 쿠키는 한 번 쓰면 지운다.
 - 이메일: `email`(`email_verified`가 false면 안 씀) → `preferred_username`·`upn`이 이메일 꼴일 때. 허용 도메인을 정했으면 그 도메인만.
 - **계정을 만들지 않는다** — 그 이메일(대소문자 무시, 하나만)로 등록된 직원이 **이 기관 부서**에 속할 때만. 슈퍼관리자 계정·다른 기관 사람·사용 중지/탈퇴(`canSignIn`)·장기 미접속 잠금(0095)은 막는다. 성공·거절은 접속 기록(`access_logs`, 브라우저 칸에 `SSO ·`).
 - 세션은 대리 접근과 같은 NextAuth JWT(`encode`)로 30일, 토큰에 `sso: true`. 미들웨어의 계정 확인(비활성·권한/소속 변경·비밀번호 바꾼 뒤 끊기)은 그대로 걸리고, **임시 비밀번호 바꾸기 강제만은 SSO 로그인에 걸지 않는다**(비밀번호를 모른다).
@@ -67,7 +67,7 @@
 
 - 설정 칸은 없다 — 계정 서비스 앱의 Back-Channel Logout 주소에 설정 화면에 보이는 주소를 등록하면 된다(지원하는 계정 서비스만 보낸다 — Keycloak 등).
 - **logout_token에는 이메일이 없고 사용자 번호(sub)만 온다.** 그래서 기관 계정으로 로그인할 때 기관·발급자·sub → 직원을 `org_sso_subjects`에 적어 둔다(`rememberSubject` — 못 적으면 운영 기록 warning `subject`, 로그인은 그대로). 이 기능이 생긴 뒤 기관 계정으로 한 번 이상 로그인한 직원부터 받는다.
-- 검증(`verifyLogoutToken`): 서명은 id_token과 같은 규칙(RS256·ES256, jwks 공개키), `iss`·`aud`(그 기관 설정의 발급자·클라이언트 ID), `iat`(앞서지 않고 10분 안 — `LOGOUT_TOKEN_MAX_AGE_S`), `exp`(있으면), `events`에 back-channel 로그아웃 이벤트, `nonce` 없음(id_token을 돌려쓰지 못하게), `sub`·`sid` 중 하나 이상(있는데 꼴이 틀리면 거절 — 1~255자 글만). `sub`가 오면 `sub`로, `sid`만 오면 아래 0118의 세션 번호 표로 직원을 찾는다. `sid`가 온 토큰은 그 세션 하나만 끝낸다(아래 0121).
+- 검증(`verifyLogoutToken`): 서명은 id_token과 같은 규칙(RS·PS·ES 256/384/512, jwks 공개키), `iss`·`aud`(그 기관 설정의 발급자·클라이언트 ID), `iat`(앞서지 않고 10분 안 — `LOGOUT_TOKEN_MAX_AGE_S`), `exp`(있으면), `events`에 back-channel 로그아웃 이벤트, `nonce` 없음(id_token을 돌려쓰지 못하게), `sub`·`sid` 중 하나 이상(있는데 꼴이 틀리면 거절 — 1~255자 글만). `sub`가 오면 `sub`로, `sid`만 오면 아래 0118의 세션 번호 표로 직원을 찾는다. `sid`가 온 토큰은 그 세션 하나만 끝낸다(아래 0121).
 - 서명을 보기 전에는 `iss`·`aud`로 설정만 고른다(Google처럼 발급자가 같은 기관이 여럿이어도 클라이언트 ID로 가린다 — 그 값으로 아무것도 바꾸지 않음). 모르는 발급자·클라이언트는 공개키를 받으러 가지 않는다. SSO를 꺼 둔 설정도 받는다(끝내는 쪽이라).
 - 로그아웃 시각은 토큰의 `iat`(지금보다 늦지 않게)이고 **지금 값보다 늦을 때만** 적는다 — 다시 온 옛 토큰이 그 뒤의 새 로그인을 끝내지 않는다(`jti`는 따로 거르지 않는다). 적으면 보안 로그 `sso_backchannel_logout`(low).
 - 응답: 맞으면 200, 틀린 토큰 400, 설정·공개키·직원을 못 읽거나 못 적으면 503(계정 서비스가 다시 보낸다). 점검 모드에도 받는다(미들웨어 예외). 비밀번호 로그인·대리 접근은 끝내지 않는다.
@@ -102,7 +102,8 @@ OIDC Back-Channel Logout 규칙대로 `sid`가 온 로그아웃은 **그 세션 
 ## 남은 것
 
 - **실제 계정 서비스로 로그인해 보지 않았다** — 시험은 실제 RSA·EC 키로 서명한 id_token과 가짜 계정 서비스로 했다. 운영에서 Entra ID나 Keycloak 시험 테넌트로 한 번 확인해야 한다.
-- SAML, front-channel 로그아웃, `client_secret_basic`·`private_key_jwt`, PS256 등 다른 서명 알고리즘, 관리자 소속 맞추기·관리자 말고 다른 역할(예: 감사 전용)은 없다(그룹 → 부서는 위 0110 — 일반 직원만, 그룹 → 관리자는 위 0115 — 올리고 내리기만). 관리자까지 비밀번호를 끄는 완전한 SSO 전용도 없다(위 — 관리자는 남긴다).
+- **호환 넓히기**(2026-11-26, 마이그레이션 없음): id_token·logout_token 서명을 RS256/384/512·PS256/384/512(RSA-PSS, 솔트는 해시 길이)·ES256/384/512(곡선은 알고리즘마다 하나 — P-256·P-384·P-521, 키의 `crv`가 맞아야)로 받는다(`SSO_JWT_ALGS` — `none`·HS*는 받지 않음). 토큰 주소에 비밀값을 싣는 방식은 발견 문서의 `token_endpoint_auth_methods_supported`로 고른다(`pickTokenAuth` — `client_secret_post` 먼저, 없으면 `client_secret_basic`(Okta 등의 기본 — 비밀값은 머리글에만, RFC 6749 2.3.1의 폼 인코딩 `basicAuthHeader`), 목록이 없으면 예전처럼 post, 둘 다 없으면 교환하지 않음). 켤 때 발견 문서가 우리가 못 하는 인증 방식·서명 알고리즘만 알려 주면 저장하지 않고 까닭을 보인다(400). 시험: `tests/batch-0324.test.ts`(실제 키로 서명한 여덟 알고리즘·none/HS256 거절·곡선 다른 키·basic 흐름·post 흐름·둘 다 없음·켤 때 확인).
+- SAML, front-channel 로그아웃, `private_key_jwt`·EdDSA, 관리자 소속 맞추기·관리자 말고 다른 역할(예: 감사 전용)은 없다(그룹 → 부서는 위 0110 — 일반 직원만, 그룹 → 관리자는 위 0115 — 올리고 내리기만). 관리자까지 비밀번호를 끄는 완전한 SSO 전용도 없다(위 — 관리자는 남긴다).
 - 공용 `/login`에는 단추가 없다 — 기관 전용 경로에서만.
 
 시험: `tests/batch-0286.test.ts`.
