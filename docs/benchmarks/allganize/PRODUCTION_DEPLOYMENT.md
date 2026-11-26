@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-27(새벽): 실행 전 금액·멈춘 까닭·공유 대화의 고쳐 쓴 답·예산 알림 더 받을 주소·문서 좁히기 다시 찾기·고쳐 쓰기 이어지는 질문(0329~0334) — 0134·0135 운영 적용
+
+- 코드 배포 `dpl_Gwr3YVDp1mM1V7GZoVguYXR2UnzN`(커밋 `8df4d26`, 2026-11-27 06:53 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `1202eb0`(밤 2 기록), `e1fb59a` 기능 — 입력형 앱 실행 화면의 '많으면 약 N원'(`POST /api/apps/estimate`)(0329), 앱 실행이 멈춘 까닭 코드·관리자 앱 실행 현황 '멈춘 까닭'(0134)(0330), 공유 대화의 '근거로 고쳐 쓴 답'(0331), 기관 예산 알림을 더 받을 주소(0135)(0332), '문서 좁히기'의 넓혀 다시 찾기(0333), 고쳐 쓰기의 이어지는 질문(0334). `8df4d26` 문서. 가지 Preview(`dpl_GK54DWyugMeJb9LTWcBq5QybWZZk`) Ready 뒤 `main`. 배포 전 전체 시험 488파일 5,563개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_9f8A1dBWkA5JK8safVVuPVSNzJLN`(fa181c0)로 promote — 0134는 같은 함수에 칸 하나 더, 0135는 칸 추가라 옛 코드도 돈다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0133, `budget_alert_emails` 없음, `app_run_states_between`에 까닭 없음, RLS 꺼진 표 0. **0134 → 0135를 코드보다 먼저 적용**(`npm run db:migrate`, 2건 OK) → 다시 읽어 `organizations.budget_alert_emails`(text[] NOT NULL 기본 '{}')·5개 CHECK·함수에 까닭(anon 실행 권한 없음), RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/`·`/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/admin/budget-alerts` 403·`/api/admin/app-overview`·`POST /api/apps/estimate` 인증 없이 401, 없는 공유 링크 `/api/shared/{uuid}` 404(새 칸 조회가 오류 없이 돎). 실행기 호출 06:55~06:59 KST 모두 200(heartbeat 06:55), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 실제 모델·NODA·실제 앱 실행으로 금액·까닭·다시 찾기를 보지 않았다. 늘린 찾기 예산(4배)을 NODA가 받는지 모른다(받지 않으면 첫 결과로). 예산 알림 더 받을 주소로 실제 메일을 받아 보지 않았다. 화면은 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-26(밤 2): 일괄 실행에 문서함 문서·공유 자료함 하위 부서·예산 알림 이력·앱 실행 현황 기간과 CSV(0325~0328) — 0131~0133 운영 적용
 
 - 코드 배포 `dpl_9f8A1dBWkA5JK8safVVuPVSNzJLN`(커밋 `fa181c0`, 2026-11-26 22:17 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `ab15a9d`(밤 기록), `77fcde2` 기능 — 앱 일괄 실행이 실행 화면에서 고른 문서함 문서를 모든 줄에 함께 쓰고 줄마다 지금 근거 판으로(0131)(0325), 공유 자료함 '하위 부서도 함께'(0132)(0326), 관리자 '기관 정보'의 예산 알림 이력(마이그레이션 없음)(0327), 관리자 '앱 실행 현황'의 기간 고르기·CSV와 기관 통계 API `app-runs`의 `?from=&to=`(0133 `app_run_states_between`)(0328). `c8460a1` 문서. `fa181c0` 고침.
