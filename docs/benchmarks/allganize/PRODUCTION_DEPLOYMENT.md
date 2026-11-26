@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-26(저녁): 지난 판 원문 찾기·대화의 적용 기준일·결과 여러 곳에 보내기·자료함 내용 100,000자(0317~0320) — 0127 운영 적용
+
+- 코드 배포 `dpl_5isz8i1AZcAXhaZaGwEYKBcz1fZc`(커밋 `798829a`, 2026-11-26 19:02 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `116b49b`(오후 2 기록), `0e9a688` 기능 — 업무 규정 확인이 과거 기준일에 시행 중이던 지난 판의 원본을 다시 읽어 질문 낱말 문단을 근거로(0317), 앱 결과를 첫 보낼 곳 말고 2곳까지 더(`deliverMore`)(0318), 대화 입력창 '적용 기준일'(미래는 시행 예정 새 판, 과거는 그날의 지난 판 원문 문단까지)(0319), 자료함 내용 찾기 100,000자(0127)(0320). `798829a` 문서. 가지 Preview(`workon-6gh03073c`, `dpl_CCqadKMK354h2NWLXZa6VLyj6hsa`) Ready 뒤 `main`. 배포 전 전체 시험 474파일 5,489개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_9c7uuDSZ65K4dUrbVGFMf1xg2k63`(bad9b17)로 promote — 0127은 CHECK 넓힘이라 옛 코드도 돈다(옛 코드는 20,000자까지만 담는다).
+- 배포 전 운영 확인(읽기만): 마지막 적용 0126, 내용 CHECK 1~20,000자, 자료함 행 0, RLS 꺼진 표 0. **0127을 코드보다 먼저 적용**(`npm run db:migrate`, 1건 OK) → 다시 읽어 CHECK 1~100,000자, 다시 읽을 파일 0, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/my-library`·`/api/apps/batches`·`POST /api/chat`(기준일 포함) 인증 없이 401. 실행기 호출 19:07~19:11 KST 모두 200(heartbeat 19:10), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 지난 판 원문 찾기·대화의 적용 기준일을 실제 문서·실제 모델로 해 보지 않았다(운영에 지난 판이 있는 비서 문서가 없다). 여러 곳에 보내기를 실제 받는 시스템으로 보내 보지 않았다. 입력창·빌더 화면은 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-26(오후 2): 입력형 앱 데이터 표 계산 조회 단계·비서 데이터 파일 미리 읽어 두기(0315·0316) — 마이그레이션 없음
 
 - 코드 배포 `dpl_9c7uuDSZ65K4dUrbVGFMf1xg2k63`(커밋 `bad9b17`, 2026-11-26 14:40 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `44e7dc0`(오후 기록), `d204310` 기능 — 입력형 앱 조회 단계 `data_table`(앱 비서 문서함의 표 파일로, AI는 계산 지시만·숫자는 표 합치기 엔진, 틀리면 한 번 더·안 되면 정보 공백)(0315), 데이터 파일의 표를 문서 id로 저장소 `data-extracts/`에 읽어 두고 5분 실행기가 두 개씩 미리 읽음·문서와 비서를 지우면 함께 지움(0316). `bad9b17` 문서. 가지 Preview(`workon-gdp2n6ei1`, `dpl_Hz3U3kdcEswDFraXciyFirnqRz4m`) Ready 뒤 `main`. 배포 전 전체 시험 470파일 5,466개 통과·tsc 0.
