@@ -21,7 +21,7 @@ describe('설정 값', () => {
     expect(settingsFromAgent(agent as never)).toEqual({
       name: '공문 비서', description: '', icon: '📨', category: '공공기관', usage_guide: '',
       starter_prompts: '교육 안내\n자료 요청', system_prompt: '공문을 씁니다', model_id: '',
-      doc_search: false, image: true, document: false, file_read: false, table_merge: false, connectors: ['law'],
+      doc_search: false, image: true, document: false, file_read: false, table_merge: false, table_merge_documents: false, web_search: false, web_search_domains: '', connectors: ['law'],
     });
   });
 

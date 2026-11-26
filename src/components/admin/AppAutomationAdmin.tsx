@@ -145,7 +145,7 @@ export default function AppAutomationAdmin() {
   async function changeBatchLimit() {
     const current = data?.batchLimit;
     if (!current) return;
-    const raw = window.prompt(`일괄 실행 한 번에 실행할 최대 줄 수(1~100, 비우면 기본 100줄). 지금: ${current.maxRows ?? '기본 100'}줄. 이미 만든 일괄 실행은 그대로 돕니다.`, current.maxRows ? String(current.maxRows) : '');
+    const raw = window.prompt(`일괄 실행 한 번에 실행할 최대 줄 수(1~500, 비우면 기본 100줄). 지금: ${current.maxRows ?? '기본 100'}줄. 이미 만든 일괄 실행은 그대로 돕니다.`, current.maxRows ? String(current.maxRows) : '');
     if (raw === null) return;
     const trimmed = raw.trim();
     const value = trimmed === '' ? null : Number(trimmed);

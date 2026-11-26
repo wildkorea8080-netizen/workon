@@ -4,12 +4,17 @@
 // 머리글에 '기대 핵심어' 칸을 두면(0088) 그 줄의 결과에 그 핵심어가 모두 들어 있는지 실행기가 본다 — 앱 답변을 여러 건 한 번에 재는 길.
 
 import { missingKeywords } from '@/lib/keyword-match';
+import { agreementNote, judgeAgreement, type RagEvalJudgeAgreement } from '@/lib/rag-eval-judge';
 
+/** 기관이 정하지 않았을 때 한 번 최대 줄 수(기본) */
 export const BATCH_MAX_ROWS = 100;
+/** 기관 전체 관리자가 정할 수 있는 한 번 최대 줄 수(2026-11-26, 0123) — 쌓인 줄이 많으면 실행기가 일괄 실행 전용 실행기를 더 띄워 나란히 돌린다 */
+export const BATCH_ROWS_CEILING = 500;
 /** 한 직원이 동시에 돌릴 수 있는 일괄 실행 수 */
 export const BATCH_MAX_RUNNING = 3;
 export const BATCH_NAME_MAX = 80;
-export const BATCH_TEXT_MAX = 400_000;
+/** 붙인 표 글 상한 — 500줄(0123)을 담게. 한글 100만 자 ≈ 3MB라 요청 본문 상한(4.5MB) 안 */
+export const BATCH_TEXT_MAX = 1_000_000;
 /** 줄 하나가 모델 오류로 실패하면 다시 해 볼 횟수(첫 시도 포함) */
 export const BATCH_MAX_ATTEMPTS = 2;
 /** `running`으로 이만큼 지나면 실행기가 끊긴 것으로 보고 다시 차지한다 */
@@ -62,6 +67,48 @@ export function expectVerdict(expect: string | null | undefined, missing: string
   return missing.length ? `빠짐: ${missing.join(', ')}` : '맞음';
 }
 
+// ── AI 채점(2026-11-26, 0125) — 고르면 기대 답이 있는 줄마다 앱의 모델로 한 번 더 불러 결과를 맞음·일부·틀림으로(참고) ──
+export type BatchJudgeGrade = 'correct' | 'partial' | 'incorrect';
+export const BATCH_JUDGE_GRADES: BatchJudgeGrade[] = ['correct', 'partial', 'incorrect'];
+export const BATCH_JUDGE_LABELS: Record<BatchJudgeGrade, string> = { correct: '맞음', partial: '일부 맞음', incorrect: '틀림' };
+export const isBatchJudgeGrade = (v: unknown): v is BatchJudgeGrade => typeof v === 'string' && (BATCH_JUDGE_GRADES as string[]).includes(v);
+/** 채점 이유 길이(DB CHECK 300과 같음) */
+export const BATCH_JUDGE_REASON_MAX = 300;
+export const BATCH_JUDGE_NEEDS_EXPECT = "AI 채점은 표에 '기대 답'(또는 기대 핵심어) 칸이 있을 때만 고를 수 있습니다.";
+
+/** 줄 하나의 AI 채점 꼴 — 화면·엑셀. 채점하지 않은 줄은 빈 글, 못 한 줄은 이유 */
+export function judgeVerdict(grade: string | null | undefined, reason: string | null | undefined): string {
+  if (isBatchJudgeGrade(grade)) return reason ? `${BATCH_JUDGE_LABELS[grade]} — ${reason}` : BATCH_JUDGE_LABELS[grade];
+  return reason ?? '';
+}
+
+// ── 사람 판정(0126) — AI 채점자를 사람 판정과 맞대 잰다(문서 찾기 평가의 사람 판정과 같은 셈) ──
+
+export const BATCH_HUMAN_ONLY_DONE = '마친 줄만 사람 판정을 남길 수 있습니다.';
+export const BATCH_HUMAN_BAD_INPUT = '판정은 { position: 줄 번호, grade: "correct" | "partial" | "incorrect" | null }로 보내 주세요.';
+
+/** 사람 판정 요청 몸 — 줄 번호(1~500 정수)와 등급(null이면 지움). 아니면 null */
+export function parseHumanLabel(body: Record<string, unknown> | null): { position: number; grade: BatchJudgeGrade | null } | null {
+  if (!body) return null;
+  const position = body.position;
+  if (typeof position !== 'number' || !Number.isInteger(position) || position < 1 || position > BATCH_ROWS_CEILING) return null;
+  if (body.grade === null) return { position, grade: null };
+  return isBatchJudgeGrade(body.grade) ? { position, grade: body.grade } : null;
+}
+
+/** 줄들의 사람 판정과 AI 채점 맞대기 — 사람 판정이 하나도 없으면 undefined */
+export function batchAgreement(items: Array<{ judgeGrade?: BatchJudgeGrade | null; humanGrade?: BatchJudgeGrade | null }>): RagEvalJudgeAgreement | undefined {
+  return judgeAgreement(items.map((it) => ({
+    ...(it.judgeGrade ? { judge: { grade: it.judgeGrade } } : {}),
+    ...(it.humanGrade ? { human: { grade: it.humanGrade, at: '' } } : {}),
+  })));
+}
+
+/** 목록 한 줄의 맞대기 꼴 — 사람 판정이 없으면 빈 글 */
+export function batchAgreementSummary(agreement: RagEvalJudgeAgreement | undefined): string {
+  return agreement ? ` · ${agreementNote(agreement)}` : '';
+}
+
 /** 줄이 가진 파일 사본 하나 — `path`는 화면으로 내보내지 않는다 */
 export type BatchFile = { id: string; name: string; size: number; path: string };
 
@@ -103,6 +150,10 @@ export interface BatchView {
   done: number; failed: number; skipped: number; pending: number; stopReason: string | null; createdAt: string; finishedAt: string | null;
   /** 기대 핵심어를 잰 줄 수 / 그중 모두 들어 있던 줄 수(0088) — 기대 핵심어가 없는 묶음은 0·0 */
   expectChecked?: number; expectPassed?: number;
+  /** AI 채점을 고른 묶음인가와 등급별 줄 수(0125) — 채점하지 못한 줄은 judgeErrors */
+  judge?: boolean; judgeCorrect?: number; judgePartial?: number; judgeIncorrect?: number; judgeErrors?: number;
+  /** 사람 판정(0126)과 AI 채점의 맞대기 — 사람 판정이 없으면 없음 */
+  agreement?: RagEvalJudgeAgreement;
 }
 export interface BatchItemView {
   position: number; status: BatchItemStatus; error: string | null; conversationId: string | null; inputs: Record<string, string>;
@@ -110,6 +161,10 @@ export interface BatchItemView {
   fileName?: string | null;
   /** 기대 핵심어(0088)와 결과에 없던 핵심어(재지 않았으면 null) */
   expect?: string | null; expectMissing?: string[] | null;
+  /** AI 채점(0125) — 등급(못 했으면 null)과 이유 */
+  judgeGrade?: BatchJudgeGrade | null; judgeReason?: string | null;
+  /** 만든 직원이 매긴 사람 판정(0126) */
+  humanGrade?: BatchJudgeGrade | null;
 }
 
 type Field = { key: string; label: string };
@@ -169,7 +224,8 @@ export function parseBatchTable(text: string, fields: Field[]): { ok: true; rows
   for (const k of new Set(used)) if (used.filter((x) => x === k).length > 1) errors.push(`'${fields.find((f) => f.key === k)?.label ?? k}' 항목이 머리글에 두 번 있습니다.`);
   if (!used.length && !errors.length) errors.push('머리글에서 이 앱의 입력 항목을 찾지 못했습니다.');
   const lines = records.slice(1);
-  if (lines.length > BATCH_MAX_ROWS) errors.push(`한 번에 ${BATCH_MAX_ROWS}줄까지 실행합니다(지금 ${lines.length}줄).`);
+  // 기관 상한(기본 100줄 — 기관이 500줄까지 정함)은 만들 때 서버가 본다. 여기서는 정할 수 있는 끝(500)까지만
+  if (lines.length > BATCH_ROWS_CEILING) errors.push(`한 번에 ${BATCH_ROWS_CEILING}줄까지 실행합니다(지금 ${lines.length}줄).`);
   if (errors.length) return { ok: false, errors };
   const rows = lines.map((cells, r) => {
     if (cells.length > header.length && cells.slice(header.length).some((c) => c.trim())) errors.push(`${r + 2}번째 줄: 머리글보다 칸이 많습니다.`);

@@ -1,9 +1,10 @@
 import { randomUUID } from 'crypto';
 // src/lib/assistant/stream.ts
+import { defaultReservationIo, releaseRunUsage, type ReservationIo } from '@/lib/usage-reservation';
 import { streamChat, complete } from '@/lib/llm';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { toolsFor } from '@/lib/capabilities';
-import type { LlmContentBlock, LlmMessage, LlmTool, LlmUsage } from '@/lib/llm/types';
+import type { LlmContentBlock, LlmMessage, LlmServerTools, LlmTool, LlmUsage, LlmWebSource } from '@/lib/llm/types';
 import type { Capability, TurnContext, ToolOutcome, GeneratedFileRef } from '@/lib/capabilities/types';
 import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
@@ -19,6 +20,7 @@ import type { NumberCheck } from './persist';
 import { noda, nodaErrorFields, nodaTenant, NodaError, VERIFY_TIMEOUT_MS, type NodaVerifyResult } from '@/lib/noda';
 import { appLookupRunner, runAppIntermediateSteps, type AppStepRecord } from '@/lib/apps/pipeline';
 import { appDocSearchRunner } from '@/lib/apps/app-doc-lookup';
+import { appWebSearchRunner } from '@/lib/apps/app-web-lookup';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { callExternalLookup } from '@/lib/apps/outbound/lookup';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
@@ -53,6 +55,8 @@ export interface StreamTurnDeps {
   enqueueOutbound?: typeof enqueueOutbound;
   /** 앱의 기관 연동 시스템 조회 단계(0102)가 부르는 곳 — 기본은 `callExternalLookup`. 시험이 바꿔 끼운다 */
   externalLookup?: typeof callExternalLookup;
+  /** 사용량 예약 풀기(0122) — 시험이 바꿔 끼운다 */
+  reservationIo?: ReservationIo;
 }
 
 /**
@@ -84,6 +88,20 @@ export interface LoopArgs {
   ctx: TurnContext;
   maxRounds: number;
   progress?: LoopProgress;
+  /** 업체 서버에서 도는 도구(웹 검색, 2026-11-26) — 정의만 싣는다. 결과는 같은 응답의 블록으로 온다 */
+  serverTools?: LlmServerTools;
+}
+
+/** 서버 도구가 긴 일을 멈춘 응답(`pause_turn`)을 이어 부르는 횟수 — 한 턴에 */
+export const MAX_PAUSE_RESUMES = 3;
+/** 답변이 아무것도 인용하지 않았을 때 출처로 보일 웹 검색 결과 수 */
+export const WEB_RESULT_LINKS = 5;
+
+/** 응답의 사용량을 턴 합에 더한다 — 웹 검색 횟수까지 */
+function addUsage(total: LlmUsage, part: LlmUsage): void {
+  total.input_tokens += part.input_tokens;
+  total.output_tokens += part.output_tokens;
+  if (part.web_search_requests) total.web_search_requests = (total.web_search_requests ?? 0) + part.web_search_requests;
 }
 
 export interface LoopResult {
@@ -146,8 +164,13 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   const shownValues: number[] = [];
   let attachmentToolSucceeded = false;
   const tools = args.tools.length > 0 ? args.tools : undefined;
+  const serverTools = args.serverTools?.webSearch ? args.serverTools : undefined;
   let text = '';
   let toolsRan = false;
+  // 웹 검색(2026-11-26) — 답이 인용한 곳이 출처, 인용이 없으면 찾은 곳 앞 몇 개
+  const citedLinks: ToolSource[] = [];
+  const searchedLinks: ToolSource[] = [];
+  let pauses = 0;
 
   /**
    * 도구 없이 답만 받는 마지막 호출. 요청은 시스템 지시만이 아니라 **도구 결과 뒤 사용자 메시지**로도 보낸다 —
@@ -165,23 +188,31 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       maxTokens: MAX_OUTPUT_TOKENS,
       tools,
       toolChoice: 'none',
+      ...(serverTools ? { serverTools } : {}),
     })) {
       if (event.type === 'text') {
         answer += event.text;
         text += event.text;
         send({ event: 'delta', data: { text: event.text } });
+      } else if (event.type === 'citation') {
+        noteCitation(event.source);
       } else if (event.type === 'done') {
-        usage.input_tokens += event.usage.input_tokens;
-        usage.output_tokens += event.usage.output_tokens;
+        addUsage(usage, event.usage);
       }
     }
     return answer;
+  };
+  const noteCitation = (source: LlmWebSource) => {
+    citedLinks.push({ title: source.title, url: source.url });
+    // 인용한 원문 조각의 숫자는 AI가 본 숫자다(숫자 확인이 웹 근거 숫자를 '확인되지 않음'으로 잡지 않게)
+    if (source.citedText) for (const v of numbersIn(source.citedText)) shownValues.push(v);
   };
 
   for (let round = 0; round < args.maxRounds; round++) {
     const calls: { id: string; name: string; input: Record<string, unknown> }[] = [];
     let roundText = '';
     let stopReason: string | null = null;
+    let rawContent: Record<string, unknown>[] | undefined;
 
     for await (const event of streamChat({
       model: args.modelId,
@@ -189,6 +220,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       messages,
       maxTokens: MAX_OUTPUT_TOKENS,
       tools,
+      ...(serverTools ? { serverTools } : {}),
     })) {
       if (event.type === 'text') {
         roundText += event.text;
@@ -196,11 +228,28 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
         send({ event: 'delta', data: { text: event.text } });
       } else if (event.type === 'tool_use') {
         calls.push({ id: event.id, name: event.name, input: event.input });
+      } else if (event.type === 'server_tool_use') {
+        // 웹 검색이 돌기 시작함 — 화면에 '찾는 중'(우리가 실행하지 않는다). 동적 거르기의 코드 실행은 보이지 않는다
+        if (event.name === 'web_search') send({ event: 'tool_start', data: { name: 'web_search', input: event.input } });
+      } else if (event.type === 'server_tool_result') {
+        const found = event.sources.slice(0, WEB_RESULT_LINKS).map((s) => ({ title: s.title, url: s.url }));
+        searchedLinks.push(...found);
+        send({ event: 'tool_end', data: { name: event.name, ok: event.ok, sources: found, files: [] } });
+      } else if (event.type === 'citation') {
+        noteCitation(event.source);
       } else {
-        usage.input_tokens += event.usage.input_tokens;
-        usage.output_tokens += event.usage.output_tokens;
+        addUsage(usage, event.usage);
         stopReason = event.stopReason;
+        rawContent = event.content;
       }
+    }
+
+    // 서버 도구(웹 검색)가 긴 일을 멈췄다 — 받은 응답을 그대로 돌려주면 서버가 이어 간다(사용자 메시지를 붙이지 않는다). 라운드로 세지 않고 턴에 몇 번까지
+    if (stopReason === 'pause_turn' && rawContent?.length && pauses < MAX_PAUSE_RESUMES) {
+      pauses++;
+      messages.push({ role: 'assistant', content: rawContent.map((block) => ({ type: 'provider_raw' as const, block })) });
+      round--;
+      continue;
     }
 
     if (stopReason === 'max_tokens' && calls.length > 0) {
@@ -223,10 +272,15 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       break;
     }
 
-    // 모델이 만든 턴을 그대로 이력에 더한다 (글 + tool_use 블록)
+    // 모델이 만든 턴을 그대로 이력에 더한다 (글 + tool_use 블록). 서버 도구(웹 검색)를 쓴 응답은 받은 블록 그대로 —
+    // 검색 결과(암호화)·인용·생각 블록을 다시 만들 수 없다
     const assistantBlocks: LlmContentBlock[] = [];
-    if (roundText) assistantBlocks.push({ type: 'text', text: roundText });
-    for (const call of calls) assistantBlocks.push({ type: 'tool_use', id: call.id, name: call.name, input: call.input });
+    if (rawContent?.length) {
+      for (const block of rawContent) assistantBlocks.push({ type: 'provider_raw', block });
+    } else {
+      if (roundText) assistantBlocks.push({ type: 'text', text: roundText });
+      for (const call of calls) assistantBlocks.push({ type: 'tool_use', id: call.id, name: call.name, input: call.input });
+    }
     messages.push({ role: 'assistant', content: assistantBlocks });
 
     const resultBlocks: LlmContentBlock[] = [];
@@ -257,7 +311,9 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
     }
   }
 
-  return { text, usage, capabilityUsage, links: dedupeLinks(links), files, shownValues, attachmentToolSucceeded };
+  // 웹 출처 — 답이 인용한 곳, 인용이 없으면 찾은 곳 앞 몇 개(같은 주소는 한 번)
+  const webLinks = citedLinks.length ? citedLinks : searchedLinks.slice(0, WEB_RESULT_LINKS);
+  return { text, usage, capabilityUsage, links: dedupeLinks([...links, ...webLinks]), files, shownValues, attachmentToolSucceeded };
 }
 
 /** 이 턴의 사용량을 모델별로 한 행씩 기록한다. 토큰이 없으면 남기지 않는다 */
@@ -327,6 +383,15 @@ async function verifyTurn(turn: PreparedTurn, answer: string, verify: VerifyFn):
  * 순서: meta → 도구 루프(delta·tool_*) → 숫자 확인·NODA 검증 → 메시지 저장 → 사용 기록 → 제목 → done
  */
 export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnDeps = {}): Promise<void> {
+  try {
+    await runTurn(turn, rawSend, deps);
+  } finally {
+    // 앱 실행의 사용량 예약(0122)은 실행을 마치면(실패해도) 푼다 — 못 풀어도 기한이 지나면 세지 않는다
+    if (turn.usageReservationId) await releaseRunUsage(deps.reservationIo ?? defaultReservationIo(), turn.usageReservationId, turn.ctx.departmentId);
+  }
+}
+
+async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnDeps): Promise<void> {
   // 보내기 실패(연결 끊김)가 저장·사용 기록을 건너뛰게 하면 안 된다. 답변을
   // 받지 못한 사용자도 새로고침하면 대화를 볼 수 있어야 하고, 쓴 토큰은 청구된다.
   // 라우트도 enqueue 실패를 삼키지만 실행기가 그 약속에 기대지 않는다.
@@ -356,7 +421,8 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
   const guard = async () => {
     // 시간 예산을 먼저(DB를 부르지 않는다) — 넘었으면 직원이 고칠 수 있는 안내로 멈춰 기록을 저장한다
     if (now() > deadline) throw new AppInputError(APP_TIME_BUDGET_MESSAGE);
-    const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId);
+    // 자기 실행의 사용량 예약(0122)은 빼고 본다 — 세면 예약한 몫 때문에 자기가 멈춘다
+    const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId, { excludeReservationId: turn.usageReservationId });
     const allowed = await getAllowedModelIds(turn.ctx.organizationId);
     if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');
   };
@@ -379,7 +445,9 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
       // 문서 찾기 조회 단계(2026-11-09)는 이 턴의 비서·기관으로 대화와 같은 찾기 — 시험은 searchDocs로 바꿔 끼운다
       guard, lookup: appLookupRunner(turn.ctx, deps.executeTool ?? executeAppLookup, appDocSearchRunner(turn.ctx, deps.searchDocs ? ({ query }) => deps.searchDocs!(query) : undefined, turn.appLookupAgents ?? []),
         // 기관 연동 시스템 조회(0102) — 이 턴의 기관·앱으로, 승인된 곳인지는 부를 때마다 다시 본다
-        (query, endpoint, action) => (deps.externalLookup ?? callExternalLookup)({ organizationId: turn.ctx.organizationId, agentId: turn.ctx.agentId, appName: turn.appName ?? '앱', appVersion: turn.ctx.agentVersion }, { endpointId: endpoint, action, query })),
+        (query, endpoint, action) => (deps.externalLookup ?? callExternalLookup)({ organizationId: turn.ctx.organizationId, agentId: turn.ctx.agentId, appName: turn.appName ?? '앱', appVersion: turn.ctx.agentVersion }, { endpointId: endpoint, action, query }),
+        // 웹 검색 조회(2026-11-26) — 기관 스위치(대화 준비가 읽음)·앱 능력·모델을 부를 때마다 보고, 쓴 토큰·검색 횟수를 이 실행의 사용량에
+        appWebSearchRunner({ ctx: turn.ctx, model: turn.modelId, usage: progress.usage, guard })),
     }) : null;
     result = await runToolLoop(
       {
@@ -391,6 +459,7 @@ export async function streamTurn(turn: PreparedTurn, rawSend: SendEvent, deps: S
         ctx: turn.ctx,
         maxRounds: staged ? 1 : MAX_TOOL_ROUNDS,
         progress,
+        ...(!staged && turn.serverTools ? { serverTools: turn.serverTools } : {}),
       },
       send
     );

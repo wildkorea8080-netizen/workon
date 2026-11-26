@@ -1,3 +1,5 @@
+import { normalizeWebSearchSettings } from '@/lib/web-search-spec';
+
 /**
  * 능력 설정 — 어떤 능력이 있고, 설정이 어떤 꼴이어야 하며, 기관이 어디까지
  * 열어 두었는가. DB를 보지 않는 순수 함수만 둔다.
@@ -6,7 +8,7 @@
  * 그 목록의 id가 여기 CAPABILITY_IDS와 같은지 테스트가 확인한다.
  */
 
-export const CAPABILITY_IDS = ['doc_search', 'public_data', 'image', 'document', 'file_read', 'table_merge'] as const;
+export const CAPABILITY_IDS = ['doc_search', 'public_data', 'image', 'document', 'file_read', 'table_merge', 'web_search'] as const;
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
 export interface CapabilitySettings {
@@ -14,8 +16,11 @@ export interface CapabilitySettings {
   image?: Record<string, never>;
   document?: Record<string, never>;
   file_read?: Record<string, never>;
-  table_merge?: Record<string, never>;
+  /** 표 합치기 — `agent_documents`면 이 비서의 문서함에 올린 표 파일(엑셀·CSV·한글)로도 계산(2026-11-26) */
+  table_merge?: { agent_documents?: true };
   public_data?: { connectors: string[] };
+  /** 웹 검색(2026-11-26, 0124) — 찾을 곳(도메인)이 있으면 그곳만. 기관이 켰을 때만 돈다 */
+  web_search?: { allowed_domains?: string[] };
 }
 
 export type NormalizeResult = { ok: true; value: CapabilitySettings } | { ok: false; message: string };
@@ -54,9 +59,17 @@ export function normalizeCapabilities(
       const unique = [...new Set(connectors as string[])];
       // 연결이 하나도 없는 공공데이터 능력은 켜 둔 의미가 없다
       if (unique.length > 0) value.public_data = { connectors: unique };
+    } else if (id === 'table_merge') {
+      const docs = settings.agent_documents;
+      if (docs !== undefined && typeof docs !== 'boolean') return { ok: false, message: '표 합치기 설정 형식이 올바르지 않습니다.' };
+      value.table_merge = docs === true ? { agent_documents: true } : {};
+    } else if (id === 'web_search') {
+      const ws = normalizeWebSearchSettings(settings);
+      if (!ws.ok) return { ok: false, message: ws.message };
+      value.web_search = ws.value;
     } else {
       // 설정이 없는 능력. 딸려 온 값은 버린다.
-      value[id as 'doc_search' | 'image' | 'document' | 'file_read' | 'table_merge'] = {};
+      value[id as 'doc_search' | 'image' | 'document' | 'file_read'] = {};
     }
   }
 

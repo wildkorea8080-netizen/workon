@@ -41,6 +41,8 @@ export const SECURITY_EVENT_LABELS: Record<string, string> = {
   conversation_unshared_by_admin: '대화 공개 링크 중단(관리자)',
   conversation_share_org_disabled: '기관 대화 공개 링크 막기(관리자)',
   conversation_share_org_enabled: '기관 대화 공개 링크 다시 열기(관리자)',
+  web_search_org_enabled: '기관 웹 검색 켜기(관리자)',
+  web_search_org_disabled: '기관 웹 검색 끄기(관리자)',
   department_created: '부서 만들기(관리자)',
   department_updated: '부서 고치기(관리자)',
   department_deleted: '부서 삭제(관리자)',

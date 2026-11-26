@@ -181,7 +181,8 @@ export function superTokenSub(token: string): string | null {
  * - 'error': 못 읽음
  */
 export type UserStatus =
-  | { kind: 'active'; role: string | null; departmentId: string | null; passwordChangedAt?: number | null; mustChangePassword?: boolean; /** (0114) 계정 서비스가 알린 기관 계정 로그아웃 시각(ms) */ ssoLogoutAt?: number | null }
+  | { kind: 'active'; role: string | null; departmentId: string | null; passwordChangedAt?: number | null; mustChangePassword?: boolean; /** (0114) 계정 서비스가 알린 기관 계정 로그아웃 시각(ms) */ ssoLogoutAt?: number | null;
+      /** (0121) sid로 끝낸 세션 — `{로그아웃 초}:{sid}` */ ssoEndedSessions?: string[]; /** (0121) sid로 받은 로그아웃의 가장 늦은 때(ms) — sid 없는 로그인용 */ ssoSidLogoutAt?: number | null }
   | { kind: 'inactive' }
   | { kind: 'error' };
 
@@ -189,9 +190,9 @@ export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: Fe
   if (typeof sub !== 'string' || !UUID.test(sub)) return { kind: 'inactive' };
   if (!cfg) return { kind: 'error' };
   try {
-    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change,sso_logout_at`, { headers: headers(cfg) });
+    const res = await f(`${cfg.url}/rest/v1/users?id=eq.${sub}&select=role,department_id,is_active,deleted_at,password_changed_at,password_must_change,sso_logout_at,sso_ended_sessions,sso_sid_logout_at`, { headers: headers(cfg) });
     if (!res.ok) return { kind: 'error' };
-    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null; password_must_change?: boolean | null; sso_logout_at?: string | null }[];
+    const rows = (await res.json()) as { role?: string | null; department_id?: string | null; is_active?: boolean | null; deleted_at?: string | null; password_changed_at?: string | null; password_must_change?: boolean | null; sso_logout_at?: string | null; sso_ended_sessions?: unknown; sso_sid_logout_at?: string | null }[];
     if (!Array.isArray(rows)) return { kind: 'error' };
     const row = rows[0];
     if (!row || row.is_active === false || row.deleted_at) return { kind: 'inactive' };
@@ -199,7 +200,9 @@ export async function readUserStatus(cfg: RestConfig | null, sub: unknown, f: Fe
     return { kind: 'active', role: String(row.role ?? 'USER').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'USER', departmentId: typeof row.department_id === 'string' ? row.department_id : null,
       passwordChangedAt: row.password_changed_at ? Date.parse(row.password_changed_at) || null : null,
       mustChangePassword: row.password_must_change === true,
-      ssoLogoutAt: row.sso_logout_at ? Date.parse(row.sso_logout_at) || null : null };
+      ssoLogoutAt: row.sso_logout_at ? Date.parse(row.sso_logout_at) || null : null,
+      ssoEndedSessions: Array.isArray(row.sso_ended_sessions) ? row.sso_ended_sessions.filter((e): e is string => typeof e === 'string').slice(-20) : [],
+      ssoSidLogoutAt: row.sso_sid_logout_at ? Date.parse(row.sso_sid_logout_at) || null : null };
   } catch {
     return { kind: 'error' };
   }
@@ -248,6 +251,22 @@ export async function deptSsoOnly(
 type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: number };
 
 /**
+ * (0121) 이 sid의 로그인이 back-channel 로그아웃으로 끝났나 — 끝낸 세션 항목(`{로그아웃 초}:{sid}`) 중 sid가 같고 로그인이 그때나 그 전인 것.
+ * 같은 sid가 나중에 다시 쓰여도(계정 서비스가 번호를 되쓰는 경우) 로그아웃 뒤에 들어온 로그인은 끝내지 않는다
+ */
+export function sessionEndedBySid(entries: readonly string[] | undefined, sid: string, loginSec: number | null): boolean {
+  if (!entries?.length || !sid) return false;
+  for (const entry of entries) {
+    const colon = entry.indexOf(':');
+    if (colon < 1 || entry.slice(colon + 1) !== sid) continue;
+    const at = Number(entry.slice(0, colon));
+    if (!Number.isInteger(at)) continue;
+    if (loginSec === null || loginSec <= at) return true;
+  }
+  return false;
+}
+
+/**
  * 이 토큰을 지금도 받아도 되는가.
  * - 비활성·탈퇴 → 'inactive', 역할·부서가 토큰과 다름 → 'changed'(다시 로그인해야 새 권한·소속이 토큰에 실린다 — 강등된 관리자가
  *   옛 토큰으로 관리자 화면을 쓰거나, 다른 부서로 옮긴 직원이 옛 부서 범위로 보지 않게)
@@ -256,7 +275,7 @@ type UserCacheEntry = { status: Exclude<UserStatus, { kind: 'error' }>; at: numb
  */
 export async function userSessionVerdict(
   cache: Map<string, UserCacheEntry>,
-  token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown; isImpersonating?: unknown; sso?: unknown },
+  token: { sub?: unknown; role?: unknown; departmentId?: unknown; authAt?: unknown; iat?: unknown; isImpersonating?: unknown; sso?: unknown; ssoSid?: unknown },
   read: (sub: unknown) => Promise<UserStatus>,
   now = Date.now(),
   /** 기관 SSO 전용(0109)인가 — 부서 id로. 없으면 보지 않는다 */
@@ -289,9 +308,14 @@ export async function userSessionVerdict(
     if (loginSec !== null && loginSec < Math.floor(status.passwordChangedAt / 1000)) return 'password_changed';
   }
   // 계정 서비스가 먼저 로그아웃했다(back-channel, 0114) — 그때나 그 전에 기관 계정으로 들어온 로그인만 끝낸다(비밀번호 로그인·대리 접근은 그대로)
-  if (status.ssoLogoutAt && token.sso === true && token.isImpersonating !== true) {
+  if (token.sso === true && token.isImpersonating !== true) {
     const loginSec = typeof token.authAt === 'number' ? Math.floor(token.authAt / 1000) : typeof token.iat === 'number' ? token.iat : null;
-    if (loginSec !== null && loginSec <= Math.floor(status.ssoLogoutAt / 1000)) return 'sso_logged_out';
+    if (status.ssoLogoutAt && loginSec !== null && loginSec <= Math.floor(status.ssoLogoutAt / 1000)) return 'sso_logged_out';
+    // sid가 온 로그아웃(0121)은 그 세션 하나만 — 로그인에 sid가 실렸으면 그 sid로 끝낸 항목만 본다. sid를 싣지 않은 로그인
+    // (이 배포 전 로그인·id_token에 sid가 없던 로그인)은 어느 세션인지 몰라 예전처럼 sid 로그아웃 시각으로 끝낸다
+    if (typeof token.ssoSid === 'string' && token.ssoSid) {
+      if (sessionEndedBySid(status.ssoEndedSessions, token.ssoSid, loginSec)) return 'sso_logged_out';
+    } else if (status.ssoSidLogoutAt && loginSec !== null && loginSec <= Math.floor(status.ssoSidLogoutAt / 1000)) return 'sso_logged_out';
   }
   // 임시 비밀번호(0093) — 본인이 바꾸기 전까지는 '비밀번호 바꾸기'만. 대리 접근(슈퍼관리자)은 그 관리자 대신 바꾸지 않으므로 묶지 않는다
   // 기관 SSO(0107)로 들어온 로그인도 묶지 않는다 — 비밀번호를 쓰지 않아 지금 비밀번호를 모른다(임시 비밀번호 로그인은 그대로 묶임)

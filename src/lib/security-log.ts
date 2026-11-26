@@ -93,7 +93,10 @@ export type SecurityEventType =
   | 'conversation_unshared_by_admin'
   /** 기관 전체 관리자가 대화 공개 링크 기능을 막음 / 다시 엶 (0098, 2026-11-23) */
   | 'conversation_share_org_disabled'
-  | 'conversation_share_org_enabled';
+  | 'conversation_share_org_enabled'
+  /** 기관 전체 관리자가 비서의 웹 검색을 켬 / 끔 (0124, 2026-11-26) */
+  | 'web_search_org_enabled'
+  | 'web_search_org_disabled';
 
 export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical';
 

@@ -150,7 +150,10 @@ export function mergeUsageByModel(usages: LlmUsage[]): LlmUsage[] {
     byModel.set(
       u.model,
       prev
-        ? { model: u.model, input_tokens: prev.input_tokens + u.input_tokens, output_tokens: prev.output_tokens + u.output_tokens }
+        ? {
+          model: u.model, input_tokens: prev.input_tokens + u.input_tokens, output_tokens: prev.output_tokens + u.output_tokens,
+          ...((prev.web_search_requests ?? 0) + (u.web_search_requests ?? 0) > 0 ? { web_search_requests: (prev.web_search_requests ?? 0) + (u.web_search_requests ?? 0) } : {}),
+        }
         : { ...u }
     );
   }
@@ -164,6 +167,8 @@ export function buildUsageDetails(usage: LlmUsage, extra: Record<string, unknown
     model: usage.model,
     input_tokens: usage.input_tokens,
     output_tokens: usage.output_tokens,
+    // 웹 검색(2026-11-26) — 원가에 회당 값이 들어간다(금액 한도·예산 판정이 함께 센다)
+    ...(usage.web_search_requests ? { web_search_requests: usage.web_search_requests } : {}),
     cost_usd: estimateCostUsd(usage, usage.model),
     cost_krw: estimateCostKrw(usage, usage.model),
   };

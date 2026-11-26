@@ -155,12 +155,12 @@ describe('목록·엑셀·연결', () => {
     const lib = readFileSync('src/lib/apps/batches.ts', 'utf8');
     expect(lib).toContain("...(rowExpects[i] ? { expect: rowExpects[i] } : {})");
     expect(lib).toContain("expects: tableRows.map((r) => r.expect ?? '')");
-    expect(lib).toContain("select('batch_id, status, expect_missing')");
+    expect(lib).toContain("select('id, batch_id, status, expect_missing, judge_grade, judge_reason, human_grade'"); // 쪽 읽기(0123)·AI 채점(0125)
     expect(lib).toContain("select('id, batch_id, position, inputs, status, attempts, claimed_at, file, expect')");
-    expect(lib).toContain("select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id')");
+    expect(lib).toContain("select('id, organization_id, department_id, user_id, agent_id, app_version, status, webhook_id, judge')");
     expect(lib).toContain("'기대 핵심어는 줄마다 하나씩(줄 수와 같게) 보내 주세요.'");
     const panel = readFileSync('src/components/apps/AppBatchPanel.tsx', 'utf8');
-    expect(panel).toContain('...(preview.expects.some(Boolean) ? { expects: preview.expects } : {})');
+    expect(panel).toContain('...(withExpect ? { expects: preview.expects, ...(judge ? { judge: true } : {}) } : {})');
     expect(panel).toContain('핵심어 맞음 ${b.expectPassed ?? 0}/${b.expectChecked}');
     expect(readFileSync('src/lib/rag-eval-answer.ts', 'utf8')).toContain("export { keywordKey, missingKeywords } from '@/lib/keyword-match';");
   });

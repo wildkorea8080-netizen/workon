@@ -10,8 +10,8 @@ import {
 const known = { knownConnectorIds: ['law', 'kosis'] };
 
 describe('능력 설정 정규화', () => {
-  it('능력은 여섯이다 — S1의 셋, S2-a의 문서 만들기, S3-a의 파일 받아 읽기, S3-b의 표 합치기', () => {
-    expect([...CAPABILITY_IDS]).toEqual(['doc_search', 'public_data', 'image', 'document', 'file_read', 'table_merge']);
+  it('능력은 일곱이다 — S1의 셋, S2-a의 문서 만들기, S3-a의 파일 받아 읽기, S3-b의 표 합치기, 웹 검색(0124)', () => {
+    expect([...CAPABILITY_IDS]).toEqual(['doc_search', 'public_data', 'image', 'document', 'file_read', 'table_merge', 'web_search']);
   });
 
   it('비어 있으면 빈 설정', () => {

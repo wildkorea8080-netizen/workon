@@ -1,7 +1,7 @@
 // src/lib/agent-patch.ts
 import { parseCatalogFields, type AgentType } from '@/lib/agent-catalog';
 import { normalizeCapabilities, type CapabilitySettings } from '@/lib/capabilities/settings';
-import { appLookupConnectors, appUsesDocSearchLookup, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
+import { appLookupConnectors, appUsesDocSearchLookup, appUsesWebSearchLookup, validateAppDefinition, type AppDefinition } from '@/lib/apps/definition';
 
 /**
  * 비서 수정 요청을 두 갈래로 나눈다.
@@ -110,6 +110,10 @@ export function splitAgentBody(
     // 문서 찾기 조회 단계(2026-11-09)는 앱의 문서 찾기 능력이 켜져 있어야 돈다
     if (appUsesDocSearchLookup(result.settings.app_definition) && !result.settings.capabilities.doc_search) {
       return fail('문서 찾기 단계를 쓰려면 앱 능력의 문서 찾기를 켜 주세요.');
+    }
+    // 웹 검색 조회(2026-11-26)는 앱의 웹 검색 능력이 켜져 있어야 돈다(기관 스위치는 실행 때 본다)
+    if (appUsesWebSearchLookup(result.settings.app_definition) && !result.settings.capabilities.web_search) {
+      return fail('웹 검색 단계를 쓰려면 앱 능력의 웹 검색을 켜 주세요.');
     }
   }
 

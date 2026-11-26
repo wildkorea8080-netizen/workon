@@ -98,6 +98,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_templates: '쓸 수 있는 양식을 찾는 중',
   read_template: '양식의 항목을 읽는 중',
   fill_template: '문서 파일을 만드는 중',
+  web_search: '웹에서 찾는 중',
 };
 
 function toolLabel(name: string) {

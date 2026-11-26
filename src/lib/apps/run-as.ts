@@ -24,7 +24,8 @@ export type RunAsOutcome =
   /** 만들 때와 소속 부서가 다르다 — 권한 범위가 바뀌었을 수 있어 실행하지 않는다 */
   | { kind: 'department_changed' }
   /** 대화 실행기가 시작 전에 거절(409 앱 판 바뀜·403/404 앱을 쓸 수 없음·429 한도·400 입력 검사 등) */
-  | { kind: 'rejected'; status: number; message: string }
+  /** `waitable` — 사용량 예약(0122)에 막혔지만 다른 실행이 쥔 예약이 풀리면 될 거절(일괄 실행은 멈추지 않고 다음 차례에) */
+  | { kind: 'rejected'; status: number; message: string; waitable?: boolean }
   /** 시작했지만 끝까지 가지 못함(모델 오류·응답 끊김) — 대화는 남았을 수 있다 */
   | { kind: 'failed'; error: string; conversationId: string | null };
 
@@ -47,7 +48,7 @@ export async function runAppAs(input: RunAsInput, titlePrefix: string, io: RunAs
     expires: new Date(Date.now() + 5 * 60_000).toISOString(),
   } as Session;
   const prepared = await io.prepare(session, { agent_id: input.agentId, message: '앱 실행', app_inputs: input.inputs, app_version: input.appVersion, ...(input.documentIds?.length ? { app_document_ids: input.documentIds } : {}), ...(input.attachmentIds?.length ? { attachment_ids: input.attachmentIds } : {}), ...(input.resumeMessageId ? { resume_message_id: input.resumeMessageId } : {}) });
-  if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message };
+  if (!prepared.ok) return { kind: 'rejected', status: prepared.status, message: prepared.message, ...(prepared.details?.waitable === true ? { waitable: true } : {}) };
   let conversationId: string | null = null; let error: string | null = null; let done = false; let messageId: string | null = null;
   try {
     await io.stream(prepared.turn, (event) => {

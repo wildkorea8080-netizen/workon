@@ -29,6 +29,8 @@ export type TurnEvent =
 export type SendEvent = (event: TurnEvent) => void;
 
 export interface PreparedTurn {
+  /** (0122) 앱 실행의 사용량 예약 — 단계마다 한도를 다시 볼 때 자기 예약은 빼고, 실행을 마치면 푼다 */
+  usageReservationId?: string;
   appSteps?: import('@/lib/apps/definition').AppStep[];
   /** 앱 이름 — 기관 연동 시스템 조회(0102)가 받는 쪽에 어느 앱이 부르는지 알린다 */
   appName?: string;
@@ -56,6 +58,8 @@ export interface PreparedTurn {
   systemPrompt: string;
   messages: LlmMessage[];
   tools: LlmTool[];
+  /** 업체 서버에서 도는 도구(웹 검색 — 기관이 켰고 비서가 켠 턴만, 2026-11-26) */
+  serverTools?: import('@/lib/llm/types').LlmServerTools;
   capabilities: Capability[];
   conversationId: string;
   isNewConversation: boolean;

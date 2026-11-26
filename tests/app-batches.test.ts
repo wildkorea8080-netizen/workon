@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it, vi } from 'vitest';
-import { BATCH_MAX_ROWS, parseBatchTable, normalizeBatchName } from '@/lib/apps/batch-spec';
+import { BATCH_ROWS_CEILING, parseBatchTable, normalizeBatchName } from '@/lib/apps/batch-spec';
 import { BATCH_START_WINDOW_MS, runDueBatchItems, type BatchDeps, type BatchItemRun, type ItemPatch } from '@/lib/apps/batches';
 import { runAppAs, type RunAsIo, type RunAsOutcome } from '@/lib/apps/run-as';
 import { previewBatch } from '@/components/apps/AppBatchPanel';
@@ -30,7 +30,7 @@ describe('표 읽기', () => {
     expect(parseBatchTable('주제\ttopic\n여비\t여비', fields)).toMatchObject({ ok: false, errors: [expect.stringContaining('두 번')] });
     expect(parseBatchTable('주제\n', fields)).toMatchObject({ ok: false });
     expect(parseBatchTable('', fields)).toMatchObject({ ok: false });
-    expect(parseBatchTable(`주제\n${Array.from({ length: BATCH_MAX_ROWS + 1 }, (_, i) => `q${i}`).join('\n')}`, fields)).toMatchObject({ ok: false, errors: [expect.stringContaining(`${BATCH_MAX_ROWS}줄`)] });
+    expect(parseBatchTable(`주제\n${Array.from({ length: BATCH_ROWS_CEILING + 1 }, (_, i) => `q${i}`).join('\n')}`, fields)).toMatchObject({ ok: false, errors: [expect.stringContaining(`${BATCH_ROWS_CEILING}줄`)] });
     // 첫 줄에 탭이 없으면 쉼표로 가른다
     expect(parseBatchTable('주제\n여비,넘침', fields)).toMatchObject({ ok: false, errors: [expect.stringContaining('2번째 줄')] });
     expect(parseBatchTable('주제\n여비\t넘침', fields)).toEqual({ ok: true, rows: [{ topic: '여비\t넘침' }], expects: [''] });
@@ -113,9 +113,9 @@ describe('실행기', () => {
   it('차지 못 한 줄은 건너뛰고, 시작 창(90초)을 넘기면 새 줄을 시작하지 않는다, 목록 실패도 던지지 않는다', async () => {
     const none = deps([], [item(1)], { claim: async () => false });
     expect(await runDueBatchItems(none.d)).toMatchObject({ ran: 0 });
-    const slow = deps([], [item(1), item(2), item(3), item(4)]);
+    const slow = deps([], [item(1), item(2), item(3), item(4), item(5), item(6)]);
     slow.d.run = async () => { slow.advance(BATCH_START_WINDOW_MS + 1); return { kind: 'completed', conversationId: 'c', messageId: 'm' }; };
-    expect((await runDueBatchItems(slow.d)).ran).toBe(2); // 두 줄씩 나란히 — 각자 첫 줄만
+    expect((await runDueBatchItems(slow.d)).ran).toBe(3); // 세 줄씩 나란히(2026-11-26) — 각자 첫 줄만
     expect(await runDueBatchItems({ ...deps([]).d, openItems: async () => { throw new Error('db'); } })).toMatchObject({ ran: 0 });
   });
 });
@@ -146,10 +146,11 @@ describe('결과 가리키기·연결', () => {
     for (const route of ['src/app/api/apps/batches/route.ts', 'src/app/api/apps/batches/[id]/route.ts', 'src/app/api/apps/batches/[id]/export/route.ts']) {
       expect(readFileSync(route, 'utf8')).toContain('session.user.id');
     }
-    // 잎 파일 — 핵심어 규칙(keyword-match.ts, 그것도 아무것도 import하지 않음) 말고는 가져오지 않는다
+    // 잎 파일 — 핵심어 규칙(keyword-match.ts)·사람 판정 맞대기(rag-eval-judge.ts, 0126) — 둘 다 아무것도 import하지 않음 — 말고는 가져오지 않는다
     const spec = readFileSync('src/lib/apps/batch-spec.ts', 'utf8');
-    expect(spec.match(/^import .*$/gm)).toEqual(["import { missingKeywords } from '@/lib/keyword-match';"]);
+    expect(spec.match(/^import .*$/gm)).toEqual(["import { missingKeywords } from '@/lib/keyword-match';", "import { agreementNote, judgeAgreement, type RagEvalJudgeAgreement } from '@/lib/rag-eval-judge';"]);
     expect(readFileSync('src/lib/keyword-match.ts', 'utf8')).not.toMatch(/^import /m);
+    expect(readFileSync('src/lib/rag-eval-judge.ts', 'utf8')).not.toMatch(/^import /m);
     // 시험 판 실행 화면에는 일괄 실행을 두지 않는다(일괄 실행은 언제나 지금 판)
     expect(readFileSync('src/app/apps/run/page.tsx', 'utf8')).toContain('{!draftSavedAt && <AppBatchPanel');
   });

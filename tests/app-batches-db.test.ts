@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 
 /**
  * 입력형 앱 일괄 실행 표(0077)를 실제 Postgres에서 — 시험 DB(`npm run work:testdb -- start`)가 있을 때만.
- * 보는 것: 상태·마친 때·멈춘 사유 짝 CHECK, 줄 수 1~100, 같은 묶음·같은 번호 한 줄(UNIQUE), 줄 상태·차지·마친 때 짝 CHECK,
+ * 보는 것: 상태·마친 때·멈춘 사유 짝 CHECK, 줄 수 1~500(0123), 같은 묶음·같은 번호 한 줄(UNIQUE), 줄 상태·차지·마친 때 짝 CHECK,
  * 묶음을 지우면 줄도, 대화를 지우면 줄의 대화·답변 칸만 비움, RLS로 anon·authenticated는 못 읽음
  */
 const url = process.env.WORK_TEST_DATABASE_URL;
@@ -42,14 +42,14 @@ describe.skipIf(!url)('앱 일괄 실행 DB (0077)', () => {
     [batchId, position, patch.status ?? 'pending', patch.claimed_at ?? null, patch.finished_at ?? null, patch.conversation_id ?? null],
   );
 
-  it('묶음 CHECK — 상태와 마친 때·멈춘 사유 짝, 줄 수 1~100', async () => {
+  it('묶음 CHECK — 상태와 마친 때·멈춘 사유 짝, 줄 수 1~500(0123)', async () => {
     await batch();
     await expect(batch({ status: 'done' })).rejects.toThrow(/check/i);
     await batch({ status: 'done', finished_at: '2026-11-09T00:00:00Z' });
     await expect(batch({ status: 'stopped', finished_at: '2026-11-09T00:00:00Z' })).rejects.toThrow(/check/i);
     await batch({ status: 'stopped', finished_at: '2026-11-09T00:00:00Z', stop_reason: '앱 설정이 바뀌어 멈췄습니다.' });
     await expect(batch({ total: 0 })).rejects.toThrow(/check/i);
-    await expect(batch({ total: 101 })).rejects.toThrow(/check/i);
+    await expect(batch({ total: 501 })).rejects.toThrow(/check/i);
   });
 
   it('줄 CHECK — 같은 번호 한 줄, 실행 중은 차지 시각, 끝난 줄은 마친 때', async () => {

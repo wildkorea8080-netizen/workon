@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { actorScopeOr503 } from '@/lib/actor-scope-response';
-import { BatchReadError, cancelBatch, getBatch, retryUnfinished } from '@/lib/apps/batches';
+import { BatchReadError, cancelBatch, getBatch, labelBatchItem, retryUnfinished } from '@/lib/apps/batches';
+import { BATCH_HUMAN_BAD_INPUT, parseHumanLabel } from '@/lib/apps/batch-spec';
+import { readJsonObject } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 const fail = (message: string, status: number) => NextResponse.json({ ok: false, error: { message } }, { status });
@@ -34,6 +36,20 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const out = await retryUnfinished(actor, params.id);
   if (!out.ok) return NextResponse.json({ ok: false, error: { message: out.message, ...('errors' in out ? { details: { errors: out.errors } } : {}) } }, { status: out.status });
   return NextResponse.json({ ok: true, data: { batch: out.batch, skippedFiles: out.skippedFiles } });
+}
+
+/**
+ * 사람 판정(0126) — `{ position, grade }`(grade null이면 지움). 만든 사람만·마친 줄만(아니면 409). 남긴 뒤 묶음을 다시 읽어
+ * 맞대기(AI 채점 일치율·후하게/짜게 본 줄·3×3 표)와 함께 돌려준다
+ */
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const session = await getServerAuthSession();
+  if (!session?.user?.id) return fail('인증이 필요합니다.', 401);
+  const label = parseHumanLabel(await readJsonObject(request));
+  if (!label) return fail(BATCH_HUMAN_BAD_INPUT, 400);
+  const out = await labelBatchItem(session.user.id, params.id, label.position, label.grade);
+  if (!out.ok) return fail(out.message, out.status);
+  return NextResponse.json({ ok: true, data: { batch: out.batch, items: out.items } });
 }
 
 /** 그만두기 — 기다리던 줄은 건너뛰고, 이미 실행 중인 줄은 끝까지 간다 */

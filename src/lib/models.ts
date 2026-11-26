@@ -25,7 +25,15 @@ export interface ModelDefinition {
   contextWindow: number;
   /** 관리자가 고를 때 판단 근거가 되는 한 줄 설명 */
   note: string;
+  /**
+   * 이 모델에 싣는 Anthropic 웹 검색 도구의 꼴(2026-11-26). `web_search_20260209`(동적 거르기 — 결과를 코드로 걸러 넣음)는
+   * Sonnet 4.6·Opus 5·Sonnet 5 이후, 그 전 모델은 `web_search_20250305`. 없으면 웹 검색을 싣지 않는다
+   */
+  webSearchTool?: 'web_search_20260209' | 'web_search_20250305';
 }
+
+/** 웹 검색 한 번의 값(USD) — Anthropic 공식 $10 / 1,000회(토큰과 따로). 기록 시점 원가(cost_usd)에 더한다 */
+export const WEB_SEARCH_USD_PER_REQUEST = 0.01;
 
 export const MODELS: Record<string, ModelDefinition> = {
   'claude-sonnet-4-6': {
@@ -37,6 +45,7 @@ export const MODELS: Record<string, ModelDefinition> = {
     enabled: true,
     contextWindow: 1_000_000,
     note: '기본 모델. 일반 문서 작성·요약에 충분합니다.',
+    webSearchTool: 'web_search_20260209',
   },
   'claude-opus-5': {
     id: 'claude-opus-5',
@@ -47,6 +56,7 @@ export const MODELS: Record<string, ModelDefinition> = {
     enabled: true,
     contextWindow: 1_000_000,
     note: '가장 정확합니다. 법령 해석·복잡한 보고서처럼 틀리면 곤란한 일에 씁니다.',
+    webSearchTool: 'web_search_20260209',
   },
   'claude-sonnet-5': {
     id: 'claude-sonnet-5',
@@ -57,6 +67,7 @@ export const MODELS: Record<string, ModelDefinition> = {
     enabled: true,
     contextWindow: 1_000_000,
     note: '균형형. Sonnet 4.6과 같은 단가로 더 나은 품질을 냅니다.',
+    webSearchTool: 'web_search_20260209',
   },
   'claude-haiku-4-5': {
     id: 'claude-haiku-4-5',
@@ -67,6 +78,7 @@ export const MODELS: Record<string, ModelDefinition> = {
     enabled: true,
     contextWindow: 200_000,
     note: '가장 저렴합니다. 음슴체 변환·개조식 정리처럼 단순 변환에 적합합니다.',
+    webSearchTool: 'web_search_20250305',
   },
   // 모델 추가 시: 단가는 반드시 공식 가격표를 확인해 넣을 것.
   // 다른 프로바이더를 붙이려면 src/lib/llm/ 어댑터 계층이 먼저 필요하다.
@@ -102,14 +114,18 @@ export function enabledModels(): ModelDefinition[] {
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
+  /** 웹 검색 횟수(2026-11-26) — 회당 WEB_SEARCH_USD_PER_REQUEST */
+  web_search_requests?: number;
 }
 
 /** 토큰 사용량 → USD. modelId가 없으면 기본 모델 단가로 추정한다. */
 export function estimateCostUsd(usage: TokenUsage, modelId?: string | null): number {
   const model = getModel(modelId);
+  const searches = Number(usage.web_search_requests);
   const cost =
     (usage.input_tokens / 1_000_000) * model.inputPerMTok +
-    (usage.output_tokens / 1_000_000) * model.outputPerMTok;
+    (usage.output_tokens / 1_000_000) * model.outputPerMTok +
+    (Number.isFinite(searches) && searches > 0 ? searches * WEB_SEARCH_USD_PER_REQUEST : 0);
   return parseFloat(cost.toFixed(6));
 }
 

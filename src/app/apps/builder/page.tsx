@@ -7,7 +7,7 @@ import WorkShell, { Card, ErrorNote, PageTitle } from '@/components/work/WorkShe
 import AppFields from '@/components/apps/AppFields';
 import AppStepEditor, { RequiredWhenEditor, lookupAgentChoices, type LookupAgentChoice, type LookupEndpointChoice } from '@/components/apps/AppStepEditor';
 import { api } from '@/lib/work/client';
-import { APP_LOOKUP_TOOLS, appLookupConnectors, appUsesDocSearchLookup, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppField, type AppLookupTool } from '@/lib/apps/definition';
+import { APP_LOOKUP_TOOLS, appLookupConnectors, appUsesDocSearchLookup, appUsesWebSearchLookup, upgradeAppConditions, validateAppDefinition, type AppDefinition, type AppField, type AppLookupTool } from '@/lib/apps/definition';
 import { lookupCapability } from '@/lib/apps/lookup-capability';
 import { readAppDraft, savesAsDraft, type AppDraft } from '@/lib/apps/draft';
 import AppDraftPanel, { kstTime } from '@/components/apps/AppDraftPanel';
@@ -131,6 +131,8 @@ function Builder() {
     if (connectors.length) capabilities.public_data = { connectors }; else delete capabilities.public_data;
     // 문서 찾기 조회 단계(2026-11-09) — 쓰면 문서 찾기 능력을 켠다(단계를 지워도 끄지 않는다 — 올린 문서로 답하는 데도 쓰는 능력이다)
     if (appUsesDocSearchLookup(checked.value)) capabilities.doc_search = {};
+    // 웹 검색 조회·조사(2026-11-26) — 쓰면 웹 검색 능력을 켠다(이미 정한 찾을 곳은 그대로). 돌지는 기관 스위치가 정한다
+    if (appUsesWebSearchLookup(checked.value) && !capabilities.web_search) capabilities.web_search = {};
     const settings = { capabilities, name: name.trim(), description: description.trim(), category: category.trim() || '기타', system_prompt: instructions.trim(), app_definition: checked.value };
     if (agent && savesAsDraft(agent.tier)) {
       // 부서·공식 앱은 시험 판으로 — 지금 판(부서 사람들의 실행·예약·연동)은 배포 전까지 그대로

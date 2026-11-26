@@ -11,8 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 type Write = { table: string; op: 'insert' | 'update'; rows: Record<string, unknown>[] };
 const writes: Write[] = [];
-const policy = vi.hoisted(() => ({ allowed: true, models: ['claude-haiku-4-5'] }));
-vi.mock('@/lib/usage-limit', async original => ({ ...await original<typeof import('@/lib/usage-limit')>(), checkTokenLimit: async () => ({ allowed: policy.allowed }) }));
+const policy = vi.hoisted(() => ({ allowed: true, models: ['claude-haiku-4-5'], limitCalls: [] as unknown[][] }));
+vi.mock('@/lib/usage-limit', async original => ({ ...await original<typeof import('@/lib/usage-limit')>(), checkTokenLimit: async (...args: unknown[]) => { policy.limitCalls.push(args); return { allowed: policy.allowed }; } }));
 vi.mock('@/lib/model-policy', async original => ({ ...await original<typeof import('@/lib/model-policy')>(), getAllowedModelIds: async () => policy.models }));
 
 vi.mock('@/lib/supabaseAdmin', () => {
@@ -824,5 +824,34 @@ describe('앱 실행의 시간 예산(2026-11-07)', () => {
     const { readFileSync } = await import('fs');
     expect(readFileSync('src/app/api/chat/route.ts', 'utf8')).toContain('export const maxDuration = 300;');
     expect(APP_STEP_TIME_BUDGET_MS).toBeLessThanOrEqual(200_000);
+  });
+});
+
+describe('앱 실행의 사용량 예약(0122)', () => {
+  const appSteps = [{ name: '정리', instruction: '정리하세요.' }, { name: '작성', instruction: '작성하세요.' }];
+  const io = () => ({ headroom: vi.fn(), reserve: vi.fn(), release: vi.fn(async () => {}), report: vi.fn(async () => {}), now: () => 0 });
+  it('단계마다 한도를 다시 볼 때 자기 예약은 빼고, 마치면 예약을 푼다', async () => {
+    setLlmAdapterForTests(adapter());
+    policy.limitCalls.length = 0;
+    const r = io();
+    await run(turn({ appSteps, appStepInputs: { source: 'x' }, usageReservationId: 'r9', isNewConversation: false }), undefined, { reservationIo: r as never });
+    expect(policy.limitCalls.length).toBeGreaterThan(0);
+    for (const args of policy.limitCalls) expect(args[2]).toEqual({ excludeReservationId: 'r9' });
+    expect(r.release).toHaveBeenCalledWith('r9');
+  });
+  it('실행이 실패해도 예약을 풀고, 못 풀면 운영 기록만(실행 결과는 그대로)', async () => {
+    const a = adapter(); a.complete = async () => { throw new Error('모델 장애'); };
+    setLlmAdapterForTests(a);
+    const r = io(); r.release = vi.fn(async () => { throw new Error('db'); });
+    const events = await run(turn({ appSteps, appStepInputs: { source: 'x' }, usageReservationId: 'r9', isNewConversation: false }), undefined, { reservationIo: r as never });
+    expect(events.some(e => e.event === 'error')).toBe(true);
+    expect(r.release).toHaveBeenCalledWith('r9');
+    expect(r.report).toHaveBeenCalledWith('release', expect.any(Error), expect.anything());
+  });
+  it('예약이 없는 턴은 풀지 않는다', async () => {
+    setLlmAdapterForTests(adapter());
+    const r = io();
+    await run(turn({ appSteps, appStepInputs: { source: 'x' }, isNewConversation: false }), undefined, { reservationIo: r as never });
+    expect(r.release).not.toHaveBeenCalled();
   });
 });

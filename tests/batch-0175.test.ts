@@ -85,7 +85,7 @@ describe('일괄 실행 — 원본 확인', () => {
     const get = lib.slice(lib.indexOf('export async function getBatch'), lib.indexOf('export async function cancelBatch'));
     expect(get).toContain('if (itemsError) throw new BatchReadError();');
     expect(get.indexOf('if (itemsError)')).toBeLessThan(get.indexOf('const items ='));
-    expect(lib.match(/if \(batch === 'failed'\) return \{ ok: false, status: 503/g)).toHaveLength(2);
+    expect(lib.match(/if \(batch === 'failed'\) return \{ ok: false, status: 503/g)).toHaveLength(3); // 그만두기·다시 실행·사람 판정(0126)
   });
 
   for (const route of ['src/app/api/apps/batches/[id]/route.ts', 'src/app/api/apps/batches/[id]/export/route.ts']) {

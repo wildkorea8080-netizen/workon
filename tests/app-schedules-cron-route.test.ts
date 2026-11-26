@@ -5,7 +5,10 @@ const state = vi.hoisted(() => ({ worker: 'w'.repeat(64) as string | undefined, 
 vi.mock('@/lib/config', () => ({
   get WORK_WORKER_SECRET() { return state.worker; },
   get CRON_SECRET() { return state.cron; },
+  APP_URL: 'https://workon.example',
 }));
+// 일괄 실행 전용 실행기 더 띄우기(2026-11-26) — 기다리는 줄 수를 세고 띄운다(여기서는 0줄)
+vi.mock('@/lib/apps/batch-lanes', () => ({ pendingBatchRows: async () => 0, laneBaseUrl: (u: string) => u, dispatchBatchLanes: async () => ({ requested: 0, started: 0, failed: 0 }) }));
 vi.mock('@/lib/apps/schedules', () => ({
   scheduleDeps: () => ({}),
   runDueSchedules: async () => { state.runs++; return { checked: 0, completed: 0, failed: 0, paused: 0, skipped: 0, partial: false }; },
@@ -13,7 +16,7 @@ vi.mock('@/lib/apps/schedules', () => ({
 
 vi.mock('@/lib/apps/schedule-health', () => ({ recordRunnerHeartbeat: async () => { state.beats++; } }));
 // 앱 결과 보내기(0076) — 예약 실행과 나란히 돈다. 자격이 없으면 이것도 돌지 않아야 한다
-vi.mock('@/lib/apps/batches', () => ({ batchDeps: () => ({}), runDueBatchItems: async () => { state.batches++; return { ran: 0, done: 0, failed: 0, retried: 0, stopped: 0 }; } }));
+vi.mock('@/lib/apps/batches', () => ({ batchDeps: () => ({}), batchExtraLanes: () => 0, runDueBatchItems: async () => { state.batches++; return { ran: 0, done: 0, failed: 0, retried: 0, stopped: 0 }; } }));
 vi.mock('@/lib/apps/outbound/deliver', () => ({ outboundDeps: () => ({}), dispatchDueDeliveries: async () => { state.dispatches++; return { claimed: 0, sent: 0, retried: 0, gaveUp: 0 }; } }));
 vi.mock('@/lib/apps/outbound/notices', () => ({ runOutboundNotices: async () => ({ failureMails: 0, approvalMails: 0 }) }));
 // 문서 참조 색인 자동 채우기(2026-11-12) — 같은 차례에 나란히

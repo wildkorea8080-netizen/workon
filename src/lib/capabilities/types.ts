@@ -1,5 +1,5 @@
 // src/lib/capabilities/types.ts
-import type { LlmTool, LlmUsage } from '@/lib/llm/types';
+import type { LlmServerTools, LlmTool, LlmUsage } from '@/lib/llm/types';
 import type { ToolSource } from '@/lib/connectors';
 import type { RetrievedChunk } from '@/lib/db';
 import type { AttachmentSummary } from '@/lib/attachments/types';
@@ -84,6 +84,8 @@ export interface PrepareResult {
    * 없으면 비서 보관함. 비서·공통 근거가 함께 있는 턴은 `verifySources`를 비워 검증하지 않는다
    */
   verifyTenant?: string;
+  /** 업체 서버에서 도는 도구(웹 검색, 2026-11-26) — 실행기가 요청에 정의만 싣는다 */
+  serverTools?: LlmServerTools;
 }
 
 /** 도구가 만든 파일. 화면(tool_end)과 메시지 저장(source_references.files)으로 간다 */

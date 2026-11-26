@@ -21,6 +21,12 @@ export interface AgentSettingsValue {
   document: boolean;
   file_read: boolean;
   table_merge: boolean;
+  /** 표 합치기가 이 비서의 문서함에 올린 표 파일로도 계산(2026-11-26) — 표 합치기가 켜졌을 때만 저장 */
+  table_merge_documents: boolean;
+  /** 웹 검색(2026-11-26, 0124) — 기관이 켰을 때만 돈다 */
+  web_search: boolean;
+  /** 웹 검색의 찾을 곳(줄바꿈·쉼표로 나눔, 비우면 제한 없음) — 서버가 다시 검사한다 */
+  web_search_domains: string;
   connectors: string[];
 }
 
@@ -55,6 +61,19 @@ export function connectorIdsOf(capabilities: unknown): string[] {
   return Array.isArray(list) ? list.filter((c): c is string => typeof c === 'string') : [];
 }
 
+/** 저장된 웹 검색의 찾을 곳 */
+export function webSearchDomainsOf(capabilities: unknown): string[] {
+  if (!isObject(capabilities) || !isObject(capabilities.web_search)) return [];
+  const list = capabilities.web_search.allowed_domains;
+  return Array.isArray(list) ? list.filter((d): d is string => typeof d === 'string') : [];
+}
+
+/** 화면 입력 → 저장 값. 틀린 곳은 그대로 보내 서버가 까닭과 함께 거절한다(조용히 빼면 찾을 곳이 넓어진다) */
+function webSearchBody(text: string): { allowed_domains?: string[] } {
+  const list = text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+  return list.length ? { allowed_domains: list } : {};
+}
+
 export function settingsFromAgent(
   agent: Pick<Agent, 'name' | 'description' | 'icon' | 'category' | 'usage_guide' | 'starter_prompts' | 'system_prompt' | 'model_id' | 'capabilities'>
 ): AgentSettingsValue {
@@ -73,6 +92,9 @@ export function settingsFromAgent(
     document: 'document' in caps,
     file_read: 'file_read' in caps,
     table_merge: 'table_merge' in caps,
+    table_merge_documents: isObject(caps.table_merge) && caps.table_merge.agent_documents === true,
+    web_search: 'web_search' in caps,
+    web_search_domains: webSearchDomainsOf(caps).join('\n'),
     connectors: connectorIdsOf(caps),
   };
 }
@@ -98,7 +120,8 @@ export function settingsToBody(value: AgentSettingsValue, opts: { isLink: boolea
       ...(value.document ? { document: {} } : {}),
       // 저장 값에서 읽어 그대로 돌려보낸다 — 빠뜨리면 다른 칸을 저장할 때 조용히 꺼진다
       ...(value.file_read ? { file_read: {} } : {}),
-      ...(value.table_merge ? { table_merge: {} } : {}),
+      ...(value.table_merge ? { table_merge: value.table_merge_documents ? { agent_documents: true } : {} } : {}),
+      ...(value.web_search ? { web_search: webSearchBody(value.web_search_domains) } : {}),
       ...(value.connectors.length > 0 ? { public_data: { connectors: value.connectors } } : {}),
     },
   };

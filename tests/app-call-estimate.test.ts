@@ -14,7 +14,7 @@ const def = (steps: NonNullable<AppDefinition['steps']>): AppDefinition => ({ sc
 
 describe('estimateAppCalls', () => {
   it('단계가 없으면 한 번, 중간 단계 + 마지막 단계', () => {
-    expect(estimateAppCalls({ schemaVersion: 1, fields, output: 'paragraphs' }, {}, 0)).toEqual({ min: 1, max: 1, lookups: 0, mayDigest: false });
+    expect(estimateAppCalls({ schemaVersion: 1, fields, output: 'paragraphs' }, {}, 0)).toEqual({ min: 1, max: 1, lookups: 0, webSearches: 0, mayDigest: false });
     expect(estimateAppCalls(def([{ name: 'a', instruction: 'x' }, { name: 'b', instruction: 'y' }]), {}, 0)).toMatchObject({ min: 2, max: 2 });
   });
 
@@ -22,7 +22,7 @@ describe('estimateAppCalls', () => {
     const lines = def([{ name: 'a', instruction: 'x', repeat: { field: 'items' } }, { name: 'b', instruction: 'y' }]);
     expect(estimateAppCalls(lines, { items: '하나\n\n둘\n셋 ' }, 0)).toMatchObject({ min: 4, max: 4 });
     const files: AppDefinition = { ...def([{ name: 'a', instruction: 'x', repeat: { files: true } }, { name: 'b', instruction: 'y' }]), attachments: { required: true } };
-    expect(estimateAppCalls(files, {}, 3)).toEqual({ min: 4, max: 4, lookups: 0, mayDigest: true });
+    expect(estimateAppCalls(files, {}, 3)).toEqual({ min: 4, max: 4, lookups: 0, webSearches: 0, mayDigest: true });
   });
 
   it('조회 단계는 AI가 아니라 조회로 센다, 입력만 보는 조건은 지금 입력으로 판정', () => {
@@ -31,8 +31,8 @@ describe('estimateAppCalls', () => {
       { name: '민원만', instruction: 'x', when: { all: [{ field: 'kind', op: 'equals', value: '민원' }] } },
       { name: '끝', instruction: 'y' },
     ]);
-    expect(estimateAppCalls(d, { kind: '민원' }, 0)).toEqual({ min: 2, max: 2, lookups: 1, mayDigest: false });
-    expect(estimateAppCalls(d, { kind: '질의' }, 0)).toEqual({ min: 1, max: 1, lookups: 1, mayDigest: false });
+    expect(estimateAppCalls(d, { kind: '민원' }, 0)).toEqual({ min: 2, max: 2, lookups: 1, webSearches: 0, mayDigest: false });
+    expect(estimateAppCalls(d, { kind: '질의' }, 0)).toEqual({ min: 1, max: 1, lookups: 1, webSearches: 0, mayDigest: false });
   });
 
   it('앞 분류 결과(@N)로 갈리는 단계는 미리 알 수 없어 많으면에만 넣는다', () => {
@@ -48,15 +48,15 @@ describe('estimateAppCalls', () => {
     const qa = PUBLIC_SECTOR_FORM_PRESETS.find((p) => p.name === '질의별 답변 방향 정리')!.appDefinition!;
     expect(estimateAppCalls(qa, { questions: '가\n나\n다', kind: '민원' }, 0)).toMatchObject({ min: 4, max: 4 });
     const law = PUBLIC_SECTOR_FORM_PRESETS.find((p) => p.name === '법령 근거 조사')!.appDefinition!;
-    expect(estimateAppCalls(law, { question: 'q', keyword: '여비' }, 0)).toEqual({ min: 1, max: 1, lookups: 1, mayDigest: false });
+    expect(estimateAppCalls(law, { question: 'q', keyword: '여비' }, 0)).toEqual({ min: 1, max: 1, lookups: 1, webSearches: 0, mayDigest: false });
     expect(estimateAppCalls(law, { question: 'q', keyword: '여비', law_name: '공무원 여비 규정' }, 0)).toMatchObject({ lookups: 2 });
   });
 });
 
 describe('describeAppCalls·화면', () => {
   it('한 줄 문구', () => {
-    expect(describeAppCalls({ min: 3, max: 3, lookups: 0, mayDigest: false })).toBe('예상 AI 호출 3번');
-    expect(describeAppCalls({ min: 2, max: 4, lookups: 1, mayDigest: true })).toBe('예상 AI 호출 2~4번 · 공공 데이터 조회 1번(AI 사용량 없음) · 첨부가 길면 조각마다 추리는 호출이 더 듭니다');
+    expect(describeAppCalls({ min: 3, max: 3, lookups: 0, webSearches: 0, mayDigest: false })).toBe('예상 AI 호출 3번');
+    expect(describeAppCalls({ min: 2, max: 4, lookups: 1, webSearches: 0, mayDigest: true })).toBe('예상 AI 호출 2~4번 · 공공 데이터 조회 1번(AI 사용량 없음) · 첨부가 길면 조각마다 추리는 호출이 더 듭니다');
   });
   it('실행 화면이 지금 입력·붙인 파일 수로 보인다', () => {
     const page = readFileSync('src/app/apps/run/page.tsx', 'utf8');

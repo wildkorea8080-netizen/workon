@@ -5,8 +5,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { renderAppInput, type AppDefinition } from '@/lib/apps/definition';
 import { estimateAppCalls } from '@/lib/apps/call-estimate';
 import {
-  BATCH_EXPECT_HEADERS, BATCH_FILE_ROWS_MISMATCH, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_NAME_MAX, BATCH_STATUS_LABELS, pairRowsWithFiles, parseBatchTable, type BatchView,
+  BATCH_EXPECT_HEADERS, BATCH_FILE_ROWS_MISMATCH, BATCH_MAX_FILES, BATCH_MAX_ROWS, BATCH_NAME_MAX, BATCH_ROWS_CEILING, BATCH_STATUS_LABELS, batchAgreementSummary, pairRowsWithFiles, parseBatchTable, type BatchView,
 } from '@/lib/apps/batch-spec';
+import AppBatchItems from './AppBatchItems';
+
+/** 목록 한 줄의 AI 채점(0125) 꼴 — 채점한 줄이 없으면 빈 글 */
+export function batchJudgeSummary(b: Pick<BatchView, 'judge' | 'judgeCorrect' | 'judgePartial' | 'judgeIncorrect' | 'judgeErrors'>): string {
+  if (!b.judge) return '';
+  const judged = (b.judgeCorrect ?? 0) + (b.judgePartial ?? 0) + (b.judgeIncorrect ?? 0);
+  if (!judged && !b.judgeErrors) return ' · AI 채점 기다림';
+  return ` · AI 채점 맞음 ${b.judgeCorrect ?? 0}/${judged}${b.judgePartial ? ` · 일부 ${b.judgePartial}` : ''}${b.judgeIncorrect ? ` · 틀림 ${b.judgeIncorrect}` : ''}${b.judgeErrors ? ` · 못 함 ${b.judgeErrors}` : ''}`;
+}
 import { ATTACHMENT_ACCEPT } from '@/lib/attachments/limits';
 import { uploadAttachment } from '@/lib/attachments/upload-client';
 
@@ -69,6 +78,8 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [name, setName] = useState('');
+  /** AI 채점(0125) — 기대 답 칸이 있을 때만 고른다 */
+  const [judge, setJudge] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -77,6 +88,8 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
   // 실패한 줄 알고 다시 만들면 같은 일괄 실행이 두 번 돌았다(사용량도 두 번). 만든 것은 목록과 따로 알린다
   const [created, setCreated] = useState<string | null>(null);
   const [listUnread, setListUnread] = useState(false);
+  /** 줄별 결과·사람 판정(0126)을 펼친 묶음 */
+  const [itemsOpen, setItemsOpen] = useState<string | null>(null);
   const acceptsFiles = Boolean(definition.attachments);
   const filesOnly = Boolean(definition.attachments?.required);
   const [mode, setMode] = useState<'table' | 'files'>(filesOnly ? 'files' : 'table');
@@ -109,14 +122,15 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
     setBusy(true); setError(null); setErrors([]); setCreated(null);
     try {
       // 기대 핵심어 칸이 있을 때만 싣는다(0088 — 줄마다 결과에 핵심어가 모두 있는지 실행기가 잰다)
-      const payload = { agent_id: agentId, name: name.trim() || undefined, rows: preview.rows, ...(preview.expects.some(Boolean) ? { expects: preview.expects } : {}), ...(mode === 'files' ? { attachment_ids: readyIds } : {}) };
+      const withExpect = preview.expects.some(Boolean);
+      const payload = { agent_id: agentId, name: name.trim() || undefined, rows: preview.rows, ...(withExpect ? { expects: preview.expects, ...(judge ? { judge: true } : {}) } : {}), ...(mode === 'files' ? { attachment_ids: readyIds } : {}) };
       const res = await fetch('/api/apps/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) { setError(body?.error?.message ?? '일괄 실행을 만들지 못했습니다.'); setErrors(body?.error?.details?.errors ?? []); }
       else {
         const lines = mode === 'files' ? readyIds.length : preview.rows.length;
         setCreated(batchCreatedNotice(lines));
-        setText(''); setName(''); setUploads([]); await load();
+        setText(''); setName(''); setUploads([]); setJudge(false); await load();
       }
     } finally { setBusy(false); }
   }
@@ -172,7 +186,7 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
           )}
           {mode === 'table' ? (
             <p className="text-xs leading-5 text-slate-500">
-              엑셀에서 표를 복사해 붙이거나 CSV 파일을 고르세요. <strong>첫 줄은 입력 항목 이름</strong>({definition.fields.map((f) => f.label).join(', ')})이고 아래로 한 줄에 한 건, {BATCH_MAX_ROWS}줄까지입니다.
+              엑셀에서 표를 복사해 붙이거나 CSV 파일을 고르세요. <strong>첫 줄은 입력 항목 이름</strong>({definition.fields.map((f) => f.label).join(', ')})이고 아래로 한 줄에 한 건, {BATCH_MAX_ROWS}줄까지입니다(기관 관리자가 상한을 늘렸으면 {BATCH_ROWS_CEILING}줄까지).
               줄마다 이 앱을 한 번씩 실행해(지금 판·지금 권한) 결과를 엑셀로 모아 줍니다. 서버가 5분마다 몇 줄씩 처리하므로 줄이 많으면 시간이 걸립니다(창을 닫아도 이어 가고, 모두 마치거나 멈추면 메일로 한 번 알립니다). 줄마다 AI 사용량이 듭니다. 기관이 한 번의 줄 수 상한을 낮춰 두었으면 그 줄 수까지입니다.
               <br />앱 답변을 재 보려면 <strong>{BATCH_EXPECT_HEADERS[0]}</strong> 칸을 더하세요(쉼표로 나눈 낱말들) — 줄마다 결과에 그 낱말이 모두 들어 있는지 세어 목록·엑셀에 보입니다(AI를 더 부르지 않음).
             </p>
@@ -203,8 +217,14 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
             <input aria-label="일괄 실행 이름" value={name} maxLength={BATCH_NAME_MAX} onChange={(e) => setName(e.target.value)} placeholder={`이름(선택) — 기본 '${agentName} 일괄 실행'`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs" />
           </div>
           {preview && (preview.ok
-            ? <p role="status" className="text-xs text-slate-700">{mode === 'files' ? `파일 ${readyIds.length}개` : `${preview.rows.length}줄`} — 많으면 AI 호출 {preview.maxCalls}번{preview.expects.some(Boolean) ? ` · 기대 핵심어 ${preview.expects.filter(Boolean).length}줄` : ''}</p>
+            ? <p role="status" className="text-xs text-slate-700">{mode === 'files' ? `파일 ${readyIds.length}개` : `${preview.rows.length}줄`} — 많으면 AI 호출 {preview.maxCalls + (judge && preview.expects.some(Boolean) ? preview.expects.filter(Boolean).length : 0)}번{preview.expects.some(Boolean) ? ` · 기대 핵심어 ${preview.expects.filter(Boolean).length}줄` : ''}{judge && preview.expects.some(Boolean) ? ' (AI 채점 포함)' : ''}</p>
             : <ul role="alert" className="space-y-0.5 text-xs text-red-700">{preview.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
+          {preview?.ok && preview.expects.some(Boolean) && (
+            <label className="flex items-start gap-2 text-xs text-slate-700">
+              <input type="checkbox" checked={judge} disabled={disabled || busy} onChange={(e) => setJudge(e.target.checked)} className="mt-0.5" />
+              <span>AI 채점(참고) — 기대 답이 있는 줄마다 이 앱의 모델로 결과가 기대 답과 맞는지 맞음·일부·틀림을 매깁니다. 줄마다 AI 호출이 한 번 더 들고 채점자도 틀릴 수 있습니다.</span>
+            </label>
+          )}
           <button type="button" disabled={disabled || busy || uploading || !preview?.ok} onClick={() => void submit()} className="rounded-xl bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '일괄 실행 시작'}</button>
           {error && <div role="alert" className="text-xs text-red-700"><p>{error}</p>{errors.length > 1 && <ul>{errors.slice(1).map((e) => <li key={e}>{e}</li>)}</ul>}</div>}
           {created && <p role="status" className="text-xs text-emerald-700">{created}</p>}
@@ -215,14 +235,16 @@ export default function AppBatchPanel({ agentId, agentName, definition, disabled
                 <li key={b.id} className="rounded-lg border border-slate-200 p-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium">{b.name}</span>
-                    <span className={b.status === 'running' ? 'text-ws-accent-text' : b.status === 'stopped' ? 'text-red-700' : 'text-slate-600'}>{BATCH_STATUS_LABELS[b.status]} · 완료 {b.done}/{b.total}{b.failed ? ` · 실패 ${b.failed}` : ''}{b.skipped ? ` · 건너뜀 ${b.skipped}` : ''}{b.expectChecked ? ` · 핵심어 맞음 ${b.expectPassed ?? 0}/${b.expectChecked}` : ''}</span>
+                    <span className={b.status === 'running' ? 'text-ws-accent-text' : b.status === 'stopped' ? 'text-red-700' : 'text-slate-600'}>{BATCH_STATUS_LABELS[b.status]} · 완료 {b.done}/{b.total}{b.failed ? ` · 실패 ${b.failed}` : ''}{b.skipped ? ` · 건너뜀 ${b.skipped}` : ''}{b.expectChecked ? ` · 핵심어 맞음 ${b.expectPassed ?? 0}/${b.expectChecked}` : ''}{batchJudgeSummary(b)}{batchAgreementSummary(b.agreement)}</span>
                   </div>
                   <p className="mt-1 text-slate-500">{kst(b.createdAt)}{b.finishedAt ? ` ~ ${kst(b.finishedAt)}` : ''}{b.stopReason ? ` — ${b.stopReason}` : ''}</p>
                   <div className="mt-1 flex gap-3">
                     {(b.done > 0 || b.failed > 0) && <Link href={`/api/apps/batches/${encodeURIComponent(b.id)}/export`} prefetch={false} className="text-ws-accent-text underline">결과 엑셀</Link>}
                     {b.status === 'running' && <button type="button" onClick={() => void cancel(b)} className="text-red-600 underline">그만두기</button>}
                     {b.status !== 'running' && b.failed + b.skipped > 0 && <button type="button" disabled={disabled} onClick={() => void retryUnfinished(b)} className="text-ws-accent-text underline disabled:opacity-40">마치지 못한 줄 다시 실행</button>}
+                    {b.done > 0 && <button type="button" aria-expanded={itemsOpen === b.id} onClick={() => setItemsOpen(itemsOpen === b.id ? null : b.id)} className="text-ws-accent-text underline">{itemsOpen === b.id ? '줄별 결과 닫기' : '줄별 결과·사람 판정'}</button>}
                   </div>
+                  {itemsOpen === b.id && <AppBatchItems batchId={b.id} fields={definition.fields} onChanged={(next) => setBatches((list) => list.map((x) => (x.id === next.id ? { ...x, ...next } : x)))} />}
                 </li>
               ))}
             </ul>

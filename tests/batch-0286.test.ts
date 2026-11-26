@@ -189,7 +189,7 @@ describe('흐름', () => {
     const form = new URLSearchParams(token.body);
     expect(Object.fromEntries(form)).toMatchObject({ grant_type: 'authorization_code', code: 'CODE', client_id: CLIENT, client_secret: 'shh', redirect_uri: `${APP}/api/sso/callback` });
     expect(form.get('code_verifier')).toBeTruthy();
-    expect(calls.mint[0]).toEqual({ id: 'u1', email: 'kim@agency.go.kr', name: '김주무관', role: 'USER', departmentId: 'd1' });
+    expect(calls.mint[0]).toEqual({ id: 'u1', email: 'kim@agency.go.kr', name: '김주무관', role: 'USER', departmentId: 'd1', sid: null });
     expect(calls.record.at(-1)).toEqual(['login', 'kim@agency.go.kr', { id: 'u1', departmentId: 'd1' }]);
   });
   it('state가 다르거나 쿠키가 없으면 sso_expired, 거절·코드 없음은 sso_denied — 토큰 교환을 하지 않는다', async () => {

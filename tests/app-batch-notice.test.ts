@@ -132,7 +132,7 @@ describe('연결', () => {
     expect(lib).toContain(".update({ status: 'done', finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id')");
     expect(lib).toContain(".update({ status: 'stopped', stop_reason: reason, finished_at: nowIso }).eq('id', batchId).eq('status', 'running').select('id')");
     expect(lib).toContain('notifyFinished: (batchId) => notifyBatchFinished(batchId)');
-    expect(lib).toContain(".eq('user_id', b.user_id).eq('status', 'awaiting_approval').in('message_id', messageIds)");
+    expect(lib).toContain(".eq('user_id', b.user_id).eq('status', 'awaiting_approval').in('message_id', ids)"); // 100개씩(0123)
     const cancel = lib.slice(lib.indexOf('export async function cancelBatch'), lib.indexOf('// ── 실행기'));
     expect(cancel).not.toContain('notify');
     expect(readFileSync('src/components/apps/AppBatchPanel.tsx', 'utf8')).toContain('메일로 한 번 알립니다');

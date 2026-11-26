@@ -45,7 +45,7 @@ export const APP_LOOPS_PER_RUN = 3;
  * `external`(2026-11-24, 0102) — 공공 데이터가 아니라 **기관 연동 시스템**: 기관 전체 관리자가 승인하고 '앱 조회에도 쓰기'를 켠 보낼 곳(0076)에 조회어를 서명해 보내고
  * 받은 답을 다음 단계 자료로 쓴다(`apps/outbound/lookup.ts`). 커넥터·능력이 없고, 고른 곳(`endpoint`)·동작(`action`)은 실행 때마다 서버가 다시 본다
  */
-export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'admrul_article' | 'interpretation_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search' | 'external';
+export type AppLookupTool = 'law_search' | 'law_article' | 'ordinance_article' | 'admrul_article' | 'interpretation_article' | 'kosis_search_tables' | 'g2b_search_bids' | 'doc_search' | 'external' | 'web_search';
 /** `each`(2026-11-09, 조사 계획) — N번째 앞 AI 단계 결과의 **줄마다** 한 번씩 조회한다(조회어의 `{{@N}}`에 그 줄, 최대 `APP_LOOKUP_EACH_MAX`줄) */
 /** `agent`(2026-11-09) — 문서 찾기가 이 앱 비서 대신 찾을 **다른 비서**(그 비서의 문서함·공통 기준). 실행 때마다 실행하는 사람이 그 비서를 쓸 수 있는지 서버가 다시 본다 */
 /**
@@ -81,7 +81,7 @@ export function refineQueryLines(text: string | undefined, sent: readonly string
 }
 /** 화면도 읽는 표 — 커넥터 정의(connectors/*.ts)는 config.ts를 읽어 화면이 가져올 수 없다. 인자 이름은 그 정의의 inputSchema와 같아야 한다 */
 // `body` = 검색해 이름이 같은 결과(없으면 첫 결과)의 본문을 읽는 단계(더 찾기·줄마다 찾기 없음), `article` = 그중 조문 번호로 좁힐 수 있는 것(법령·자치법규)
-export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; body?: true; article?: true; capability?: 'doc_search'; external?: true }> = {
+export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis' | 'g2b' | null; label: string; param: 'query' | 'keyword'; appOnly?: true; body?: true; article?: true; capability?: 'doc_search' | 'web_search'; external?: true }> = {
   law_search: { connector: 'law', label: '법령 검색(국가법령정보)', param: 'query' },
   law_article: { connector: 'law', label: '법령 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
   ordinance_article: { connector: 'law', label: '자치법규 본문(국가법령정보)', param: 'query', appOnly: true, body: true, article: true },
@@ -92,6 +92,8 @@ export const APP_LOOKUP_TOOLS: Record<AppLookupTool, { connector: 'law' | 'kosis
   g2b_search_bids: { connector: 'g2b', label: '입찰공고 검색(나라장터)', param: 'keyword' },
   doc_search: { connector: null, label: '문서 찾기(이 앱 비서의 문서함·공통 기준)', param: 'query', appOnly: true, capability: 'doc_search' },
   external: { connector: null, label: '기관 연동 시스템 조회(관리자가 승인한 주소)', param: 'query', appOnly: true, external: true },
+  // 웹 검색(2026-11-26, 0124) — 이 앱 비서의 웹 검색 능력 + 기관 스위치. 조회어마다 AI가 Anthropic 웹 검색으로 찾아 간추린다(모델 호출·검색 요금)
+  web_search: { connector: null, label: '웹 검색(기관이 켰을 때만 — 검색어가 기관 밖으로 갑니다)', param: 'query', appOnly: true, capability: 'web_search' },
 };
 /** 문서 원본 주소 — 문서 찾기 조회의 출처는 바깥 링크가 아니라 이 꼴만 받는다(권한은 원본 라우트가 다시 본다) */
 export const APP_DOC_SOURCE_PATH = /^\/api\/(?:documents|common-documents)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/original(?:\?page=\d{1,6})?$/;
@@ -101,6 +103,13 @@ export function appUsesDocSearchLookup(def: AppDefinition | null | undefined): b
   return (def?.steps ?? []).some(step => (step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'doc_search' && !step.lookup.agent)
     // 조사 단계(2026-11-25)가 문서 찾기를 고르면 이 앱 비서의 문서함을 찾는다
     || Boolean(step.research?.tools.some((t) => APP_LOOKUP_TOOLS[t].capability === 'doc_search')));
+}
+/** 웹 검색 조회의 조회어 하나에 검색 횟수(2026-11-26) — 줄마다 찾기·더 찾기·조사 라운드가 곱해지므로 작게. 사용량 예약도 이 수로 셈 */
+export const APP_WEB_LOOKUP_MAX_USES = 2;
+/** 웹 검색 조회·조사 단계를 쓰는가(2026-11-26) — 빌더가 앱 능력에 `web_search`를 켜고, 저장 검사가 능력과 맞춰 본다 */
+export function appUsesWebSearchLookup(def: AppDefinition | null | undefined): boolean {
+  return (def?.steps ?? []).some(step => (step.lookup && APP_LOOKUP_TOOLS[step.lookup.tool].capability === 'web_search')
+    || Boolean(step.research?.tools.some((t) => APP_LOOKUP_TOOLS[t].capability === 'web_search')));
 }
 /** 문서 찾기 단계가 찾을 다른 비서들(이 앱 비서는 빼고, 중복 없이) — 실행 전에 권한을 한 번에 본다 */
 export function appLookupAgentIds(steps: AppStep[] | null | undefined, ownAgentId: string): string[] {

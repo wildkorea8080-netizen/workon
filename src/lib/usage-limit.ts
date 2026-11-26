@@ -5,7 +5,9 @@ import { isStoppedOrgStatus } from '@/lib/org-status';
 /** 읽지 못해 확인하지 못한 단계 — 그 단계는 '허용'으로 열어 두었다(2026-11-18) */
 export type LimitGap =
   | 'department' | 'organization' | 'monthly' | 'department_spend' | 'user' | 'user_spend'
-  | 'contract' | 'annual_spend' | 'tokens' | 'exception';
+  | 'contract' | 'annual_spend' | 'tokens' | 'exception'
+  /** (0122) 앱 실행의 사용량 예약을 못 읽음 — 예약 없이 판정했다 */
+  | 'reservations';
 
 export interface TokenLimitStatus {
   /** false면 요청을 차단해야 한다 */
@@ -34,6 +36,8 @@ export interface TokenLimitStatus {
     usedKrw: number;
     limitKrw: number;
     percent: number;
+    /** (0122) 실행 중인 앱이 예약해 둔 금액 — 판정은 쓴 금액 + 예약으로 한다(있을 때만) */
+    reservedKrw?: number;
   };
 
   /** 연간 정액 계약일 때만 채워진다 */
@@ -47,7 +51,43 @@ export interface TokenLimitStatus {
     /** 경고 기준을 넘었는지 (차단은 아님) */
     warning: boolean;
     contractEndsAt: string | null;
+    /** (0122) 실행 중인 앱이 예약해 둔 금액(있을 때만) */
+    reservedKrw?: number;
   };
+}
+
+/** (0122) 살아 있는 사용량 예약의 합 — 범위마다. 자기 실행의 예약(`exclude`)은 뺀다 */
+export interface ReservedSums { department: number; user: number; organization: number }
+type ReservedLoader = () => Promise<ReservedSums>;
+const NO_RESERVATIONS: ReservedSums = { department: 0, user: 0, organization: 0 };
+
+/** 한 번만 읽는다(부서·개인·연간 판정이 함께 쓴다). 못 읽으면 0으로 보고 gaps에 적는다(열림 — 예전과 같은 판정) */
+function reservationLoader(organizationId: string, departmentId: string, userId: string | undefined, exclude: string | undefined, gaps: LimitGap[]): ReservedLoader {
+  let pending: Promise<ReservedSums> | null = null;
+  return () => {
+    pending ??= (async () => {
+      const { data, error } = await supabaseAdmin.from('usage_reservations')
+        .select('id, department_id, user_id, amount_krw')
+        .eq('organization_id', organizationId).gt('expires_at', new Date().toISOString()).limit(1000);
+      if (error) { gaps.push('reservations'); return NO_RESERVATIONS; }
+      return sumReservations((data ?? []) as ReservationRow[], departmentId, userId, exclude);
+    })();
+    return pending;
+  };
+}
+
+export type ReservationRow = { id: string; department_id: string | null; user_id: string | null; amount_krw: number | string | null };
+export function sumReservations(rows: ReservationRow[], departmentId: string, userId: string | undefined, exclude?: string): ReservedSums {
+  const sums = { department: 0, user: 0, organization: 0 };
+  for (const row of rows) {
+    if (exclude && row.id === exclude) continue;
+    const amount = Number(row.amount_krw);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    sums.organization += amount;
+    if (row.department_id === departmentId) sums.department += amount;
+    if (userId && row.user_id === userId) sums.user += amount;
+  }
+  return sums;
 }
 
 const ALLOWED: TokenLimitStatus = { allowed: true, usedTokens: 0, limitTokens: 0 };
@@ -111,6 +151,7 @@ async function checkAnnualBudget(
   organizationName: string,
   contract: ActiveContract,
   gaps: LimitGap[],
+  reserved: ReservedLoader = async () => NO_RESERVATIONS,
 ): Promise<TokenLimitStatus | null> {
   const totalKrw = Number(contract.annual_budget_krw ?? 0);
   if (totalKrw <= 0) return null; // 금액 미설정이면 이 판정을 건너뛴다
@@ -132,15 +173,18 @@ async function checkAnnualBudget(
 
   const usedKrw = Number(data ?? 0);
   const percent = Math.round((usedKrw / totalKrw) * 100);
+  const reservedKrw = (await reserved()).organization;
   const budget = {
     totalKrw,
     usedKrw,
     percent,
     warning: percent >= (contract.budget_alert_percent ?? 80),
     contractEndsAt: contract.expires_at,
+    ...(reservedKrw > 0 ? { reservedKrw } : {}),
   };
 
-  if (usedKrw >= totalKrw) {
+  // 실행 중인 앱이 예약한 금액도 쓴 것으로 센다(0122) — 예약한 실행이 마칠 몫을 다른 대화가 먼저 쓰지 않게
+  if (usedKrw + reservedKrw >= totalKrw) {
     return {
       allowed: false,
       usedTokens: 0,
@@ -173,6 +217,11 @@ async function checkAnnualBudget(
  * 공공기관 담당자에게 "토큰 소진"은 의미가 통하지 않는다. 문구를 라우트마다
  * 따로 쓰면 같은 상황을 다르게 설명하게 되므로 한 곳에 둔다.
  */
+/** (0122) 실행 중인 앱이 예약해 둔 금액이 있으면 '쓴 금액'에 덧붙인다 — 실제로 쓴 금액만 보면 왜 막혔는지 모른다 */
+function reservedNote(reservedKrw: number | undefined): string {
+  return reservedKrw && reservedKrw > 0 ? ` + 실행 중인 앱이 예약한 ${Math.round(reservedKrw).toLocaleString()}원` : '';
+}
+
 export function limitMessage(status: TokenLimitStatus): string {
   if (status.reason === 'org_suspended') {
     return '기관 이용이 정지되었습니다. 관리자에게 문의하세요.';
@@ -183,17 +232,17 @@ export function limitMessage(status: TokenLimitStatus): string {
   if (status.reason === 'budget_exhausted') {
     const used = Math.round(status.budget?.usedKrw ?? 0).toLocaleString();
     const total = Math.round(status.budget?.totalKrw ?? 0).toLocaleString();
-    return `연간 계약 금액을 모두 사용했습니다. (${used}원 / ${total}원) 계약 담당자에게 문의하세요.`;
+    return `연간 계약 금액을 모두 사용했습니다. (${used}원${reservedNote(status.budget?.reservedKrw)} / ${total}원) 계약 담당자에게 문의하세요.`;
   }
   if (status.reason === 'department_budget_exhausted') {
     const used = Math.round(status.monthly?.usedKrw ?? 0).toLocaleString();
     const total = Math.round(status.monthly?.limitKrw ?? 0).toLocaleString();
-    return `부서의 이번 달 사용 한도를 모두 사용했습니다. (${used}원 / ${total}원) 부서 관리자에게 문의하세요.`;
+    return `부서의 이번 달 사용 한도를 모두 사용했습니다. (${used}원${reservedNote(status.monthly?.reservedKrw)} / ${total}원) 부서 관리자에게 문의하세요.`;
   }
   if (status.reason === 'user_budget_exhausted') {
     const used = Math.round(status.monthly?.usedKrw ?? 0).toLocaleString();
     const total = Math.round(status.monthly?.limitKrw ?? 0).toLocaleString();
-    return `이번 달 개인 사용 한도를 모두 사용했습니다. (${used}원 / ${total}원) 관리자에게 한도 조정을 요청하세요.`;
+    return `이번 달 개인 사용 한도를 모두 사용했습니다. (${used}원${reservedNote(status.monthly?.reservedKrw)} / ${total}원) 관리자에게 한도 조정을 요청하세요.`;
   }
   return `이번 달 사용 한도를 모두 사용했습니다. (${status.usedTokens.toLocaleString()} / ${status.limitTokens.toLocaleString()} 토큰) 관리자에게 문의하세요.`;
 }
@@ -215,6 +264,7 @@ async function checkMonthlyBudget(
   userId: string | undefined,
   organizationName: string,
   gaps: LimitGap[],
+  reserved: ReservedLoader = async () => NO_RESERVATIONS,
 ): Promise<TokenLimitStatus | null> {
   const { data: dept, error: deptError } = await supabaseAdmin
     .from('departments')
@@ -243,7 +293,8 @@ async function checkMonthlyBudget(
       gaps.push('department_spend');
     } else {
       const usedKrw = Number(data ?? 0);
-      if (usedKrw >= deptLimit) {
+      const reservedKrw = (await reserved()).department;
+      if (usedKrw + reservedKrw >= deptLimit) {
         return {
           allowed: false,
           usedTokens: 0,
@@ -255,6 +306,7 @@ async function checkMonthlyBudget(
             usedKrw,
             limitKrw: deptLimit,
             percent: Math.round((usedKrw / deptLimit) * 100),
+            ...(reservedKrw > 0 ? { reservedKrw } : {}),
           },
         };
       }
@@ -289,7 +341,8 @@ async function checkMonthlyBudget(
   }
 
   const usedKrw = Number(data ?? 0);
-  if (usedKrw >= userLimit) {
+  const reservedKrw = (await reserved()).user;
+  if (usedKrw + reservedKrw >= userLimit) {
     return {
       allowed: false,
       usedTokens: 0,
@@ -301,6 +354,7 @@ async function checkMonthlyBudget(
         usedKrw,
         limitKrw: userLimit,
         percent: Math.round((usedKrw / userLimit) * 100),
+        ...(reservedKrw > 0 ? { reservedKrw } : {}),
       },
     };
   }
@@ -342,12 +396,14 @@ export function resetLimitGapReports(): void {
 
 export async function checkTokenLimit(
   departmentId: string,
-  userId?: string
+  userId?: string,
+  /** (0122) 실행 중인 앱이 자기 예약을 빼고 볼 때 — 단계마다의 다시 보기(guard) */
+  opts: { excludeReservationId?: string } = {},
 ): Promise<TokenLimitStatus> {
   const gaps: LimitGap[] = [];
   let status: TokenLimitStatus;
   try {
-    status = await evaluateTokenLimit(departmentId, userId, gaps);
+    status = await evaluateTokenLimit(departmentId, userId, gaps, opts.excludeReservationId);
   } catch {
     // 한도 확인 실패가 채팅을 막아서는 안 된다
     gaps.push('exception');
@@ -362,6 +418,7 @@ async function evaluateTokenLimit(
   departmentId: string,
   userId: string | undefined,
   gaps: LimitGap[],
+  excludeReservationId?: string,
 ): Promise<TokenLimitStatus> {
   {
     const { data: dept, error: deptError } = await supabaseAdmin
@@ -397,13 +454,15 @@ async function evaluateTokenLimit(
     // ── 부서·개인 월 한도 (0024) ──
     // 기관보다 좁은 층이라 먼저 본다. 기관 예산이 남아 있어도 부서나 개인이
     // 소진했으면 거기서 끊긴다.
-    const monthly = await checkMonthlyBudget(departmentId, userId, org.name, gaps);
+    // 실행 중인 앱의 사용량 예약(0122) — 금액 한도가 있을 때만 한 번 읽는다
+    const reserved = reservationLoader(organizationId, departmentId, userId, excludeReservationId, gaps);
+    const monthly = await checkMonthlyBudget(departmentId, userId, org.name, gaps, reserved);
     if (monthly) return monthly;
 
     // ── 연간 정액 계약이면 금액 기준으로 판정 ──
     const contract = await getActiveContract(organizationId, gaps);
     if (contract?.billing_type === 'annual_fixed') {
-      const budgetStatus = await checkAnnualBudget(organizationId, org.name, contract, gaps);
+      const budgetStatus = await checkAnnualBudget(organizationId, org.name, contract, gaps, reserved);
       if (budgetStatus) {
         // 기관 예산이 남아 있으면 부서·개인 사용액도 함께 실어 보낸다.
         // 화면이 두 값을 한 번에 보여줄 수 있다.
@@ -671,4 +730,54 @@ export async function userBudgetStatuses(organizationId: string): Promise<UserBu
     statuses.push({ userId: row.user_id, periodKey, used, limit, percent: Math.floor((used / limit) * 100) });
   }
   return statuses;
+}
+
+/** (0122) 금액 한도의 남은 금액 — 앱 실행의 사용량 예약(usage-reservation.ts)이 쓴다 */
+export interface HeadroomCheck {
+  scope: 'department' | 'user' | 'organization';
+  /** 한도 − 쓴 금액(원). 다른 실행의 예약은 빼지 않았다 — 예약 함수(usage_reserve)가 잠금 안에서 뺀다 */
+  headroom: number;
+  limitKrw: number;
+}
+
+/**
+ * 판정(`checkTokenLimit`)과 같은 규칙의 금액 한도별 남은 금액 — 부서 월 한도·개인 월 한도(개인 값, 없으면 부서 기본값)·
+ * 연간 정액 계약 금액. 토큰 한도(종량제)는 금액이 아니라 예약하지 않는다. 기관이 없으면 빈 목록, 못 읽으면 던진다(예약하지 않음)
+ */
+export async function amountHeadroom(departmentId: string, userId: string | undefined): Promise<{ organizationId: string | null; checks: HeadroomCheck[] }> {
+  const fail = (what: string, code?: string) => { throw new Error(`amountHeadroom: ${what}${code ? ` ${code}` : ''}`); };
+  const { data: dept, error: deptError } = await supabaseAdmin
+    .from('departments').select('organization_id, monthly_budget_krw, user_monthly_budget_krw').eq('id', departmentId).maybeSingle();
+  if (deptError) fail('department', deptError.code);
+  const organizationId = (dept?.organization_id as string | null | undefined) ?? null;
+  if (!dept || !organizationId) return { organizationId: null, checks: [] };
+  const checks: HeadroomCheck[] = [];
+  const from = monthStartISO();
+  const to = new Date().toISOString();
+  const deptLimit = Number(dept.monthly_budget_krw ?? 0);
+  if (deptLimit > 0) {
+    const { data, error } = await supabaseAdmin.rpc('department_spend_krw', { p_department_id: departmentId, p_from: from, p_to: to });
+    if (error) fail('department_spend', error.code);
+    checks.push({ scope: 'department', headroom: deptLimit - Number(data ?? 0), limitKrw: deptLimit });
+  }
+  if (userId) {
+    const { data: user, error: userError } = await supabaseAdmin.from('users').select('monthly_budget_krw').eq('id', userId).maybeSingle();
+    if (userError) fail('user', userError.code);
+    const userLimit = Number(user?.monthly_budget_krw ?? dept.user_monthly_budget_krw ?? 0);
+    if (userLimit > 0) {
+      const { data, error } = await supabaseAdmin.rpc('user_spend_krw', { p_user_id: userId, p_from: from, p_to: to });
+      if (error) fail('user_spend', error.code);
+      checks.push({ scope: 'user', headroom: userLimit - Number(data ?? 0), limitKrw: userLimit });
+    }
+  }
+  const contract = await getActiveContract(organizationId);
+  const totalKrw = Number(contract?.annual_budget_krw ?? 0);
+  if (contract?.billing_type === 'annual_fixed' && totalKrw > 0) {
+    const { data, error } = await supabaseAdmin.rpc('organization_spend_krw', {
+      p_organization_id: organizationId, p_from: contract.started_at, p_to: contract.expires_at ?? new Date().toISOString(),
+    });
+    if (error) fail('annual_spend', error.code);
+    checks.push({ scope: 'organization', headroom: totalKrw - Number(data ?? 0), limitKrw: totalKrw });
+  }
+  return { organizationId, checks };
 }

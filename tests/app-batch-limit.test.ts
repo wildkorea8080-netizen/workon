@@ -30,18 +30,21 @@ const admin = (whole = true) => ({ scope: actor(whole) as never, userId: 'adm', 
 beforeEach(() => { state.results = {}; state.calls = []; state.security = []; });
 
 describe('상한 값', () => {
-  it('null(기본) 또는 1~100 정수', () => {
+  it('null(기본) 또는 1~500 정수(0123)', () => {
     expect(parseBatchLimit(null)).toEqual({ ok: true, value: null });
     expect(parseBatchLimit(20)).toEqual({ ok: true, value: 20 });
-    for (const bad of [0, 101, 2.5, '20', undefined]) expect(parseBatchLimit(bad).ok).toBe(false);
+    expect(parseBatchLimit(500)).toEqual({ ok: true, value: 500 });
+    for (const bad of [0, 501, 2.5, '20', undefined]) expect(parseBatchLimit(bad).ok).toBe(false);
   });
   it('보기 — 실제 상한·바꿀 수 있는지(기관 전체 관리자만)', () => {
     expect(batchLimitView(null, actor(true) as never)).toEqual({ maxRows: null, effective: 100, canChange: true });
     expect(batchLimitView(20, actor(false) as never)).toEqual({ maxRows: 20, effective: 20, canChange: false });
   });
   it('DB 값이 이상하면 기본(null), 읽기 오류는 던진다', async () => {
-    state.results.organizations = [{ data: { app_batch_max_rows: 500 } }];
+    state.results.organizations = [{ data: { app_batch_max_rows: 501 } }];
     expect(await readBatchLimit('org')).toBeNull();
+    state.results.organizations = [{ data: { app_batch_max_rows: 500 } }];
+    expect(await readBatchLimit('org')).toBe(500);
     state.results.organizations = [{ error: { message: 'down' } }];
     await expect(readBatchLimit('org')).rejects.toThrow('down');
   });
@@ -93,7 +96,7 @@ describe('연결', () => {
     const lib = readFileSync('src/lib/apps/batches.ts', 'utf8');
     expect(lib).toContain('try { orgLimit = await readBatchLimit(actor.organizationId); } catch { return { ok: false, status: 503');
     expect(lib).toContain('if (orgLimit !== null && inputs.length > orgLimit)');
-    expect(lib).toContain(".eq('user_id', userId).in('message_id', rows.map((r) => r.message_id))");
+    expect(lib).toContain(".eq('user_id', userId).in('message_id', ids)"); // 100개씩 나눠(0123 — 500줄)
     expect(readFileSync('src/app/api/apps/batches/[id]/export/route.ts', 'utf8')).toContain('loadBatchDeliveries(session.user.id, params.id)');
     expect(readFileSync('src/app/api/admin/app-automations/batch-limit/route.ts', 'utf8')).toContain('isAdminSession(session)');
     expect(readFileSync('src/lib/apps/automation-admin.ts', 'utf8')).toContain('batchLimit: await batchLimitPromise');
@@ -110,14 +113,22 @@ describe.skipIf(!url)('0084 (시험 DB)', () => {
     await db.connect();
   });
   afterAll(async () => { await db?.end(); });
-  it('다시 적용해도 안전, 1~100만', async () => {
+  it('다시 적용해도 안전 — 0084 뒤 0123이면 1~500만', async () => {
     const sql = readFileSync('supabase/migrations/0084_app_batch_max_rows.sql', 'utf8');
     await db.query(sql);
     await db.query(sql);
+    // 0084를 다시 적용하면 상한 CHECK가 1~100으로 돌아간다 — 시험 DB를 지금 마이그레이션 상태로 되돌린다(0123 — 1~500)
+    const widen = readFileSync('supabase/migrations/0123_app_batch_rows_500.sql', 'utf8');
+    await db.query(widen);
+    await db.query(widen);
     await db.query('BEGIN');
     try {
       const org = (await db.query("INSERT INTO organizations (name, app_batch_max_rows) VALUES ('상한 시험', 20) RETURNING id")).rows[0].id;
+      await db.query('SAVEPOINT s');
       await expect(db.query('UPDATE organizations SET app_batch_max_rows = 0 WHERE id = $1', [org])).rejects.toMatchObject({ code: '23514' });
+      await db.query('ROLLBACK TO SAVEPOINT s');
+      await db.query('UPDATE organizations SET app_batch_max_rows = 500 WHERE id = $1', [org]);
+      await expect(db.query('UPDATE organizations SET app_batch_max_rows = 501 WHERE id = $1', [org])).rejects.toMatchObject({ code: '23514' });
     } finally {
       await db.query('ROLLBACK');
     }

@@ -17,6 +17,7 @@ import {
 } from '@/lib/agent-form';
 import { requestJson } from '@/lib/request-json';
 import { fetchOkJson } from '@/lib/ok-json';
+import { parseWebDomains } from '@/lib/web-search-spec';
 import TemplatesPanel from './TemplatesPanel';
 import DocumentsPanel from './DocumentsPanel';
 import HistoryPanel from './HistoryPanel';
@@ -366,6 +367,7 @@ export default function AgentEditorModal({
                         ['file_read', '파일 받아 읽기', '대화 중에 엑셀·한글·PDF 등 파일을 여러 개 받아 읽습니다'],
                         ['table_merge', '표 합치기·집계', '첨부한 표를 합치고 합계를 계산해 엑셀로 만듭니다'],
                         ['document', '문서 만들기', '한글·Word 양식을 채우거나 표준 서식으로 문서 파일을 만듭니다'],
+                        ['web_search', '웹 검색', '최신 정보·공개 자료를 웹에서 찾아 출처와 함께 답합니다 — 기관 관리자가 웹 검색을 켰을 때만, 검색어는 기관 밖으로 갑니다'],
                       ] as const
                     ).map(([key, text, hint]) => (
                       <label key={key} className="flex items-start gap-2.5 cursor-pointer">
@@ -381,6 +383,35 @@ export default function AgentEditorModal({
                         </span>
                       </label>
                     ))}
+                    {value.table_merge && (
+                      <label className="flex items-start gap-2.5 cursor-pointer pl-6">
+                        <input
+                          type="checkbox"
+                          checked={value.table_merge_documents}
+                          onChange={(e) => patch({ table_merge_documents: e.target.checked })}
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087]"
+                        />
+                        <span>
+                          <span className="block text-xs font-medium text-slate-800">문서함의 표 파일로도 계산</span>
+                          <span className="block text-[11px] text-slate-400">이 비서에 올린 엑셀·CSV·한글 표(읽힌 지금 판만)를 직원이 첨부하지 않아도 합계·집계에 씁니다 — 이 비서를 쓰는 사람은 그 표의 내용을 볼 수 있습니다</span>
+                        </span>
+                      </label>
+                    )}
+                    {value.web_search && (
+                      <div className="pl-6">
+                        <label className="block text-[11px] text-slate-500 mb-1">웹 검색할 곳(한 줄에 하나, 예: go.kr — 비우면 제한 없음)</label>
+                        <textarea
+                          value={value.web_search_domains}
+                          onChange={(e) => patch({ web_search_domains: e.target.value })}
+                          rows={2}
+                          className={`${input} text-xs`}
+                          placeholder={'go.kr\nlaw.go.kr'}
+                        />
+                        {parseWebDomains(value.web_search_domains).bad.length > 0 && (
+                          <p className="mt-1 text-[11px] text-amber-600">{`도메인이 아닌 것: ${parseWebDomains(value.web_search_domains).bad.join(', ')} — 고쳐야 저장됩니다`}</p>
+                        )}
+                      </div>
+                    )}
                     {(choices.length > 0 || staleIds.length > 0 || optionsUnread.connectors) && (
                       <div className="pt-2 border-t border-slate-100">
                         <p className="text-xs font-medium text-slate-800 mb-1">공공데이터 조회</p>

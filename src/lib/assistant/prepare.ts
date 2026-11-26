@@ -34,6 +34,8 @@ import { LIBRARY_DOCUMENT_COLUMNS, loadLibraryDocuments, parseLibraryIds, type L
 import { SUPABASE_DOCUMENTS_BUCKET } from '@/lib/config';
 import { loadTurnExtract } from '@/lib/capabilities/attachment-access';
 import { restoreAppSteps, isInputOnlyRun } from '@/lib/apps/resume';
+import { estimateAppCalls } from '@/lib/apps/call-estimate';
+import { defaultReservationIo, estimateRunCostKrw, reservationRejectMessage, reservationWaitable, reserveRunUsage, type ReservationIo } from '@/lib/usage-reservation';
 import type { AppStepRecord } from '@/lib/apps/pipeline';
 import type { PrepareOutcome, PreparedTurn } from './types';
 
@@ -57,6 +59,19 @@ function reject(message: string, status: number, details?: Record<string, unknow
  * 첫 턴이 첨부 묶기에서 거절됐을 때 방금 만든 대화를 치운다. 일부만 묶였을 수 있어
  * 첨부 저장소를 먼저 지운다 — 행만 연쇄 삭제되면 객체가 남는다. 실패해도 던지지 않는다.
  */
+/** 예약 금액 어림용 — 글 조각만 센다(사진 바이트는 글자 수로 세지 않는다) */
+function messageTextLength(messages: PreparedTurn['messages']): number {
+  let n = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') { n += m.content.length; continue; }
+    for (const block of m.content) {
+      if (block.type === 'text') n += block.text.length;
+      else if (block.type === 'tool_result') n += block.content.length;
+    }
+  }
+  return n;
+}
+
 async function discardNewConversation(conversationId: string, userId: string): Promise<void> {
   await deleteConversationAttachments(conversationId);
   const { error } = await supabaseAdmin.from('conversations').delete().eq('id', conversationId).eq('user_id', userId);
@@ -97,7 +112,12 @@ export async function previousUserQuestion(conversationId: string, userId: strin
   }
 }
 
-export async function prepareTurn(session: Session, body: Record<string, unknown>): Promise<PrepareOutcome> {
+export async function prepareTurn(
+  session: Session,
+  body: Record<string, unknown>,
+  /** 사용량 예약(0122) — 시험이 바꿔 끼운다 */
+  { reservationIo }: { reservationIo?: ReservationIo } = {},
+): Promise<PrepareOutcome> {
   const { agent_id, message: rawMessage, conversation_id, images, attachment_ids } = body;
   // '문서 없이 일반 답변 받기'. 정확히 true일 때만 — 다른 값으로 문서 찾기가 꺼지면 안 된다
   const skipDocuments = body.skip_documents === true;
@@ -405,11 +425,35 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
   const verifyFrom = prepared.find((p) => p.verifySources?.length);
   const verifySources = verifyFrom?.verifySources ?? [];
   const verifyTenant = verifyFrom?.verifyTenant ?? null;
+  // 웹 검색(2026-11-26) — 기관이 켰고 비서가 켠 턴만 정의를 싣는다(capabilities/web-search.ts). 입력형 앱 실행에는 싣지 않는다(단계 실행기가 따로 부른다)
+  // — 앱 실행에는 대화용 웹 검색 지시문도 싣지 않는다(마지막 단계에는 도구가 없다 — 웹 자료는 웹 검색 조회 단계의 결과로만 온다)
+  const serverTools = !definition.value ? prepared.find((p) => p.serverTools?.webSearch)?.serverTools : undefined;
   const { tools } = toolsFor(capabilities, ctx);
+  const systemPrompt = buildSystemPrompt(agent.system_prompt, [...prepared.map((p, i) => (definition.value && capabilities[i]?.id === 'web_search' ? undefined : p.systemAddendum)), definition.value ? appOutputInstruction(definition.value) : undefined]);
+  const messages: PreparedTurn['messages'] = [...history, { role: 'user', content: buildUserContent(message + fileContext, attachedImages) }];
+
+  // 앱 실행의 사용량 예약(0122) — 많으면 쓸 금액을 금액 한도에 예약하고, 모자라면 도중에 멈추지 않도록 시작하지 않는다(맨 끝 — 앞의 거절이 예약을 남기지 않게)
+  let usageReservationId: string | undefined;
+  if (appStepInputs && definition.value) {
+    const amountKrw = estimateRunCostKrw({
+      modelId,
+      ...(() => { const e = estimateAppCalls(definition.value, appStepInputs, sentIds.length + libraryFiles.length); return { calls: e.max, webSearches: e.webSearches }; })(),
+      baseChars: systemPrompt.length + messageTextLength(messages),
+      ...(appMaterialPieces ? { digest: { pieces: appMaterialPieces.pieces.length, chars: appMaterialPieces.chars } } : {}),
+    });
+    const reserved = await reserveRunUsage(reservationIo ?? defaultReservationIo(), { departmentId: actor.departmentId, userId: actor.userId, amountKrw });
+    if (!reserved.ok) {
+      if (isNewConversation) await discardNewConversation(conversationId, actor.userId);
+      return reject(reservationRejectMessage(reserved), 429, { reason: 'usage_reservation', scope: reserved.scope, waitable: reservationWaitable(reserved), attachments_consumed: isNewConversation });
+    }
+    if (reserved.id) usageReservationId = reserved.id;
+  }
 
   return {
     ok: true,
     turn: {
+      ...(usageReservationId ? { usageReservationId } : {}),
+      ...(serverTools ? { serverTools } : {}),
       appSteps: body.app_inputs !== undefined ? definition.value?.steps : undefined,
       ...(body.app_inputs !== undefined ? { appName: agent.name } : {}),
       appStepInputs,
@@ -424,8 +468,8 @@ export async function prepareTurn(session: Session, body: Record<string, unknown
       ctx,
       modelId,
       modelSubstituted: substituted,
-      systemPrompt: buildSystemPrompt(agent.system_prompt, [...prepared.map((p) => p.systemAddendum), definition.value ? appOutputInstruction(definition.value) : undefined]),
-      messages: [...history, { role: 'user', content: buildUserContent(message + fileContext, attachedImages) }],
+      systemPrompt,
+      messages,
       tools,
       capabilities,
       conversationId,

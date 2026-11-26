@@ -241,7 +241,8 @@ export interface SsoIo {
   findUser(email: string, organizationId: string): Promise<SsoUserRow | null>;
   lockIfDormant(userId: string): Promise<boolean>;
   record(outcome: SignInOutcome, email: string | null, user: { id: string; departmentId: string | null } | null): Promise<void>;
-  mintSession(user: { id: string; email: string; name: string | null; role: 'ADMIN' | 'USER'; departmentId: string }): Promise<string>;
+  /** (0121) `sid`는 id_token의 세션 번호(꼴이 맞을 때만) — 토큰 `ssoSid`에 실어 그 세션만 끝내는 back-channel 로그아웃에 쓴다 */
+  mintSession(user: { id: string; email: string; name: string | null; role: 'ADMIN' | 'USER'; departmentId: string; sid?: string | null }): Promise<string>;
   /**
    * (0110) 그룹 → 부서 맞추기 — 일반 직원을 `to` 부서로 옮긴다(부서가 이 기관 것인지 다시 보고, 지금 부서가 `from`일 때만).
    * 옮겼으면 true, 그 사이 바뀌어 옮기지 않았으면 false, 못 읽거나 못 쓰면(또는 다른 기관 부서면) 던진다. 없으면 맞추지 않는다
@@ -422,7 +423,9 @@ export async function finishSso(
         await reportFailure('role_sync', error, org.id);
       }
     }
-    const session = await io.mintSession({ id: user.id, email: user.email ?? email, name: decision.name, role, departmentId });
+    // (0118·0121) 계정 서비스의 세션 번호 — 로그인(토큰)에 싣고 sid → 직원도 적어 둔다(id_token에 sid가 있을 때만)
+    const sid = ssoKey(checked.claims.sid);
+    const session = await io.mintSession({ id: user.id, email: user.email ?? email, name: decision.name, role, departmentId, sid });
     // (0114) back-channel 로그아웃이 sub만 보내므로 sub → 직원을 적어 둔다. 못 적으면 그 로그아웃만 못 받는다(로그인은 그대로)
     const subject = checked.claims.sub;
     if (io.rememberSubject && typeof subject === 'string' && subject && subject.length <= 255) {
@@ -432,9 +435,7 @@ export async function finishSso(
         await reportFailure('subject', error, org.id);
       }
     }
-    // (0118) sid만 보내는 계정 서비스도 있어 sid → 직원도 적어 둔다(id_token에 sid가 있을 때만)
-    const sid = checked.claims.sid;
-    if (io.rememberSession && typeof sid === 'string' && sid && sid.length <= 255) {
+    if (io.rememberSession && sid) {
       try {
         await io.rememberSession({ organizationId: org.id, issuer, sid, userId: user.id });
       } catch (error) {
@@ -624,13 +625,19 @@ export interface SsoBackchannelIo {
   sessionUsers?(a: { organizationId: string; issuer: string; sid: string }): Promise<string[]>;
   /** 기관 계정 로그아웃 시각을 적는다(지금 값보다 늦을 때만 — 다시 온 옛 토큰은 새 로그인을 끝내지 않게). 바꿨으면 true, 못 쓰면 던진다 */
   markLoggedOut(a: { userId: string; organizationId: string; atMs: number }): Promise<boolean>;
+  /**
+   * (0121) sid의 세션 하나만 끝낸다 — 직원 행의 끝낸 세션 목록에 `{초}:{sid}`를 더하고 sid 로그아웃 시각을 늦춘다(sid 없는 로그인용).
+   * 바꿨으면 true(이미 적혀 있으면 false), 못 쓰면 던진다. 없으면 sid가 와도 모두 끝낸다(markLoggedOut)
+   */
+  endSession?(a: { userId: string; organizationId: string; sid: string; atMs: number }): Promise<boolean>;
   now(): number;
 }
 
 /**
- * 계정 서비스가 보낸 logout_token(OIDC Back-Channel Logout)을 받아, 그 sub(없으면 sid — 0118)로 기관 계정 로그인한 직원의 로그아웃 시각을 적는다 —
- * sid만 와도 그 세션 하나가 아니라 그 직원의 그 전 기관 계정 로그인을 모두 끝낸다(WORKON 로그인에 sid를 싣지 않아 하나만 가려 끝낼 수 없다 — 더 넓게 끝내는 쪽).
- * 미들웨어가 그 전에 기관 계정으로 들어온 WORKON 로그인을 끝낸다('sso_logged_out', 30초 안). 비밀번호 로그인·대리 접근은 그대로.
+ * 계정 서비스가 보낸 logout_token(OIDC Back-Channel Logout)을 받아, 그 sub(없으면 sid — 0118)로 기관 계정 로그인한 직원을 찾는다.
+ * sid가 온 토큰은 **그 세션 하나만** 끝낸다(0121 — 로그인 토큰에 실린 sid로, OIDC 규칙대로). sid를 싣지 않은 로그인(이 배포 전·id_token에 sid가
+ * 없던 로그인)은 어느 세션인지 몰라 함께 끝난다. sub만 온 토큰은 그 직원의 그 전 기관 계정 로그인을 모두 끝낸다.
+ * 미들웨어가 해당 WORKON 로그인을 끝낸다('sso_logged_out', 30초 안). 비밀번호 로그인·대리 접근은 그대로.
  * 서명 전에는 iss·aud로 설정만 고른다(그 값으로 무엇을 바꾸지 않음). 틀린 토큰 400, 못 읽음 503(계정 서비스가 다시 보낸다), 맞으면 200
  */
 export async function handleBackchannelLogout(raw: unknown, io: SsoBackchannelIo): Promise<{ status: 200 | 400 | 503; ended: number }> {
@@ -679,7 +686,10 @@ export async function handleBackchannelLogout(raw: unknown, io: SsoBackchannelIo
           ? await io.sessionUsers({ organizationId: config.organization_id, issuer, sid: checked.sid })
           : [];
       for (const userId of users) {
-        if (await io.markLoggedOut({ userId, organizationId: config.organization_id, atMs: checked.loggedOutAtMs })) ended += 1;
+        const done = checked.sid && io.endSession
+          ? await io.endSession({ userId, organizationId: config.organization_id, sid: checked.sid, atMs: checked.loggedOutAtMs })
+          : await io.markLoggedOut({ userId, organizationId: config.organization_id, atMs: checked.loggedOutAtMs });
+        if (done) ended += 1;
       }
     } catch (error) {
       await reportFailure('backchannel', error, config.organization_id);
@@ -726,6 +736,16 @@ export function defaultSsoBackchannelIo(): SsoBackchannelIo {
       const row = ((data ?? []) as { id: string; department_id: string | null }[])[0];
       if (!row) return false;
       await logSecurityEvent(row.department_id, userId, 'sso_backchannel_logout', { target_user_id: userId, via: 'sso_backchannel', logged_out_at: at }, 'low');
+      return true;
+    },
+    async endSession({ userId, sid, atMs }) {
+      const at = new Date(atMs).toISOString();
+      const { data, error } = await supabaseAdmin.rpc('sso_end_session', { p_user_id: userId, p_sid: sid, p_at: at });
+      if (error) throw new SsoError('sso_unavailable', 'session_end_write');
+      const rows = (Array.isArray(data) ? data : []) as { department_id: string | null }[];
+      if (!rows.length) return false;
+      // sid는 남기지 않는다(계정 서비스의 세션 번호) — 그 세션 하나만 끝냈다는 것만
+      await logSecurityEvent(rows[0].department_id ?? null, userId, 'sso_backchannel_logout', { target_user_id: userId, via: 'sso_backchannel', scope: 'session', logged_out_at: at }, 'low');
       return true;
     },
     now: () => Date.now(),
@@ -783,7 +803,7 @@ export function defaultSsoIo(meta: { ip: string | null; userAgent: string | null
       return encode({
         token: {
           sub: user.id, id: user.id, name: user.name ?? user.email, email: user.email, role: user.role, departmentId: user.departmentId,
-          authAt: Date.now(), sso: true, iat: nowS, exp: nowS + SSO_SESSION_MAX_AGE_S,
+          authAt: Date.now(), sso: true, ...(user.sid ? { ssoSid: user.sid } : {}), iat: nowS, exp: nowS + SSO_SESSION_MAX_AGE_S,
         },
         secret: NEXTAUTH_SECRET,
         maxAge: SSO_SESSION_MAX_AGE_S,

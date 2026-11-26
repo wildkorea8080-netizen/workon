@@ -320,3 +320,60 @@ describe('재개 기록의 소유권·판·입력 검사', () => {
     expect(await prepareTurn(session, { ...body, attachment_ids: [A] })).toMatchObject({ ok: false, status: 409 }); expect(calls).not.toContain('insert:conversations');
   });
 });
+
+describe('앱 실행의 사용량 예약(0122)', () => {
+  const form = { schemaVersion: 1, fields: [{ key: 'source', label: '원문', type: 'textarea', required: true }], output: 'bullets' };
+  const io = (over: Record<string, unknown> = {}) => ({
+    headroom: vi.fn(async () => ({ organizationId: 'o1', checks: [{ scope: 'department' as const, headroom: 50_000, limitKrw: 100_000 }] })),
+    reserve: vi.fn(async () => ({ ok: true as const, id: 'r1' })),
+    release: vi.fn(async () => {}),
+    report: vi.fn(async () => {}),
+    now: () => Date.parse('2026-11-26T03:00:00Z'),
+    ...over,
+  });
+  const run = (reservationIo: ReturnType<typeof io>, extra: Record<string, unknown> = {}) =>
+    prepareTurn(session, { agent_id: AGENT, message: '앱 실행', app_version: 3, app_inputs: { source: '가상 자료' }, ...extra }, { reservationIo: reservationIo as never });
+  beforeEach(() => { state.appDefinition = form; state.capabilities = {}; });
+  it('앱 실행은 많으면 쓸 금액을 예약하고 턴에 예약 번호를 싣는다', async () => {
+    const r = io();
+    const out = await run(r);
+    expect(out.ok).toBe(true); if (!out.ok) return;
+    expect(out.turn.usageReservationId).toBe('r1');
+    expect(r.headroom).toHaveBeenCalledWith('d1', 'u1');
+    const arg = (r.reserve.mock.calls[0] as unknown as [{ amountKrw: number; departmentId: string; userId: string; expiresAt: string }])[0];
+    expect(arg).toMatchObject({ organizationId: 'o1', departmentId: 'd1', userId: 'u1', expiresAt: '2026-11-26T03:10:00.000Z' });
+    expect(arg.amountKrw).toBeGreaterThan(0);
+  });
+  it('모자라면 시작하지 않는다 — 429·만든 대화는 지움·까닭에 남은 금액과 다른 실행의 예약', async () => {
+    const out = await run(io({ reserve: vi.fn(async () => ({ ok: false as const, scope: 'department' as const, headroom: 300, reserved: 200 })) }));
+    expect(out).toMatchObject({ ok: false, status: 429, details: { reason: 'usage_reservation', scope: 'department' } });
+    if (out.ok) return;
+    expect(out.message).toContain('부서의 이번 달 남은 한도가 100원');
+    expect(out.message).toContain('실행 중인 다른 앱이 예약한 200원');
+    expect(calls).toContain('insert:conversations');
+    expect(calls).toContain(`delete:conversations:${NEW_CONV}`);
+  });
+  it('다른 실행의 예약이 풀리면 될 거절에는 waitable을 싣는다(일괄 실행은 멈추지 않고 다음 차례에, 2026-11-26)', async () => {
+    const wait = await run(io({ reserve: vi.fn(async () => ({ ok: false as const, scope: 'department' as const, headroom: 1_000_000, reserved: 999_995 })) }));
+    expect(wait).toMatchObject({ ok: false, status: 429, details: { reason: 'usage_reservation', waitable: true } });
+    const never = await run(io({ reserve: vi.fn(async () => ({ ok: false as const, scope: 'department' as const, headroom: 0, reserved: 0 })) })); // 다른 예약이 없다 — 기다려도 안 됨
+    expect(never).toMatchObject({ ok: false, status: 429, details: { reason: 'usage_reservation', waitable: false } });
+  });
+  it('금액 한도가 없거나 예약을 못 하면 예약 없이 실행(운영 기록)', async () => {
+    const none = io({ headroom: vi.fn(async () => ({ organizationId: 'o1', checks: [] })) });
+    const a = await run(none);
+    expect(a.ok && a.turn.usageReservationId).toBe(undefined);
+    expect(none.reserve).not.toHaveBeenCalled();
+    const broken = io({ reserve: vi.fn(async () => { throw new Error('db'); }) });
+    const b = await run(broken);
+    expect(b.ok).toBe(true);
+    expect(broken.report).toHaveBeenCalledWith('reserve', expect.any(Error), 'd1');
+  });
+  it('앱이 아닌 대화는 예약하지 않는다', async () => {
+    state.appDefinition = null;
+    const r = io();
+    const out = await prepareTurn(session, { agent_id: AGENT, message: '그냥 질문' }, { reservationIo: r as never });
+    expect(out.ok).toBe(true);
+    expect(r.headroom).not.toHaveBeenCalled();
+  });
+});

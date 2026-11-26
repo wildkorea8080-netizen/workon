@@ -283,7 +283,9 @@ describe('실패 안내 메일·마이그레이션·실행기 라우트', () => 
     expect(sql).toContain("CHECK ((frequency = 'weekly') = (weekday IS NOT NULL))"); expect(sql).toContain("CHECK ((frequency = 'monthly') = (month_day IS NOT NULL))");
     expect(sql).toContain('run_minute IN (0, 30)'); expect(sql).toContain('month_day BETWEEN 1 AND 28');
     expect(sql).not.toMatch(/DROP|ALTER TABLE public\.(agents|users|conversations)/);
-    const route = readFileSync('src/app/api/cron/app-schedules/route.ts', 'utf8');
+    // 자격은 2026-11-26에 cron-auth.ts로 뽑았다(일괄 실행 전용 실행기와 같다)
+    const route = readFileSync('src/app/api/cron/app-schedules/route.ts', 'utf8') + readFileSync('src/lib/cron-auth.ts', 'utf8');
+    expect(route).toContain('workerSecretRejection(request)');
     expect(route).toContain('WORK_WORKER_SECRET'); expect(route).toContain('CRON_SECRET'); expect(route).toContain('timingSafeEqual'); expect(route).toContain('status: 503'); expect(route).toContain('maxDuration = 300');
     // Vercel Hobby 예약 작업(2개·하루 한 번)에는 넣지 않는다 — pg_cron이 부른다
     const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: { path: string }[] };
