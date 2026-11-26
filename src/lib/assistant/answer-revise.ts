@@ -32,7 +32,9 @@ export interface ReviseDeps {
   loadMessage(id: string): Promise<{ id: string; role: string; conversation_id: string; content: string; created_at: string; source_references: Refs | null } | null>;
   loadConversation(conversationId: string, userId: string): Promise<{ id: string; agent_id: string | null; department_id: string } | null>;
   /** 그 답변 바로 앞의 사용자 메시지(같은 대화, 시각이 같거나 앞) */
-  loadQuestion(conversationId: string, atOrBefore: string): Promise<{ content: string; source_references: Refs | null } | null>;
+  loadQuestion(conversationId: string, atOrBefore: string): Promise<{ content: string; source_references: Refs | null; created_at?: string } | null>;
+  /** 그 질문 바로 앞의 사용자 질문(2026-11-26) — 짧은 이어지는 질문을 앞 질문과 묶어 찾게. 없거나 못 읽으면 null */
+  loadPreviousQuestion?(conversationId: string, before: string): Promise<string | null>;
   /**
    * 조건부 저장 — `expect`가 null이면 고쳐 쓰기 칸이 비었을 때만, 문자열이면 그 차지 시각일 때만 `source_references`를 `next`로 바꾼다.
    * 바꿨으면 true
@@ -43,7 +45,7 @@ export interface ReviseDeps {
   /** 기관 정책을 거친 비서 모델 */
   resolveModel(agent: ReviseAgent, organizationId: string): Promise<string>;
   /** 대화와 같은 찾기(근거 + 시스템 프롬프트에 붙을 글) — 실패면 null */
-  prepare(agentId: string, organizationId: string, query: string): Promise<{ chunks: RetrievedChunk[]; systemAddendum?: string } | null>;
+  prepare(agentId: string, organizationId: string, query: string, previousQuestion?: string): Promise<{ chunks: RetrievedChunk[]; systemAddendum?: string } | null>;
   /** 대화와 같은 찾기(근거만) — 숫자가 든 문장으로 더 찾을 때 */
   search(agentId: string, organizationId: string, query: string): Promise<RetrievedChunk[] | null>;
   complete(req: LlmRequest): Promise<LlmCompletion>;
@@ -100,7 +102,11 @@ export async function reviseAnswer(actor: ActorScope, messageId: string, deps: R
   const release = () => deps.writeRefs(id, base, startedAt).catch(() => false);
 
   try {
-    const prepared = await deps.prepare(agent.id, organizationId, query);
+    // 짧은 이어지는 질문('그럼 국외 출장은?')은 대화처럼 앞 질문과 묶어 다시 찾는다 — 앞 질문을 못 읽으면 지금 질문만으로
+    const previousQuestion = question?.created_at && deps.loadPreviousQuestion
+      ? await deps.loadPreviousQuestion(conversation.id, question.created_at).catch(() => null)
+      : null;
+    const prepared = previousQuestion ? await deps.prepare(agent.id, organizationId, query, previousQuestion) : await deps.prepare(agent.id, organizationId, query);
     if (!prepared) { await release(); return fail(503, REVISE_DOCUMENTS_UNAVAILABLE); }
     // 숫자가 든 문장으로 더 찾기 — 숫자 근거 다시 찾기와 같은 문장·같은 예산(문장 3개·5초)
     const found = await searchQueries(researchQueries(message.content, eligible.unverified), (q) => deps.search(agent.id, organizationId, q));

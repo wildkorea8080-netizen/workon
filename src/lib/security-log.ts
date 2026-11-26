@@ -71,6 +71,7 @@ export type SecurityEventType =
   | 'user_role_synced'
   /** 기관 전체 관리자가 공유 자료함을 만들거나 고치거나 지움 (0116) */
   | 'library_share_changed'
+  | 'budget_alert_recipients_changed'
   | 'sso_backchannel_logout'
   | 'user_budget_changed'
   /** 기관 관리자가 직원을 초대함 / 초대를 취소함 (2026-11-18) */

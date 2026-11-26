@@ -10,6 +10,7 @@ vi.mock('@/lib/supabaseAdmin', () => ({
       const b: Record<string, unknown> = {};
       for (const m of ['select', 'eq', 'not', 'order', 'limit', 'in']) b[m] = (...args: unknown[]) => { state.calls.push(`${table}.${m}:${JSON.stringify(args)}`); return b; };
       b.then = (res: (v: unknown) => unknown) => res(table === 'budget_alerts' ? { data: state.alerts, error: state.alertError } : { data: state.depts, error: state.deptError });
+      b.maybeSingle = async () => ({ data: { budget_alert_emails: [] }, error: null });
       return b;
     },
   },

@@ -4,12 +4,15 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { actionErrorText } from '@/lib/ok-json';
+import { REVISION_LABEL } from '@/lib/assistant/answer-revise-spec';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+  /** 근거로 고쳐 쓴 답(2026-11-26) — 공유한 때까지 고쳐 쓴 것만 */
+  revision?: { text: string; created_at: string };
 }
 
 interface SharedConversation {
@@ -132,6 +135,12 @@ export default function SharedConversationPage() {
                   }`}
                 >
                   {msg.content}
+                  {msg.role === 'assistant' && msg.revision && (
+                    <div aria-label={REVISION_LABEL} className="mt-3 rounded-xl border border-teal-200 bg-white px-3 py-2 text-slate-800">
+                      <p className="mb-1 text-xs font-semibold text-teal-800">{REVISION_LABEL} — 확인되지 않은 숫자를 문서에서 다시 찾아 고쳐 썼습니다(위 원래 답은 그대로)</p>
+                      {msg.revision.text}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

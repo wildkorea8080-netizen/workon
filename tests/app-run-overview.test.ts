@@ -78,7 +78,7 @@ describe('앱별 묶기', () => {
     expect(result.apps.map((a) => a.agentId)).toEqual(['a', 'b']);
     expect(result.apps[0]).toEqual({
       agentId: 'a', name: '공문 정리', departmentName: '총무과', runs: 4, saved: 1, interrupted: 3, uncertain: 0, noResponse: 0,
-      failedSteps: [{ name: '단계2', count: 2 }, { name: '단계1', count: 1 }], lastInterruptedAt: '2026-10-26T01:00:00Z',
+      failedSteps: [{ name: '단계2', count: 2 }, { name: '단계1', count: 1 }], failedCauses: [], lastInterruptedAt: '2026-10-26T01:00:00Z',
     });
     expect(result.apps[1]).toMatchObject({ runs: 3, saved: 2, noResponse: 1, interrupted: 0, lastInterruptedAt: null });
   });

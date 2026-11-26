@@ -81,7 +81,7 @@ describe('CSV', () => {
     expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const text = bytes.subarray(3).toString('utf8');
     expect(text.startsWith('기간,2026-10-01 ~ 2026-10-31')).toBe(true);
-    expect(text).toContain(`"'=HYPERLINK(""x"")",총무과,1,0,1,0,0,정리(1),2026-10-05 10:00`);
+    expect(text).toContain(`"'=HYPERLINK(""x"")",총무과,1,0,1,0,0,정리(1),,2026-10-05 10:00`);
     expect(text).toContain('개인 앱 1개(이름 비공개)');
     expect(text).not.toContain('내 비밀 앱');
   });

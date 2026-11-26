@@ -76,6 +76,7 @@ export const API_ROUTES: readonly string[] = [
   'apps/batches',
   'apps/batches/[id]',
   'apps/batches/[id]/export',
+  'apps/estimate',
   'apps/export',
   'apps/favorites',
   'apps/history',

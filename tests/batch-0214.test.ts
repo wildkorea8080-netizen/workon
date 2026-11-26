@@ -50,7 +50,7 @@ describe('업무 저장소의 읽기 실패', () => {
 describe('예산 알림의 기관 담당자 주소', () => {
   it('못 읽으면 던진다(관리자에게만 보내고 끝내지 않음)', () => {
     const src = readFileSync('src/lib/budget-alerts.ts', 'utf8');
-    expect(src).toContain("const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('contact_email')");
+    expect(src).toContain("const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('contact_email, budget_alert_emails')");
     expect(src).toContain('if (orgError) throw new Error(`organizations: ${orgError.message}`);');
   });
 });

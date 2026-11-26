@@ -440,6 +440,18 @@ type DocSearchCarry =
  * 모델에게는 남긴 조각의 블록만 싣는다(keepContextBlocks) — 프롬프트가 두 배가 되지 않는다
  */
 export const TAG_FILTER_BUDGET = NODA_CONTEXT_BUDGET * 2;
+/**
+ * 고른 태그 문서의 근거가 하나도 없을 때 한 번 더 찾는 예산(2026-11-26) — 다른 문서의 근거가 예산을 다 차지해 태그 문서를 못 찾을 수 있다.
+ * 모델에게는 여전히 태그 문서의 블록만 싣는다(프롬프트는 늘지 않음)
+ */
+export const TAG_FILTER_RETRY_BUDGET = NODA_CONTEXT_BUDGET * 4;
+
+/** NODA 근거 중 고른 태그가 붙은 이 비서 문서의 것이 있는가 — 다시 찾을지 가른다(맞추기 전의 파일 이름으로) */
+export function hasTaggedSource(sources: { filename?: unknown }[], docs: AgentDocument[], tags: readonly string[]): boolean {
+  const want = new Set(tags.map((t) => t.toLocaleLowerCase('ko')));
+  const tagged = new Set(docs.filter((d) => (d.tags ?? []).some((t) => want.has(t.toLocaleLowerCase('ko')))).map((d) => d.id.toLowerCase()));
+  return sources.some((s) => typeof s.filename === 'string' && tagged.has((documentIdFromNodaFilename(s.filename) ?? '').toLowerCase()));
+}
 
 /** 고른 태그가 하나라도 붙은 문서의 조각만(대소문자 무시). 공통 자료실 조각은 태그가 없어 뺀다 — filterChunksByTags와 같은 규칙 */
 export function keepTaggedChunks(chunks: RetrievedChunk[], docs: AgentDocument[], tags: readonly string[]): RetrievedChunk[] {
@@ -701,11 +713,11 @@ export async function searchLikeChat(
  * '답변까지 평가'(2026-11-08)가 대화와 같은 프롬프트로 답을 만들 때 쓴다. 찾기 실패(대화라면 503)면 null
  */
 export async function prepareLikeChat(
-  input: { agentId: string; organizationId: string; query: string },
+  input: { agentId: string; organizationId: string; query: string; /** 앞 질문(2026-11-26 — 근거로 고쳐 쓰기의 짧은 이어지는 질문, 대화와 같은 '앞 질문과 묶어 다시 찾기') */ previousQuestion?: string },
   deps: DocSearchDeps = defaultDeps
 ): Promise<{ chunks: RetrievedChunk[]; systemAddendum?: string } | null> {
   const cap = createDocSearch(deps);
-  const pre = await cap.preflight!({ organizationId: input.organizationId, agentId: input.agentId, message: input.query, skipDocuments: false });
+  const pre = await cap.preflight!({ organizationId: input.organizationId, agentId: input.agentId, message: input.query, skipDocuments: false, ...(input.previousQuestion ? { previousQuestion: input.previousQuestion } : {}) });
   if (!pre.ok) return null;
   // prepare가 읽는 것은 기관·비서·질문·preflight 결과뿐이다 — 대화·첨부·사용자는 없다
   const ctx = {
@@ -850,6 +862,17 @@ export function createDocSearch(deps: DocSearchDeps = defaultDeps): Capability {
 
       let result = agentCall.status === 'fulfilled' ? agentCall.value : undefined;
       let commonResult = commonCall.status === 'fulfilled' ? commonCall.value : undefined;
+
+      // '문서 좁히기'(2026-11-26) — 찾은 근거가 있는데 고른 태그 문서의 것이 없으면 예산을 넓혀 한 번 더(다른 문서가 예산을 다 차지했을 수 있다).
+      // 다시 찾기가 실패하면 첫 결과로 간다(첫 찾기는 이미 성공했다)
+      if (tags && result && result.sources.length > 0 && !hasTaggedSource(result.sources, docs, tags)) {
+        try {
+          const wider = await deps.fetchContext(agentId, message, TAG_FILTER_RETRY_BUDGET);
+          if (hasTaggedSource(wider.sources, docs, tags)) result = wider;
+        } catch (error) {
+          await log({ level: 'warning', category: 'api', message: '문서 좁히기의 넓혀 다시 찾기 실패 — 첫 찾기 결과로 답함', details: { agent_id: agentId, ...nodaErrorFields(error) }, orgId: organizationId });
+        }
+      }
 
       // 이어지는 질문 — 짧은 질문이 아무 근거도 못 찾았고 바로 앞 질문이 있으면, 앞 질문과 묶어 한 번만 다시 찾는다(2026-11-05).
       // '그럼 국외 출장은?'은 혼자서는 뜻이 비어 근거를 못 찾는다. 다시 찾기가 실패하면 첫 결과(근거 없음)로 간다 — 첫 찾기는 이미 성공했다

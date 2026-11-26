@@ -25,6 +25,7 @@ import { appDataTableRunner } from '@/lib/apps/app-data-lookup';
 import { executeAppLookup, type ToolResult } from '@/lib/connectors';
 import { callExternalLookup } from '@/lib/apps/outbound/lookup';
 import { AppInputError, appendToLastUserMessage, digestPieces } from '@/lib/apps/long-input';
+import { APP_EMPTY_RESULT_MESSAGE, APP_LIMIT_OR_POLICY_MESSAGE, appRunCause } from '@/lib/apps/run-cause';
 import { APP_TIME_BUDGET_CODE } from '@/lib/apps/stream';
 import { isInputOnlyRun } from '@/lib/apps/resume';
 import { checkTokenLimit } from '@/lib/usage-limit';
@@ -427,7 +428,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
     // 자기 실행의 사용량 예약(0122)은 빼고 본다 — 세면 예약한 몫 때문에 자기가 멈춘다
     const limit = await checkTokenLimit(turn.ctx.departmentId, turn.ctx.userId, { excludeReservationId: turn.usageReservationId });
     const allowed = await getAllowedModelIds(turn.ctx.organizationId);
-    if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error('기관 사용량 또는 모델 정책이 변경되어 단계 실행을 중단했습니다.');
+    if (!limit.allowed || !allowed.includes(turn.modelId)) throw new Error(APP_LIMIT_OR_POLICY_MESSAGE);
   };
   const appMaterial = turn.appMaterialPieces ? { pieces: turn.appMaterialPieces.pieces.length, chars: turn.appMaterialPieces.chars } : undefined;
   try {
@@ -469,7 +470,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
       send
     );
     if (staged) {
-      if (!result.text.trim()) throw new Error('마지막 단계에서 결과가 생성되지 않았습니다.');
+      if (!result.text.trim()) throw new Error(APP_EMPTY_RESULT_MESSAGE);
       appRecords[appRecords.length - 1].status = 'completed'; appRecords[appRecords.length - 1].output = result.text;
       updateStep(appRecords.length - 1);
     }
@@ -481,8 +482,20 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
       for (let i = 0; i < appRecords.length; i++) {
         if (appRecords[i].status === 'running') appRecords[i].status = 'failed';
         else if (appRecords[i].status === 'pending') appRecords[i].status = 'not_run';
-        updateStep(i);
       }
+      // 멈춘 까닭(2026-11-26) — 코드만(오류 원문은 남기지 않음). 멈춘 단계에, 그런 단계가 없으면(단계 전에 멈춤) 처음 실행하지 못한 단계에
+      const at = appRecords.findIndex(r => r.status === 'failed') >= 0 ? appRecords.findIndex(r => r.status === 'failed') : appRecords.findIndex(r => r.status === 'not_run');
+      if (at >= 0) {
+        const step = turn.appSteps?.[at];
+        appRecords[at].cause = appRunCause({
+          message: error instanceof Error ? error.message : '',
+          llm: error instanceof LlmApiError ? llmErrorKind(error) : null,
+          appInput: error instanceof AppInputError,
+          timeBudget: error instanceof AppInputError && error.message === APP_TIME_BUDGET_MESSAGE,
+          lookupStep: Boolean(step?.lookup || step?.research),
+        });
+      }
+      for (let i = 0; i < appRecords.length; i++) updateStep(i);
       try {
         await saveMessages(buildMessageRows({ conversationId: turn.conversationId, userId: turn.ctx.userId,
           userContent: turn.storedUserContent, assistantText: savedInputs && appRecords.some(step => step.status === 'completed') ? '단계 처리 중 중단됐습니다. 완료된 결과를 확인한 뒤 이어서 실행하거나 새로 실행해 주세요.' : '단계 처리 중 중단됐습니다. 완료된 단계 결과를 확인하고 새로 실행해 주세요.',

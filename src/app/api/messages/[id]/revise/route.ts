@@ -36,7 +36,7 @@ function reviseDeps(organizationId: string): ReviseDeps {
       // 한 턴의 두 행은 한 번에 들어가 시각이 같다 — 같거나 앞선 사용자 메시지 중 가장 늦은 것
       const { data, error } = await supabaseAdmin
         .from('messages')
-        .select('content, source_references')
+        .select('content, source_references, created_at')
         .eq('conversation_id', conversationId)
         .eq('role', 'user')
         .lte('created_at', atOrBefore)
@@ -69,7 +69,21 @@ function reviseDeps(organizationId: string): ReviseDeps {
     async resolveModel(agent, orgId) {
       return resolveModel(agent.model_id, await getAllowedModelIds(orgId)).modelId;
     },
-    prepare: (agentId, orgId, query) => prepareLikeChat({ agentId, organizationId: orgId, query }),
+    prepare: (agentId, orgId, query, previousQuestion) => prepareLikeChat({ agentId, organizationId: orgId, query, ...(previousQuestion ? { previousQuestion } : {}) }),
+    async loadPreviousQuestion(conversationId, before) {
+      const { data, error } = await supabaseAdmin
+        .from('messages')
+        .select('content')
+        .eq('conversation_id', conversationId)
+        .eq('role', 'user')
+        .lt('created_at', before)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      const content = (data as { content?: unknown } | null)?.content;
+      return typeof content === 'string' && content.trim() ? content : null;
+    },
     search: (agentId, orgId, query) => searchLikeChat({ agentId, organizationId: orgId, query }),
     complete,
     logUsage: (usage, row) => writeUsageLog({

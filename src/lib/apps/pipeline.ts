@@ -1,3 +1,4 @@
+import type { AppRunCause } from './run-cause';
 import { APP_RESEARCH_PER_ROUND, researchPlanLines, type AppResearch, APP_CLASSIFY_TOKENS, APP_DOC_SOURCE_PATH, APP_LOOKUP_OUTPUT_MAX, stepQueryLines, refineQueryLines, APP_LOOKUP_EACH_MAX, APP_LOOKUP_REFINE_TOTAL, APP_MAX_STEPS, APP_REPEAT_MAX, APP_LOOPS_PER_RUN, branchBackIndex, branchRounds, branchJumpIndex, repeatItems, repeatsFiles, APP_LOOKUP_TOOLS, chooseBranch, classifyAnswer, classifyKey, conditionHolds, evaluationInputs, lookupArticleNumber, renderLookupQuery, type AppBranch, type AppLookupTool, type AppStep } from './definition';
 import { AppInputError } from './long-input';
 import type { LlmCompletion, LlmMessage, LlmRequest, LlmUsage } from '@/lib/llm/types';
@@ -15,7 +16,7 @@ export type AppStepSource = { title: string; url: string };
  * `looped` = 이 단계의 갈래가 앞 단계로 되돌아간 횟수(2026-11-25), `loopFeedback` = 되돌아가 다시 하는 동안 되돌아오게 한 단계의 기록에 남는
  * 그 결과(되돌아온 까닭) — 이어 실행이 두 값으로 되돌아간 횟수와 참고 자료를 이어 받는다(2026-11-25)
  */
-export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; partial?: string[]; reusedItems?: number; query?: string; article?: string; sources?: AppStepSource[]; jumped?: true; docSearch?: true; gap?: true; queries?: string[]; gapQueries?: string[]; refined?: number; tags?: string[]; research?: true; looped?: number; loopFeedback?: string };
+export type AppStepRecord = { name: string; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'not_run'; /** 멈춘 까닭(2026-11-26) — 멈춘 단계(없으면 처음 실행하지 못한 단계)에 코드만 */ cause?: AppRunCause; output?: string; reused?: boolean; branch?: string; kind?: 'lookup' | 'classify'; repeated?: number; repeatedFiles?: true; partial?: string[]; reusedItems?: number; query?: string; article?: string; sources?: AppStepSource[]; jumped?: true; docSearch?: true; gap?: true; queries?: string[]; gapQueries?: string[]; refined?: number; tags?: string[]; research?: true; looped?: number; loopFeedback?: string };
 /**
  * 조회 단계가 부르는 도구 — 실행기(stream.ts)가 앱 능력 범위를 확인한 뒤 커넥터를 부른다. 던지지 않고 isError로 실패를 알린다. `article`은 본문 도구의 조 번호.
  * `gap`은 문서 찾기가 근거를 찾지 못했다는 표시(실패가 아니다 — 내용은 '근거 없음' 안내 글)

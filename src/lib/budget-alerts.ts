@@ -16,7 +16,7 @@ import {
  * 기준을 넘었으면 관리자에게 메일을 보낸다. 대상은 둘이다.
  *
  * - **기관**: 연간 정액 계약(기준 = 계약의 `budget_alert_percent`(기본 80)·90·100) 또는 종량제 월 토큰 한도(80·90·100).
- *   받는 사람은 기관 담당자 메일(`organizations.contact_email`) + 최상위 부서의 활성 관리자.
+ *   받는 사람은 기관 담당자 메일(`organizations.contact_email`) + 기관 전체 관리자가 더한 주소(0135, 5개) + 최상위 부서의 활성 관리자.
  * - **부서 월 한도(0024)**: 기준 80·90·100. 받는 사람은 그 부서와 상위 부서의 활성 관리자(그 부서를 관리하는 사람).
  *
  * - 같은 대상·같은 기간(연간 계약 id, 그 밖은 KST 달)·같은 기준은 **한 번만**(`budget_alerts` 유일 키로 차지한 실행만 보낸다).
@@ -318,7 +318,7 @@ export function budgetAlertDeps(): BudgetAlertDeps {
         return cleanRecipients(await activeAdminEmails((own ?? []).map((d: { id: string }) => d.id)));
       }
       // 기관 담당자 주소를 못 읽으면 던진다(2026-11-20 — 예전엔 빼고 관리자에게만 보내 '보냄'으로 끝냈다)
-      const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('contact_email').eq('id', organizationId).maybeSingle();
+      const { data: org, error: orgError } = await supabaseAdmin.from('organizations').select('contact_email, budget_alert_emails').eq('id', organizationId).maybeSingle();
       if (orgError) throw new Error(`organizations: ${orgError.message}`);
       const { data: roots, error } = await supabaseAdmin
         .from('departments')
@@ -327,7 +327,9 @@ export function budgetAlertDeps(): BudgetAlertDeps {
         .is('parent_id', null);
       if (error) throw new Error(`departments: ${error.message}`);
       const admins = await activeAdminEmails((roots ?? []).map((d: { id: string }) => d.id));
-      return cleanRecipients([org?.contact_email, ...admins]);
+      // 기관 전체 관리자가 더한 예산 담당자(0135)
+      const extra = Array.isArray(org?.budget_alert_emails) ? (org!.budget_alert_emails as string[]) : [];
+      return cleanRecipients([org?.contact_email, ...extra, ...admins]);
     },
     async claim(c, options) {
       const row = {

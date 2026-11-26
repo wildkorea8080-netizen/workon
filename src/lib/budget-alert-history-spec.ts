@@ -84,3 +84,16 @@ export function budgetAlertView(row: BudgetAlertRow, managed: Set<string>, deptN
     updatedAt: row.updated_at,
   };
 }
+
+/** 기관 예산 알림을 더 받을 주소(0135) — 기관 전체 관리자가 정한다 */
+export const BUDGET_ALERT_EXTRA_MAX = 5;
+const EMAIL_RE = /^[^\s@<>"',]+@[^\s@<>"',]+\.[^\s@<>"',]+$/;
+/** 주소 목록 검사 — 다듬어 소문자·겹침 없이, 꼴이 틀리거나 5개를 넘으면 까닭 글 */
+export function parseBudgetAlertEmails(raw: unknown): { ok: true; emails: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(raw)) return { ok: false, message: '주소를 목록으로 보내 주세요.' };
+  const emails = [...new Set(raw.map((v) => (typeof v === 'string' ? v.trim().toLowerCase() : '')).filter(Boolean))];
+  const bad = emails.find((e) => e.length > 200 || !EMAIL_RE.test(e));
+  if (bad !== undefined) return { ok: false, message: `메일 주소를 확인해 주세요: ${bad.slice(0, 60)}` };
+  if (emails.length > BUDGET_ALERT_EXTRA_MAX) return { ok: false, message: `주소는 ${BUDGET_ALERT_EXTRA_MAX}개까지 더할 수 있습니다.` };
+  return { ok: true, emails };
+}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { requestJson, serverErrorText } from '@/lib/ok-json';
 import { latestGate } from '@/lib/latest-request';
 import type { AppRunOverview as Overview } from '@/lib/apps/run-overview';
+import { APP_RUN_CAUSE_LABELS } from '@/lib/apps/run-cause';
 
 const kst = (iso: string) => new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -26,6 +27,7 @@ export function AppRunOverviewTable({ data }: { data: Overview }) {
               <th className="px-3 py-2 text-right">중단</th>
               <th className="px-3 py-2 text-right">확인 필요·응답 없음</th>
               <th className="px-3 py-2">자주 멈춘 단계</th>
+              <th className="px-3 py-2">멈춘 까닭</th>
               <th className="px-3 py-2">마지막 중단</th>
             </tr>
           </thead>
@@ -39,6 +41,7 @@ export function AppRunOverviewTable({ data }: { data: Overview }) {
                 <td className={`px-3 py-2 text-right tabular-nums ${app.interrupted ? 'font-semibold text-red-700' : ''}`}>{app.interrupted.toLocaleString('ko-KR')}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{(app.uncertain + app.noResponse).toLocaleString('ko-KR')}</td>
                 <td className="px-3 py-2 text-slate-600">{app.failedSteps.length ? app.failedSteps.map((s) => `${s.name}(${s.count})`).join(', ') : '—'}</td>
+                <td className="px-3 py-2 text-slate-600">{app.failedCauses?.length ? app.failedCauses.map((c) => `${APP_RUN_CAUSE_LABELS[c.cause] ?? c.label}(${c.count})`).join(', ') : '—'}</td>
                 <td className="px-3 py-2 text-slate-600">{app.lastInterruptedAt ? kst(app.lastInterruptedAt) : '—'}</td>
               </tr>
             ))}
@@ -50,6 +53,7 @@ export function AppRunOverviewTable({ data }: { data: Overview }) {
                 <td className="px-3 py-2 text-right tabular-nums">{personal.saved.toLocaleString('ko-KR')}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{personal.interrupted.toLocaleString('ko-KR')}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{(personal.uncertain + personal.noResponse).toLocaleString('ko-KR')}</td>
+                <td className="px-3 py-2 text-slate-600">—</td>
                 <td className="px-3 py-2 text-slate-600">—</td>
                 <td className="px-3 py-2 text-slate-600">—</td>
               </tr>

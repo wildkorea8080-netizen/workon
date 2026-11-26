@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { messagesUntil, type SharedMessage } from '@/lib/shared-conversation';
+import { sharedMessages, type SharedMessageRow } from '@/lib/shared-conversation';
 import { SHARE_OPEN_BLOCKED_MESSAGE, shareSwitchForDepartment } from '@/lib/share-switch';
 
 const NOT_FOUND = () =>
@@ -38,7 +38,10 @@ export async function GET(
           id,
           role,
           content,
-          created_at
+          created_at,
+          revised:source_references->revision->>text,
+          revised_status:source_references->revision->>status,
+          revised_at:source_references->revision->>created_at
         )
       `)
       .eq('share_token', params.token)
@@ -59,7 +62,7 @@ export async function GET(
       department_id: string | null;
       metadata: { shared_at?: unknown } | null;
       agent: unknown;
-      messages: SharedMessage[] | null;
+      messages: SharedMessageRow[] | null;
     };
 
     // 주인의 계정 — 사용 중지·탈퇴면 링크도 닫는다
@@ -94,7 +97,8 @@ export async function GET(
         title: row.title,
         created_at: row.created_at,
         agent: row.agent ?? null,
-        messages: messagesUntil(row.messages ?? [], row.metadata?.shared_at),
+        // 근거로 고쳐 쓴 답(2026-11-26)은 공유한 때까지 고쳐 쓴 것만 글로 — 근거 발췌는 읽지도 않는다
+        messages: sharedMessages(row.messages ?? [], row.metadata?.shared_at),
       },
     });
   } catch (error) {
