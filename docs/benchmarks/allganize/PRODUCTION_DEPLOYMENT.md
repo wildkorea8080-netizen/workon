@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-26(오후 2): 입력형 앱 데이터 표 계산 조회 단계·비서 데이터 파일 미리 읽어 두기(0315·0316) — 마이그레이션 없음
+
+- 코드 배포 `dpl_9c7uuDSZ65K4dUrbVGFMf1xg2k63`(커밋 `bad9b17`, 2026-11-26 14:40 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `44e7dc0`(오후 기록), `d204310` 기능 — 입력형 앱 조회 단계 `data_table`(앱 비서 문서함의 표 파일로, AI는 계산 지시만·숫자는 표 합치기 엔진, 틀리면 한 번 더·안 되면 정보 공백)(0315), 데이터 파일의 표를 문서 id로 저장소 `data-extracts/`에 읽어 두고 5분 실행기가 두 개씩 미리 읽음·문서와 비서를 지우면 함께 지움(0316). `bad9b17` 문서. 가지 Preview(`workon-gdp2n6ei1`, `dpl_Hz3U3kdcEswDFraXciyFirnqRz4m`) Ready 뒤 `main`. 배포 전 전체 시험 470파일 5,466개 통과·tsc 0.
+- 되돌릴 때는 직전 `dpl_9BXcwE2x9Ev7YZbDXbTb1J3yY4Ys`(5d9033c)로 promote — 마이그레이션이 없다. 읽어 둔 표(`data-extracts/`)는 옛 코드가 쓰지 않을 뿐 해가 없다.
+- 배포 전 운영 확인(읽기만): 마지막 적용 0126, 적용할 마이그레이션 없음, 데이터 파일을 켠 비서 0, RLS 꺼진 표 0, `npm run db:drift` 어긋남 없음.
+- 배포 뒤 확인: `/login`·`/api/system/maintenance`·`/api/branding` 200, `/api/apps/batches`·`/api/agents`·`/api/cron/app-schedules` 인증 없이 401. 실행기 호출 14:43~14:47 KST 모두 200(heartbeat 14:45 — 미리 읽어 두기가 함께 돈다), 최근 60분 critical·error 0건.
+- **확인하지 못한 것**: 데이터 표 계산을 실제 Claude로 불러 보지 않았다. 운영에 데이터 파일을 켠 비서가 없어 읽어 두기·미리 읽기가 실제 저장소에 써지는 것은 보지 못했다. 빌더 화면은 브라우저로 눌러 보지 않았다.
+
 ## 2026-11-26(오후): SSO 세션 하나만 로그아웃·앱 사용량 예약·일괄 실행 500줄·웹 검색·비서 데이터 파일·일괄 실행 AI 채점과 사람 판정(0307~0314) — 0121~0126 운영 적용
 
 - 코드 배포 `dpl_9BXcwE2x9Ev7YZbDXbTb1J3yY4Ys`(커밋 `5d9033c`, 2026-11-26 13:22 KST, `main` fast-forward, 사용자 "운영반영"). 들어간 커밋: `b15915c`(새벽 기록), `7a1f282` 기능 — sid가 온 back-channel 로그아웃은 그 세션 하나만 끝냄(`users.sso_ended_sessions`·`sso_sid_logout_at`·`sso_end_session`, 0121)(0307), 입력형 앱 실행 전 사용량 예약(`usage_reservations`·`usage_reserve`, 0122)(0308), 일괄 실행 500줄·일괄 실행 전용 실행기 셋까지 나란히(`/api/cron/app-batches`, 0123)(0309), 비서의 웹 검색(기관 전체 관리자가 켤 때만, 0124)(0310)과 앱 조회·조사 단계의 웹 검색(0311), 비서 문서함의 표 파일로 표 합치기(마이그레이션 없음)(0312), 일괄 실행 AI 채점(0125)(0313)·사람 판정과 맞대기(0126)(0314). `5d9033c` 문서. 가지 Preview(`workon-et6zawtp4`, `dpl_Fptzp8gcHqdk22H3tXtbQHYwqcjY`) Ready 뒤 `main`. 배포 전 전체 시험 468파일 5,445개 통과·tsc 0.
