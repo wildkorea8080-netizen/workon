@@ -62,3 +62,10 @@ describe('관리자 시민 상담', () => {
     expect(read('src/app/api/cron/app-schedules/route.ts')).toContain('purgePublicAskLogs(now)');
   });
 });
+
+describe('미들웨어 matcher', () => {
+  it('/ask 화면을 따로 적는다 — 마지막 catch-all은 실제로 / 말고 맞지 않는다', () => {
+    const mw = readFileSync('src/middleware.ts', 'utf8');
+    expect(mw).toContain("'/ask/:path*',");
+  });
+});

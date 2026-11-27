@@ -367,6 +367,8 @@ export const config = {
     '/user/:path*',
     '/super/:path*',
     '/api/:path*',
+    // 시민 상담 창(0136) — 화면에 frame-ancestors를 건다. 아래 마지막 줄은 문자열 속 '\.'이 '.'이 되어 '/' 말고는 맞지 않으므로 따로 적는다
+    '/ask/:path*',
     '/((?!_next|api|static|.*\..*).*)',
   ],
 };
