@@ -23,6 +23,10 @@ describe('지우기 단추', () => {
     const card = readFileSync('src/components/chat/AgentCard.tsx', 'utf8');
     expect(card).toContain("requestJson(`/api/agents/${agent.id}`, { method: 'DELETE' })");
     expect(card).toContain('if (!confirm(');
+    // 지우는 동안 단추를 막고 '지우는 중…'(몇 초 걸림), 좁은 카드에서 단추 글자가 접히지 않게(2026-11-27 운영 화면 확인)
+    expect(card).toContain("{deleting ? '지우는 중…' : '지우기'}");
+    expect(card).toContain('disabled={deleting}');
+    expect(card).toContain('flex-1 whitespace-nowrap py-1.5 px-1 text-xs font-semibold text-emerald-700');
     expect(readFileSync('src/components/chat/AgentSelector.tsx', 'utf8')).toContain('onDeleted={() => { if (selectedAgent?.id === agent.id) onAgentSelect(null); fetchAgents(activeTab); }}');
   });
 });

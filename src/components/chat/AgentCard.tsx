@@ -55,6 +55,8 @@ export default function AgentCard({
 }: AgentCardProps) {
   const c = pickColor(agent.name);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  /** 지우는 중(2026-11-27) — 비서의 문서 보관함까지 비우느라 몇 초 걸린다. 그동안 단추를 막고 그렇다고 보인다 */
+  const [deleting, setDeleting] = useState(false);
   /**
    * 내가 고칠 수 있는 비서인가 — 나만의 비서이거나 내 부서의 부서 비서. [편집]과
    * [공식 등록 신청]이 같은 조건을 쓴다. 신청은 서버가 소유자·부서원만 받는다.
@@ -131,10 +133,10 @@ export default function AgentCard({
         {/* 내 비서 승인 상태 영역 */}
         {agent.tier !== 'official' && (
           <div onClick={e => e.stopPropagation()}>
-            <div className="flex gap-1.5 mt-1">
+            <div className="flex flex-wrap gap-1.5 mt-1">
               {(canManage || (agent.shared_with_me && agent.shared_can_edit)) && onEdit && (
                 <button onClick={() => onEdit(agent)}
-                  className="flex-1 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                  className="flex-1 whitespace-nowrap py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
                   편집
                 </button>
               )}
@@ -146,21 +148,25 @@ export default function AgentCard({
                     if (!r.ok) alert(r.error?.message ?? '부서 비서로 올리지 못했습니다.');
                     else onPromoted?.();
                   }}
-                  className="flex-1 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">
+                  className="flex-1 whitespace-nowrap py-1.5 px-1 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">
                   부서 비서로
                 </button>
               )}
               {/* 지우기(2026-11-27) — 나만의 비서·앱의 주인만. 예전엔 지우는 API만 있고 직원 화면에 단추가 없었다 */}
               {agent.tier === 'personal' && !agent.shared_with_me && onDeleted && (
                 <button
+                  disabled={deleting}
                   onClick={async () => {
                     if (!confirm(`'${agent.name}'을(를) 지웁니다. 목록에서 사라지고 다시 쓸 수 없습니다(지난 대화 기록은 남습니다). 지울까요?`)) return;
-                    const { r } = await requestJson(`/api/agents/${agent.id}`, { method: 'DELETE' });
-                    if (!r.ok) alert(r.error?.message ?? '지우지 못했습니다.');
-                    else onDeleted();
+                    setDeleting(true);
+                    try {
+                      const { r } = await requestJson(`/api/agents/${agent.id}`, { method: 'DELETE' });
+                      if (!r.ok) alert(r.error?.message ?? '지우지 못했습니다.');
+                      else onDeleted();
+                    } finally { setDeleting(false); }
                   }}
-                  className="py-1.5 px-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
-                  지우기
+                  className="whitespace-nowrap py-1.5 px-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                  {deleting ? '지우는 중…' : '지우기'}
                 </button>
               )}
             </div>
