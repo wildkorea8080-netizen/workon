@@ -375,32 +375,33 @@ export default function UsersManager() {
                 </div>
                 <div className="space-y-2">
                   {shownUsers.map(user => (
-                    <div key={user.id} className={`flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow ${user.is_active === false ? 'opacity-60' : ''}`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-[#003087] font-bold text-sm">
+                    <div key={user.id} className={`flex flex-wrap items-center justify-between gap-3 p-4 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow ${user.is_active === false ? 'opacity-60' : ''}`}>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-50 flex items-center justify-center text-[#003087] font-bold text-sm">
                           {(user.full_name || user.email).charAt(0).toUpperCase()}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-900">
                             {user.full_name || '(이름 없음)'}
                             {user.id === meId && <span className="ml-1.5 text-xs font-normal text-slate-400">(나)</span>}
                           </p>
-                          <p className="text-xs text-slate-400">{user.email}</p>
+                          <p className="text-xs text-slate-400 break-all">{user.email}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      {/* 좁은 화면(사이드바를 연 노트북 등)에서는 줄을 바꿔 놓는다 — 예전엔 줄바꿈 없이 눌려 단추 글자가 한 글자씩 세로로 접혔다 */}
+                      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
                         {user.is_active === false && (
-                          <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-slate-200 text-slate-600">사용 중지됨</span>
+                          <span className="whitespace-nowrap px-2.5 py-1 text-xs font-medium rounded-full bg-slate-200 text-slate-600">사용 중지됨</span>
                         )}
                         {user.sign_in_locked_until && (
                           <span className="flex items-center gap-1.5">
-                            <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-red-50 text-red-600" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
+                            <span className="whitespace-nowrap px-2.5 py-1 text-xs font-medium rounded-full bg-red-50 text-red-600" title="로그인을 30분 안에 5번 틀려 잠겼습니다">
                               로그인 잠김 · {lockUntilLabel(user.sign_in_locked_until)}
                             </span>
                             <button
                               onClick={() => handleUnlock(user.id)}
                               disabled={movingId === user.id}
-                              className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                              className="whitespace-nowrap text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
                             >
                               잠금 풀기
                             </button>
@@ -436,7 +437,7 @@ export default function UsersManager() {
                           title="개인 월 한도(원). 비우면 소속 부서의 기본값을 따릅니다"
                           className="w-28 px-2 py-1 border border-slate-200 rounded-lg text-xs disabled:bg-slate-50"
                         />
-                        <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${
+                        <span className={`whitespace-nowrap px-2.5 py-1 text-xs font-medium rounded-full ${
                           user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
                         }`}>
                           {user.role === 'ADMIN' ? '관리자' : '일반 직원'}
@@ -447,7 +448,7 @@ export default function UsersManager() {
                             onClick={() => handleRole(user.id, user.email, user.role !== 'ADMIN')}
                             disabled={movingId === user.id}
                             title={user.role === 'ADMIN' ? '관리자 권한을 해제합니다(보안 로그에 남습니다)' : '이 직원을 관리자로 지정합니다(보안 로그에 남습니다)'}
-                            className="text-xs font-medium text-slate-500 hover:text-purple-700 disabled:opacity-50"
+                            className="whitespace-nowrap text-xs font-medium text-slate-500 hover:text-purple-700 disabled:opacity-50"
                           >
                             {user.role === 'ADMIN' ? '관리자 해제' : '관리자로 지정'}
                           </button>
@@ -457,7 +458,7 @@ export default function UsersManager() {
                           onClick={() => handleResetPassword(user.id, user.email)}
                           disabled={movingId === user.id}
                           title="임시 비밀번호를 다시 발급합니다(지금 비밀번호와 로그인은 모두 끝남)"
-                          className="text-xs font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                          className="whitespace-nowrap text-xs font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50"
                         >
                           비밀번호 재발급
                         </button>
@@ -466,11 +467,11 @@ export default function UsersManager() {
                           onClick={() => handleActive(user.id, user.email, user.is_active === false)}
                           disabled={movingId === user.id}
                           title={user.is_active === false ? '계정을 다시 사용하게 합니다' : '계정을 사용 중지합니다(로그인이 막히고 열린 로그인도 끝남)'}
-                          className={`text-xs font-medium disabled:opacity-50 ${user.is_active === false ? 'text-emerald-600 hover:text-emerald-800' : 'text-slate-500 hover:text-red-600'}`}
+                          className={`whitespace-nowrap text-xs font-medium disabled:opacity-50 ${user.is_active === false ? 'text-emerald-600 hover:text-emerald-800' : 'text-slate-500 hover:text-red-600'}`}
                         >
                           {user.is_active === false ? '다시 사용' : '사용 중지'}
                         </button>
-                        <span className="text-xs text-slate-400" title="가입일 · 마지막 로그인">
+                        <span className="whitespace-nowrap text-xs text-slate-400" title="가입일 · 마지막 로그인">
                           {formatDate(user.created_at)} · {user.last_sign_in_at ? `최근 ${formatDate(user.last_sign_in_at)}` : '로그인 기록 없음'}
                         </span>
                       </div>
