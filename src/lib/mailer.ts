@@ -1,4 +1,5 @@
 import { APP_NAME, MAIL_FROM, RESEND_API_KEY } from '@/lib/config';
+import { logSystem } from '@/lib/logger';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -22,6 +23,37 @@ function escapeHtml(value: string) {
     .replace(/"/g, '&quot;');
 }
 
+/** 설정 문제(키 틀림·보내는 도메인 미인증·요청 꼴)라 다시 해도 같은 실패 — 운영자가 고쳐야 한다 */
+export function isMailConfigFailure(status: number | null): boolean {
+  return status === 401 || status === 403 || status === 422;
+}
+/** 실패 글에 메일 주소가 섞여 오면 가린다(운영 기록에 받는 사람을 남기지 않는다) */
+export function mailErrorText(message: string): string {
+  return message.replace(/[^\s@<>"',;:]+@[^\s@<>"',;:]+/g, '(주소)').slice(0, 200);
+}
+export const MAIL_FAILURE_LOG_INTERVAL_MS = 10 * 60 * 1000;
+const lastMailFailureLog = new Map<string, number>();
+
+/**
+ * 메일 실패를 운영 기록에(2026-11-27) — 예전엔 함수 로그(`console.error`, 받는 사람 주소까지)뿐이라
+ * 보내는 도메인이 인증되지 않아 운영의 모든 메일(초대·비밀번호 찾기·예산 알림·예약 실패·critical 알림)이 실패해도
+ * 슈퍼관리자 화면 어디에도 보이지 않았다. 설정 문제면 critical(대시보드 띠), 그 밖은 error. 같은 꼴은 한 서버에서 10분에 한 번
+ */
+async function reportMailFailure(status: number | null, error: string): Promise<void> {
+  const config = isMailConfigFailure(status);
+  const key = `${status ?? 'network'}`;
+  const now = Date.now();
+  const last = lastMailFailureLog.get(key);
+  if (last !== undefined && now - last < MAIL_FAILURE_LOG_INTERVAL_MS) return;
+  lastMailFailureLog.set(key, now);
+  await logSystem({
+    level: config ? 'critical' : 'error',
+    category: 'api',
+    message: config ? '메일을 보내지 못했습니다(메일 서비스 설정 — 보내는 주소·키 확인)' : '메일을 보내지 못했습니다',
+    details: { status, error: mailErrorText(error) },
+  });
+}
+
 async function sendMail(to: string, subject: string, html: string): Promise<MailResult> {
   if (!isMailConfigured()) {
     return { sent: false, reason: 'not_configured' };
@@ -40,13 +72,15 @@ async function sendMail(to: string, subject: string, html: string): Promise<Mail
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       const error = body?.message ?? `HTTP ${response.status}`;
-      console.error('[mailer] 발송 실패:', to, error);
+      console.error('[mailer] 발송 실패:', response.status, mailErrorText(String(error)));
+      await reportMailFailure(response.status, String(error));
       return { sent: false, reason: 'send_failed', error };
     }
 
     return { sent: true };
   } catch (err: any) {
-    console.error('[mailer] 발송 예외:', to, err?.message);
+    console.error('[mailer] 발송 예외:', mailErrorText(String(err?.message ?? '')));
+    await reportMailFailure(null, String(err?.message ?? '알 수 없는 오류'));
     return { sent: false, reason: 'send_failed', error: err?.message ?? '알 수 없는 오류' };
   }
 }
