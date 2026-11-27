@@ -55,7 +55,11 @@ export default function UsersManager() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'USER' | 'ADMIN'>('USER');
   const [inviting, setInviting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ url: string; emailSent: boolean } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ url: string; emailSent: boolean; emailError?: string } | null>(null);
+  /** 복사가 안 되는 브라우저(2026-11-27) — 클립보드를 못 쓰면 글을 골라 두고 직접 복사하라고 알린다 */
+  const [copyFailed, setCopyFailed] = useState(false);
+  /** 취소를 한 번 더 눌러 확인하는 초대(2026-11-27) — 확인 창(confirm)이 막힌 브라우저에서 아무 반응이 없었다 */
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -96,7 +100,7 @@ export default function UsersManager() {
       });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setInviteResult({ url: result.data.inviteUrl, emailSent: Boolean(result.data.emailSent) });
+      setInviteResult({ url: result.data.inviteUrl, emailSent: Boolean(result.data.emailSent), ...(typeof result.data.emailError === 'string' ? { emailError: result.data.emailError } : {}) });
       await loadData();
     } catch (err) {
       setInviteError(actionErrorText(err, '초대 발송에 실패했습니다.'));
@@ -106,7 +110,9 @@ export default function UsersManager() {
   };
 
   const handleCancelInvite = async (id: string) => {
-    if (!confirm('이 초대를 취소하시겠습니까?')) return;
+    // 첫 누름은 확인을 묻고(단추가 '취소 확인'으로 바뀜), 두 번째에 취소한다 — 확인 창(confirm)은 막힌 브라우저가 있다
+    if (confirmCancelId !== id) { setConfirmCancelId(id); return; }
+    setConfirmCancelId(null);
     try {
       // 실패했는데 목록에서만 사라지지 않게 — 응답을 본다(이미 수락된 초대는 취소되지 않는다)
       const res = await fetch(`/api/admin/invite/${id}`, { method: 'DELETE' });
@@ -266,8 +272,12 @@ export default function UsersManager() {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
+      setCopyFailed(false);
       setTimeout(() => setCopied(false), 2500);
-    } catch { /* ignore */ }
+    } catch {
+      // 클립보드를 못 쓰는 브라우저 — 조용히 넘기지 않는다(예전엔 눌러도 아무 일이 없었다)
+      setCopyFailed(true);
+    }
   };
 
   const pendingInvitations = invitations.filter(i => !i.accepted_at && !isExpired(i.expires_at));
@@ -334,7 +344,7 @@ export default function UsersManager() {
             </button>
           </p>
           <p className="text-xs text-amber-800">
-            {resetResult.emailSent ? '본인 메일로도 보냈습니다. ' : '메일 발송이 설정돼 있지 않아 직접 전해 주세요. '}
+            {resetResult.emailSent ? '본인 메일로도 보냈습니다. ' : '메일로 보내지 못해 직접 전해 주세요. '}
             이 화면을 닫으면 다시 볼 수 없습니다. 직원은 다음 로그인에 비밀번호부터 바꿉니다.
           </p>
           <button type="button" onClick={() => setResetResult(null)} className="text-xs text-amber-700 hover:text-amber-900">닫기</button>
@@ -502,7 +512,7 @@ export default function UsersManager() {
                             </td>
                             <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(inv.expires_at)}</td>
                             <td className="px-4 py-3 text-right">
-                              <button onClick={() => handleCancelInvite(inv.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">취소</button>
+                              <button onClick={() => void handleCancelInvite(inv.id)} onBlur={() => setConfirmCancelId((c) => (c === inv.id ? null : c))} className={`text-xs font-medium ${confirmCancelId === inv.id ? 'rounded bg-red-600 px-2 py-1 text-white' : 'text-red-500 hover:text-red-700'}`}>{confirmCancelId === inv.id ? '취소 확인' : '취소'}</button>
                             </td>
                           </tr>
                         ))}
@@ -584,9 +594,15 @@ export default function UsersManager() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                   </svg>
                   <p className="text-xs text-amber-800 leading-relaxed">
-                    메일 발송이 설정되지 않아 자동 발송되지 않았습니다. 아래 링크를 직접 전달해주세요.
-                    <br />
-                    <span className="text-amber-700">자동 발송하려면 <code className="font-mono">RESEND_API_KEY</code>와 <code className="font-mono">MAIL_FROM</code> 환경변수를 설정하세요.</span>
+                    {inviteResult.emailError === 'not_configured' ? (
+                      <>
+                        메일 발송이 설정되지 않아 자동 발송되지 않았습니다. 아래 링크를 직접 전달해주세요.
+                        <br />
+                        <span className="text-amber-700">자동 발송하려면 <code className="font-mono">RESEND_API_KEY</code>와 <code className="font-mono">MAIL_FROM</code> 환경변수를 설정하세요.</span>
+                      </>
+                    ) : (
+                      <>초대 메일을 보내지 못했습니다(메일 서비스가 받지 않음). 아래 링크를 직접 전달해주세요 — 계속되면 서비스 운영자에게 메일 설정(보내는 주소 인증)을 확인해 달라고 하세요.</>
+                    )}
                   </p>
                 </div>
               )}
@@ -594,7 +610,8 @@ export default function UsersManager() {
               <div>
                 <p className="text-xs text-slate-500 mb-2 font-medium">초대 링크 (7일 유효)</p>
                 <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <p className="flex-1 text-xs text-slate-700 truncate font-mono">{inviteResult.url}</p>
+                  {/* 링크 전체를 보이고(예전엔 '…'로 잘려 손으로도 못 옮겼다) 누르면 전체가 골라진다 */}
+                  <p className="flex-1 select-all break-all text-xs text-slate-700 font-mono">{inviteResult.url}</p>
                   <button
                     onClick={() => handleCopy(inviteResult.url)}
                     className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
@@ -604,10 +621,11 @@ export default function UsersManager() {
                     {copied ? '복사됨' : '복사'}
                   </button>
                 </div>
+                {copyFailed && <p role="alert" className="mt-2 text-xs text-amber-800">이 브라우저에서는 자동 복사가 되지 않습니다 — 위 링크를 눌러 전체를 고른 뒤 Ctrl+C(맥은 ⌘+C)로 복사해 주세요.</p>}
               </div>
               <div className="flex gap-3">
                 <button
-                  onClick={() => { setInviteResult(null); setInviteEmail(''); }}
+                  onClick={() => { setInviteResult(null); setInviteEmail(''); setCopyFailed(false); }}
                   className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50"
                 >
                   추가 초대
