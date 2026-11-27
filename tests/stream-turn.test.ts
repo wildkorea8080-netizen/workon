@@ -876,5 +876,17 @@ describe('앱 결과를 여러 곳에 보내기(2026-11-26)', () => {
     await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverMore: [{ endpointId: ep(2) }] }), undefined, { enqueueOutbound });
     await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverEndpointId: ep(1), appDeliverMore: [{ endpointId: ep(2) }], appDraftSavedAt: '2026-11-26T00:00:00Z' }), undefined, { enqueueOutbound });
     expect(enqueueOutbound).not.toHaveBeenCalled();
+  });  it('바로 보내기(2026-11-27) — 넣은 것이 있으면 답을 다 보낸 뒤 그 답변으로 한 번, 확인 기다림·실패뿐이면 부르지 않음', async () => {
+    setLlmAdapterForTests(adapter());
+    const order: string[] = [];
+    const deliverNow = vi.fn(async () => { order.push('deliver'); });
+    const events = await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverEndpointId: ep(1) }), undefined, { enqueueOutbound: vi.fn(async () => 'queued' as const), deliverNow });
+    const done = events.find((e) => e.event === 'done') as { data: { message_id: string } };
+    expect(deliverNow).toHaveBeenCalledWith(done.data.message_id);
+    expect(events[events.length - 1].event).toBe('done');
+    const waiting = vi.fn(async () => {});
+    await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverEndpointId: ep(1) }), undefined, { enqueueOutbound: vi.fn(async () => 'awaiting' as const), deliverNow: waiting });
+    await run(turn({ appStepInputs: { topic: 'x' }, isNewConversation: false, appDeliverEndpointId: ep(1) }), undefined, { enqueueOutbound: vi.fn(async () => 'failed' as const), deliverNow: waiting });
+    expect(waiting).not.toHaveBeenCalled();
   });
 });

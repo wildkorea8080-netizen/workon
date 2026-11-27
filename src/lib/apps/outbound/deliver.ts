@@ -113,6 +113,20 @@ export async function enqueueOutbound(input: { organizationId: string; endpointI
   }
 }
 
+/**
+ * 바로 보내기(2026-11-27) — 실행이 끝나 넣은 보내기(사람 확인 없는 것)를 그 자리에서 한 번 보낸다. 예전에는 5분 실행기를 기다려 최대 5분 늦었다.
+ * 같은 차지·같은 보내기 길(`dispatchDueDeliveries` — 그 답변의 것만)이라 실패하면 지금처럼 1·5·30분·2시간 뒤 5분 실행기가 다시 보낸다.
+ * 던지지 않는다. 확인 기다림은 집지 않는다(상태가 pending이 아니다)
+ */
+export const OUTBOUND_IMMEDIATE_BUDGET_MS = 20_000;
+export async function deliverNow(messageId: string, deps: OutboundDeps = outboundDeps()): Promise<DispatchResult | null> {
+  try {
+    return await dispatchDueDeliveries(deps, { messageId, limit: 3, budgetMs: OUTBOUND_IMMEDIATE_BUDGET_MS });
+  } catch {
+    return null;
+  }
+}
+
 // ── 보내기 실행기 ─────────────────────────────────────────────────────
 
 export interface DueDelivery { id: string; organization_id: string; endpoint_id: string; agent_id: string; message_id: string; status: 'pending' | 'sending'; attempts: number; claimed_at: string | null; action?: string | null }
@@ -127,7 +141,8 @@ export type FinishPatch = { status: 'sent' | 'pending' | 'gave_up'; attempts: nu
 
 export interface OutboundDeps {
   now(): number;
-  listDue(nowIso: string, staleIso: string, limit: number): Promise<DueDelivery[] | null>;
+  /** `messageId`를 주면 그 답변의 보내기만(바로 보내기 — 2026-11-27) */
+  listDue(nowIso: string, staleIso: string, limit: number, messageId?: string): Promise<DueDelivery[] | null>;
   claim(row: DueDelivery, nowIso: string, staleIso: string): Promise<boolean>;
   load(row: DueDelivery): Promise<DeliveryContext | null>;
   finish(id: string, patch: FinishPatch): Promise<void>;
@@ -144,15 +159,15 @@ export interface OutboundDeps {
 export type DispatchResult = { claimed: number; sent: number; retried: number; gaveUp: number; expired: number };
 
 /** 차례가 된 보내기를 한 번에 `limit`개까지, `budgetMs` 안에서. 던지지 않는다 */
-export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: number; budgetMs?: number } = {}): Promise<DispatchResult> {
+export async function dispatchDueDeliveries(deps: OutboundDeps, opts: { limit?: number; budgetMs?: number; messageId?: string } = {}): Promise<DispatchResult> {
   const start = deps.now();
   const result: DispatchResult = { claimed: 0, sent: 0, retried: 0, gaveUp: 0, expired: 0 };
   const iso = (ms: number) => new Date(ms).toISOString();
-  if (deps.expireApprovals) {
+  if (deps.expireApprovals && !opts.messageId) {
     try { result.expired = await deps.expireApprovals(iso(start - OUTBOUND_APPROVAL_MS)); } catch { /* 다음 차례에 다시 */ }
   }
   let due: DueDelivery[] | null;
-  try { due = await deps.listDue(iso(start), iso(start - OUTBOUND_STALE_MS), opts.limit ?? 20); } catch { due = null; }
+  try { due = await deps.listDue(iso(start), iso(start - OUTBOUND_STALE_MS), opts.limit ?? 20, opts.messageId); } catch { due = null; }
   for (const row of due ?? []) {
     if (deps.now() - start > (opts.budgetMs ?? 25_000)) break;
     const now = deps.now();
@@ -244,11 +259,12 @@ type Row = Record<string, unknown>;
 export function outboundDeps(): OutboundDeps {
   return {
     now: () => Date.now(),
-    async listDue(nowIso, staleIso, limit) {
-      const { data, error } = await supabaseAdmin.from('app_outbound_deliveries')
+    async listDue(nowIso, staleIso, limit, messageId) {
+      let q = supabaseAdmin.from('app_outbound_deliveries')
         .select('id, organization_id, endpoint_id, agent_id, message_id, status, attempts, claimed_at, action')
-        .or(`and(status.eq.pending,next_attempt_at.lte.${nowIso}),and(status.eq.sending,claimed_at.lt.${staleIso})`)
-        .order('next_attempt_at', { ascending: true }).limit(limit);
+        .or(`and(status.eq.pending,next_attempt_at.lte.${nowIso}),and(status.eq.sending,claimed_at.lt.${staleIso})`);
+      if (messageId) q = q.eq('message_id', messageId);
+      const { data, error } = await q.order('next_attempt_at', { ascending: true }).limit(limit);
       if (error) return null;
       return (data ?? []) as DueDelivery[];
     },

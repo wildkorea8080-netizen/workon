@@ -9,7 +9,7 @@ import type { Capability, TurnContext, ToolOutcome, GeneratedFileRef } from '@/l
 import type { ToolSource } from '@/lib/connectors';
 import { MAX_OUTPUT_TOKENS, MAX_TOOL_ROUNDS, type PreparedTurn, type SendEvent } from './types';
 import { dedupeLinks, buildMessageRows, saveMessages, mergeUsageByModel, buildUsageDetails, writeUsageLog } from './persist';
-import { enqueueOutbound, shouldDeliver } from '@/lib/apps/outbound/deliver';
+import { deliverNow, enqueueOutbound, shouldDeliver } from '@/lib/apps/outbound/deliver';
 import { LlmApiError, friendlyLlmMessage, llmErrorKind } from '@/lib/llm/errors';
 import { logSystem } from '@/lib/logger';
 import { checkNumbers, numbersIn, NUMBER_CHECK_TOOLS } from './number-check';
@@ -55,6 +55,8 @@ export interface StreamTurnDeps {
   searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
   /** 앱 결과 보내기 기록 넣기(0076) — 시험이 바꿔 끼운다 */
   enqueueOutbound?: typeof enqueueOutbound;
+  /** 넣은 보내기를 바로 한 번 보내기(2026-11-27) — 시험이 바꿔 끼운다. 넣기만 바꿔 끼운 시험은 보내지 않는다 */
+  deliverNow?: (messageId: string) => Promise<unknown>;
   /** 앱의 기관 연동 시스템 조회 단계(0102)가 부르는 곳 — 기본은 `callExternalLookup`. 시험이 바꿔 끼운다 */
   externalLookup?: typeof callExternalLookup;
   /** 데이터 표 계산 조회(2026-11-26)의 목록·표·모델 — 시험이 바꿔 끼운다 */
@@ -574,13 +576,14 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
       verify,
     })
   );
-  // 앱 결과 보내기(0076) — 끝까지 마친 실행만, 저장된 답변을 보낼 차례에 넣는다(보내기는 앱 예약 실행기가 5분마다). 실패해도 답에는 영향 없음
+  // 앱 결과 보내기(0076) — 끝까지 마친 실행만, 저장된 답변을 보낼 차례에 넣는다(답을 다 보낸 뒤 바로 한 번 보내고, 못 보내면 앱 예약 실행기가 5분마다). 실패해도 답에는 영향 없음
+  let queuedDelivery = false;
   if (shouldDeliver({ endpointId: turn.appDeliverEndpointId, draft: Boolean(turn.appDraftSavedAt), saved: !saveError, text: result.text, steps: appRecords })) {
-    await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(turn.appDeliverAction ? { action: turn.appDeliverAction } : {}) });
+    if (await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: turn.appDeliverEndpointId!, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(turn.appDeliverAction ? { action: turn.appDeliverAction } : {}) }) === 'queued') queuedDelivery = true;
     // 더 보낼 곳(2026-11-26) — 곳마다 보내기 기록 하나(사람 확인·다시 보내기·알림은 곳마다 따로). 하나가 실패해도 나머지는 넣는다
     for (const more of turn.appDeliverMore ?? []) {
       if (more.endpointId === turn.appDeliverEndpointId) continue;
-      await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: more.endpointId, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(more.action ? { action: more.action } : {}) });
+      if (await (deps.enqueueOutbound ?? enqueueOutbound)({ organizationId: turn.ctx.organizationId, endpointId: more.endpointId, agentId: turn.ctx.agentId, messageId: messageIds.assistant, userId: turn.ctx.userId, ...(more.action ? { action: more.action } : {}) }) === 'queued') queuedDelivery = true;
     }
   }
   if (saveError) {
@@ -628,4 +631,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
   }
 
   send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck, ...(saveError ? {} : { message_id: messageIds.assistant }) } });
+  // 결과 보내기 — 답을 다 보낸 뒤 그 자리에서 한 번(2026-11-27, 예전엔 5분 실행기를 기다림). 실패하면 실행기가 다시 보낸다
+  const sendNow = deps.deliverNow ?? (deps.enqueueOutbound ? null : deliverNow);
+  if (queuedDelivery && sendNow) await sendNow(messageIds.assistant).catch(() => undefined);
 }

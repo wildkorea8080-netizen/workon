@@ -38,6 +38,8 @@ interface AgentCardProps {
   myDepartmentId?: string | null;
   onEdit?: (agent: Agent) => void;
   onPromoted?: () => void;
+  /** 나만의 비서를 지운 뒤(2026-11-27) — 목록 다시 읽기 */
+  onDeleted?: () => void;
 }
 
 export default function AgentCard({
@@ -49,6 +51,7 @@ export default function AgentCard({
   myDepartmentId,
   onEdit,
   onPromoted,
+  onDeleted,
 }: AgentCardProps) {
   const c = pickColor(agent.name);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -145,6 +148,19 @@ export default function AgentCard({
                   }}
                   className="flex-1 py-1.5 text-xs font-semibold text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">
                   부서 비서로
+                </button>
+              )}
+              {/* 지우기(2026-11-27) — 나만의 비서·앱의 주인만. 예전엔 지우는 API만 있고 직원 화면에 단추가 없었다 */}
+              {agent.tier === 'personal' && !agent.shared_with_me && onDeleted && (
+                <button
+                  onClick={async () => {
+                    if (!confirm(`'${agent.name}'을(를) 지웁니다. 목록에서 사라지고 다시 쓸 수 없습니다(지난 대화 기록은 남습니다). 지울까요?`)) return;
+                    const { r } = await requestJson(`/api/agents/${agent.id}`, { method: 'DELETE' });
+                    if (!r.ok) alert(r.error?.message ?? '지우지 못했습니다.');
+                    else onDeleted();
+                  }}
+                  className="py-1.5 px-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
+                  지우기
                 </button>
               )}
             </div>

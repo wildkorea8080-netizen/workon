@@ -165,6 +165,7 @@ export default function AgentSelector({ selectedAgent, onAgentSelect }: AgentSel
                   setActiveTab('dept');
                   fetchAgents('dept');
                 }}
+                onDeleted={() => { if (selectedAgent?.id === agent.id) onAgentSelect(null); fetchAgents(activeTab); }}
               />
             ))}
 

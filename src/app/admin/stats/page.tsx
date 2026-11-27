@@ -48,7 +48,7 @@ export default async function AdminStatsPage() {
       <div className="pt-2">
         <h2 className="text-lg font-semibold text-slate-900">입력형 앱 실행 현황</h2>
         <p className="text-sm text-slate-500 mt-0.5 mb-4">
-          최근 30일, 내 부서와 하위 부서의 앱입니다. 자주 멈추는 앱과 단계를 찾는 용도라 입력·결과·실행한 사람은 보이지 않고, 개인 앱은 이름 없이 묶어 셉니다.
+          고른 기간(비우면 최근 30일), 내 부서와 하위 부서의 앱입니다. 자주 멈추는 앱과 단계를 찾는 용도라 입력·결과·실행한 사람은 보이지 않고, 개인 앱은 이름 없이 묶어 셉니다.
         </p>
         <AppRunOverview />
       </div>

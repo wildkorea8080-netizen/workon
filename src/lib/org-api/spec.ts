@@ -49,7 +49,7 @@ export const ORG_API_ENDPOINTS: Record<OrgApiEndpoint, { scope: OrgApiScope; pat
   'usage-summary': { scope: 'usage', path: '/api/v1/usage-summary?by=agent&from=2026-10-01&to=2026-10-31', label: '이용통계(by=agent|department)' },
   // (2026-11-11, 0086) 관리자 통계 화면의 숫자 셋 — 같은 읽기 함수, 질문·답변·결과 글·직원 없음
   'feedback-summary': { scope: 'usage', path: '/api/v1/feedback-summary?from=2026-10-01&to=2026-10-31', label: '답변 평가(비서별 도움됨·아쉬움·줄인 시간)' },
-  'app-runs': { scope: 'usage', path: '/api/v1/app-runs', label: '입력형 앱 실행 현황(최근 30일)' },
+  'app-runs': { scope: 'usage', path: '/api/v1/app-runs', label: '입력형 앱 실행 현황(?from=&to=, 비우면 최근 30일)' },
   'budget': { scope: 'usage', path: '/api/v1/budget', label: '예산 소진 현황(기관·부서 월 한도)' },
   // (2026-11-23, 0099) 기관 문서관리시스템이 WORKON 문서함과 맞대 보는 목록 — 읽기 실패·낡은 판·근거로 쓰는지
   'documents': { scope: 'documents', path: '/api/v1/documents?status=failed&limit=100', label: '문서함 목록(읽기 상태·판·시행일·근거로 쓰는지·태그, 본문·원본 없음)' },

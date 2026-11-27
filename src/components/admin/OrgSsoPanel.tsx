@@ -83,7 +83,7 @@ export default function OrgSsoPanel() {
         아래 &apos;직원은 기관 계정으로만&apos;을 고르지 않으면 비밀번호 로그인도 그대로 됩니다. <b>계정을 새로 만들지 않습니다</b> — 계정 서비스의 이메일과 같은 이메일로 이 기관에 이미 등록된 직원만 들어옵니다.
       </p>
       <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-        계정 서비스에 앱(클라이언트)을 만들 때 돌아올 주소(Redirect URI)로 <code className="break-all">{loaded.redirectUri}</code> 을 등록하세요. 권한 범위는 <code>openid email profile</code>, 인증 방식은 클라이언트 비밀값(POST)입니다.
+        계정 서비스에 앱(클라이언트)을 만들 때 돌아올 주소(Redirect URI)로 <code className="break-all">{loaded.redirectUri}</code> 을 등록하세요. 권한 범위는 <code>openid email profile</code>, 인증 방식은 클라이언트 비밀값입니다(POST·Basic — 계정 서비스가 알려 주는 것으로 고릅니다).
       </div>
       {!loaded.canManage && <p className="mt-3 text-sm text-slate-500">기관 전체 관리자(최상위 부서 소속)만 바꿀 수 있습니다{loaded.config ? '' : ' — 아직 설정이 없습니다'}.</p>}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
