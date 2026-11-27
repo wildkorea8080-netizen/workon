@@ -78,6 +78,7 @@ const ACTION_LABEL: Record<string, string> = {
   rag_eval_judge: '문서 찾기 평가 채점(AI)',
   app_batch_judge: '앱 일괄 실행 채점(AI)',
   answer_revised: '근거로 고쳐 쓰기(AI)',
+  public_ask: '시민 상담(AI)',
   create_agent: '비서 생성',
   add_forbidden_word: '금지어 추가',
   delete_forbidden_word: '금지어 삭제',

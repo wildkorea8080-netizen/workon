@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import StatsDashboard from '@/components/admin/StatsDashboard';
 import QuickStats from '@/components/admin/QuickStats';
+import NewPresetsBanner from '@/components/admin/NewPresetsBanner';
 
 export default async function AdminDashboardPage() {
   const session = await getServerAuthSession();
@@ -22,6 +23,8 @@ export default async function AdminDashboardPage() {
         <h1 className="text-2xl font-semibold text-slate-900">관리자 대시보드</h1>
         <p className="text-slate-600 mt-2">부서 리소스 및 사용자 관리를 위한 관리자 포털입니다.</p>
       </div>
+
+      <NewPresetsBanner />
 
       {/* Quick Stats */}
       <QuickStats />

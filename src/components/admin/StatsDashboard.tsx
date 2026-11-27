@@ -63,6 +63,7 @@ export default function StatsDashboard() {
       table_merged: '표 합치기',
       document_tag_suggest: '문서 태그 초안(AI)',
       answer_revised: '근거로 고쳐 쓰기(AI)',
+      public_ask: '시민 상담(AI)',
       create_agent: '비서 생성',
       add_forbidden_word: '금지어 추가',
       delete_forbidden_word: '금지어 삭제',

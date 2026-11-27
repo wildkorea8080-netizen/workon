@@ -166,9 +166,12 @@ export function presetSettingsPatch(preset: AgentPreset, existingCapabilities: u
  */
 export function presetCapabilities(preset: AgentPreset): CapabilitySettings {
   if (preset.appDefinition) return preset.connectors?.length ? { public_data: { connectors: preset.connectors } } : {};
-  return preset.connectors?.length
-    ? { image: {}, public_data: { connectors: preset.connectors } }
-    : { image: {} };
+  return {
+    image: {},
+    ...(preset.connectors?.length ? { public_data: { connectors: preset.connectors } } : {}),
+    // 문서 근거 비서(2026-11-27) — 기관이 올린 문서로 답한다
+    ...(preset.docSearch ? { doc_search: {} } : {}),
+  };
 }
 
 /**
@@ -187,6 +190,8 @@ export function mergePresetCapabilities(existing: unknown, preset: AgentPreset):
   base.image = {};
   if (preset.connectors?.length) base.public_data = { connectors: preset.connectors };
   else delete base.public_data;
+  // 문서 찾기는 켜기만 한다(관리자가 문서를 붙여 켠 것을 끄지 않게)
+  if (preset.docSearch) base.doc_search = {};
   return base as CapabilitySettings;
 }
 
