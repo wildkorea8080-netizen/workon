@@ -27,12 +27,20 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
     const agent = await loadAgentAccess(params.id);
     if (!agent || agent.deleted_at) return jsonError('비서를 찾을 수 없습니다.', 404);
-    if (!canEditAgent(agent, actor)) return jsonError('이 비서를 볼 권한이 없습니다.', 403);
+    if (!canEditAgent(agent, actor)) return jsonError('이 비서를 고칠 권한이 없습니다.', 403);
 
     // 위에서 있는 비서임을 확인했다 — 여기서 못 읽은 것은 '없음'이 아니다(2026-11-20, 예전엔 404 '비서를 찾을 수 없습니다')
     const { data, error } = await supabaseAdmin.from('agents').select('*').eq('id', params.id).maybeSingle();
     if (error) return jsonError('비서 설정을 지금 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.', 503);
     if (!data) return jsonError('비서를 찾을 수 없습니다.', 404);
+    // 함께 고치는 사람(0129)이 연 편집 창 — 주인이 아님을 알리고(공유 탭을 숨김) 공유 대상 목록은 싣지 않는다(2026-11-27 운영 확인에서 찾음:
+    // 예전엔 공유 탭이 보여 눌러도 403 '불러오지 못했습니다'였고, 다른 공유 대상의 id가 함께 갔다)
+    const row = data as Record<string, unknown>;
+    if (row.tier === 'personal' && row.owner_id !== actor.userId) {
+      const rest: Record<string, unknown> = { ...row, shared_with_me: true, shared_can_edit: true };
+      delete rest.shared_user_ids; delete rest.shared_editor_ids; delete rest.shared_department_ids;
+      return NextResponse.json({ ok: true, data: rest });
+    }
     return NextResponse.json({ ok: true, data });
   } catch (error) {
     console.error('[agents GET]', error);
