@@ -118,7 +118,7 @@ export default function OutboundEndpointsPanel() {
       <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto]">
         <input aria-label="보낼 곳 이름" value={name} maxLength={OUTBOUND_NAME_MAX} onChange={(e) => setName(e.target.value)} placeholder="이름 — 예: 전자결재 연계" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         <input aria-label="보낼 주소" value={url} maxLength={OUTBOUND_URL_MAX} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.go.kr/workon/receive" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-        <button type="button" disabled={busy || unread || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
+        <button type="button" disabled={busy || unread || !name.trim() || !url.trim() || active.length >= OUTBOUND_MAX_ENDPOINTS} onClick={() => void create()} className="rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '보낼 곳 만들기'}</button>
       </div>
       <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />보내기 전 실행한 직원이 결과를 확인(권장 — 끄면 실행을 마친 결과가 사람 확인 없이 곧바로 나갑니다)</label>
       <label className="block text-sm text-slate-700">받는 쪽 동작(선택 — 한 줄에 하나 <code>키=이름</code>, {OUTBOUND_MAX_ACTIONS}개까지. 예: <code>draft=기안 임시 저장</code>)

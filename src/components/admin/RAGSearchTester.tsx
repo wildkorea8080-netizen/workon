@@ -88,7 +88,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
             <select
               value={selectedAgentId}
               onChange={(e) => setSelectedAgentId(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-ws-accent"
             >
               <option value="">선택하세요</option>
               {agents.map((agent) => (
@@ -109,7 +109,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="예: 인사규정, 휴가 정책, ..."
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-ws-accent"
             />
           </div>
         </div>
@@ -117,7 +117,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
         <button
           type="submit"
           disabled={loading}
-          className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+          className="w-full px-4 py-2 bg-ws-accent text-white rounded-md hover:bg-ws-accent disabled:bg-gray-400 transition-colors"
         >
           {loading ? '검색 중...' : '검색 테스트'}
         </button>
@@ -158,7 +158,7 @@ export default function RAGSearchTester({ agents: initialAgents }: RAGTestProps)
                 </div>
                 {chunk.similarity > 0 && (
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-blue-600">
+                    <div className="text-sm font-semibold text-ws-accent-text">
                       유사도: {(chunk.similarity * 100).toFixed(1)}%
                     </div>
                   </div>

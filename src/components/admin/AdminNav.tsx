@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import type { ReactNode } from 'react';
 
-const NAV_ITEMS = [
+/** 관리자 포털 메뉴 — 그리기는 AdminSidebar(넓은 화면 사이드바·작은 화면 위쪽 탭)가 한다 */
+export const ADMIN_NAV: { href: string; label: string; icon: ReactNode; exact?: boolean }[] = [
   {
     href: '/admin',
     label: '대시보드',
@@ -125,36 +125,7 @@ const NAV_ITEMS = [
   },
 ];
 
-export default function AdminNav() {
-  const pathname = usePathname();
-
-  return (
-    <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
-      {NAV_ITEMS.map(item => {
-        const isActive = item.exact
-          ? pathname === item.href
-          : pathname === item.href || pathname.startsWith(item.href + '/');
-
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              isActive
-                ? 'bg-white/15 text-white border-l-2 border-white pl-2.5'
-                : 'text-white/60 hover:text-white hover:bg-white/10'
-            }`}
-          >
-            <span className={isActive ? 'text-white' : 'text-white/40 group-hover:text-white/80'}>
-              {item.icon}
-            </span>
-            {item.label}
-            {isActive && (
-              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/80" />
-            )}
-          </Link>
-        );
-      })}
-    </nav>
-  );
+/** 이 메뉴가 지금 주소인가 — 대시보드는 정확히, 나머지는 하위 주소까지 */
+export function isAdminNavActive(item: { href: string; exact?: boolean }, pathname: string): boolean {
+  return item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(item.href + '/');
 }

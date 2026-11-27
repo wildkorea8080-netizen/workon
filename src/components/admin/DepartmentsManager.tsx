@@ -170,7 +170,7 @@ export default function DepartmentsManager() {
               <input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+                className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/20"
               />
               <select
                 value={editParentId}
@@ -196,7 +196,7 @@ export default function DepartmentsManager() {
                 onChange={(e) => setEditBudget(e.target.value)}
                 placeholder="부서 월 한도(원)"
                 title="비우면 제한 없음"
-                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/20"
               />
               <input
                 type="number"
@@ -205,12 +205,12 @@ export default function DepartmentsManager() {
                 onChange={(e) => setEditUserBudget(e.target.value)}
                 placeholder="1인당 월 한도(원)"
                 title="이 부서 직원 한 명이 쓸 수 있는 기본 금액. 비우면 제한 없음"
-                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+                className="w-36 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/20"
               />
               <button
                 onClick={() => handleUpdate(node.id)}
                 disabled={busy}
-                className="px-3 py-1.5 bg-[#003087] text-white text-xs font-semibold rounded-lg disabled:bg-slate-300"
+                className="px-3 py-1.5 bg-ws-accent text-white text-xs font-semibold rounded-lg disabled:bg-slate-300"
               >
                 저장
               </button>
@@ -229,7 +229,7 @@ export default function DepartmentsManager() {
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-slate-900">{node.name}</span>
                 {isMine && (
-                  <span className="ml-2 text-[10px] px-1.5 py-0.5 bg-[#003087]/10 text-[#003087] rounded font-medium">
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 bg-ws-accent/10 text-ws-accent-text rounded font-medium">
                     내 소속
                   </span>
                 )}
@@ -239,7 +239,7 @@ export default function DepartmentsManager() {
                 {/* 한도를 목록에서 바로 보여준다. 부서마다 수정 화면을 열어야
                     알 수 있으면 어디에 얼마를 걸어 뒀는지 파악할 수 없다. */}
                 {(node.monthly_budget_krw != null || node.user_monthly_budget_krw != null) && (
-                  <span className="ml-2 text-xs text-[#003087]">
+                  <span className="ml-2 text-xs text-ws-accent-text">
                     {node.monthly_budget_krw != null &&
                       `한도 ${Number(node.monthly_budget_krw).toLocaleString()}원`}
                     {node.monthly_budget_krw != null && node.user_monthly_budget_krw != null && ' · '}
@@ -290,7 +290,7 @@ export default function DepartmentsManager() {
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="새 부서명 (예: 기획예산과)"
-          className="flex-1 min-w-[200px] px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+          className="flex-1 min-w-[200px] px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/20"
         />
         <select
           value={newParentId}
@@ -308,7 +308,7 @@ export default function DepartmentsManager() {
         <button
           type="submit"
           disabled={busy || !newName.trim()}
-          className="px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
+          className="px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
         >
           부서 추가
         </button>

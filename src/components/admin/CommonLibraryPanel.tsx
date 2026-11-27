@@ -123,7 +123,7 @@ export default function CommonLibraryPanel() {
                   type="button"
                   onClick={() => toggleCited(d.id)}
                   aria-expanded={Boolean(cited[d.id])}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ws-accent-text hover:bg-slate-50"
                 >
                   인용하는 문서
                 </button>
@@ -131,7 +131,7 @@ export default function CommonLibraryPanel() {
                   <button
                     type="button"
                     onClick={() => setCompareId(d.id)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ws-accent-text hover:bg-slate-50"
                   >
                     옛 판과 비교
                   </button>
@@ -140,7 +140,7 @@ export default function CommonLibraryPanel() {
                   href={`/api/common-documents/${encodeURIComponent(d.id)}/original`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#003087] hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ws-accent-text hover:bg-slate-50"
                 >
                   원본 열기
                 </a>

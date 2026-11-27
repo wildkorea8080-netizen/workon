@@ -159,7 +159,7 @@ export default function EditionCompareModal({ endpoint, onClose }: { endpoint: s
               <a
                 href={`${endpoint}?format=hwpx`}
                 download
-                className="px-3 py-1.5 text-xs font-medium bg-blue-700 text-white hover:bg-blue-800 rounded-md"
+                className="px-3 py-1.5 text-xs font-medium bg-ws-accent text-white hover:bg-ws-accent-hover rounded-md"
                 title="바뀐 문단만 담은 신구대비표(한글)를 내려받습니다 — 개정 쪽 밑줄, 현행 쪽 취소선"
               >
                 신구대비표 한글

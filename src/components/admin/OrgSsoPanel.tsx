@@ -166,7 +166,7 @@ export default function OrgSsoPanel() {
         ))}
         {loaded.canManage && mappings.length < SSO_MAX_GROUP_MAPPINGS && (
           <button type="button" disabled={disabled} onClick={() => setMappings([...mappings, { value: '', departmentId: '' }])}
-            className="mt-2 text-sm font-medium text-[#003087] disabled:opacity-40">+ 그룹 더하기</button>
+            className="mt-2 text-sm font-medium text-ws-accent-text disabled:opacity-40">+ 그룹 더하기</button>
         )}
       </div>
       {/* 그룹 → 관리자 역할(0115) — 같은 클레임에 이 값이 든 일반 직원을 관리자로 */}
@@ -188,7 +188,7 @@ export default function OrgSsoPanel() {
       {msg && <p role={msg.ok ? 'status' : 'alert'} className={`mt-3 text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.text}</p>}
       {loaded.canManage && (
         <button type="button" disabled={disabled || !issuer.trim() || !clientId.trim()} onClick={() => void save()}
-          className="mt-4 rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{saving.running ? '저장 중…' : '저장'}</button>
+          className="mt-4 rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{saving.running ? '저장 중…' : '저장'}</button>
       )}
     </section>
   );

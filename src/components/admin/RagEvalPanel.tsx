@@ -202,7 +202,7 @@ export default function RagEvalPanel() {
         </select>
         {setId && <button type="button" onClick={() => void deleteSet()} className="text-slate-500 underline">이 세트 지우기</button>}
         <input aria-label="세트 이름" value={setName} maxLength={60} onChange={(e) => setSetName(e.target.value)} placeholder="세트 이름(예: 여비 규정 기본 질문)" className="min-w-[14rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5" />
-        <button type="button" disabled={!setName.trim() || !preview?.ok} onClick={() => void saveSet()} className="rounded-lg border border-[#003087] px-3 py-1.5 font-semibold text-[#003087] disabled:opacity-40">세트 저장</button>
+        <button type="button" disabled={!setName.trim() || !preview?.ok} onClick={() => void saveSet()} className="rounded-lg border border-ws-accent px-3 py-1.5 font-semibold text-ws-accent-text disabled:opacity-40">세트 저장</button>
       </div>
       {setNotice && <p role="status" className="text-xs text-emerald-700">{setNotice}</p>}
       {preview && (preview.ok
@@ -234,7 +234,7 @@ export default function RagEvalPanel() {
         </label>
       )}
       {tooManyForAnswers && <p role="alert" className="text-xs text-red-700">답변까지 평가할 때는 질문 {RAG_EVAL_ANSWER_MAX_QUESTIONS}개까지입니다(지금 {preview?.ok ? preview.rows.length : 0}개).</p>}
-      <button type="button" disabled={!agentId || running || !preview?.ok || tooManyForAnswers} onClick={() => void evaluate()} className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? (withAnswers ? '평가 중… (질문당 십여 초)' : '평가 중… (질문당 몇 초)') : '평가 실행'}</button>
+      <button type="button" disabled={!agentId || running || !preview?.ok || tooManyForAnswers} onClick={() => void evaluate()} className="rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? (withAnswers ? '평가 중… (질문당 십여 초)' : '평가 중… (질문당 몇 초)') : '평가 실행'}</button>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
 
       {run?.results && (
@@ -242,8 +242,8 @@ export default function RagEvalPanel() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-slate-800">{kst(run.created_at)} · 판 {run.agent_version} — {summaryLine(run.summary)}</p>
             <span className="flex gap-3">
-              <button type="button" onClick={() => void loadAcross(run)} className="text-xs text-[#003087] underline">같은 세트로 잰 다른 비서</button>
-              <button type="button" onClick={download} className="text-xs text-[#003087] underline">결과 CSV 내려받기</button>
+              <button type="button" onClick={() => void loadAcross(run)} className="text-xs text-ws-accent-text underline">같은 세트로 잰 다른 비서</button>
+              <button type="button" onClick={download} className="text-xs text-ws-accent-text underline">결과 CSV 내려받기</button>
             </span>
           </div>
           {across?.runId === run.id && (
@@ -275,7 +275,7 @@ export default function RagEvalPanel() {
                       <option value="">—</option>
                       {RAG_EVAL_GRADES.map((g) => <option key={g} value={g}>{RAG_EVAL_JUDGE_LABELS[g]}</option>)}
                     </select>{r.answer.human && r.answer.judge?.grade && (r.answer.human.grade === r.answer.judge.grade ? <span className="text-emerald-700">AI 채점과 같음</span> : <span className="text-amber-700">AI 채점과 다름</span>)}</label>}
-                    {r.answer.text && <details><summary className="cursor-pointer text-[#003087]">답 보기</summary><p className="mt-1 whitespace-pre-wrap text-slate-700">{r.answer.text}</p></details>}
+                    {r.answer.text && <details><summary className="cursor-pointer text-ws-accent-text">답 보기</summary><p className="mt-1 whitespace-pre-wrap text-slate-700">{r.answer.text}</p></details>}
                   </> : '—'}</td>}
                 </tr>))}</tbody>
             </table>
@@ -300,7 +300,7 @@ export default function RagEvalPanel() {
           <h3 className="text-sm font-semibold text-slate-800">지난 평가</h3>
           <ul className="space-y-1 text-xs">{history.map((h) => (
             <li key={h.id} className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => void open(h)} className="text-[#003087] underline">{kst(h.created_at)} · 판 {h.agent_version} · 질문 {h.question_count}</button>
+              <button type="button" onClick={() => void open(h)} className="text-ws-accent-text underline">{kst(h.created_at)} · 판 {h.agent_version} · 질문 {h.question_count}</button>
               <span className="text-slate-600">{summaryLine(h.summary)}</span>
               <button type="button" onClick={() => void reuseSet(h)} className="text-slate-500 underline">이 세트 다시 쓰기</button>
               {run?.results && h.id !== run.id && <button type="button" onClick={() => void compareWith(h)} className="text-slate-500 underline">지금 결과와 비교</button>}

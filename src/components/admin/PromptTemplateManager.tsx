@@ -39,7 +39,7 @@ export default function PromptTemplateManager() {
 
   return (
     <div className="space-y-4">
-      <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-sm text-slate-700">
+      <div className="p-4 rounded-xl bg-ws-accent-soft border border-ws-accent/20 text-sm text-slate-700">
         보고서 생성 기능은 비서로 옮겨졌습니다. 아래 내용을 복사해 비서 관리 → [설정] → 지시문에 붙여 넣으세요.
         기관 서식은 [설정] → 양식 탭에 올립니다.
       </div>

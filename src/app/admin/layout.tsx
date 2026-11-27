@@ -1,9 +1,11 @@
 import { getServerAuthSession, isAdminSession } from '@/lib/auth';
 import Link from 'next/link';
-import AdminNav from '@/components/admin/AdminNav';
+import AdminSidebar from '@/components/admin/AdminSidebar';
 import ImpersonateBanner from '@/components/admin/ImpersonateBanner';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { APP_NAME } from '@/lib/config';
+import { themeStyle } from '@/lib/theme-color';
+import type { CSSProperties } from 'react';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerAuthSession();
@@ -15,7 +17,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <div className="text-center">
           <h1 className="text-2xl font-semibold text-red-600">접근 거부</h1>
           <p className="text-slate-600 mt-2">관리자 권한이 필요합니다.</p>
-          <Link href="/" className="inline-block mt-4 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700">
+          <Link href="/" className="inline-block mt-4 px-4 py-2 bg-ws-accent text-white rounded-xl hover:bg-ws-accent-hover">
             돌아가기
           </Link>
         </div>
@@ -30,6 +32,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // 클라이언트에서 받아오면 첫 화면에 기본 이름이 잠깐 스쳤다가 바뀐다.
   let brandName = APP_NAME;
   let brandLogo: string | null = null;
+  // 기관 테마 색(0067) — 직원 화면과 같은 색으로 단추·고른 메뉴를 칠한다. 못 읽거나 없으면 기본 청록(globals.css :root)
+  let themeColor: string | null = null;
   const departmentId = session?.user?.departmentId;
   if (departmentId) {
     const { data: dept } = await supabaseAdmin
@@ -40,86 +44,30 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     if (dept?.organization_id) {
       const { data: org } = await supabaseAdmin
         .from('organizations')
-        .select('name, logo_url')
+        .select('name, logo_url, theme_color')
         .eq('id', dept.organization_id)
         .maybeSingle();
       if (org?.name) brandName = org.name;
       if (org?.logo_url) brandLogo = `/api/branding/logo?org=${dept.organization_id}`;
+      if (typeof org?.theme_color === 'string') themeColor = org.theme_color;
     }
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    // 직원 화면(업무 틀)과 같은 바탕·글꼴·테마 색(2026-11-27) — 예전엔 짙은 남색 사이드바에 박힌 남색이라 다른 제품처럼 보였다
+    <div
+      className="flex h-screen flex-col bg-[#F7F8FC] text-[#22283D] md:flex-row"
+      style={{ fontFamily: 'Pretendard, -apple-system, sans-serif', ...((themeStyle(themeColor) ?? {}) as CSSProperties) }}
+    >
       {/* 대리 접근 배너 */}
       {isImpersonating && <ImpersonateBanner orgName={orgName} />}
 
-      {/* 좌측 사이드바 */}
-      <aside className={`w-60 bg-[#1C2B4A] text-white flex flex-col flex-shrink-0 ${isImpersonating ? 'mt-[52px]' : ''}`}>
-        {/* 로고 */}
-        <div className="px-4 py-4 border-b border-white/10">
-          <Link href="/admin" className="block hover:opacity-80 transition-opacity">
-            {brandLogo ? (
-              // 로고를 한 줄 통째로 쓴다. 사이드바가 240px뿐이라 로고와
-              // 기관명을 가로로 나란히 두면 로고가 140px 안으로 눌려 읽히지
-              // 않는다. 게다가 기관 CI에는 대개 기관명이 이미 들어 있어
-              // 옆에 또 적는 것은 같은 말을 두 번 하는 것이다.
-              //
-              // 짙은 남색 위에 그대로 얹으면 CI 색과 테두리가 뭉개지므로
-              // 흰 판을 깐다 — 배경색을 규정하는 기관이 있어 얹을 수 없다.
-              <span className="bg-white rounded-lg px-3 py-2.5 flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {/* 높이를 고정하면 가로형 CI가 폭을 다 못 쓴다(사이드바 240 −
-                    좌우 여백 = 184px인데 높이 36px에 맞추면 144px로 눌린다).
-                    너비를 채우고 높이만 상한을 둔다 — 가로형은 폭이,
-                    엠블럼형은 높이가 기준이 되어 둘 다 제 크기로 나온다. */}
-                <img
-                  src={brandLogo}
-                  alt={brandName}
-                  className="w-full max-h-14 object-contain"
-                />
-              </span>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🏛️</span>
-                <p className="text-sm font-bold text-white leading-tight truncate">{brandName}</p>
-              </div>
-            )}
-            <p className="text-[11px] text-white/40 mt-2 text-center">
-              관리자 포털{isImpersonating ? ' (대리)' : ''}
-            </p>
-          </Link>
-        </div>
-
-        <AdminNav />
-
-        {/* 하단 사용자 정보 */}
-        <div className="px-4 py-4 border-t border-white/10">
-          <div className="flex items-center gap-2.5 mb-3">
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${isImpersonating ? 'bg-amber-500' : 'bg-brand-600'}`}>
-              {session?.user?.email?.[0]?.toUpperCase() ?? 'A'}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-white truncate">{session?.user?.email}</p>
-              <p className={`text-[11px] ${isImpersonating ? 'text-amber-400' : 'text-white/40'}`}>
-                {isImpersonating ? '대리 접근 중' : '관리자'}
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/"
-            className="flex items-center justify-center gap-2 w-full px-3 py-2 text-xs font-medium bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white/80"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            메인 화면
-          </Link>
-        </div>
-      </aside>
+      {/* 대리 접근 중이면 띠(52px) 아래로 민다 — 사이드바·작은 화면 막대는 AdminSidebar가, 넓은 화면 콘텐츠는 아래가 */}
+      <AdminSidebar brandName={brandName} brandLogo={brandLogo} email={session?.user?.email ?? ''} isImpersonating={isImpersonating} />
 
       {/* 우측 콘텐츠 */}
-      <div className={`flex-1 flex flex-col overflow-hidden ${isImpersonating ? 'mt-[52px]' : ''}`}>
-        <main className="flex-1 overflow-y-auto px-8 py-6">
+      <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isImpersonating ? 'md:mt-[52px]' : ''}`}>
+        <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
           {children}
         </main>
       </div>

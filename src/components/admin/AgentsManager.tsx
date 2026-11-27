@@ -106,7 +106,7 @@ function OperationalFields({
   onChange: (patch: Partial<AgentFormData>) => void;
 }) {
   const input =
-    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400';
+    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40';
   const label = 'block text-xs font-medium text-slate-500 mb-1';
 
   return (
@@ -126,7 +126,7 @@ function OperationalFields({
               onClick={() => onChange({ agent_type: key })}
               className={`flex-1 px-3 py-2 rounded-xl border text-left transition-colors ${
                 form.agent_type === key
-                  ? 'border-[#003087] bg-blue-50 text-[#003087]'
+                  ? 'border-ws-accent bg-ws-accent-soft text-ws-accent-text'
                   : 'border-slate-200 text-slate-500 hover:bg-slate-50'
               }`}
             >
@@ -171,7 +171,7 @@ function OperationalFields({
                 name={`visibility-${idPrefix}`}
                 checked={form.visibility === value}
                 onChange={() => onChange({ visibility: value })}
-                className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+                className="mt-0.5 w-4 h-4 border-slate-300 text-ws-accent-text focus:ring-ws-accent"
               />
               <span className="min-w-0">
                 <span className="block text-xs font-medium text-slate-800">{text}</span>
@@ -212,7 +212,7 @@ function CatalogFields({
   onChange: (patch: Partial<AgentFormData>) => void;
 }) {
   const input =
-    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400';
+    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40';
   const label = 'block text-xs font-medium text-slate-500 mb-1';
 
   return (
@@ -305,7 +305,7 @@ function CatalogFields({
                           : form.connectors.filter(id => id !== connector.id),
                       })
                     }
-                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-ws-accent-text focus:ring-ws-accent"
                   />
                   <span className="min-w-0">
                     <span className="block text-xs font-medium text-slate-800">{connector.label}</span>
@@ -674,7 +674,7 @@ export default function AgentsManager() {
             onClick={() => setActiveTab(tab.key)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${
               activeTab === tab.key
-                ? 'border-brand-600 text-brand-700'
+                ? 'border-ws-accent text-ws-accent-text'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
@@ -713,7 +713,7 @@ export default function AgentsManager() {
             </button>
             <button
               onClick={() => { setShowCreateForm(true); setEditingAgent(null); }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -751,10 +751,10 @@ export default function AgentsManager() {
                   onKeyDown={e => { if (e.key === 'Enter' && !isImeComposing(e)) { e.preventDefault(); addCategory(); } }}
                   placeholder="새 카테고리 (예: 인사·복무)"
                   maxLength={30}
-                  className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                  className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40"
                 />
                 <button onClick={addCategory} disabled={!newCategoryName.trim() || categoryFlight.running !== null}
-                  className="px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
+                  className="px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
                   추가
                 </button>
               </div>
@@ -804,14 +804,14 @@ export default function AgentsManager() {
               <form onSubmit={handleCreateAgent} className="space-y-3">
                 <input type="text" required placeholder="비서 이름" value={formData.name}
                   onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40" />
                 <input type="text" placeholder="한 줄 설명" value={formData.description}
                   onChange={e => setFormData(p => ({ ...p, description: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40" />
                 {formData.agent_type === 'chat' && (
                   <textarea placeholder="시스템 프롬프트" rows={4} value={formData.system_prompt}
                     onChange={e => setFormData(p => ({ ...p, system_prompt: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none" />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40 resize-none" />
                 )}
 
                 <CatalogFields form={formData} categories={categories} connectors={connectors} connectorsUnread={unread.connectors}
@@ -825,7 +825,7 @@ export default function AgentsManager() {
 
                 <div className="flex gap-2">
                   <button type="submit" disabled={submitting}
-                    className="px-4 py-2 bg-brand-600 text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
+                    className="px-4 py-2 bg-ws-accent text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
                     {submitting ? '생성 중...' : '생성'}
                   </button>
                   <button type="button" onClick={() => setShowCreateForm(false)}
@@ -840,7 +840,7 @@ export default function AgentsManager() {
           <div className="flex gap-2 mb-3">
             {([['all', '전체'], ['official', '공식 비서'], ['department', '부서 비서']] as const).map(([key, text]) => (
               <button key={key} onClick={() => setTierFilter(key)}
-                className={`px-3 py-1 text-xs rounded-full border ${tierFilter === key ? 'bg-[#003087] text-white border-[#003087]' : 'border-slate-200 text-slate-500'}`}>
+                className={`px-3 py-1 text-xs rounded-full border ${tierFilter === key ? 'bg-ws-accent text-white border-ws-accent' : 'border-slate-200 text-slate-500'}`}>
                 {text}
               </button>
             ))}
@@ -860,7 +860,7 @@ export default function AgentsManager() {
 
                       <div className="flex gap-2">
                         <button type="submit" disabled={submitting}
-                          className="px-4 py-2 bg-brand-600 text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
+                          className="px-4 py-2 bg-ws-accent text-white text-sm font-semibold rounded-xl disabled:bg-slate-300">
                           {submitting ? '저장 중...' : '저장'}
                         </button>
                         <button type="button" onClick={() => setEditingAgent(null)}
@@ -905,7 +905,7 @@ export default function AgentsManager() {
                           title={agent.is_published ? '누르면 숨겨집니다' : '누르면 직원에게 보입니다'}
                           className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors disabled:opacity-50 ${
                             agent.is_published
-                              ? 'bg-[#003087] text-white hover:bg-[#002070]'
+                              ? 'bg-ws-accent text-white hover:bg-ws-accent-hover'
                               : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                           }`}>
                           {publishingId === agent.id ? '...' : agent.is_published ? '노출 중' : '노출 대기중'}
@@ -999,7 +999,7 @@ export default function AgentsManager() {
                     onClick={() => setApproveScope(s)}
                     className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 transition-colors ${
                       approveScope === s
-                        ? 'border-brand-600 bg-brand-50 text-brand-700'
+                        ? 'border-ws-accent bg-ws-accent-soft text-ws-accent-text'
                         : 'border-slate-200 text-slate-500 hover:border-slate-300'
                     }`}
                   >
@@ -1035,7 +1035,7 @@ export default function AgentsManager() {
                 onChange={e => setRejectNote(e.target.value)}
                 placeholder="반려 사유를 입력하세요. 신청자에게 표시됩니다."
                 rows={3}
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none"
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/40 resize-none"
               />
             </div>
             <div className="flex gap-2">
@@ -1090,7 +1090,7 @@ function ApprovalCard({
     <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
       <div className="p-4">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-ws-accent/15 flex items-center justify-center text-ws-accent-text font-bold text-sm flex-shrink-0">
             {agent.icon ?? agent.name.slice(0, 1)}
           </div>
           <div className="flex-1 min-w-0">

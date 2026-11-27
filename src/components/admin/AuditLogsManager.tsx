@@ -185,7 +185,7 @@ export default function AuditLogsManager() {
         <button
           onClick={handleExport}
           disabled={loading}
-          className="ml-auto px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
+          className="ml-auto px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
         >
           CSV 내려받기
         </button>
@@ -210,7 +210,7 @@ export default function AuditLogsManager() {
                 if (!e.target.checked) setRevealReason('');
                 setPage(1);
               }}
-              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-ws-accent-text focus:ring-ws-accent"
             />
             <span className="min-w-0">
               <span className="block text-sm font-medium text-slate-800">질문 원문 열람</span>

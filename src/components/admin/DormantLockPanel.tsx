@@ -80,7 +80,7 @@ export default function DormantLockPanel() {
           type="button"
           onClick={save}
           disabled={saving || choice === (days ? String(days) : 'off')}
-          className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          className="rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
         >
           {saving ? '저장 중…' : '저장'}
         </button>

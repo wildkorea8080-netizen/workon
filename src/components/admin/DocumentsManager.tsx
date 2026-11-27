@@ -53,7 +53,7 @@ const POLL_INTERVAL_MS = 5_000;
 function ReadStatusChip({ doc }: { doc: DocumentRow }) {
   switch (doc.noda_status) {
     case 'reading':
-      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-100 text-blue-800">읽는 중</span>;
+      return <span className="text-xs px-2 py-0.5 rounded font-medium bg-ws-accent/15 text-ws-accent-text">읽는 중</span>;
     case 'failed':
       return (
         <span className="text-xs px-2 py-0.5 rounded font-medium bg-red-100 text-red-800">
@@ -382,7 +382,7 @@ export default function DocumentsManager() {
                 const checked = uploadForm.agentIds.includes(agent.id);
                 return (
                   <label key={agent.id}
-                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-blue-50' : ''}`}>
+                    className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-ws-accent-soft' : ''}`}>
                     <input
                       type="checkbox"
                       checked={checked}
@@ -423,7 +423,7 @@ export default function DocumentsManager() {
                     return (
                       <span
                         key={id}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-ws-accent-soft text-ws-accent-text text-xs"
                       >
                         {agent?.name ?? '(삭제된 비서)'}
                         <button
@@ -434,7 +434,7 @@ export default function DocumentsManager() {
                               agentIds: prev.agentIds.filter((x) => x !== id),
                             }))
                           }
-                          className="text-blue-400 hover:text-blue-700 leading-none"
+                          className="text-ws-accent/60 hover:text-ws-accent-text leading-none"
                           aria-label={`${agent?.name ?? ''} 선택 해제`}
                         >
                           ×
@@ -498,7 +498,7 @@ export default function DocumentsManager() {
                     name="doc-visibility"
                     checked={uploadForm.visibility === value}
                     onChange={() => setUploadForm(prev => ({ ...prev, visibility: value }))}
-                    className="mt-0.5 w-4 h-4 border-slate-300 text-[#003087] focus:ring-[#003087]"
+                    className="mt-0.5 w-4 h-4 border-slate-300 text-ws-accent-text focus:ring-ws-accent"
                   />
                   <span className="min-w-0">
                     <span className="block text-sm text-slate-800">{label}</span>
@@ -512,21 +512,21 @@ export default function DocumentsManager() {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">파일 선택 *</label>
             {uploadForm.file ? (
-              <div className="p-4 border-2 border-dashed border-blue-300 bg-blue-50 rounded-md">
+              <div className="p-4 border-2 border-dashed border-ws-accent/40 bg-ws-accent-soft rounded-md">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-6 h-6 text-ws-accent-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     <div>
-                      <p className="font-medium text-blue-900">{uploadForm.file.name}</p>
-                      <p className="text-sm text-blue-700">{formatFileSize(uploadForm.file.size)}</p>
+                      <p className="font-medium text-ws-accent-text">{uploadForm.file.name}</p>
+                      <p className="text-sm text-ws-accent-text">{formatFileSize(uploadForm.file.size)}</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setUploadForm(prev => ({ ...prev, file: null }))}
-                    className="text-blue-600 hover:text-blue-800"
+                    className="text-ws-accent-text hover:text-ws-accent-text"
                   >
                     변경
                   </button>
@@ -536,7 +536,7 @@ export default function DocumentsManager() {
               <div>
                 <label
                   className={`w-full p-8 border-2 border-dashed rounded-md cursor-pointer transition-colors flex items-center justify-center ${
-                    dragging ? 'border-blue-400 bg-blue-50' : 'border-slate-300 hover:border-slate-400'
+                    dragging ? 'border-ws-accent bg-ws-accent-soft' : 'border-slate-300 hover:border-slate-400'
                   }`}
                   onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                   onDragLeave={() => setDragging(false)}
@@ -766,7 +766,7 @@ export default function DocumentsManager() {
                   </button>
                   <button
                     onClick={() => openAssignModal(doc)}
-                    className="px-2.5 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-md transition-colors"
+                    className="px-2.5 py-1.5 text-xs font-medium bg-ws-accent-soft text-ws-accent-text hover:bg-ws-accent/15 rounded-md transition-colors"
                     title="다른 비서에 추가 연결"
                   >
                     + 비서 추가
@@ -820,7 +820,7 @@ export default function DocumentsManager() {
                   const checked = assignIds.includes(agent.id);
                   return (
                     <label key={agent.id}
-                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-blue-50' : ''}`}>
+                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${checked ? 'bg-ws-accent-soft' : ''}`}>
                       <input type="checkbox" checked={checked}
                         onChange={() => setAssignIds(prev =>
                           checked ? prev.filter(id => id !== agent.id) : [...prev, agent.id]
@@ -832,7 +832,7 @@ export default function DocumentsManager() {
                 })}
             </div>
             {assignIds.length > 0 && (
-              <p className="text-xs text-blue-600">{assignIds.length}개 비서 선택됨</p>
+              <p className="text-xs text-ws-accent-text">{assignIds.length}개 비서 선택됨</p>
             )}
             {errorMessage && (
               <p className="text-xs text-red-600">{errorMessage}</p>

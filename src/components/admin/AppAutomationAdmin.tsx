@@ -61,7 +61,7 @@ export function OrgAutomationSwitch({ kind, view, busy, onToggle }: { kind: 'web
         <p className="font-semibold">{view.disabled ? `기관 전체 ${t.subject} 꺼져 있습니다` : `기관 전체 ${t.on}`}</p>
         {view.canChange && (
           <button type="button" disabled={busy} onClick={() => onToggle(view.disabled)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${view.disabled ? 'bg-[#003087] text-white' : 'border border-red-300 text-red-700'}`}>
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${view.disabled ? 'bg-ws-accent text-white' : 'border border-red-300 text-red-700'}`}>
             {busy ? '처리 중…' : view.disabled ? '다시 켜기' : '기관 전체 끄기'}
           </button>
         )}
@@ -181,7 +181,7 @@ export default function AppAutomationAdmin() {
           <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
           쓰는 연동·켜진 예약·실행 중인 일괄 실행만 보기
         </label>
-        <button type="button" onClick={() => void load()} className="text-sm text-[#003087]">새로고침</button>
+        <button type="button" onClick={() => void load()} className="text-sm text-ws-accent-text">새로고침</button>
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {data.truncated && <p className="text-xs text-amber-700">항목이 많아 최근 것만 보입니다.</p>}
@@ -279,7 +279,7 @@ export default function AppAutomationAdmin() {
         {data.batchLimit && (
           <p className="mt-1 text-sm text-slate-700">
             기관 상한: 한 번에 <strong>{data.batchLimit.effective}줄</strong>{data.batchLimit.maxRows === null ? '(기본)' : ''}
-            {data.batchLimit.canChange && <button type="button" disabled={busy === 'batch-limit'} onClick={() => void changeBatchLimit()} className="ml-2 text-xs text-[#003087] underline disabled:opacity-40">바꾸기</button>}
+            {data.batchLimit.canChange && <button type="button" disabled={busy === 'batch-limit'} onClick={() => void changeBatchLimit()} className="ml-2 text-xs text-ws-accent-text underline disabled:opacity-40">바꾸기</button>}
           </p>
         )}
         <p className="text-sm text-slate-500 mt-0.5 mb-3">직원이 여러 건(표·파일)을 한 번에 맡긴 실행입니다(최근 50개). 줄마다 AI 사용량이 듭니다. 입력·결과는 보이지 않습니다. 멈추면 남은 줄은 실행하지 않고 되돌릴 수 없습니다(직원이 새로 만듭니다).</p>

@@ -96,7 +96,7 @@ export default function FeedbackSummary() {
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="text-xs text-slate-500">시작<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="ml-1 rounded-lg border border-slate-200 px-2 py-1 text-sm" /></label>
         <label className="text-xs text-slate-500">끝<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="ml-1 rounded-lg border border-slate-200 px-2 py-1 text-sm" /></label>
-        <button type="button" disabled={loading} onClick={() => void load(from, to)} className="rounded-lg border border-slate-200 px-3 py-1 text-sm text-[#003087] disabled:opacity-40">조회</button>
+        <button type="button" disabled={loading} onClick={() => void load(from, to)} className="rounded-lg border border-slate-200 px-3 py-1 text-sm text-ws-accent-text disabled:opacity-40">조회</button>
       </div>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       {loading && !data ? <p role="status" className="text-sm text-slate-500">불러오는 중…</p> : data && <FeedbackSummaryTable data={data} />}

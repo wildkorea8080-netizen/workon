@@ -114,7 +114,7 @@ export default function OrgApiKeysPanel() {
               </p>
             )}
             <button type="button" disabled={busy || unread || !name.trim() || !scopes.length || active >= ORG_API_MAX_ACTIVE_KEYS} onClick={() => void create()}
-              className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '키 만들기'}</button>
+              className="rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '만드는 중…' : '키 만들기'}</button>
           </div>
           {created && (
             <div role="status" className="space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">

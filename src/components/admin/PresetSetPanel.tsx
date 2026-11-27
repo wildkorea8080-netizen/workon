@@ -109,8 +109,8 @@ export default function PresetSetPanel() {
       </ul>
       {canInstall && (
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => void run(mode)} disabled={!chosen[mode].size || busy} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '처리 중…' : `고른 ${chosen[mode].size}개 ${action}`}</button>
-          <button type="button" onClick={() => setChosen((prev) => ({ ...prev, [mode]: new Set(list.map((m) => m.name)) }))} disabled={busy} className="text-xs text-brand-700">모두 고르기</button>
+          <button type="button" onClick={() => void run(mode)} disabled={!chosen[mode].size || busy} className="rounded-xl bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? '처리 중…' : `고른 ${chosen[mode].size}개 ${action}`}</button>
+          <button type="button" onClick={() => setChosen((prev) => ({ ...prev, [mode]: new Set(list.map((m) => m.name)) }))} disabled={busy} className="text-xs text-ws-accent-text">모두 고르기</button>
           <span className="text-xs text-slate-500">{note}</span>
         </div>
       )}
@@ -124,7 +124,7 @@ export default function PresetSetPanel() {
           <h2 className="text-sm font-semibold text-slate-900">기본 비서·앱 세트</h2>
           <p className="mt-1 text-xs text-slate-500">{summary ? `${summary}가 있습니다.` : '기본 세트가 모두 설치되어 있고 최신입니다.'}</p>
         </div>
-        {(missing.length > 0 || outdated.length > 0) && <button type="button" className="text-xs font-semibold text-brand-700" aria-expanded={open} onClick={() => setOpen((v) => !v)}>{open ? '접기' : '살펴보기'}</button>}
+        {(missing.length > 0 || outdated.length > 0) && <button type="button" className="text-xs font-semibold text-ws-accent-text" aria-expanded={open} onClick={() => setOpen((v) => !v)}>{open ? '접기' : '살펴보기'}</button>}
       </div>
       {open && (
         <div className="mt-3 space-y-4">

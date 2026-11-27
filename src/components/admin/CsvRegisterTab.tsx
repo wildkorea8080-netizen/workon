@@ -132,15 +132,15 @@ export default function CsvRegisterTab() {
   return (
     <div className="space-y-6">
       {/* 양식 다운로드 */}
-      <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-xl">
+      <div className="flex items-center justify-between p-4 bg-ws-accent-soft border border-ws-accent/30 rounded-xl">
         <div>
-          <p className="text-sm font-semibold text-[#003087]">CSV 양식 다운로드</p>
+          <p className="text-sm font-semibold text-ws-accent-text">CSV 양식 다운로드</p>
           <p className="text-xs text-slate-500 mt-0.5">헤더: 부서명, 상위부서명, 직원이름, 이메일, 직책, 권한(ADMIN/USER)</p>
         </div>
         <a
           href="/templates/직원등록양식.csv"
           download
-          className="flex items-center gap-2 px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-xs font-semibold rounded-xl transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-xs font-semibold rounded-xl transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -156,7 +156,7 @@ export default function CsvRegisterTab() {
         onDrop={handleDrop}
         onClick={() => fileRef.current?.click()}
         className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
-          dragging ? 'border-[#003087] bg-blue-50' : 'border-slate-200 hover:border-[#003087] hover:bg-slate-50'
+          dragging ? 'border-ws-accent bg-ws-accent-soft' : 'border-slate-200 hover:border-ws-accent hover:bg-slate-50'
         }`}
       >
         <input
@@ -195,7 +195,7 @@ export default function CsvRegisterTab() {
                       type="checkbox"
                       checked={selected.size === validCount && validCount > 0}
                       onChange={toggleAll}
-                      className="rounded accent-[#003087]"
+                      className="rounded accent-ws-accent"
                     />
                   </th>
                   {['부서명', '이름', '이메일', '직책', '권한', '상태'].map(h => (
@@ -212,7 +212,7 @@ export default function CsvRegisterTab() {
                         disabled={!!row._error}
                         checked={selected.has(row.row)}
                         onChange={() => toggleSelect(row.row)}
-                        className="rounded accent-[#003087] disabled:opacity-30"
+                        className="rounded accent-ws-accent disabled:opacity-30"
                       />
                     </td>
                     <td className="px-3 py-2.5 text-slate-700">{row.부서명}</td>
@@ -260,7 +260,7 @@ export default function CsvRegisterTab() {
             <button
               onClick={handleSubmit}
               disabled={submitting || selected.size === 0}
-              className="flex items-center gap-2 px-6 py-2.5 bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
+              className="flex items-center gap-2 px-6 py-2.5 bg-ws-accent hover:bg-ws-accent-hover disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
             >
               {submitting ? (
                 <>
@@ -302,7 +302,7 @@ export default function CsvRegisterTab() {
                 <p className="text-sm font-semibold text-slate-700">임시 비밀번호 목록</p>
                 <button
                   onClick={downloadResult}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#003087] border border-[#003087]/30 rounded-lg hover:bg-blue-50 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-ws-accent-text border border-ws-accent/30 rounded-lg hover:bg-ws-accent-soft transition-colors"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -372,7 +372,7 @@ function CopyCell({ value }: { value: string }) {
   return (
     <button
       onClick={copy}
-      className="flex items-center gap-1.5 font-mono text-xs text-slate-800 hover:text-[#003087] transition-colors"
+      className="flex items-center gap-1.5 font-mono text-xs text-slate-800 hover:text-ws-accent-text transition-colors"
     >
       <span>{value}</span>
       {copied ? (

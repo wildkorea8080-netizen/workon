@@ -316,7 +316,7 @@ export default function UsersManager() {
             onClick={() => setTab(t.key)}
             className={`px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 ${
               tab === t.key
-                ? 'border-[#003087] text-[#003087] bg-blue-50'
+                ? 'border-ws-accent text-ws-accent-text bg-ws-accent-soft'
                 : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
             }`}
           >
@@ -356,7 +356,7 @@ export default function UsersManager() {
         <div className="space-y-8">
           {loading ? (
             <div className="flex items-center justify-center py-12 text-slate-500">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#003087] mr-3" />
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-ws-accent mr-3" />
               로딩 중...
             </div>
           ) : (
@@ -377,7 +377,7 @@ export default function UsersManager() {
                   {shownUsers.map(user => (
                     <div key={user.id} className={`flex flex-wrap items-center justify-between gap-3 p-4 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-shadow ${user.is_active === false ? 'opacity-60' : ''}`}>
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-50 flex items-center justify-center text-[#003087] font-bold text-sm">
+                        <div className="w-9 h-9 shrink-0 rounded-xl bg-ws-accent-soft flex items-center justify-center text-ws-accent-text font-bold text-sm">
                           {(user.full_name || user.email).charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0">
@@ -546,7 +546,7 @@ export default function UsersManager() {
                   value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   placeholder="colleague@gov.kr"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/30 focus:border-[#003087]"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/30 focus:border-ws-accent"
                 />
               </div>
               <div>
@@ -557,7 +557,7 @@ export default function UsersManager() {
                       key={r} type="button" onClick={() => setInviteRole(r)}
                       className={`flex-1 py-2.5 rounded-xl text-sm font-medium border-2 transition-colors ${
                         inviteRole === r
-                          ? 'border-[#003087] bg-blue-50 text-[#003087]'
+                          ? 'border-ws-accent bg-ws-accent-soft text-ws-accent-text'
                           : 'border-slate-200 text-slate-500 hover:border-slate-300'
                       }`}
                     >
@@ -571,7 +571,7 @@ export default function UsersManager() {
               )}
               <button
                 type="submit" disabled={inviting}
-                className="w-full py-3 bg-[#003087] hover:bg-[#002070] disabled:bg-slate-300 text-white font-semibold rounded-xl text-sm transition-colors"
+                className="w-full py-3 bg-ws-accent hover:bg-ws-accent-hover disabled:bg-slate-300 text-white font-semibold rounded-xl text-sm transition-colors"
               >
                 {inviting ? '초대 링크 생성 중...' : '초대 링크 생성'}
               </button>
@@ -633,7 +633,7 @@ export default function UsersManager() {
                 </button>
                 <button
                   onClick={() => { setTab('list'); setInviteResult(null); }}
-                  className="flex-1 py-2.5 bg-[#003087] hover:bg-[#002070] text-white font-semibold rounded-xl text-sm"
+                  className="flex-1 py-2.5 bg-ws-accent hover:bg-ws-accent-hover text-white font-semibold rounded-xl text-sm"
                 >
                   완료
                 </button>

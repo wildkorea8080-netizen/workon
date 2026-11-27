@@ -116,7 +116,7 @@ export default function UsageSummary() {
                 onClick={() => setAxis(key)}
                 className={`px-3 py-2 text-sm rounded-xl border transition-colors ${
                   axis === key
-                    ? 'border-[#003087] bg-blue-50 text-[#003087] font-semibold'
+                    ? 'border-ws-accent bg-ws-accent-soft text-ws-accent-text font-semibold'
                     : 'border-slate-200 text-slate-500 hover:bg-slate-50'
                 }`}
               >
@@ -138,7 +138,7 @@ export default function UsageSummary() {
         <button
           onClick={handleExport}
           disabled={loading || rows.length === 0}
-          className="ml-auto px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
+          className="ml-auto px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
         >
           CSV 내려받기
         </button>
@@ -203,7 +203,7 @@ export default function UsageSummary() {
                       </div>
                       {/* 비중을 눈으로 보게 한다. 숫자만 보면 상위 몇 개가 대부분인지 안 보인다. */}
                       <div className="mt-1 h-1 bg-slate-100 rounded-full overflow-hidden max-w-[220px]">
-                        <div className="h-full bg-[#003087]/60 rounded-full"
+                        <div className="h-full bg-ws-accent/60 rounded-full"
                           style={{ width: `${(row.costKrw / maxCost) * 100}%` }} />
                       </div>
                     </td>

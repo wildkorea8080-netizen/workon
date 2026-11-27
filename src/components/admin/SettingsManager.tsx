@@ -280,7 +280,7 @@ export default function SettingsManager() {
         </div>
         <p className="text-sm text-slate-500 mb-4">
           내 부서와 하위 부서의 최근 20건입니다. 전체 기간과 CSV는{' '}
-          <a href="/admin/audit" className="text-blue-600 hover:underline">사용 내역 조회</a>의 보안 이벤트에서 봅니다.
+          <a href="/admin/audit" className="text-ws-accent-text hover:underline">사용 내역 조회</a>의 보안 이벤트에서 봅니다.
         </p>
         {logsError && (
           <div className="p-3 mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{logsError}</div>
@@ -295,7 +295,7 @@ export default function SettingsManager() {
                       log.severity === 'critical' ? 'text-red-700 bg-red-100' :
                       log.severity === 'high' ? 'text-orange-700 bg-orange-100' :
                       log.severity === 'medium' ? 'text-yellow-700 bg-yellow-100' :
-                      'text-blue-700 bg-blue-100'
+                      'text-ws-accent-text bg-ws-accent/15'
                     }`}>
                       {log.severity_label}
                     </span>

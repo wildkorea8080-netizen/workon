@@ -216,7 +216,7 @@ export default function OrganizationManager() {
   }
 
   const input =
-    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20';
+    'w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-ws-accent/20';
   const label = 'block text-xs font-medium text-slate-500 mb-1';
   const loginUrl = slug ? `${typeof window !== 'undefined' ? window.location.origin : ''}/signin/${slug}` : null;
 
@@ -329,7 +329,7 @@ export default function OrganizationManager() {
             영문 소문자·숫자·하이픈. 직원에게 이 주소를 안내하면 기관명과 로고가 표시된 로그인 화면이 열립니다.
           </p>
           {loginUrl && (
-            <p className="mt-1 text-[11px] text-[#003087] font-mono break-all">{loginUrl}</p>
+            <p className="mt-1 text-[11px] text-ws-accent-text font-mono break-all">{loginUrl}</p>
           )}
         </div>
 
@@ -374,7 +374,7 @@ export default function OrganizationManager() {
                   onClick={() =>
                     setAllowedIps((prev) => (prev.trim() ? `${prev.trim()}\n${org.currentIp}` : org.currentIp!))
                   }
-                  className="ml-2 text-[#003087] hover:underline"
+                  className="ml-2 text-ws-accent-text hover:underline"
                 >
                   목록에 추가
                 </button>
@@ -416,7 +416,7 @@ export default function OrganizationManager() {
                         e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)
                       )
                     }
-                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#003087] focus:ring-[#003087]"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-ws-accent-text focus:ring-ws-accent"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-slate-800">{m.label}</span>
@@ -438,7 +438,7 @@ export default function OrganizationManager() {
           <button
             onClick={handleSave}
             disabled={saving || !org || !name.trim()}
-            className="px-4 py-2 bg-[#003087] hover:bg-[#002070] text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
+            className="px-4 py-2 bg-ws-accent hover:bg-ws-accent-hover text-white text-sm font-semibold rounded-xl disabled:bg-slate-300"
           >
             {saving ? '저장 중...' : '변경하기'}
           </button>
@@ -497,7 +497,7 @@ function BudgetCard({ budget }: { budget: BudgetInfo }) {
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${
-              blocked ? 'bg-red-500' : warning ? 'bg-amber-500' : 'bg-[#003087]'
+              blocked ? 'bg-red-500' : warning ? 'bg-amber-500' : 'bg-ws-accent'
             }`}
             style={{ width: `${barWidth}%` }}
           />
@@ -543,7 +543,7 @@ function BudgetCard({ budget }: { budget: BudgetInfo }) {
       {!unlimited && (
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full ${blocked ? 'bg-red-500' : 'bg-[#003087]'}`}
+            className={`h-full rounded-full ${blocked ? 'bg-red-500' : 'bg-ws-accent'}`}
             style={{ width: `${Math.min(100, percent)}%` }}
           />
         </div>
@@ -599,7 +599,7 @@ function ThemeColorField({ value, onChange, problem }: { value: string; onChange
           onChange={(e) => onChange(e.target.value)}
           placeholder={`${DEFAULT_THEME_COLOR} (비우면 기본 청록)`}
           maxLength={7}
-          className="w-56 px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+          className="w-56 px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ws-accent/20"
         />
       </div>
       {problem && <p role="alert" className="mt-1 text-[12px] text-red-600">{problem}</p>}

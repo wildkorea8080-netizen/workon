@@ -150,7 +150,7 @@ export default function WorkAdmin() {
             <span className="text-gray-700">파일</span>
             <input type="file" accept=".hwpx,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="mt-1" />
           </label>
-          <button type="submit" disabled={busy || !file || !canManage} className="rounded bg-[#003087] px-4 py-2 font-semibold text-white disabled:bg-gray-300">
+          <button type="submit" disabled={busy || !file || !canManage} className="rounded bg-ws-accent px-4 py-2 font-semibold text-white disabled:bg-gray-300">
             등록·시험 생성
           </button>
         </form>
@@ -161,7 +161,7 @@ export default function WorkAdmin() {
               {chat.filter((c) => !c.imported).map((c) => (
                 <li key={c.id} className="flex items-center justify-between rounded border border-gray-100 px-2 py-1">
                   <span>{c.name} <span className="text-gray-500">({c.agentName} · {c.fileName})</span></span>
-                  <button disabled={busy} onClick={() => run(call('/api/admin/work-templates', json('POST', { agentTemplateId: c.id })), `${c.name}을(를) 업무 양식으로 가져왔습니다.`)} className="text-[#003087] underline">가져오기</button>
+                  <button disabled={busy} onClick={() => run(call('/api/admin/work-templates', json('POST', { agentTemplateId: c.id })), `${c.name}을(를) 업무 양식으로 가져왔습니다.`)} className="text-ws-accent-text underline">가져오기</button>
                 </li>
               ))}
             </ul>
@@ -184,8 +184,8 @@ export default function WorkAdmin() {
               </div>
               {t.status !== 'retired' && canManage && (
                 <div className="mt-2 flex flex-wrap gap-3 text-xs">
-                  <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'test' })), '시험 생성을 다시 했습니다.')} className="text-[#003087] underline">시험 생성 다시</button>
-                  {t.status === 'mapped' && <button disabled={busy} onClick={() => { setAttestFor(t.id); setAttestNote(''); }} className="text-[#003087] underline">한글에서 확인함 기록</button>}
+                  <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'test' })), '시험 생성을 다시 했습니다.')} className="text-ws-accent-text underline">시험 생성 다시</button>
+                  {t.status === 'mapped' && <button disabled={busy} onClick={() => { setAttestFor(t.id); setAttestNote(''); }} className="text-ws-accent-text underline">한글에서 확인함 기록</button>}
                   <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'retire' })), '사용 중지했습니다. 이 양식으로 만든 작업은 그대로입니다.')} className="text-red-700 underline">사용 중지</button>
                 </div>
               )}
@@ -193,7 +193,7 @@ export default function WorkAdmin() {
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   <label htmlFor={`att-${t.id}`}>무엇을 확인했나요?</label>
                   <input id={`att-${t.id}`} value={attestNote} onChange={(e) => setAttestNote(e.target.value)} maxLength={300} className="min-w-[260px] rounded border border-gray-300 px-2 py-1" placeholder="예: 한글 2022에서 시험 파일을 열어 쪽 배치·글꼴 확인" />
-                  <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'attest', note: attestNote })), '관리자 확인을 기록했습니다.').then(() => setAttestFor(null))} className="rounded bg-[#003087] px-2 py-1 text-white">기록</button>
+                  <button disabled={busy} onClick={() => run(call(`/api/admin/work-templates/${t.id}`, json('PATCH', { action: 'attest', note: attestNote })), '관리자 확인을 기록했습니다.').then(() => setAttestFor(null))} className="rounded bg-ws-accent px-2 py-1 text-white">기록</button>
                 </div>
               )}
             </li>

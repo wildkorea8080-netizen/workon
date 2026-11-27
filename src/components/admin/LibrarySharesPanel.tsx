@@ -107,7 +107,7 @@ export default function LibrarySharesPanel() {
       )}
       {loaded.canManage && !draft && loaded.shares.length < LIBRARY_MAX_SHARES && (
         <button type="button" disabled={busy} onClick={() => { setMsg(null); setDraft({ id: null, name: '', departmentIds: [], includeDescendants: false }); }}
-          className="mt-3 text-sm font-medium text-[#003087] disabled:opacity-40">+ 공유 자료함 만들기</button>
+          className="mt-3 text-sm font-medium text-ws-accent-text disabled:opacity-40">+ 공유 자료함 만들기</button>
       )}
       {!loaded.canManage && <p className="mt-3 text-xs text-slate-500">만들고 고치는 일은 기관 전체 관리자(최상위 부서 소속)만 합니다.</p>}
       {draft && (
@@ -133,7 +133,7 @@ export default function LibrarySharesPanel() {
           </label>
           <div className="mt-3 flex gap-3">
             <button type="submit" disabled={busy || !draft.name.trim() || draft.departmentIds.length === 0}
-              className="rounded-lg bg-[#003087] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{action.running === 'save' ? '저장 중…' : '저장'}</button>
+              className="rounded-lg bg-ws-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{action.running === 'save' ? '저장 중…' : '저장'}</button>
             <button type="button" disabled={busy} onClick={() => setDraft(null)} className="text-sm text-slate-600 underline disabled:opacity-40">취소</button>
           </div>
         </form>
