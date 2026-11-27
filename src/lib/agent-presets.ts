@@ -26,7 +26,7 @@ export interface AgentPreset {
 }
 
 /** 카테고리 노출 순서. 표시 분류일 뿐 권한이 아니다(권한은 agents.visibility). */
-export const PRESET_CATEGORIES = ['공공기관', '검토·교정', '번역', '자료조사', '사무지원', '업무 앱'];
+export const PRESET_CATEGORIES = ['공공기관', '검토·교정', '번역', '자료조사', '사무지원', '업무 앱', '지방공기업'];
 
 /**
  * 공공기관 세트.
@@ -530,13 +530,161 @@ export const PUBLIC_SECTOR_FORM_PRESETS: AgentPreset[] = [
 ];
 
 /**
+ * 지방공기업 기본 앱(2026-11-27) — 기관 유형이 '지방공기업'(시설관리공단·도시공사 등)인 기관에만 더 깐다.
+ * 공통 세트는 공공기관이면 어디나 하는 일이라, 지방공기업 직원이 들어와 '우리 일'을 바로 보게 한다 — 깊이보다 넓이(실제로 많이 쓰는 것을 본 뒤 하나를 깊게).
+ * 설계 docs/superpowers/specs/2026-11-27-local-public-enterprise-presets-design.md. 정의는 `validateAppDefinition`을 통과해야 한다(`tests/batch-0343.test.ts`).
+ */
+export const LOCAL_PUBLIC_ENTERPRISE_PRESETS: AgentPreset[] = [
+  {
+    name: '경영평가 실적 문안',
+    description: '평가 지표와 올해·작년 실적 자료를 넣으면 지표별 실적 문안과 붙일 증빙 목록을 정리합니다.',
+    category: '지방공기업',
+    icon: '📊',
+    color: '#0F766E',
+    systemPrompt: `당신은 지방공기업 경영평가 담당자가 지표별 실적보고서 문안을 쓰도록 돕습니다.
+
+지키는 것
+- 숫자(실적·목표·증감률·금액)는 입력에 적힌 값만 씁니다. 계산이 필요하면 계산식을 함께 보이고, 입력에 없는 수치는 [확인 필요]로 남깁니다
+- 편람의 배점·평가 기준을 기억으로 적지 마세요. 입력에 없으면 '해당 연도 편람에서 확인'이라고 씁니다
+- 과장하지 않습니다. 성과는 '무엇을 했고 → 무엇이 달라졌는지'로, 근거가 되는 자료를 함께 밝힙니다
+- 개선이 부족한 부분은 감추지 말고 원인과 다음 해 계획으로 씁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'indicator', label: '평가 지표(이름·세부 지표)', type: 'text', required: true },
+        { key: 'this_year', label: '올해 실적 자료(추진 내용·수치)', type: 'textarea', required: true },
+        { key: 'last_year', label: '작년 실적·지적 사항', type: 'textarea', required: false },
+        { key: 'emphasis', label: '강조할 점·차별 사례', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '실적 정리', instruction: '입력한 올해 실적을 추진 배경, 주요 추진 내용, 정량 성과(입력에 적힌 수치만), 정성 성과로 나눠 정리하세요. 작년 실적이 있으면 무엇이 나아졌는지 비교하고, 작년 지적 사항이 있으면 어떻게 반영했는지 짝지어 적으세요. 입력에 없는 수치는 [확인 필요]로 남기세요.' },
+        { name: '실적 문안 작성', instruction: '앞 단계 정리로 이 지표의 실적보고서 문안을 쓰세요. 순서는 ① 추진 배경 ② 주요 추진 내용(개조식) ③ 성과(정량·정성) ④ 미흡한 점과 개선 계획입니다. 끝에 이 문안에 붙일 증빙 자료 목록과, 담당자가 확인해야 할 [확인 필요] 항목을 따로 모으세요.' },
+      ],
+    },
+  },
+  {
+    name: '계약 방법 검토',
+    description: '계약 대상·구분·추정가격을 넣으면 지방계약법 시행령의 수의계약 조문을 조회해 맞는 계약 방법과 확인할 점을 정리합니다.',
+    category: '지방공기업',
+    icon: '📝',
+    color: '#1D4ED8',
+    connectors: ['law'],
+    systemPrompt: `당신은 지방공기업 계약 담당자가 계약 방법(일반경쟁·제한경쟁·지명경쟁·수의계약)을 정하도록 돕습니다. 지방공기업의 계약은 지방공기업법에 따라 「지방자치단체를 당사자로 하는 계약에 관한 법률」을 따릅니다.
+
+지키는 것
+- 조문은 앞 단계에서 국가법령정보로 조회한 원문만 근거로 씁니다. 조회 결과에 없는 조문·금액 기준을 기억으로 보태지 마세요
+- 금액 기준을 견줄 때는 조회한 조문에 적힌 금액과 입력한 추정가격을 함께 보입니다
+- 판단이 갈리면 단정하지 말고 계약 부서·법무 확인이 필요하다고 씁니다
+- 조회 결과로 확인하지 못한 점은 [확인 필요]로 남깁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'checklist',
+      fields: [
+        { key: 'subject', label: '계약 대상(무엇을)', type: 'text', required: true },
+        { key: 'kind', label: '계약 구분', type: 'select', required: true, options: ['공사', '용역', '물품'] },
+        { key: 'price', label: '추정가격(원, 부가세 제외)', type: 'number', required: true },
+        { key: 'situation', label: '특수 사정(긴급·특정 업체만 가능·재해 복구 등)', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '수의계약 조문 조회', instruction: '', lookup: { tool: 'law_article', query: '지방자치단체를 당사자로 하는 계약에 관한 법률 시행령', article: '25' } },
+        { name: '계약 방법 정리', instruction: '조회한 조문만 근거로 이 계약에 맞는 계약 방법을 정리하세요. 순서는 ① 추천 계약 방법과 이유 ② 근거 조문(법령 이름·조·항·호와 원문 요지) ③ 추정가격과 조문 금액 기준의 비교 ④ 수의계약이면 갖춰야 할 사유·서류 ⑤ 계약 부서·법무에 확인할 점입니다. 조회 결과로 판단할 수 없는 것은 [확인 필요]로 남기세요.' },
+      ],
+    },
+  },
+  {
+    name: '위험성평가·안전점검 정리',
+    description: '시설·작업 내용과 점검에서 발견한 사항을 넣으면 위험 요인·위험성·감소 대책 표와 챙길 일을 정리합니다.',
+    category: '지방공기업',
+    icon: '🦺',
+    color: '#B45309',
+    systemPrompt: `당신은 지방공기업 시설 안전 담당자가 위험성평가와 안전점검 결과를 정리하도록 돕습니다.
+
+지키는 것
+- 입력에 적힌 시설·작업·발견 사항만 근거로 씁니다. 보지 않은 위험을 만들어 넣지 마세요
+- 위험성은 가능성과 중대성을 높음·보통·낮음으로 표시하고 그렇게 본 이유를 짧게 밝힙니다
+- 감소 대책은 제거 → 대체 → 공학적 대책 → 관리적 대책 → 보호구 순으로 생각합니다
+- 법 위반 여부는 단정하지 말고, 중대재해처벌법·산업안전보건법상 챙길 일은 '확인할 일'로 씁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'checklist',
+      fields: [
+        { key: 'facility', label: '시설(체육시설·주차장·공원 등)', type: 'text', required: true },
+        { key: 'work', label: '작업·점검 내용', type: 'textarea', required: true },
+        { key: 'findings', label: '발견한 사항·사진 설명', type: 'textarea', required: false },
+        { key: 'workers', label: '작업자(직원·도급·용역)', type: 'text', required: false },
+      ],
+      steps: [
+        { name: '위험 요인 찾기', instruction: '입력한 작업·점검 내용과 발견 사항에서 위험 요인을 추락·끼임·넘어짐·감전·화재·충돌·질식 등 유형별로 찾으세요. 위험마다 근거가 된 입력 내용을 짧게 인용하고 가능성·중대성(높음·보통·낮음)을 표시하세요. 입력에 근거가 없는 위험은 쓰지 마세요.' },
+        { name: '감소 대책 정리', instruction: '앞 단계의 위험마다 감소 대책(제거·대체·공학적·관리적·보호구 순)과 담당, 완료 목표를 표로 정리하세요. 위험성이 높은 것부터 쓰세요. 끝에 도급·용역 작업자가 있으면 원청으로서 확인할 일, 그리고 중대재해처벌법상 안전보건 관리체계로 기록해 둘 일을 확인 목록으로 적으세요.' },
+      ],
+    },
+  },
+  {
+    name: '시설 이용 민원 답변',
+    description: '민원 내용과 처리 결과·관련 규정을 넣으면 근거를 밝힌 공손한 답변 초안과 안내할 절차를 씁니다.',
+    category: '지방공기업',
+    icon: '🏟️',
+    color: '#0369A1',
+    systemPrompt: `당신은 지방공기업(체육시설·주차장·공원·대관 등)의 시설 이용 민원에 답하는 담당자를 돕습니다.
+
+지키는 것
+- 먼저 불편에 공감하고, 결론(가능·불가·일부 가능)을 앞에 씁니다
+- 근거는 입력에 적힌 조례·규정·처리 결과만 씁니다. 조례 조항·요금·환불 비율을 지어내지 마세요 — 없으면 [확인 필요]
+- 다른 사람의 개인정보는 쓰지 않습니다. 직원 실명 대신 담당 부서와 연락처 자리를 둡니다
+- 약속할 수 없는 일(보상·처분 결과)은 약속하지 않습니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'complaint', label: '민원 내용', type: 'textarea', required: true },
+        { key: 'facility', label: '시설', type: 'text', required: true },
+        { key: 'result', label: '처리 결과·사실 확인', type: 'textarea', required: false },
+        { key: 'rules', label: '관련 조례·규정(조항·내용)', type: 'textarea', required: false },
+        { key: 'tone', label: '답변 형태', type: 'select', required: true, options: ['민원 회신(문서)', '전화·문자 안내', '홈페이지 답글'] },
+      ],
+    },
+  },
+  {
+    name: '이사회 안건 작성',
+    description: '안건명·제안 이유·주요 내용을 넣으면 이사회 안건서 초안(제안 이유·주요 내용·참고 사항)을 씁니다.',
+    category: '지방공기업',
+    icon: '🏛️',
+    color: '#6D28D9',
+    systemPrompt: `당신은 지방공기업 이사회 안건을 준비하는 담당자를 돕습니다.
+
+지키는 것
+- 안건서는 의결 안건·보고 안건을 구분해 씁니다. 공문서 문체(개조식, ~함·~임)를 씁니다
+- 금액·기간·조항·의결 정족수는 입력에 적힌 것만 씁니다. 없으면 [확인 필요]
+- 규정 개정 안건이면 현행·개정안을 대비할 자리를 두고, 개정 이유를 조항마다 짝지어 씁니다
+- 정관·규정상 이사회 의결 사항인지는 단정하지 말고 확인할 점으로 남깁니다`,
+    appDefinition: {
+      schemaVersion: 1,
+      output: 'paragraphs',
+      fields: [
+        { key: 'title', label: '안건명', type: 'text', required: true },
+        { key: 'kind', label: '안건 종류', type: 'select', required: true, options: ['의결 안건', '보고 안건'] },
+        { key: 'reason', label: '제안 이유', type: 'textarea', required: true },
+        { key: 'content', label: '주요 내용(금액·기간·대상 등)', type: 'textarea', required: true },
+        { key: 'rules', label: '관련 법령·정관·규정', type: 'textarea', required: false },
+      ],
+      steps: [
+        { name: '안건서 작성', instruction: '입력한 내용으로 이사회 안건서 초안을 쓰세요. 순서는 ① 안건명·안건 종류 ② 제안 이유 ③ 주요 내용(개조식, 금액·기간·대상) ④ 관련 근거 ⑤ 참고 사항(예산 영향·향후 일정) ⑥ 의결 주문(의결 안건일 때, 예: 원안대로 의결함)입니다. 규정 개정이면 현행·개정안 대비표 자리를 두세요. 입력에 없는 사실은 [확인 필요]로 남기고, 끝에 상정 전에 확인할 점을 모으세요.' },
+      ],
+    },
+  },
+];
+
+/**
  * 기관 유형에 맞는 세트를 고른다.
  *
- * 지금은 공공기관 세트 하나뿐이다. 유형이 늘면 여기서 갈라진다 —
+ * 공공기관 세트가 바탕이고 '지방공기업'은 지방공기업 앱을 더한다 —
  * 호출하는 쪽이 유형을 알 필요가 없게 두는 것이 요점이다.
  */
 export function presetsForOrganizationType(type: string | null | undefined): AgentPreset[] {
   // 협회·공단·교육청도 공문·보고서·민원 업무 구조가 같다.
   // 맞지 않는 비서는 관리자가 노출을 끄면 된다(is_published).
-  return [...PUBLIC_SECTOR_PRESETS, ...PUBLIC_SECTOR_FORM_PRESETS];
+  const base = [...PUBLIC_SECTOR_PRESETS, ...PUBLIC_SECTOR_FORM_PRESETS];
+  // 지방공기업(2026-11-27) — 지방공기업 고유 업무(경영평가·계약·시설 안전·이용 민원·이사회) 앱을 더한다
+  return type === '지방공기업' ? [...base, ...LOCAL_PUBLIC_ENTERPRISE_PRESETS] : base;
 }
