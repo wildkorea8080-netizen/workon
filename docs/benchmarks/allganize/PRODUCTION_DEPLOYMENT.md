@@ -5,6 +5,14 @@
 - 2026-11-02 14:xx KST `feat/s6-1-currentize`를 푸시하고 `main`을 같은 커밋으로 fast-forward 푸시했더니 Vercel GitHub 연동이 **`main` 푸시마다 Production 배포를 만들어 Ready가 되면 운영 주소에 자동으로 붙였다**(`dpl_BYYmTTAhuh9fa232L7yES54RyogA`, 56205e4 — 바로 전 CLI 배포와 같은 코드 + 문서 커밋. 가지 푸시는 Preview 빌드). 그 전까지 운영은 CLI `--skip-domain` 빌드 → promote로만 올렸고 `main`은 10-30에 멈춰 있어 이 길이 잠들어 있었다.
 - 그래서 앞으로 **`main`에 올리는 것 = 운영 배포**다. 운영 DB 마이그레이션이 먼저여야 하는 커밋은 적용 전에 `main`에 올리지 않는다. 커밋 메시지의 `[vercel skip]`은 **이 프로젝트에서 빌드를 막지 못했다**(6cc3e23을 푸시하자 Production 빌드가 또 잡혔다) — 문서만 고친 푸시도 운영을 같은 코드로 다시 배포한다는 뜻이니, 빌드를 피하려면 Vercel 프로젝트 설정의 Ignored Build Step을 따로 걸어야 한다. CLI promote 방식도 그대로 쓸 수 있다(둘 다 같은 운영 주소를 바꾼다 — 나중 것이 이긴다).
 
+## 2026-11-27(오전 3): 직원 초대 화면 — 복사 실패 알림·메일 실패 까닭·취소 두 번 눌러 확인(0338) — 마이그레이션 없음
+
+- 코드 배포 `dpl_GCmqBPkfaoio5DCy695B9jsE85bb`(커밋 `5be4f5b`, 2026-11-27 10:31 KST, `main` fast-forward, 사용자 "운영반영"). 사용자가 운영에서 시험용 직원을 초대하다 겪은 세 가지 — '복사'가 클립보드를 못 쓰는 브라우저에서 조용히 실패하고 링크가 잘려 옮길 수 없던 것, 메일 보내기 실패를 '설정되지 않음'으로 보이던 것, 초대 '취소'가 확인 창이 막힌 브라우저에서 반응이 없던 것. 가지 Preview(`dpl_8H2sGrukvmfXe8xuV4pRw48r6PTG`) Ready 뒤 `main`. 전체 시험 491파일 5,572개 통과.
+- 되돌릴 때는 직전 `dpl_J1RfgZRYTG5gn2ChH4w8zmKqqJD1`(32d93d0)로 promote.
+- 배포 뒤 앱 안 브라우저(관리자)로 초대 '취소'를 한 번 눌러 빨간 '취소 확인'으로 바뀌고 다른 곳을 누르면 되돌아오는 것을 확인(초대는 취소하지 않음). 실행기 호출 10:29~10:33 KST 모두 200(heartbeat 10:30), 최근 60분 critical·error 0건.
+- **운영 메일이 모두 실패 중**(Vercel 로그 `[mailer] 발송 실패: … The gmail.com domain is not verified`) — `MAIL_FROM`이 인증하지 않은 gmail.com 주소라 Resend가 거절한다. 초대·비밀번호 찾기·임시 비밀번호·예산·앱 예약/일괄 실행·critical 알림 메일이 가지 않는다. 사용자가 Resend에서 도메인을 인증하고 `MAIL_FROM`을 그 도메인 주소로 바꿔야 한다(코드로는 못 고침).
+- 보인 것(고치지 않음): 앱 안 브라우저 폭(약 700px)에서 사용자 관리 목록의 단추 글자가 세로로 접힌다.
+
 ## 2026-11-27(오전 2): 나만의 비서 지우는 중 표시·카드 단추 글자 접힘(0337) — 마이그레이션 없음
 
 - 코드 배포 `dpl_J1RfgZRYTG5gn2ChH4w8zmKqqJD1`(커밋 `32d93d0`, 2026-11-27 10:01 KST, `main` fast-forward, 사용자 "운영반영"). 오전 운영 화면 확인에서 남긴 두 가지 — 지우는 몇 초 동안 단추를 '지우는 중…'으로 막기, 카드 단추 글자가 두 줄로 접히지 않게. 가지 Preview(`dpl_12TxSDpEFo55xW9SbqYT9hZ2XBLA`) Ready 뒤 `main`. 전체 시험 490파일 5,569개 통과.
