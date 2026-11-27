@@ -116,7 +116,7 @@ async function reportFilterGap(departmentId: string, code: string): Promise<void
   }).catch(() => {});
 }
 
-export async function filterUserInput(departmentId: string, text: string, userId?: string, options: { departmentIds?: string[] } = {}): Promise<FilterResult> {
+export async function filterUserInput(departmentId: string, text: string, userId?: string, options: { departmentIds?: string[]; /** 시민 상담 창(0136) — 금지어를 못 읽으면 건너뛰지 않고 던진다(로그인 없는 창이라 닫힘) */ failClosed?: boolean } = {}): Promise<FilterResult> {
   const result: FilterResult = {
     isValid: true,
     blockedWords: [],
@@ -135,6 +135,7 @@ export async function filterUserInput(departmentId: string, text: string, userId
     .in('department_id', departmentIds)
     .eq('is_active', true);
 
+  if (error && options.failClosed) throw new Error('forbidden_words_unavailable');
   if (error) {
     // 금지어를 못 읽으면 금지어 검사만 건너뛴다(대화를 막지는 않는다) — **개인정보 패턴 검사는 그대로 한다.**
     // 예전에는 여기서 바로 돌아가, DB가 이상한 동안 주민등록번호·카드번호 검사까지 함께 꺼졌다(그 검사는 DB가 필요 없다).

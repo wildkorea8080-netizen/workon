@@ -337,3 +337,29 @@ export function allowedWhileMustChange(pathname: string): boolean {
 export function sessionCookieNames(names: string[]): string[] {
   return names.filter((n) => /^(__Secure-)?next-auth\.session-token(\.\d+)?$/.test(n));
 }
+
+/**
+ * 시민 상담 창(0136)을 넣을 수 있는 홈페이지 — 켜진 기관의 허용 주소. 기관·설정이 없거나 꺼졌으면 빈 목록, 못 읽으면 'error'
+ * (미들웨어가 `frame-ancestors`로 건다 — 못 읽으면 자기 주소만, 닫힘)
+ */
+export async function readPublicAskOrigins(cfg: RestConfig | null, slug: string, f: FetchLike): Promise<string[] | 'error'> {
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) return [];
+  if (!cfg) return 'error';
+  try {
+    const org = await f(`${cfg.url}/rest/v1/organizations?slug=eq.${slug}&select=id`, { headers: headers(cfg) });
+    if (!org.ok) return 'error';
+    const orgRows = (await org.json()) as { id?: string }[];
+    if (!Array.isArray(orgRows)) return 'error';
+    const id = orgRows[0]?.id;
+    if (typeof id !== 'string' || !UUID.test(id)) return [];
+    const res = await f(`${cfg.url}/rest/v1/public_ask_settings?organization_id=eq.${id}&select=enabled,allowed_origins`, { headers: headers(cfg) });
+    if (!res.ok) return 'error';
+    const rows = (await res.json()) as { enabled?: boolean | null; allowed_origins?: unknown }[];
+    if (!Array.isArray(rows)) return 'error';
+    const row = rows[0];
+    if (!row?.enabled || !Array.isArray(row.allowed_origins)) return [];
+    return row.allowed_origins.filter((o): o is string => typeof o === 'string');
+  } catch {
+    return 'error';
+  }
+}

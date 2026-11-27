@@ -53,7 +53,7 @@ export function toolsFor(
  */
 export function effectiveCapabilities(
   stored: unknown,
-  opts: { tier: 'personal' | 'department' | 'official'; scope: CapabilityScope; knownConnectorIds: string[] }
+  opts: { tier: 'personal' | 'department' | 'official' | 'public'; scope: CapabilityScope; knownConnectorIds: string[] }
 ): CapabilitySettings {
   // 키가 빠진 커넥터는 '모르는 연결'로 거절되므로, 정규화 전에 걸러 둔다
   const known = new Set(opts.knownConnectorIds);

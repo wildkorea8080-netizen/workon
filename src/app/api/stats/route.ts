@@ -65,7 +65,7 @@ export async function GET(_request: NextRequest) {
       // 지난 판(개정으로 내려간 문서)은 근거로 쓰지 않으므로 세지 않는다
       countOf(supabaseAdmin.from('documents').select('id', head).in('department_id', managed).is('retired_at', null)),
       // 지운 비서(숨김)와 나만의 비서는 기관이 운영하는 비서가 아니다
-      countOf(supabaseAdmin.from('agents').select('id', head).in('department_id', managed).is('deleted_at', null).neq('tier', 'personal')),
+      countOf(supabaseAdmin.from('agents').select('id', head).in('department_id', managed).is('deleted_at', null).neq('tier', 'personal').neq('tier', 'public')),
       countOf(supabaseAdmin.from('conversations').select('id', head).in('department_id', managed)),
       countOf(
         supabaseAdmin

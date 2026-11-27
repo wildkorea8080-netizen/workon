@@ -70,7 +70,7 @@ export const ORG_API_ENDPOINTS: Record<OrgApiEndpoint, { scope: OrgApiScope; pat
  * 나만의 비서는 키를 만든 사람의 것이어도 아니다(목록 API 0099가 감추는 비서와 같다)
  */
 export function writableAgent<T extends { deleted_at: string | null; tier: string; organization_id: string | null }>(agent: T | null, organizationId: string): agent is T {
-  return Boolean(agent && !agent.deleted_at && agent.tier !== 'personal' && agent.organization_id === organizationId);
+  return Boolean(agent && !agent.deleted_at && agent.tier !== 'personal' && agent.tier !== 'public' && agent.organization_id === organizationId);
 }
 
 // ── 비서에게 묻기(POST /api/v1/chat, 0101) ──

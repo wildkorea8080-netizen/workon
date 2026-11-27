@@ -34,6 +34,7 @@ export const TIER_LABELS = {
   personal: '나만의 비서',
   department: '부서 비서',
   official: '공식 비서',
+  public: '시민 전용 비서',
 } as const;
 
 const FIELD_LABELS: Record<string, string> = {
@@ -190,7 +191,7 @@ export interface ConnectorChoice {
  */
 export function connectorChoices(
   all: ConnectorChoice[],
-  tier: 'personal' | 'department' | 'official',
+  tier: 'personal' | 'department' | 'official' | 'public',
   current: string[]
 ): ConnectorChoice[] {
   if (tier === 'official') return all;
@@ -216,7 +217,7 @@ export const CREATE_CONNECTOR_LIST_UNREAD = '실시간 조회(공공 데이터) 
 
 export function isConnectorOutOfScope(
   choice: ConnectorChoice,
-  tier: 'personal' | 'department' | 'official'
+  tier: 'personal' | 'department' | 'official' | 'public'
 ): boolean {
   if (tier === 'official') return false;
   return !choice.allowedForPersonal;

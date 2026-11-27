@@ -38,6 +38,7 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['/register', '가입 자체가 비인증 행위'],
   ['/register/validate-token', '초대 토큰 검증'],
   ['/shared/[token]', '공개 공유 링크. 토큰이 곧 자격'],
+  ['/ask/[slug]', '시민용 민원 상담 창(0136) — 시민이 로그인 없이 묻는다. 기관 전체 관리자가 켠 기관만, IP·기관 하루 횟수·기관 예산·개인정보 필터가 막고, 시민 전용 비서의 문서만 근거로 쓴다'],
   ['/super/auth/login', '로그인 엔드포인트 자체. 여기서 인증을 요구하면 로그인이 불가능하다'],
   ['/super/auth/logout', '쿠키를 지우는 것뿐이라 인증 여부와 무관하다'],
   ['/super/auth/setup', '최초 슈퍼관리자 생성. SUPER_ADMIN_SETUP_KEY로 보호'],

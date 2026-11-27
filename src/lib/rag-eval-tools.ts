@@ -18,7 +18,7 @@ export interface EvalToolSetup { tools: LlmTool[]; owners: Map<string, Capabilit
 
 /** 평가에 쓸 도구 — 대화와 같은 능력 결정에서 공공 데이터만 */
 export async function evalToolSetup(
-  agent: { id: string; tier: 'personal' | 'department' | 'official'; version: number; capabilities: unknown },
+  agent: { id: string; tier: 'personal' | 'department' | 'official' | 'public'; version: number; capabilities: unknown },
   actor: { organizationId: string; departmentId: string; userId: string },
   deps: { scope?: typeof getCapabilityScope; knownConnectorIds?: string[] } = {},
 ): Promise<{ ok: true; setup: EvalToolSetup } | { ok: false; message: string }> {

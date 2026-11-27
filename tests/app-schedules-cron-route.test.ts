@@ -28,6 +28,7 @@ vi.mock('@/lib/budget-alerts', () => ({ budgetAlertDeps: () => ({}), quickBudget
 vi.mock('@/lib/critical-alert', () => ({ criticalAlertDeps: () => ({}), runCriticalAlert: async () => ({ skipped: 'none' }) }));
 // 비서 데이터 파일 미리 읽어 두기(2026-11-26)
 vi.mock('@/lib/capabilities/agent-data-files', () => ({ dataPrefillDeps: () => ({}), prefillDataExtracts: async () => ({ filled: 0, failed: 0, checked: 0 }) }));
+vi.mock('@/lib/public-ask/purge', () => ({ purgePublicAskLogs: async () => ({ deleted: 0 }) }));
 
 import { GET, POST } from '@/app/api/cron/app-schedules/route';
 

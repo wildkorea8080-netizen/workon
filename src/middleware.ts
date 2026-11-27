@@ -5,9 +5,10 @@ import { clientIpFrom, isIpAllowed } from '@/lib/ip-access';
 import { superJwtSecret } from '@/lib/super-secret';
 import { BAD_ROUTE_ID_MESSAGE, badRouteId } from '@/lib/api-route-ids';
 import {
-  allowedWhileMustChange, deptSsoOnly, readDeptSsoOnly, readIpPolicy, readMaintenance, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
+  allowedWhileMustChange, deptSsoOnly, readDeptSsoOnly, readIpPolicy, readMaintenance, readPublicAskOrigins, readSuperAdminState, readSuperAdminStatus, readUserStatus, restConfig, sessionCookieNames, superAdminActive, superAllowedWhileMustChange, superMustChange, superTokenIat, superTokenSub, userSessionVerdict,
   type SessionVerdict,
 } from '@/lib/middleware-db';
+import { frameAncestors } from '@/lib/public-ask/spec';
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? '';
 
@@ -60,6 +61,16 @@ const superStatusCache = new Map<string, { active: boolean; at: number }>();
 const userStatusCache: Parameters<typeof userSessionVerdict>[0] = new Map();
 // 부서의 기관이 SSO 전용(0109)인가 — 30초
 const ssoOnlyCache = new Map<string, { on: boolean; at: number }>();
+// 시민 상담 창(0136)을 넣을 수 있는 홈페이지 — 기관(slug)마다 60초 기억, 못 읽으면 자기 주소만(닫힘)
+const publicAskFrameCache = new Map<string, { value: string; at: number }>();
+async function publicAskFrame(slug: string): Promise<string> {
+  const hit = publicAskFrameCache.get(slug);
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const origins = await readPublicAskOrigins(restConfig(), slug, fetch);
+  const value = origins === 'error' ? frameAncestors([]) : frameAncestors(origins);
+  if (origins !== 'error') publicAskFrameCache.set(slug, { value, at: Date.now() });
+  return value;
+}
 
 /** 로그인 화면들 — 끝난 세션이면 쿠키만 지우고 그대로 보인다(로그인 화면으로 다시 보내면 돌기만 한다) */
 const SIGN_IN_PAGES = /^\/(login|signin|signup|register|forgot-password|reset-password)(\/|$)/;
@@ -195,6 +206,16 @@ export async function middleware(req: NextRequest) {
       return NextResponse.json({ ok: false, error: '비밀번호를 먼저 바꿔 주세요.', code: 'password_change_required' }, { status: 403 });
     }
     return NextResponse.next();
+  }
+
+  // ── 시민 상담 창(0136) — 시민이 로그인 없이 쓴다. 로그인·기관 접속 허용 IP·세션 검사를 하지 않고(점검 모드는 위에서 이미 걸림),
+  // 화면은 그 기관이 허용한 홈페이지에서만 넣을 수 있게 frame-ancestors를 건다(vercel.json의 X-Frame-Options DENY는 /ask 밖에만)
+  if (pathname === '/api/ask' || pathname.startsWith('/api/ask/')) return NextResponse.next();
+  const askPage = /^\/ask\/([^/]+)\/?$/.exec(pathname);
+  if (askPage) {
+    const res = NextResponse.next();
+    res.headers.set('Content-Security-Policy', await publicAskFrame(askPage[1].toLowerCase()));
+    return res;
   }
 
   // ── 접속 IP 제한 (0023) ───────────────────────────────────

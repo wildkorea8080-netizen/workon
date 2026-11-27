@@ -3,7 +3,7 @@ import { pagedRows } from '@/lib/paged-select';
 
 /**
  * 기관의 '이번 달 토큰'을 한 규칙으로(2026-11-17). 종량제 월 토큰 한도 판정(`checkTokenLimit` → DB 함수 `organization_chat_tokens`, 0057)과
- * 같은 셈: **`chat_message` 기록의 입력+출력 토큰, 숫자가 아니면 0, 한국 시간 이번 달 1일부터**.
+ * 같은 셈: **`chat_message`·`public_ask`(시민 상담, 0136) 기록의 입력+출력 토큰, 숫자가 아니면 0, 한국 시간 이번 달 1일부터**.
  *
  * 예전엔 화면마다 달랐다 — 슈퍼관리자 기관 목록은 DB 뷰 `v_organization_summary`(모든 활동·UTC 달)라 기관 상세(위 함수)와 숫자가 달랐고
  * (운영 '기본 기관' 10,820 vs 10,697), 대시보드는 같은 이번 달 기록을 세 번 따로 읽어 더했으며 숫자가 아닌 값은 그대로 더했다.
@@ -21,7 +21,7 @@ export function chatTokensOf(details: unknown): number {
 export async function loadChatTokensByOrg(fromIso: string): Promise<Map<string, number> | null> {
   const { data, error } = await pagedRows<{ organization_id: string | null; details: unknown }>((a, b, w) => supabaseAdmin
     .from('usage_logs').select('organization_id, details', w ? { count: 'exact' } : undefined)
-    .eq('action', 'chat_message').gte('created_at', fromIso).order('id').range(a, b));
+    .in('action', ['chat_message', 'public_ask']).gte('created_at', fromIso).order('id').range(a, b));
   if (error) return null;
   return sumByOrg(data ?? []);
 }

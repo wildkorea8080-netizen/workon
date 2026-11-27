@@ -179,7 +179,7 @@ export function buildUsageDetails(usage: LlmUsage, extra: Record<string, unknown
 
 export async function writeUsageLog(row: {
   departmentId: string;
-  userId: string;
+  userId: string | null;
   action: string;
   resourceType: string;
   resourceId: string | null;

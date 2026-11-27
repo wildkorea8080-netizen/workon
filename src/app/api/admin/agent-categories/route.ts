@@ -38,6 +38,7 @@ async function countAgentsByCategory(organizationId: string): Promise<Map<string
       .eq('organization_id', organizationId)
       .is('deleted_at', null)
       .neq('tier', 'personal')
+      .neq('tier', 'public')
       .not('category', 'is', null)
       .order('id', { ascending: true })
       .range(from, to),

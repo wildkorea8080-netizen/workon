@@ -11,7 +11,8 @@
  * (tests/agent-route-permissions.test.ts가 원본으로 확인한다).
  */
 
-export type AgentTier = 'personal' | 'department' | 'official';
+/** 'public' = 시민 전용 비서(0136 — 기관에 하나, 직원은 쓰지 못하고 기관 전체 관리자만 고침, /ask/{slug}가 쓴다) */
+export type AgentTier = 'personal' | 'department' | 'official' | 'public';
 export type AgentVisibility = 'organization' | 'department';
 
 export interface AgentAccessInfo {
@@ -102,6 +103,9 @@ export function canEditAgent(agent: AgentAccessInfo, actor: ActorScope): boolean
       return agent.visibility === 'organization'
         ? actor.isAdmin && actor.managesWholeOrganization
         : managesAgentDepartment(agent, actor);
+    case 'public':
+      // 시민 전용 비서(0136) — 시민에게 보이는 문서를 정하는 일이라 기관 전체 관리자만
+      return actor.isAdmin && actor.managesWholeOrganization;
   }
 }
 
@@ -122,6 +126,9 @@ export function canUseAgent(agent: AgentAccessInfo, actor: ActorScope): boolean 
       return agent.visibility === 'organization'
         ? true
         : actor.visibleDepartmentIds.includes(agent.department_id);
+    case 'public':
+      // 시민 전용 비서(0136)는 직원 대화·앱·기관 API에서 쓰지 않는다 — 시민 상담 창(/api/ask)만 쓴다
+      return false;
   }
 }
 
@@ -137,6 +144,7 @@ export function canDeleteAgent(agent: AgentAccessInfo, actor: ActorScope): boole
       // 부서 전체가 쓰던 비서가 사라진다(결정 4).
       return agent.created_by === actor.userId || managesAgentDepartment(agent, actor);
     case 'official':
+    case 'public':
       return canEditAgent(agent, actor);
   }
 }
@@ -147,7 +155,7 @@ export function canPromoteToDepartment(agent: AgentAccessInfo, actor: ActorScope
 }
 
 export function canRequestOfficial(agent: AgentAccessInfo, actor: ActorScope): boolean {
-  if (agent.tier === 'official') return false;
+  if (agent.tier === 'official' || agent.tier === 'public') return false;
   if (agent.approval_status === 'pending') return false;
   // 나만의 비서의 공식 신청은 주인만(0129 — 함께 고치는 동료는 고치기까지)
   if (agent.tier === 'personal' && agent.owner_id !== actor.userId) return false;
@@ -163,7 +171,7 @@ export function canApproveOfficial(
   actor: ActorScope,
   targetVisibility: AgentVisibility
 ): boolean {
-  if (agent.deleted_at || !actor.isAdmin) return false;
+  if (agent.deleted_at || !actor.isAdmin || agent.tier === 'public') return false;
   if (!sameOrganization(agent, actor)) return false;
   return targetVisibility === 'organization'
     ? actor.managesWholeOrganization

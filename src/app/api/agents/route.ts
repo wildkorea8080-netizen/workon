@@ -107,6 +107,7 @@ export async function GET(request: NextRequest) {
         .select('*')
         .or(visibleFilter)
         .or(`tier.neq.personal,owner_id.eq.${session.user.id}`)
+        .neq('tier', 'public')
         .in('id', favoriteIds)
         .is('deleted_at', null)
         .eq('is_active', true)
@@ -173,6 +174,7 @@ export async function GET(request: NextRequest) {
         .select('*')
         .eq('organization_id', actor.organizationId)
         .neq('tier', 'personal')
+        .neq('tier', 'public') // 시민 전용 비서(0136)는 관리자 '시민 상담' 화면에서
         .is('deleted_at', null)
         // 기관 전체 공식 비서 + 관리 범위 부서에 걸린 비서(부서로 좁힌 공식 · 부서 비서)
         .or(`and(tier.eq.official,visibility.eq.organization),department_id.in.(${managed})`);
@@ -196,7 +198,7 @@ export async function GET(request: NextRequest) {
       .eq('is_active', true)
       .is('deleted_at', null);
 
-    query = departmentOnly ? query.eq('tier', 'department') : query.neq('tier', 'personal');
+    query = departmentOnly ? query.eq('tier', 'department') : query.neq('tier', 'personal').neq('tier', 'public');
 
     // 노출 대기중은 공식 비서에만 있다. 부서 비서는 승인 없이 바로 쓴다(결정 4).
     // (관리 화면은 위에서 따로 돌려줬다)
