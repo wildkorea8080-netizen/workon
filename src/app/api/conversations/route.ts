@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerAuthSession } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { conversationQuery, searchMyConversations } from '@/lib/conversation-search';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,6 +14,19 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
+    // 지난 대화 찾기(2026-11-28) — `?q=`면 내 모든 대화의 제목·메시지 글에서 찾는다(최근 30개, 맞은 자리 앞뒤)
+    if (searchParams.has('q')) {
+      const q = conversationQuery(searchParams.get('q'));
+      if (!q) {
+        return NextResponse.json({ ok: false, error: { message: '두 글자 이상 적어 찾아 주세요.' } }, { status: 400 });
+      }
+      try {
+        return NextResponse.json({ ok: true, data: await searchMyConversations(session.user.id, q) });
+      } catch (err) {
+        console.error('대화 찾기 오류:', (err as { code?: string })?.code ?? 'unknown');
+        return NextResponse.json({ ok: false, error: { message: '지금 대화를 찾지 못했습니다. 잠시 뒤 다시 찾아 주세요.' } }, { status: 503 });
+      }
+    }
     // 숫자가 아니거나 너무 크면 범위 조회가 깨지거나 1,000행 상한에 걸린다 — 1~100, 0 이상으로 맞춘다
     const rawLimit = parseInt(searchParams.get('limit') || '20', 10);
     const rawOffset = parseInt(searchParams.get('offset') || '0', 10);

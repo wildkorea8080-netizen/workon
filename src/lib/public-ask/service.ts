@@ -84,7 +84,14 @@ export async function loadPublicConfig(slug: string, deps: Pick<PublicAskDeps, '
  * 하루 횟수를 차지한 뒤의 실패는 그 기록 줄을 '거절'·'답하지 못함'으로 마무리한다
  */
 export async function askPublic(
-  input: { slug: string; question: unknown; previousQuestion?: unknown; ip: string | null },
+  input: {
+    slug: string; question: unknown; previousQuestion?: unknown; ip: string | null;
+    /**
+     * 관리자 미리 물어보기(2026-11-28) — 창을 열기 전에 기관 전체 관리자가 시민 화면과 같은 답을 본다.
+     * 켜짐 여부·하루 횟수를 보지 않고 시민 기록(public_ask_logs)에 남기지 않는다(사용 기록은 남음 — 모델을 부르므로)
+     */
+    preview?: boolean;
+  },
   deps: PublicAskDeps,
 ): Promise<PublicAskRejection | { ok: true; events: AsyncGenerator<PublicAskEvent> }> {
   const question = typeof input.question === 'string' ? input.question.normalize('NFC').trim() : '';
@@ -94,41 +101,46 @@ export async function askPublic(
   const org = await deps.loadOrg(input.slug);
   if (!org) return reject(404, 'not_found', PUBLIC_ASK_MESSAGES.notFound);
   const settings = await deps.loadSettings(org.id);
-  if (!settings?.enabled || org.status === 'suspended' || org.status === 'terminated') return reject(403, 'closed', PUBLIC_ASK_MESSAGES.closed);
-  const agent = settings.agent_id ? await deps.loadAgent(settings.agent_id) : null;
-  if (!usableAgent(agent, org.id)) return reject(503, 'not_ready', PUBLIC_ASK_MESSAGES.notReady);
+  if (org.status === 'suspended' || org.status === 'terminated') return reject(403, 'closed', PUBLIC_ASK_MESSAGES.closed);
+  if (!input.preview && !settings?.enabled) return reject(403, 'closed', PUBLIC_ASK_MESSAGES.closed);
+  const agent = settings?.agent_id ? await deps.loadAgent(settings.agent_id) : null;
+  if (!settings || !usableAgent(agent, org.id)) return reject(503, 'not_ready', PUBLIC_ASK_MESSAGES.notReady);
   if (await deps.orgBudgetExhausted(org.id)) return reject(429, 'budget', PUBLIC_ASK_MESSAGES.budget);
 
   const contacts = readContacts(settings.contacts);
-  const claim = await deps.claim(org.id, ipHashOf(input.ip), kstDayStart(kstDay(deps.now())).toISOString(), settings.ip_daily_cap, settings.org_daily_cap);
-  if (claim.status === 'capped_ip') return reject(429, 'capped_ip', PUBLIC_ASK_MESSAGES.cappedIp);
-  if (claim.status === 'capped_org' || !claim.id) return reject(429, 'capped_org', PUBLIC_ASK_MESSAGES.cappedOrg);
-  const logId = claim.id;
+  let logId: string | null = null;
+  if (!input.preview) {
+    const claim = await deps.claim(org.id, ipHashOf(input.ip), kstDayStart(kstDay(deps.now())).toISOString(), settings.ip_daily_cap, settings.org_daily_cap);
+    if (claim.status === 'capped_ip') return reject(429, 'capped_ip', PUBLIC_ASK_MESSAGES.cappedIp);
+    if (claim.status === 'capped_org' || !claim.id) return reject(429, 'capped_org', PUBLIC_ASK_MESSAGES.cappedOrg);
+    logId = claim.id;
+  }
+  const finish = (patch: LogPatch) => (logId ? deps.finishLog(logId, patch) : Promise.resolve());
 
   try {
     if (!(await deps.passesFilter(agent.department_id, question))) {
       // 거절한 질문은 글을 남기지 않는다
-      await deps.finishLog(logId, { result: 'rejected_pii' });
+      await finish({ result: 'rejected_pii' });
       return reject(400, 'rejected', PUBLIC_ASK_MESSAGES.rejected);
     }
     const prepared = await deps.prepare(agent.id, org.id, question, previous || undefined);
     if (!prepared) {
-      await deps.finishLog(logId, { result: 'unavailable', question: question.slice(0, PUBLIC_ASK_STORED_QUESTION_MAX) });
+      await finish({ result: 'unavailable', question: question.slice(0, PUBLIC_ASK_STORED_QUESTION_MAX) });
       return reject(503, 'unavailable', PUBLIC_ASK_MESSAGES.unavailable);
     }
     const model = await deps.resolveModel(agent.model_id, org.id);
-    return { ok: true, events: answer({ org, agent, question, prepared, model, logId, contacts }, deps) };
+    return { ok: true, events: answer({ org, agent, question, prepared, model, finish, contacts }, deps) };
   } catch (err) {
-    await deps.finishLog(logId, { result: 'unavailable' }).catch(() => {});
+    await finish({ result: 'unavailable' }).catch(() => {});
     throw err;
   }
 }
 
 async function* answer(
-  run: { org: PublicAskOrg; agent: PublicAskAgent; question: string; prepared: { chunks: RetrievedChunk[]; systemAddendum?: string }; model: string; logId: string; contacts: PublicAskContact[] },
+  run: { org: PublicAskOrg; agent: PublicAskAgent; question: string; prepared: { chunks: RetrievedChunk[]; systemAddendum?: string }; model: string; finish: (patch: LogPatch) => Promise<void>; contacts: PublicAskContact[] },
   deps: PublicAskDeps,
 ): AsyncGenerator<PublicAskEvent> {
-  const { org, agent, question, prepared, model, logId, contacts } = run;
+  const { org, agent, question, prepared, model, finish, contacts } = run;
   const system = buildSystemPrompt(agent.system_prompt, [prepared.systemAddendum, publicAskGuide(org.name)]);
   let text = '';
   let usage: LlmUsage | null = null;
@@ -143,7 +155,7 @@ async function* answer(
     }
   } catch {
     // 쓴 토큰을 알 수 없으면 기록만 마무리한다
-    await deps.finishLog(logId, { result: 'unavailable', question: question.slice(0, PUBLIC_ASK_STORED_QUESTION_MAX), answer: text.slice(0, PUBLIC_ASK_STORED_ANSWER_MAX) || null, model }).catch(() => {});
+    await finish({ result: 'unavailable', question: question.slice(0, PUBLIC_ASK_STORED_QUESTION_MAX), answer: text.slice(0, PUBLIC_ASK_STORED_ANSWER_MAX) || null, model }).catch(() => {});
     yield { type: 'error', message: PUBLIC_ASK_MESSAGES.unavailable };
     return;
   }
@@ -157,7 +169,7 @@ async function* answer(
   const unverified = found ? checkNumbers(text, [...numbersIn(system), ...numbersIn(question)]) : [];
   const result: PublicAskResult = found ? 'answered' : 'no_source';
   if (usage) await deps.logUsage(agent.department_id, agent.id, usage);
-  await deps.finishLog(logId, {
+  await finish({
     result, question: question.slice(0, PUBLIC_ASK_STORED_QUESTION_MAX), answer: text.slice(0, PUBLIC_ASK_STORED_ANSWER_MAX),
     sources, model: usage?.model ?? model, input_tokens: usage?.input_tokens ?? 0, output_tokens: usage?.output_tokens ?? 0,
   });

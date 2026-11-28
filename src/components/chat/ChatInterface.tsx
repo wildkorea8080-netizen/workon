@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { actionErrorText } from '@/lib/ok-json';
+import { actionErrorText, requestJson, serverErrorText } from '@/lib/ok-json';
 import { useBranding } from '@/lib/use-branding';
 import MessageBubble from './MessageBubble';
 import { isNearBottom } from './scroll-follow';
@@ -33,7 +33,9 @@ import { acceptsChatImages, acceptsChatFiles, hasDocSearch } from '@/lib/capabil
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENTS_PER_SEND } from '@/lib/attachments/limits';
 import { isImeComposing } from '@/lib/ime';
 import { readRechecked, type RecheckedNumber } from '@/lib/assistant/number-research';
-import { readRevision, revisionEligibility, type RevisionView } from '@/lib/assistant/answer-revise-spec';
+import { questionText, readRevision, revisionEligibility, type RevisionView } from '@/lib/assistant/answer-revise-spec';
+import { canRegenerate, REDO_FAILED } from './redo-turn';
+import { STOP_FAILED, STOPPED_EMPTY_TEXT } from '@/lib/assistant/stop-spec';
 import AnswerRevision from './AnswerRevision';
 import AnswerExport from './AnswerExport';
 
@@ -72,6 +74,8 @@ interface Message {
   /** 참고 문서를 불러오지 못해 거절된 안내 말풍선 — 다시 묻기·일반 답변 단추가 붙는다 */
   refusal?: boolean;
   error?: string;
+  /** 직원이 도중에 멈춘 답(2026-11-28) */
+  stopped?: boolean;
   /** 저장된 답변의 DB id — 평가할 수 있다(불러온 답변은 id, 방금 받은 답변은 done의 message_id) */
   savedId?: string;
   /** 내가 남긴 평가(0064) */
@@ -184,6 +188,13 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   /** 맨 아래를 따라 내릴지 — 사용자가 위로 올려 읽으면 false */
   const followRef = useRef(true);
+  // '답변 다시 받기·질문 고쳐 묻기'(2026-11-28) — 마지막 턴을 지우는 중·실패 글
+  const [redoBusy, setRedoBusy] = useState(false);
+  const [redoError, setRedoError] = useState<string | null>(null);
+  // 답변 멈추기(2026-11-28) — 받고 있는 답(대화·답 id는 meta로 받음). 입력형 앱 실행은 멈추지 않는다
+  const stopTargetRef = useRef<{ conversationId: string; messageId: string } | null>(null);
+  const [stopState, setStopState] = useState<'idle' | 'ready' | 'stopping'>('idle');
+  const [stopError, setStopError] = useState<string | null>(null);
   /** 오른쪽 근거 창에 연 근거. 다른 대화를 열면 닫는다 */
   const [openSource, setOpenSource] = useState<RetrievedChunk | null>(null);
   const closeSource = useCallback(() => setOpenSource(null), []);
@@ -266,6 +277,7 @@ export default function ChatInterface({
                 attachments?: { id: string; file_name: string }[];
                 number_check?: { unverified?: string[]; rechecked?: unknown };
                 documents_skipped?: boolean;
+                stopped?: boolean;
                 doc_tags?: unknown;
                 basis_date?: unknown;
                 revision?: unknown;
@@ -296,6 +308,7 @@ export default function ChatInterface({
               documentsSkipped: m.role === 'assistant' && m.source_references?.documents_skipped === true
                 ? true
                 : undefined,
+              stopped: m.role === 'assistant' && m.source_references?.stopped === true ? true : undefined,
               docTags: m.role === 'assistant' && Array.isArray(m.source_references?.doc_tags) && m.source_references.doc_tags.every((t) => typeof t === 'string') && m.source_references.doc_tags.length
                 ? (m.source_references.doc_tags as string[])
                 : undefined,
@@ -447,6 +460,39 @@ export default function ChatInterface({
     await sendTurn(req, [], skipDocuments);
   };
 
+  /**
+   * 마지막 답변 다시 받기·질문 고쳐 묻기(2026-11-28) — 서버가 마지막 질문·답을 지운 뒤에만 화면에서도 뺀다.
+   * 다시 받기는 같은 질문을 같은 태그·기준일·일반 답변 여부로 다시 보낸다(대화에 붙인 파일은 대화에 그대로 있어 다시 붙이지 않는다)
+   */
+  const redoLastTurn = async (mode: 'again' | 'edit') => {
+    const last = messages[messages.length - 1];
+    const question = messages[messages.length - 2];
+    if (isLoading || redoBusy || !conversationId || !last?.savedId || last.role !== 'assistant' || question?.role !== 'user') return;
+    if (mode === 'again' && !canRegenerate(question)) return;
+    setRedoBusy(true);
+    setRedoError(null);
+    const r = await requestJson(`/api/conversations/${encodeURIComponent(conversationId)}/last-turn?message=${encodeURIComponent(last.savedId)}`, { method: 'DELETE' });
+    setRedoBusy(false);
+    if (!r.ok) {
+      setRedoError(serverErrorText(r.body, REDO_FAILED));
+      return;
+    }
+    const text = questionText(question.content);
+    setMessages(prev => prev.slice(0, -2));
+    if (mode === 'edit') {
+      setInputMessage(text);
+      textareaRef.current?.focus();
+      return;
+    }
+    followRef.current = true;
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text, attachments: question.attachments }]);
+    await sendTurn(
+      { message: text, conversationId, images: [], attachmentIds: [], docTags: last.docTags ?? [], basisDate: last.basisDate ?? '' },
+      [],
+      last.documentsSkipped === true,
+    );
+  };
+
   const sendTurn = async (
     req: TurnRequest,
     sentChips: Parameters<typeof fileAttach.restore>[0],
@@ -457,6 +503,7 @@ export default function ChatInterface({
     const skipped = skipDocuments ? true : undefined;
     setIsLoading(true);
     setActiveTool(null);
+    setStopError(null);
 
     const patchAssistant = (patch: Partial<Message>) =>
       setMessages(prev =>
@@ -560,6 +607,11 @@ export default function ChatInterface({
               onConversationCreated(payload.conversation_id);
               prevConvIdRef.current = payload.conversation_id;
             }
+            const stopConversation = payload.conversation_id ?? req.conversationId;
+            if (typeof payload.message_id === 'string' && typeof stopConversation === 'string' && !selectedAgent.app_definition) {
+              stopTargetRef.current = { conversationId: stopConversation, messageId: payload.message_id };
+              setStopState('ready');
+            }
             if (payload.chunks?.length) {
               pendingSources = payload.chunks;
               if (bubbleShown) patchAssistant({ sources: payload.chunks });
@@ -585,6 +637,11 @@ export default function ChatInterface({
               patchAssistant({ files: [...collectedFiles] });
             }
           } else if (name === 'done') {
+            // 멈춘 답(2026-11-28) — 글을 받기 전에 멈췄으면 그렇다고 적은 말풍선을 만든다(서버도 같은 글로 저장)
+            if (payload.stopped === true) {
+              if (!bubbleShown) { streamed = STOPPED_EMPTY_TEXT; showBubble(); }
+              patchAssistant({ stopped: true });
+            }
             // 숫자 확인은 저장 뒤에 정해져 done에만 실린다. 대조할 답이 없으면 말풍선도 없다
             const unverified: unknown = payload.number_check?.unverified;
             // 저장된 답변 id — 이 답변을 바로 평가할 수 있다(저장에 실패했으면 오지 않는다)
@@ -630,6 +687,28 @@ export default function ChatInterface({
       setIsLoading(false);
       setActiveTool(null);
       setAttachmentsRefresh(n => n + 1);
+      stopTargetRef.current = null;
+      setStopState('idle');
+    }
+  };
+
+  /**
+   * 답변 멈추기(2026-11-28) — 연결을 끊지 않고 서버에 멈춤을 알린다(끊으면 서버는 답을 끝까지 만들어 저장한다).
+   * 서버가 1초 남짓 뒤에 받은 데까지 저장하고 `done`(stopped)으로 끝내면 위 읽기가 그대로 마무리한다
+   */
+  const stopAnswer = async () => {
+    const target = stopTargetRef.current;
+    if (!target || stopState !== 'ready') return;
+    setStopState('stopping');
+    setStopError(null);
+    const r = await requestJson(`/api/conversations/${encodeURIComponent(target.conversationId)}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: target.messageId }),
+    });
+    if (!r.ok && stopTargetRef.current === target) {
+      setStopError(serverErrorText(r.body, STOP_FAILED));
+      setStopState('ready');
     }
   };
 
@@ -796,6 +875,7 @@ export default function ChatInterface({
               documentsSkipped={msg.documentsSkipped}
               docTags={msg.docTags}
               basisDate={msg.basisDate}
+              stopped={msg.stopped}
               badge={msg.appDraft ? APP_DRAFT_BADGE : undefined}
               refusal={msg.refusal}
               refusalDisabled={isLoading}
@@ -805,6 +885,15 @@ export default function ChatInterface({
               error={msg.error}
             />
             {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && <AnswerFeedback messageId={msg.savedId} initial={msg.feedback ?? null} />}
+            {/* 마지막 답변 다시 받기·질문 고쳐 묻기(2026-11-28) — 앱 실행 결과는 앱 화면에서 다시 실행 */}
+            {conversationId && index === messages.length - 1 && index > 0 && msg.role === 'assistant' && msg.savedId && !msg.refusal && !msg.appSteps && !msg.appDraft && messages[index - 1].role === 'user' && !messages[index - 1].appInputs && (
+              <div className="ml-10 mt-1 flex flex-wrap items-center gap-3 text-xs">
+                <button type="button" disabled={isLoading || redoBusy || !canRegenerate(messages[index - 1])} title={canRegenerate(messages[index - 1]) ? '이 답을 지우고 같은 질문으로 다시 받습니다' : '사진은 저장하지 않아 다시 받을 수 없습니다 — 질문 고쳐 묻기로 사진을 다시 붙여 주세요'} onClick={() => void redoLastTurn('again')} className="whitespace-nowrap text-slate-500 hover:text-ws-accent-text disabled:opacity-40">↻ 답변 다시 받기</button>
+                <button type="button" disabled={isLoading || redoBusy} title="이 질문과 답을 지우고 질문을 입력창에 되돌립니다" onClick={() => void redoLastTurn('edit')} className="whitespace-nowrap text-slate-500 hover:text-ws-accent-text disabled:opacity-40">✎ 질문 고쳐 묻기</button>
+                {redoBusy && <span role="status" className="text-slate-400">지우는 중…</span>}
+                {redoError && <span role="alert" className="text-red-600">{redoError}</span>}
+              </div>
+            )}
             {msg.role === 'assistant' && msg.savedId && msg.content && !msg.error && !msg.refusal && (
               <AnswerRevision
                 key={`revise-${msg.savedId}`}
@@ -940,6 +1029,16 @@ export default function ChatInterface({
           />
         )}
 
+        {(stopState !== 'idle' || stopError) && (
+          <div className="mb-2 flex flex-wrap items-center justify-center gap-2 text-xs">
+            {stopState !== 'idle' && (
+              <button type="button" onClick={() => void stopAnswer()} disabled={stopState === 'stopping'} className="whitespace-nowrap rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-700 hover:border-ws-accent hover:text-ws-accent-text disabled:opacity-60">
+                {stopState === 'stopping' ? '멈추는 중…' : '■ 답변 멈추기'}
+              </button>
+            )}
+            {stopError && <span role="alert" className="text-red-600">{stopError}</span>}
+          </div>
+        )}
         <div className="flex items-end gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 focus-within:border-ws-accent focus-within:ring-2 focus-within:ring-ws-accent/10 transition-all">
           {canAttachAnything && (
             <button

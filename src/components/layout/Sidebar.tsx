@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { isImeComposing } from '@/lib/ime';
 import { MAX_CONVERSATION_TITLE } from '@/lib/conversation-title';
 import { actionErrorText, emptyListText, fetchOkJson, serverErrorText } from '@/lib/ok-json';
+import { latestGate } from '@/lib/latest-request';
+import { searchActive, SEARCH_FAILED } from './conversation-search-ui';
 
 interface Conversation {
   id: string;
@@ -15,6 +17,9 @@ interface Conversation {
   is_shared?: boolean;
   agent?: { name: string } | null;
 }
+
+/** 지난 대화 찾기 결과(2026-11-28) — 내용에서 맞았으면 맞은 자리 앞뒤 */
+type SearchHit = Conversation & { snippet?: { before: string; hit: string; after: string } | null };
 
 interface SidebarProps {
   selectedConversationId: string | null;
@@ -61,6 +66,10 @@ export default function Sidebar({
   // 목록을 못 읽은 것 — '대화가 없습니다'와 가른다(2026-11-20). 앞서 읽은 목록은 그대로 둔다
   const [unread, setUnread] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  // 두 글자 이상이면 내 모든 대화의 제목·내용을 서버에서 찾는다(2026-11-28) — null = 아직 결과 없음
+  const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null);
+  const [searchFailed, setSearchFailed] = useState<string | null>(null);
+  const searchGate = useRef(latestGate());
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [toast, setToast] = useState<string | null>(null);
@@ -79,6 +88,28 @@ export default function Sidebar({
 
   useEffect(() => { load(); }, [load, refreshTrigger]);
 
+  // 목록과 찾기 결과를 함께 고친다(지우기·이름 바꾸기·공유) — 찾기 결과에만 있는 대화도 바로 바뀌게
+  const patchLists = useCallback((fn: (prev: Conversation[]) => Conversation[]) => {
+    setConversations(fn);
+    setSearchHits(prev => (prev ? (fn(prev) as SearchHit[]) : prev));
+  }, []);
+
+  useEffect(() => {
+    const term = searchTerm;
+    const ticket = searchGate.current.begin();
+    setSearchFailed(null);
+    if (!searchActive(term)) { setSearchHits(null); return; }
+    setSearchHits(null);
+    // 치는 동안 매번 묻지 않게 잠깐 기다리고, 늦게 온 앞 찾기의 결과는 버린다
+    const timer = setTimeout(async () => {
+      const result = await fetchOkJson<{ data?: SearchHit[] }>(`/api/conversations?q=${encodeURIComponent(term.trim())}`);
+      if (!searchGate.current.isLatest(ticket)) return;
+      if (!result) { setSearchFailed(SEARCH_FAILED); return; }
+      setSearchHits(result.data ?? []);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm, refreshTrigger]);
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('이 대화를 삭제하시겠습니까?')) return;
@@ -90,7 +121,7 @@ export default function Sidebar({
         alert(result?.error?.message || '삭제에 실패했습니다.');
         return;
       }
-      setConversations(prev => prev.filter(c => c.id !== id));
+      patchLists(prev => prev.filter(c => c.id !== id));
       if (selectedConversationId === id) onNewConversation();
     } catch {
       alert('삭제에 실패했습니다.');
@@ -118,7 +149,7 @@ export default function Sidebar({
         return;
       }
       const saved: string = result.data.title;
-      setConversations(prev => prev.map(c => c.id === id ? { ...c, title: saved } : c));
+      patchLists(prev => prev.map(c => c.id === id ? { ...c, title: saved } : c));
     } catch {
       showToast('이름을 바꾸지 못했습니다.');
     } finally {
@@ -134,7 +165,7 @@ export default function Sidebar({
       // 서버 안내(기관이 공개 링크를 막았다 등)를 그대로 — 없으면 아래 정해 둔 글(0098, 2026-11-23)
       if (!res.ok || !result?.ok) throw new Error(serverErrorText(result, '공유 링크 생성에 실패했습니다.'));
       await navigator.clipboard.writeText(result.data.shareUrl);
-      setConversations(prev =>
+      patchLists(prev =>
         prev.map(c => (c.id === id ? { ...c, is_shared: true } : c))
       );
       // 링크에는 지금까지의 대화만 보인다 — 이후 대화는 다시 눌러야 보인다(서버가 공유한 때까지로 자른다)
@@ -164,7 +195,7 @@ export default function Sidebar({
       const res = await fetch(`/api/conversations/${id}/share`, { method: 'DELETE' });
       const result = await res.json();
       if (!result.ok) throw new Error(result.error?.message);
-      setConversations(prev =>
+      patchLists(prev =>
         prev.map(c => (c.id === id ? { ...c, is_shared: false } : c))
       );
       showToast('공유를 중단했습니다.');
@@ -173,9 +204,11 @@ export default function Sidebar({
     }
   };
 
-  const filtered = conversations.filter(c =>
-    c.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const serverSearch = searchActive(searchTerm);
+  // 한 글자는 읽어 둔 목록의 제목만 거르고, 두 글자부터는 서버가 찾은 결과(내용 포함)
+  const filtered: SearchHit[] = serverSearch
+    ? (searchHits ?? [])
+    : conversations.filter(c => c.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const grouped = GROUP_ORDER.reduce<Record<DateGroup, Conversation[]>>(
     (acc, g) => { acc[g] = []; return acc; },
@@ -210,7 +243,7 @@ export default function Sidebar({
           </svg>
           <input
             type="text"
-            placeholder="대화 검색..."
+            placeholder="대화 찾기(제목·내용)..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             aria-label="대화 검색"
@@ -221,7 +254,42 @@ export default function Sidebar({
 
       {/* 대화 목록 */}
       <div className={`flex-1 overflow-y-auto ${embedded ? 'px-0' : 'px-2'} pb-2 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-200`}>
-        {loading ? (
+        {serverSearch && searchFailed ? (
+          <p role="alert" className="text-amber-700 text-xs text-center py-6">{searchFailed}</p>
+        ) : serverSearch && searchHits === null ? (
+          <p role="status" className="text-slate-400 text-xs text-center py-6">찾는 중...</p>
+        ) : serverSearch ? (
+          filtered.length === 0 ? (
+            <p className="text-slate-400 text-xs text-center py-6">제목·내용에 &lsquo;{searchTerm.trim()}&rsquo;이(가) 든 대화가 없습니다.</p>
+          ) : (
+            <div>
+              <p className="text-[10px] font-semibold text-slate-400 tracking-widest px-1 mb-1">찾은 대화 {filtered.length}개{filtered.length >= 30 ? '(최근 30개)' : ''}</p>
+              {filtered.map(c => (
+                <div key={c.id}>
+                  <ConvItem
+                    c={c}
+                    selected={selectedConversationId === c.id}
+                    onSelect={() => onConversationSelect(c.id)}
+                    onDelete={handleDelete}
+                    onShare={handleShare}
+                    onUnshare={handleUnshare}
+                    onStartRename={startRename}
+                    renamingId={renamingId}
+                    renameValue={renameValue}
+                    onRenameChange={setRenameValue}
+                    onRenameSubmit={submitRename}
+                    onRenameCancel={() => setRenamingId(null)}
+                  />
+                  {c.snippet && (
+                    <p className="-mt-0.5 mb-1 line-clamp-2 break-all px-3 text-[11px] leading-4 text-slate-500">
+                      {c.snippet.before}<mark className="rounded bg-amber-100 px-0.5 text-slate-800">{c.snippet.hit}</mark>{c.snippet.after}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        ) : loading ? (
           <p className="text-slate-400 text-xs text-center py-6">불러오는 중...</p>
         ) : filtered.length === 0 ? (
           <p className="text-slate-400 text-xs text-center py-6">{emptyListText(unread, '대화가 없습니다.', '대화 목록을')}</p>

@@ -18,13 +18,14 @@ export type TurnEvent =
   | { event: 'app_step'; data: { index: number; total: number; step: import('@/lib/apps/pipeline').AppStepRecord } }
   /** 긴 첨부 나눠 읽기 — 조각 index를 추리는 중 */
   | { event: 'app_material'; data: { index: number; total: number; phase?: 'reduce' } }
-  | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[] } }
+  /** `message_id` = 이 턴에 저장할 답 id(2026-11-28) — 화면이 '답변 멈추기'에 쓴다. 저장됐다는 뜻은 아니다(그건 `done`) */
+  | { event: 'meta'; data: { conversation_id: string; chunks: RetrievedChunk[]; message_id?: string } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'tool_start'; data: { name: string; input: Record<string, unknown> } }
   | { event: 'tool_end'; data: { name: string; ok: boolean; sources: ToolSource[]; files: GeneratedFileRef[] } }
   | { event: 'tool_limit'; data: { rounds: number } }
   | { event: 'error'; data: { message: string } }
-  | { event: 'done'; data: { usage: LlmUsage; title: string | null; number_check: { unverified: string[]; rechecked?: { value: string; source: string }[] } | null; message_id?: string } };
+  | { event: 'done'; data: { usage: LlmUsage; title: string | null; number_check: { unverified: string[]; rechecked?: { value: string; source: string }[] } | null; message_id?: string; stopped?: boolean } };
 
 export type SendEvent = (event: TurnEvent) => void;
 

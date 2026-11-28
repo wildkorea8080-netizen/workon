@@ -10,7 +10,7 @@ type Turn = { question: string; answer: string; state: 'streaming' | 'done' | 'e
  * 시민용 민원 상담 창의 화면(2026-11-27, 0136). 대화는 이 화면에만 있고 서버에 이어 두지 않는다 —
  * 이어 묻기에는 바로 앞 질문 하나만 보내 '앞 질문과 묶어 다시 찾기'에 쓴다
  */
-export default function PublicAskChat({ slug, config, embed }: { slug: string; config: PublicAskConfig; embed: boolean }) {
+export default function PublicAskChat({ slug, config, embed, endpoint }: { slug: string; config: PublicAskConfig; embed: boolean; /** 관리자 미리 물어보기(2026-11-28) — 다른 주소로 묻고 화면 높이를 줄인다 */ endpoint?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -27,7 +27,7 @@ export default function PublicAskChat({ slug, config, embed }: { slug: string; c
     const update = (patch: Partial<Turn> | ((t: Turn) => Partial<Turn>)) =>
       setTurns((all) => all.map((t, i) => (i === all.length - 1 ? { ...t, ...(typeof patch === 'function' ? patch(t) : patch) } : t)));
     try {
-      const res = await fetch(`/api/ask/${encodeURIComponent(slug)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, previousQuestion }) });
+      const res = await fetch(endpoint ?? `/api/ask/${encodeURIComponent(slug)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, previousQuestion }) });
       if (!res.ok || !res.body || !(res.headers.get('content-type') ?? '').includes('text/event-stream')) {
         const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         update({ state: 'error', error: body?.error?.message || PUBLIC_ASK_MESSAGES.unavailable });
@@ -61,7 +61,7 @@ export default function PublicAskChat({ slug, config, embed }: { slug: string; c
   }
 
   return (
-    <div className={`mx-auto flex min-h-screen max-w-2xl flex-col ${embed ? 'px-3 py-3' : 'px-4 py-6'}`}>
+    <div className={`mx-auto flex max-w-2xl flex-col ${endpoint ? 'max-h-[640px] min-h-[360px] overflow-y-auto rounded-xl bg-[#F7F8FC] px-3 py-3' : `min-h-screen ${embed ? 'px-3 py-3' : 'px-4 py-6'}`}`}>
       <header className={`flex items-center gap-3 ${embed ? 'mb-3' : 'mb-5'}`}>
         {config.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element

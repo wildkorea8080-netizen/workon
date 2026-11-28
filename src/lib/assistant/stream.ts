@@ -30,6 +30,7 @@ import { APP_TIME_BUDGET_CODE } from '@/lib/apps/stream';
 import { isInputOnlyRun } from '@/lib/apps/resume';
 import { checkTokenLimit } from '@/lib/usage-limit';
 import { getAllowedModelIds } from '@/lib/model-policy';
+import { STOP_POLL_MS, STOPPED_EMPTY_TEXT, watchStop } from './stop';
 
 const GENERIC_TURN_ERROR = '응답 생성 중 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요.';
 
@@ -53,6 +54,12 @@ export interface StreamTurnDeps {
   deadlineAt?: number;
   /** 숫자 근거 다시 찾기(2026-11-08)와 앱의 문서 찾기 조회 단계(2026-11-09)가 부르는 문서 찾기 — 기본은 대화와 같은 `searchLikeChat`. 시험이 바꿔 끼운다 */
   searchDocs?: (query: string) => Promise<RetrievedChunk[] | null>;
+  /**
+   * '답변 멈추기'(2026-11-28, 0137) — 이 대화의 멈춤 요청(멈출 답 id)을 읽는다. 대화 화면 라우트만 준다 —
+   * 주면 입력형 앱이 아닌 턴에서 `stopPollMs`마다 보고, 이 턴의 답 id면 받던 답을 그만둔다
+   */
+  stopRequested?: (conversationId: string) => Promise<string | null>;
+  stopPollMs?: number;
   /** 앱 결과 보내기 기록 넣기(0076) — 시험이 바꿔 끼운다 */
   enqueueOutbound?: typeof enqueueOutbound;
   /** 넣은 보내기를 바로 한 번 보내기(2026-11-27) — 시험이 바꿔 끼운다. 넣기만 바꿔 끼운 시험은 보내지 않는다 */
@@ -96,6 +103,8 @@ export interface LoopArgs {
   progress?: LoopProgress;
   /** 업체 서버에서 도는 도구(웹 검색, 2026-11-26) — 정의만 싣는다. 결과는 같은 응답의 블록으로 온다 */
   serverTools?: LlmServerTools;
+  /** 직원의 '답변 멈추기'(2026-11-28) — 걸리면 받던 답을 그만두고 도구·다음 라운드를 부르지 않는다 */
+  stopSignal?: AbortSignal;
 }
 
 /** 서버 도구가 긴 일을 멈춘 응답(`pause_turn`)을 이어 부르는 횟수 — 한 턴에 */
@@ -108,6 +117,7 @@ function addUsage(total: LlmUsage, part: LlmUsage): void {
   total.input_tokens += part.input_tokens;
   total.output_tokens += part.output_tokens;
   if (part.web_search_requests) total.web_search_requests = (total.web_search_requests ?? 0) + part.web_search_requests;
+  if (part.output_estimated) total.output_estimated = true;
 }
 
 export interface LoopResult {
@@ -122,6 +132,8 @@ export interface LoopResult {
   shownValues: number[];
   /** 첨부 도구(read_attachment·combine_tables)가 한 번이라도 성공했는가. 아니면 숫자 확인을 하지 않는다 */
   attachmentToolSucceeded: boolean;
+  /** 직원이 답을 도중에 멈췄다(2026-11-28) — 받은 데까지만 */
+  stopped?: boolean;
 }
 
 export const TOOL_LIMIT_NOTICE =
@@ -177,6 +189,8 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
   const citedLinks: ToolSource[] = [];
   const searchedLinks: ToolSource[] = [];
   let pauses = 0;
+  let stopped = false;
+  const signal = args.stopSignal ? { signal: args.stopSignal } : {};
 
   /**
    * 도구 없이 답만 받는 마지막 호출. 요청은 시스템 지시만이 아니라 **도구 결과 뒤 사용자 메시지**로도 보낸다 —
@@ -195,6 +209,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       tools,
       toolChoice: 'none',
       ...(serverTools ? { serverTools } : {}),
+      ...signal,
     })) {
       if (event.type === 'text') {
         answer += event.text;
@@ -204,6 +219,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
         noteCitation(event.source);
       } else if (event.type === 'done') {
         addUsage(usage, event.usage);
+        if (event.stopReason === 'stopped') stopped = true;
       }
     }
     return answer;
@@ -227,6 +243,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       maxTokens: MAX_OUTPUT_TOKENS,
       tools,
       ...(serverTools ? { serverTools } : {}),
+      ...signal,
     })) {
       if (event.type === 'text') {
         roundText += event.text;
@@ -248,6 +265,12 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
         stopReason = event.stopReason;
         rawContent = event.content;
       }
+    }
+
+    // 직원이 멈췄다 — 받은 데까지만 두고 도구·다음 라운드를 부르지 않는다(끝난 응답 뒤에 멈춘 것도)
+    if (stopReason === 'stopped' || args.stopSignal?.aborted) {
+      stopped = true;
+      break;
     }
 
     // 서버 도구(웹 검색)가 긴 일을 멈췄다 — 받은 응답을 그대로 돌려주면 서버가 이어 간다(사용자 메시지를 붙이지 않는다). 라운드로 세지 않고 턴에 몇 번까지
@@ -291,6 +314,8 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
 
     const resultBlocks: LlmContentBlock[] = [];
     for (const call of calls) {
+      // 도구를 도는 사이에 멈췄다 — 남은 도구는 부르지 않는다
+      if (args.stopSignal?.aborted) { stopped = true; break; }
       send({ event: 'tool_start', data: { name: call.name, input: call.input } });
       const outcome = await executeCall(args.owners, call, args.ctx);
       const callLinks = outcome.sources?.links ?? [];
@@ -305,6 +330,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
       send({ event: 'tool_end', data: { name: call.name, ok: outcome.ok, sources: callLinks, files: callFiles } });
       resultBlocks.push({ type: 'tool_result', tool_use_id: call.id, content: outcome.text, is_error: !outcome.ok });
     }
+    if (stopped) break;
     messages.push({ role: 'user', content: resultBlocks });
     toolsRan = true;
 
@@ -319,7 +345,7 @@ export async function runToolLoop(args: LoopArgs, send: SendEvent): Promise<Loop
 
   // 웹 출처 — 답이 인용한 곳, 인용이 없으면 찾은 곳 앞 몇 개(같은 주소는 한 번)
   const webLinks = citedLinks.length ? citedLinks : searchedLinks.slice(0, WEB_RESULT_LINKS);
-  return { text, usage, capabilityUsage, links: dedupeLinks([...links, ...webLinks]), files, shownValues, attachmentToolSucceeded };
+  return { text, usage, capabilityUsage, links: dedupeLinks([...links, ...webLinks]), files, shownValues, attachmentToolSucceeded, stopped };
 }
 
 /** 이 턴의 사용량을 모델별로 한 행씩 기록한다. 토큰이 없으면 남기지 않는다 */
@@ -409,8 +435,15 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
     }
   };
 
+  // 답변 id를 미리 정해 `done`에 싣는다 — 화면이 방금 받은 답변을 평가할 수 있게(2026-11-05).
+  // `meta`에도 싣는다 — 화면이 이 답을 멈출 때 무엇을 멈추는지 밝힌다(2026-11-28)
+  const messageIds = { user: randomUUID(), assistant: randomUUID() };
   // 대화 id와 출처를 먼저 보내 화면이 바로 반영하게 한다
-  send({ event: 'meta', data: { conversation_id: turn.conversationId, chunks: turn.chunks } });
+  send({ event: 'meta', data: { conversation_id: turn.conversationId, chunks: turn.chunks, message_id: messageIds.assistant } });
+  // 답변 멈추기 — 입력형 앱 실행은 멈추지 않는다(끝난 단계를 기록하는 이어 실행 길이 따로 있다)
+  const stopper = deps.stopRequested && !turn.appSteps?.length
+    ? watchStop({ conversationId: turn.conversationId, messageId: messageIds.assistant, read: deps.stopRequested, everyMs: deps.stopPollMs ?? STOP_POLL_MS, orgId: turn.ctx.organizationId })
+    : null;
 
   const now = deps.now ?? Date.now;
   const deadline = Math.min(now() + APP_STEP_TIME_BUDGET_MS, deps.deadlineAt ?? Infinity);
@@ -468,15 +501,18 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
         maxRounds: staged ? 1 : MAX_TOOL_ROUNDS,
         progress,
         ...(!staged && turn.serverTools ? { serverTools: turn.serverTools } : {}),
+        ...(stopper ? { stopSignal: stopper.signal } : {}),
       },
       send
     );
+    stopper?.end();
     if (staged) {
       if (!result.text.trim()) throw new Error(APP_EMPTY_RESULT_MESSAGE);
       appRecords[appRecords.length - 1].status = 'completed'; appRecords[appRecords.length - 1].output = result.text;
       updateStep(appRecords.length - 1);
     }
   } catch (error) {
+    stopper?.end();
     console.error('[assistant] streaming error:', error);
     // 이미 끝난 라운드와 능력이 쓴 토큰은 청구 대상이다. 던졌다고 지우면 기록이 빠진다.
     await logChatUsage(turn, [progress.usage, ...progress.capabilityUsage], { aborted: true });
@@ -539,24 +575,24 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
   }
   // 숫자 근거 다시 찾기(2026-11-08) — 문서 근거로 답한 대화 턴에서 확인되지 않은 숫자가 든 문장으로 같은 문서 찾기를 한 번 더(모델 호출 없음, 5초까지).
   // 다시 찾은 근거 글에 그 숫자가 있으면 '다시 찾아 확인'으로 옮긴다. 답변은 고치지 않는다
-  if (numberCheck && turn.chunks.length > 0 && !turn.documentsSkipped && appRecords.length === 0) {
+  if (numberCheck && turn.chunks.length > 0 && !turn.documentsSkipped && appRecords.length === 0 && !result.stopped) {
     const search = deps.searchDocs ?? ((query: string) => searchLikeChat({ agentId: turn.ctx.agentId, organizationId: turn.ctx.organizationId, query }));
     const research = await researchNumbers({ answer: result.text, unverified: numberCheck.unverified, search });
     if (research.rechecked.length) numberCheck = { unverified: research.unverified, rechecked: research.rechecked };
   }
 
   // NODA 답변 검증 — 저장 전에 불러 결과를 함께 저장한다(감사 기록). 화면 목록에는 더하지 않는다(판정 R1)
-  const verify = await verifyTurn(turn, result.text, deps.verify ?? defaultVerify);
-
-  // 답변 id를 미리 정해 `done`에 싣는다 — 화면이 방금 받은 답변을 평가할 수 있게(2026-11-05)
-  const messageIds = { user: randomUUID(), assistant: randomUUID() };
+  // 멈춘 답은 검증하지 않는다(받은 데까지라 근거 대조가 뜻이 없다)
+  const verify = result.stopped ? null : await verifyTurn(turn, result.text, deps.verify ?? defaultVerify);
   const saveError = await saveMessages(
     buildMessageRows({
       messageIds,
       conversationId: turn.conversationId,
       userId: turn.ctx.userId,
       userContent: turn.storedUserContent,
-      assistantText: result.text,
+      // 멈춘 답은 받은 데까지 — 아무것도 받기 전에 멈췄으면 그렇다고 적는다(빈 답은 이어지는 대화 이력에서 어긋난다)
+      assistantText: result.stopped && !result.text.trim() ? STOPPED_EMPTY_TEXT : result.text,
+      stopped: result.stopped,
       chunks: turn.chunks,
       // 조회 단계의 원문 링크도 답변 출처로 — 답이 '출처를 밝히라'는 지시를 따랐는지 사람이 원문으로 확인한다
       links: dedupeLinks([...result.links, ...appRecords.flatMap(step => step.kind === 'lookup' && step.status === 'completed' ? step.sources ?? [] : [])]),
@@ -593,7 +629,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
   }
 
   // 모델이 다르면 단가가 다르므로 모델별로 한 행씩
-  await logChatUsage(turn, [result.usage, ...result.capabilityUsage], {});
+  await logChatUsage(turn, [result.usage, ...result.capabilityUsage], result.stopped ? { stopped: true, ...(result.usage.output_estimated ? { output_estimated: true } : {}) } : {});
 
   // 새 대화면 제목. 이 턴의 모델로 부른다 — 기본 모델이 기관 허용 목록에
   // 없을 수 있다. 쓴 토큰도 기록한다(예전에는 빠져 있었다).
@@ -630,7 +666,7 @@ async function runTurn(turn: PreparedTurn, rawSend: SendEvent, deps: StreamTurnD
     }
   }
 
-  send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck, ...(saveError ? {} : { message_id: messageIds.assistant }) } });
+  send({ event: 'done', data: { usage: result.usage, title, number_check: numberCheck, ...(saveError ? {} : { message_id: messageIds.assistant }), ...(result.stopped ? { stopped: true } : {}) } });
   // 결과 보내기 — 답을 다 보낸 뒤 그 자리에서 한 번(2026-11-27, 예전엔 5분 실행기를 기다림). 실패하면 실행기가 다시 보낸다
   const sendNow = deps.deliverNow ?? (deps.enqueueOutbound ? null : deliverNow);
   if (queuedDelivery && sendNow) await sendNow(messageIds.assistant).catch(() => undefined);

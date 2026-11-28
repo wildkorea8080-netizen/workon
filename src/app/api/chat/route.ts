@@ -4,6 +4,7 @@ import { getServerAuthSession } from '@/lib/auth';
 import { jsonError } from '@/lib/agent-route-helpers';
 import { prepareTurn } from '@/lib/assistant/prepare';
 import { streamTurn } from '@/lib/assistant/stream';
+import { readStopRequest } from '@/lib/assistant/stop';
 import type { TurnEvent } from '@/lib/assistant/types';
 
 /**
@@ -47,7 +48,8 @@ export async function POST(request: NextRequest) {
               // 클라이언트가 떠났다
             }
           };
-          await streamTurn(prepared.turn, send);
+          // 답변 멈추기(2026-11-28) — 대화 화면만. 연결이 끊겨도 멈추지 않고(답은 끝까지 저장) 직원이 따로 보낸 멈춤 요청으로만 멈춘다
+          await streamTurn(prepared.turn, send, { stopRequested: (conversationId) => readStopRequest(conversationId) });
         } catch (error) {
           console.error('[chat] stream error:', error);
           try {

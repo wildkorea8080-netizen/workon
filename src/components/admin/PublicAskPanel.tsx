@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import AgentEditorModal from '@/components/agents/AgentEditorModal';
+import PublicAskChat from '@/components/public-ask/PublicAskChat';
 import { requestJson, serverErrorText } from '@/lib/ok-json';
 import { useInFlight } from '@/lib/use-in-flight';
 import { PUBLIC_ASK_CONTACTS_MAX, PUBLIC_ASK_FAQ_MAX, type PublicAskContact } from '@/lib/public-ask/spec';
@@ -147,6 +148,14 @@ export default function PublicAskPanel() {
           {msg && <p role={msg.ok ? 'status' : 'alert'} className={`text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{msg.text}</p>}
         </form>
       </section>
+
+      {loaded.agent && loaded.slug && (
+        <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">미리 물어보기</h2>
+          <p className="mb-3 mt-1 text-xs leading-5 text-slate-500">창을 열기 전에 시민 화면과 같은 방식으로 답을 확인합니다(저장한 안내·자주 묻는 질문·연락처 기준). 시민 기록에는 남지 않지만 AI 사용량은 기관 예산에 들어갑니다.</p>
+          <PublicAskChat slug={loaded.slug} embed endpoint="/api/admin/public-ask/test" config={{ orgName: '시민 상담 미리 보기', logoUrl: null, themeColor: null, notice: loaded.settings.notice, faq: loaded.settings.faq, contacts: loaded.settings.contacts }} />
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900">3. 상담 주소·홈페이지에 붙이기</h2>

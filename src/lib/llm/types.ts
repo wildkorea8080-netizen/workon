@@ -36,6 +36,8 @@ export interface LlmUsage {
   output_tokens: number;
   /** 웹 검색 횟수(2026-11-26) — 토큰과 따로 청구된다(models.ts WEB_SEARCH_USD_PER_REQUEST). 없으면 0 */
   web_search_requests?: number;
+  /** 출력 토큰을 받은 글로 어림했다 — 답을 도중에 멈춰 업체가 마지막 사용량을 보내지 않았다(2026-11-28) */
+  output_estimated?: boolean;
 }
 
 /** 웹 검색으로 본 곳 — 화면 출처 목록·숫자 확인(인용한 글)으로 간다 */
@@ -85,6 +87,11 @@ export interface LlmRequest {
   toolChoice?: 'auto' | 'none';
   /** 업체 서버에서 도는 도구(웹 검색, 2026-11-26) — 정의만 싣는다 */
   serverTools?: LlmServerTools;
+  /**
+   * 답을 받는 도중 멈추기(2026-11-28 — 직원의 '답변 멈추기'). 응답이 흐르기 시작한 뒤에 걸리면 받기를 그만두고
+   * `done`(stopReason `'stopped'`)을 낸다 — 입력 토큰은 받은 값, 출력 토큰은 받은 글로 어림(`usage.output_estimated`). 응답 전에는 기다린다
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmCompletion {

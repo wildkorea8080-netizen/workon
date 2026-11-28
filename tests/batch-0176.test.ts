@@ -126,14 +126,14 @@ describe('사이드바 — 서버가 한 것만 화면에', () => {
   it('지우기는 응답이 ok일 때만 목록에서 뺀다', () => {
     const del = src.slice(src.indexOf('const handleDelete'), src.indexOf('const startRename'));
     expect(del.indexOf('if (!res.ok || !result?.ok)')).toBeGreaterThan(-1);
-    expect(del.indexOf('if (!res.ok || !result?.ok)')).toBeLessThan(del.indexOf('setConversations('));
+    expect(del.indexOf('if (!res.ok || !result?.ok)')).toBeLessThan(del.indexOf('patchLists('));
   });
   it('이름 바꾸기는 서버가 저장한 이름으로만 바꾸고, 실패하면 알린다', () => {
     const ren = src.slice(src.indexOf('const submitRename'), src.indexOf('const handleShare'));
     expect(ren).toContain("typeof result.data?.title !== 'string'");
     expect(ren).toContain('const saved: string = result.data.title;');
     expect(ren).toContain('showToast(');
-    expect(ren.indexOf('return;')).toBeLessThan(ren.indexOf('setConversations('));
+    expect(ren.indexOf('return;')).toBeLessThan(ren.indexOf('patchLists('));
   });
   it('입력 칸도 100자까지', () => {
     expect(src).toContain('maxLength={MAX_CONVERSATION_TITLE}');

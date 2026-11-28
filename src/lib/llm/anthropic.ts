@@ -93,9 +93,16 @@ function requireKey() {
  */
 export async function* parseAnthropicStream(
   body: ReadableStream<Uint8Array>,
-  modelId: string
+  modelId: string,
+  signal?: AbortSignal
 ): AsyncGenerator<LlmStreamEvent> {
   const reader = body.getReader();
+  // 답변 멈추기(2026-11-28) — 받기를 그만두면 기다리던 read가 끝으로 풀리고 연결이 닫혀 업체도 생성을 멈춘다
+  const onAbort = () => { reader.cancel().catch(() => undefined); };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  // 받은 글 — 멈췄을 때 출력 토큰을 어림한다(마지막 사용량(message_delta)이 오지 않는다)
+  let received = '';
   const decoder = new TextDecoder();
   const usage: LlmUsage = { model: modelId, input_tokens: 0, output_tokens: 0 };
   const pendingTools = new Map<number, { id: string; name: string; json: string }>();
@@ -153,9 +160,11 @@ export async function* parseAnthropicStream(
             const block = blocks.get(parsed.index);
             if (parsed.delta?.type === 'text_delta') {
               if (block) block.text = str(block.text) + (parsed.delta.text ?? '');
+              received += parsed.delta.text ?? '';
               yield { type: 'text', text: parsed.delta.text as string };
             } else if (parsed.delta?.type === 'input_json_delta') {
               const pending = pendingTools.get(parsed.index);
+              received += parsed.delta.partial_json ?? '';
               if (pending) pending.json += parsed.delta.partial_json ?? '';
               else blockJson.set(parsed.index, (blockJson.get(parsed.index) ?? '') + (parsed.delta.partial_json ?? ''));
             } else if (parsed.delta?.type === 'citations_delta') {
@@ -164,6 +173,7 @@ export async function* parseAnthropicStream(
               if (source) yield { type: 'citation', source };
             } else if (parsed.delta?.type === 'thinking_delta') {
               if (block) block.thinking = str(block.thinking) + (parsed.delta.thinking ?? '');
+              received += parsed.delta.thinking ?? '';
             } else if (parsed.delta?.type === 'signature_delta') {
               if (block) block.signature = parsed.delta.signature;
             }
@@ -207,16 +217,44 @@ export async function* parseAnthropicStream(
       }
     }
   } finally {
-    reader.releaseLock();
+    signal?.removeEventListener('abort', onAbort);
+    try { reader.releaseLock(); } catch { /* 멈추며 이미 풀렸다 */ }
+  }
+
+  // 끝(stop_reason)이 오기 전에 멈췄다 — 쓴 만큼은 청구되므로 받은 글로 출력 토큰을 어림해 넘긴다(짧게 세면 조용한 과소 청구)
+  if (signal?.aborted && stopReason === null) {
+    usage.output_tokens = Math.max(usage.output_tokens, estimateOutputTokens(received));
+    usage.output_estimated = true;
+    yield { type: 'done', usage, stopReason: 'stopped' };
+    return;
   }
 
   const content = usedServerTool ? [...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b) : undefined;
   yield { type: 'done', usage, stopReason, ...(content ? { content } : {}) };
 }
 
+/**
+ * 받은 글로 출력 토큰을 어림한다(멈춘 답 — 2026-11-28). 한글은 한 글자 한 토큰, 그 밖은 세 글자 한 토큰으로 넉넉히 센다
+ * (Claude는 한글 한 음절이 대개 한 토큰 안팎이다 — 짧게 세면 기관 한도·청구에서 빠진다)
+ */
+export function estimateOutputTokens(text: string): number {
+  let hangul = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (/[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3]/.test(ch)) hangul++;
+    else other++;
+  }
+  return hangul + Math.ceil(other / 3);
+}
+
 export const anthropicAdapter: LlmAdapter = {
   async *stream(req) {
     requireKey();
+    // 부르기 전에 이미 멈췄다 — 부르지 않는다(쓴 토큰 없음)
+    if (req.signal?.aborted) {
+      yield { type: 'done', usage: { model: req.model, input_tokens: 0, output_tokens: 0 }, stopReason: 'stopped' };
+      return;
+    }
     const response = await fetch(ANTHROPIC_MESSAGES_URL, {
       method: 'POST',
       headers: headers(),
@@ -224,7 +262,7 @@ export const anthropicAdapter: LlmAdapter = {
     });
     if (!response.ok) throw await apiError(response);
     if (!response.body) throw new Error('Claude API가 스트림 본문을 반환하지 않았습니다.');
-    yield* parseAnthropicStream(response.body, req.model);
+    yield* parseAnthropicStream(response.body, req.model, req.signal);
   },
 
   async complete(req): Promise<LlmCompletion> {

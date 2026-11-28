@@ -8,8 +8,8 @@ import { isInputOnlyRun } from '@/lib/apps/resume';
 /** 기본 입력형 앱(2026-11-07) — 기관을 만들 때(그리고 seed:agents로) 기본 비서와 함께 깔리는 입력형 앱 */
 
 describe('기본 입력형 앱 정의', () => {
-  it('열다섯 개(2026-11-27 알리웍스 core 여섯·later 셋 더함), 이름은 기본 비서와 겹치지 않고 범주는 업무 앱', () => {
-    expect(PUBLIC_SECTOR_FORM_PRESETS.map((p) => p.name)).toEqual(['사업 위험 검토', '안내 메일 초안', '과업지시서 초안', '행사 안내문 초안', '질의별 답변 방향 정리', '법령 근거 조사', '문서로 FAQ 만들기', '계약서 조항 검토', '주간보고 종합', '설문 문항 만들기', '채용공고 작성·점검', '회의 안건 정리', '예상 질의 만들기', '업무 절차서 만들기', '직무교육 계획']);
+  it('열아홉 개(2026-11-27 알리웍스 core 여섯·later 셋, 2026-11-28 공공 고유 넷 더함), 이름은 기본 비서와 겹치지 않고 범주는 업무 앱', () => {
+    expect(PUBLIC_SECTOR_FORM_PRESETS.map((p) => p.name)).toEqual(['사업 위험 검토', '안내 메일 초안', '과업지시서 초안', '행사 안내문 초안', '질의별 답변 방향 정리', '법령 근거 조사', '문서로 FAQ 만들기', '계약서 조항 검토', '주간보고 종합', '설문 문항 만들기', '채용공고 작성·점검', '회의 안건 정리', '예상 질의 만들기', '업무 절차서 만들기', '직무교육 계획', '정보공개 청구 검토', '개인정보 가리기 점검', '감사 지적 조치계획', '사업 결과보고서']);
     const names = [...PUBLIC_SECTOR_PRESETS, ...PUBLIC_SECTOR_FORM_PRESETS].map((p) => p.name);
     expect(new Set(names).size).toBe(names.length);
     expect(PUBLIC_SECTOR_FORM_PRESETS.every((p) => p.category === '업무 앱')).toBe(true);
@@ -39,7 +39,7 @@ describe('기본 입력형 앱 정의', () => {
   });
 
   it('기관 유형과 상관없이 세트에 들어간다', () => {
-    for (const type of [null, '공공기관', '지방자치단체']) expect(presetsForOrganizationType(type).filter((p) => p.appDefinition)).toHaveLength(15);
+    for (const type of [null, '공공기관', '지방자치단체']) expect(presetsForOrganizationType(type).filter((p) => p.appDefinition)).toHaveLength(19);
   });
 });
 

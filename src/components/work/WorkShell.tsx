@@ -9,6 +9,7 @@ import UserMenu from '@/components/layout/UserMenu';
 import NoticesBanner from '@/components/NoticesBanner';
 import WorkspaceIcon from './WorkspaceIcon';
 import RecentConversations from './RecentConversations';
+import AttentionList from './AttentionList';
 import { readSidebarCollapsed, writeSidebarCollapsed } from '@/lib/sidebar-pref';
 import { useBranding } from '@/lib/use-branding';
 import { themeStyle } from '@/lib/theme-color';
@@ -139,6 +140,8 @@ export default function WorkShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
+          {/* 확인할 일(2026-11-28) — 메일로만 알리던 일. 없으면 그리지 않는다 */}
+          <AttentionList collapsed={collapsed} />
           {/* 접으면 최근 대화는 숨긴다 — 'AI 대화' 아이콘으로 대화 화면에 간다(작은 화면의 '지난 대화' 펼치기는 그대로) */}
           {!collapsed && <Suspense fallback={null}><RecentConversations /></Suspense>}
           </div>
