@@ -12,6 +12,7 @@
 | 시민 화면 | `/ask/[slug]`(`PublicAskChat`), 붙이기 `/ask/embed.js?org=` |
 | 관리자 | `/admin/public-ask`(`PublicAskPanel`) ← `/api/admin/public-ask`·`/agent`·`/logs` — 기관 전체 관리자만 |
 | 30일 정리 | 5분 실행기 `purgePublicAskLogs` |
+| 미리 물어보기 | 관리자 '시민 상담' 화면 — `POST /api/admin/public-ask/test`(기관 전체 관리자, 켜짐·하루 횟수를 보지 않고 시민 기록에 남기지 않음, 사용 기록은 남음 — 2026-11-28) |
 
 ## 지키는 것
 - **시민 전용 비서**: 직원 비서 목록·대화(`canUseAgent` false)·앱 목록·기관 API에 나오지 않고, 고치기·문서 올리기는 기관 전체 관리자만(`canEditAgent`). 그래서 직원이 내부 문서를 넣어 시민에게 새어 나갈 길이 없다.
